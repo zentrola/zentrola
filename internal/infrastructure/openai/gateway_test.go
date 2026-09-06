@@ -1,0 +1,87 @@
+package openai
+
+import (
+	"context"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
+	"testing"
+	"time"
+
+	gw "github.com/zentrola/zentrola/internal/application/gateway"
+)
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+func TestNativeOpenAIForwarding(t *testing.T) {
+	c := NewGatewayClient(time.Second)
+	calls := 0
+	var headers http.Header
+	const body = `{"model":"deepseek-v4-flash","tools":[{"function":{"parameters":{"const":9007199254740993}}}],"messages":[{"role":"tool","tool_call_id":"call_a","content":"answer"}]}`
+	c.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		headers = r.Header
+		if r.URL.String() != "https://api.deepseek.com/chat/completions" || r.Method != "POST" || r.GetBody != nil {
+			t.Fatal("incorrect native URL or replay policy")
+		}
+		if r.Header.Get("Authorization") != "Bearer upstream-only" || r.Header.Get("x-api-key") != "" || r.Header.Get("Cookie") != "" || r.Header.Get("anthropic-version") != "" {
+			t.Fatal("credential isolation failed")
+		}
+		data, _ := io.ReadAll(r.Body)
+		if string(data) != body {
+			t.Fatal("opaque tool content modified")
+		}
+		return &http.Response{StatusCode: 429, Header: http.Header{"Retry-After": {"2"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"rate limited"}}`))}, nil
+	})
+	resp, err := c.Open(context.Background(), gw.Route{BaseURL: "https://api.deepseek.com/"}, gw.Request{Protocol: gw.OpenAIProtocol, Path: "/v1/chat/completions", Body: []byte(body), ProtocolHeaders: map[string][]string{"Cookie": {"private"}, "Authorization": {"Bearer virtual-key"}}}, []byte("upstream-only"))
+	if err != nil || resp.Status != 429 || calls != 1 {
+		t.Fatal("response changed or retried")
+	}
+	resp.Body.Close()
+	if headers.Get("Authorization") != "" {
+		t.Fatal("credential retained after Close")
+	}
+	for _, base := range []string{"http://api.deepseek.com", "https://api.deepseek.com/anthropic", "https://api.deepseek.com.evil.test", "https://api.deepseek.com@evil.test", "https://api.deepseek.com?x=1"} {
+		if _, err := c.Open(context.Background(), gw.Route{BaseURL: base}, gw.Request{Protocol: gw.OpenAIProtocol, Path: "/v1/chat/completions"}, []byte("key")); !errors.Is(err, gw.ErrRoute) {
+			t.Fatal("untrusted destination accepted")
+		}
+	}
+	if calls != 1 {
+		t.Fatal("rejected URL reached transport")
+	}
+}
+func TestRedirectAndTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, _ := io.ReadAll(r.Body)
+		if string(data) == "slow" {
+			<-r.Context().Done()
+			return
+		}
+		w.Header().Set("Location", "https://example.invalid/leak")
+		w.WriteHeader(307)
+	}))
+	defer server.Close()
+	target, _ := url.Parse(server.URL)
+	c := NewGatewayClient(30 * time.Millisecond)
+	defer c.CloseIdleConnections()
+	transport := c.client.Transport
+	c.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		copy := r.Clone(r.Context())
+		copy.URL.Scheme = target.Scheme
+		copy.URL.Host = target.Host
+		return transport.RoundTrip(copy)
+	})
+	for _, tc := range []struct {
+		body string
+		err  error
+	}{{"redirect", gw.ErrUpstream}, {"slow", gw.ErrTimeout}} {
+		_, err := c.Open(context.Background(), gw.Route{BaseURL: "https://api.deepseek.com"}, gw.Request{Protocol: gw.OpenAIProtocol, Path: "/v1/chat/completions", Body: []byte(tc.body)}, []byte("key"))
+		if !errors.Is(err, tc.err) {
+			t.Fatal("timeout/redirect policy incorrect")
+		}
+	}
+}

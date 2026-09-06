@@ -1,0 +1,350 @@
+package postgres
+
+import (
+	"bytes"
+	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"errors"
+	"io/fs"
+	"os"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+	"unicode"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/pressly/goose/v3"
+	"github.com/zentrola/zentrola/internal/application/bootstrap"
+	"github.com/zentrola/zentrola/internal/infrastructure/config"
+	"github.com/zentrola/zentrola/internal/infrastructure/idgen"
+	"github.com/zentrola/zentrola/internal/infrastructure/postgres/dbgen"
+)
+
+// 显式开启后仅在随机隔离 schema 中执行；不会清理或修改 public 中的业务表。
+func integrationDatabase(t *testing.T) (context.Context, *pgxpool.Pool, string) {
+	t.Helper()
+	if os.Getenv("ZENTROLA_INTEGRATION") != "1" {
+		t.Skip("set ZENTROLA_INTEGRATION=1 to run PostgreSQL integration tests")
+	}
+	cfg, err := config.Load("../../../.env")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	t.Cleanup(cancel)
+	base, err := Open(ctx, cfg.Postgres)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(base.Close)
+	schema := "zentrola_test_" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	quoted := pgx.Identifier{schema}.Sanitize()
+	if _, err := base.Exec(ctx, "CREATE SCHEMA "+quoted); err != nil {
+		t.Fatal(err)
+	}
+	poolConfig := base.Config().Copy()
+	poolConfig.ConnConfig.RuntimeParams["search_path"] = schema
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	t.Cleanup(func() {
+		cleanup, done := context.WithTimeout(context.Background(), 15*time.Second)
+		defer done()
+		db := stdlib.OpenDBFromPool(pool)
+		defer db.Close()
+		source, _ := fs.Sub(migrations, "migrations")
+		provider, err := goose.NewProvider(goose.DialectPostgres, db, source, goose.WithDisableGlobalRegistry(true))
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		// 仅清理本测试创建的随机隔离 schema，允许回滚拒绝有 OpenAI 历史的迁移。
+		if _, err := pool.Exec(cleanup, "TRUNCATE ai_request,usage_record,provider_model"); err != nil {
+			t.Error(err)
+			return
+		}
+		// 隔离测试历史使用受限事务清理；业务库的 append-only 保护始终保留。
+		if _, err := pool.Exec(cleanup, "DO $$ BEGIN ALTER TABLE operation_log DISABLE TRIGGER USER; TRUNCATE operation_log; ALTER TABLE operation_log ENABLE TRIGGER USER; END $$"); err != nil {
+			t.Error(err)
+			return
+		}
+		if _, err := provider.DownTo(cleanup, 0); err != nil {
+			t.Error("isolated migration rollback failed:", err)
+			return
+		}
+		if _, err := pool.Exec(cleanup, "DROP TABLE goose_db_version"); err != nil {
+			t.Error(err)
+			return
+		}
+		if _, err := base.Exec(cleanup, "DROP SCHEMA "+quoted); err != nil {
+			t.Error(err)
+		}
+	})
+	if err := Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(ctx, pool); err != nil {
+		t.Fatal("migration is not idempotent:", err)
+	}
+	return ctx, pool, schema
+}
+
+func TestStage1Integration(t *testing.T) {
+	ctx, pool, schema := integrationDatabase(t)
+	t.Run("schema conventions", func(t *testing.T) { checkSchema(t, ctx, pool, schema) })
+	t.Run("partial indexes and cardinalities", func(t *testing.T) {
+		withFixture(t, ctx, pool, func(tx pgx.Tx) {
+			mustExec(t, ctx, tx, `INSERT INTO admin_user (id,organization_id,username,password_hash,display_name,status,created_by,updated_by,created_at,updated_at)
+VALUES (70,1,'admin','test-hash','Admin','ACTIVE','system','system',now(),now())`)
+			mustReject(t, ctx, tx, "23505", `INSERT INTO admin_user (id,organization_id,username,password_hash,display_name,status,failed_login_count,locked_until,last_login_at,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 71,organization_id,username,password_hash,display_name,status,failed_login_count,locked_until,last_login_at,is_deleted,created_by,updated_by,created_at,updated_at FROM admin_user WHERE id=70`)
+			mustExec(t, ctx, tx, `UPDATE admin_user SET is_deleted=true WHERE id=70`)
+			mustExec(t, ctx, tx, `INSERT INTO admin_user (id,organization_id,username,password_hash,display_name,status,failed_login_count,locked_until,last_login_at,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 71,organization_id,username,password_hash,display_name,status,failed_login_count,locked_until,last_login_at,false,created_by,updated_by,created_at,updated_at FROM admin_user WHERE id=70`)
+			mustExec(t, ctx, tx, `INSERT INTO principal_group (id,organization_id,principal_id,group_id,created_by,updated_by,created_at,updated_at) VALUES (80,1,10,20,'system','system',now(),now()), (81,1,10,21,'system','system',now(),now())`)
+			mustReject(t, ctx, tx, "23505", `INSERT INTO principal_group (id,organization_id,principal_id,group_id,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 82,organization_id,principal_id,group_id,is_deleted,created_by,updated_by,created_at,updated_at FROM principal_group WHERE id=80`)
+			mustExec(t, ctx, tx, `UPDATE principal_group SET is_deleted=true WHERE id=80`)
+			mustExec(t, ctx, tx, `INSERT INTO principal_group (id,organization_id,principal_id,group_id,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 82,organization_id,principal_id,group_id,false,created_by,updated_by,created_at,updated_at FROM principal_group WHERE id=80`)
+			mustReject(t, ctx, tx, "23505", `INSERT INTO organization (id,organization_code,organization_name,status,created_by,updated_by,created_at,updated_at) VALUES (2,'second','Second','ACTIVE','system','system',now(),now())`)
+			mustExec(t, ctx, tx, `INSERT INTO ai_provider (id,provider_code,provider_name,provider_type,anthropic_base_url,status,is_deleted,created_by,updated_by,created_at,updated_at,openai_base_url) SELECT 41,'second-provider',provider_name,provider_type,anthropic_base_url,status,false,created_by,updated_by,created_at,updated_at,NULL FROM ai_provider WHERE id=40`)
+			mustReject(t, ctx, tx, "23505", `INSERT INTO provider_model (id,provider_id,model_id,upstream_model_code,protocol_type,status,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 52,41,model_id,upstream_model_code,protocol_type,'ACTIVE',false,created_by,updated_by,created_at,updated_at FROM provider_model WHERE id=50`)
+			mustExec(t, ctx, tx, `INSERT INTO provider_model (id,provider_id,model_id,upstream_model_code,protocol_type,status,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 52,41,model_id,upstream_model_code,protocol_type,'DISABLED',false,created_by,updated_by,created_at,updated_at FROM provider_model WHERE id=50`)
+			mustExec(t, ctx, tx, `INSERT INTO ai_resource (id,organization_id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,created_by,updated_by,created_at,updated_at)
+VALUES (60,1,40,'Resource',decode(repeat('11',32),'hex'),decode(repeat('22',12),'hex'),1,'ACTIVE','system','system',now(),now())`)
+			mustReject(t, ctx, tx, "23505", `INSERT INTO ai_resource (id,organization_id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,last_active_at,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 61,organization_id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,last_active_at,false,created_by,updated_by,created_at,updated_at FROM ai_resource WHERE id=60`)
+			mustExec(t, ctx, tx, `INSERT INTO ai_resource (id,organization_id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,last_active_at,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 61,organization_id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,'DISABLED',last_active_at,false,created_by,updated_by,created_at,updated_at FROM ai_resource WHERE id=60`)
+		})
+	})
+	t.Run("permission union and default deny", func(t *testing.T) {
+		withFixture(t, ctx, pool, func(tx pgx.Tx) {
+			q := dbgen.New(tx)
+			args := dbgen.HasGroupModelPermissionParams{OrganizationID: 1, PrincipalID: 10, ModelID: 30}
+			assertPermission := func(want bool) {
+				t.Helper()
+				got, err := q.HasGroupModelPermission(ctx, args)
+				if err != nil || got != want {
+					t.Fatalf("permission=%v want=%v err=%v", got, want, err)
+				}
+			}
+			assertPermission(false)
+			mustExec(t, ctx, tx, `INSERT INTO principal_group (id,organization_id,principal_id,group_id,created_by,updated_by,created_at,updated_at) VALUES (80,1,10,20,'system','system',now(),now()),(81,1,10,21,'system','system',now(),now())`)
+			assertPermission(false)
+			mustExec(t, ctx, tx, `INSERT INTO group_model_permission (id,organization_id,group_id,model_id,created_by,updated_by,created_at,updated_at) VALUES (90,1,21,30,'system','system',now(),now())`)
+			assertPermission(true)
+			mustExec(t, ctx, tx, `UPDATE ai_group SET status='DISABLED' WHERE id=21`)
+			assertPermission(false)
+			mustExec(t, ctx, tx, `UPDATE ai_group SET status='ACTIVE' WHERE id=21; UPDATE principal_group SET is_deleted=true WHERE group_id=21`)
+			assertPermission(false)
+			mustExec(t, ctx, tx, `UPDATE principal_group SET is_deleted=false WHERE group_id=21; UPDATE group_model_permission SET organization_id=2`)
+			assertPermission(false)
+		})
+	})
+	t.Run("credential binary round trip", func(t *testing.T) {
+		withFixture(t, ctx, pool, func(tx pgx.Tx) {
+			key, nonce := make([]byte, 32), make([]byte, 12)
+			_, _ = rand.Read(key)
+			_, _ = rand.Read(nonce)
+			block, _ := aes.NewCipher(key)
+			aead, _ := cipher.NewGCM(block)
+			plain := []byte("test-only-provider-credential")
+			sealed := aead.Seal(nil, nonce, plain, nil)
+			mustExec(t, ctx, tx, `INSERT INTO ai_resource (id,organization_id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,created_by,updated_by,created_at,updated_at) VALUES (60,1,40,'Resource',$1,$2,7,'ACTIVE','system','system',now(),now())`, sealed, nonce)
+			row, err := dbgen.New(tx).GetResource(ctx, dbgen.GetResourceParams{OrganizationID: 1, ID: 60})
+			if err != nil {
+				t.Fatal(err)
+			}
+			opened, err := aead.Open(nil, row.CredentialNonce, row.CredentialCiphertext, nil)
+			if err != nil || !bytes.Equal(opened, plain) || row.KeyVersion != 7 {
+				t.Fatal("credential bytes changed")
+			}
+			mustReject(t, ctx, tx, "23514", `UPDATE ai_resource SET credential_nonce=decode('00','hex') WHERE id=60`)
+		})
+	})
+	t.Run("request facts and append only audit", func(t *testing.T) {
+		withFixture(t, ctx, pool, func(tx pgx.Tx) {
+			mustExec(t, ctx, tx, `INSERT INTO ai_request (id,organization_id,request_id,principal_id,model_id,usage_scene,client_protocol,request_at,completed_at,latency_ms,status,created_at) VALUES (100,1,'req_test',10,30,'MODEL_GATEWAY','ANTHROPIC',now(),now(),0,'SUCCESS',now())`)
+			mustExec(t, ctx, tx, `INSERT INTO usage_record (id,organization_id,request_id,attempt_no,principal_id,provider_id,provider_model_id,resource_id,model_id,usage_scene,billing_unit,started_at,completed_at,latency_ms,status,created_at) VALUES (101,1,'req_test',1,10,40,50,60,30,'MODEL_GATEWAY','TOKEN',now(),now(),0,'SUCCESS',now())`)
+			var unknown bool
+			if err := tx.QueryRow(ctx, `SELECT input_tokens IS NULL AND cost_amount IS NULL AND cost_currency IS NULL FROM usage_record WHERE id=101`).Scan(&unknown); err != nil || !unknown {
+				t.Fatal("unknown usage/cost was falsified")
+			}
+			mustReject(t, ctx, tx, "23505", `INSERT INTO usage_record SELECT 102,organization_id,request_id,attempt_no,principal_id,provider_id,provider_model_id,resource_id,model_id,usage_scene,input_tokens,output_tokens,cached_input_tokens,billing_unit,billing_quantity,cost_amount,cost_currency,started_at,completed_at,latency_ms,status,error_type,created_at FROM usage_record WHERE id=101`)
+			mustReject(t, ctx, tx, "23514", `UPDATE usage_record SET attempt_no=2 WHERE id=101`)
+			mustExec(t, ctx, tx, `INSERT INTO operation_log (id,organization_id,operator_type,operator_id,operator_name,module,operation_type,target_type,target_id,result,created_at) VALUES (200,1,'ADMIN',70,'Admin','MEMBER','MEMBER_CREATE','PRINCIPAL',10,'SUCCESS',now())`)
+			for _, sql := range []string{`UPDATE operation_log SET operator_name='changed'`, `DELETE FROM operation_log`, `TRUNCATE operation_log`} {
+				mustReject(t, ctx, tx, "42501", sql)
+			}
+		})
+	})
+	t.Run("bootstrap atomicity and preservation", func(t *testing.T) { checkBootstrap(t, ctx, pool) })
+}
+
+func checkSchema(t *testing.T, ctx context.Context, pool *pgxpool.Pool, schema string) {
+	t.Helper()
+	rows, err := pool.Query(ctx, `SELECT c.relname,a.attname,format_type(a.atttypid,a.atttypmod),a.attnotnull,coalesce(col_description(c.oid,a.attnum),''),coalesce(obj_description(c.oid),'')
+FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_attribute a ON a.attrelid=c.oid
+WHERE n.nspname=$1 AND c.relkind='r' AND c.relname<>'goose_db_version' AND a.attnum>0 AND NOT a.attisdropped`, schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	nullable := map[string]string{
+		"ai_provider":  "openai_base_url",
+		"organization": "remark", "admin_user": "locked_until,last_login_at", "principal": "remark", "access_key": "expires_at,last_used_at,revoked_at",
+		"ai_group": "remark", "ai_resource": "last_active_at", "ai_request": "model_id,error_type",
+		"usage_record":  "input_tokens,output_tokens,cached_input_tokens,billing_quantity,cost_amount,cost_currency,error_type",
+		"operation_log": "operator_id,target_id,target_name,request_id,request_method,request_path,ip_address,user_agent,error_code,before_data,after_data,remark",
+	}
+	tables := map[string]bool{}
+	for rows.Next() {
+		var table, col, typ, comment, tableComment string
+		var notNull bool
+		if err := rows.Scan(&table, &col, &typ, &notNull, &comment, &tableComment); err != nil {
+			t.Fatal(err)
+		}
+		tables[table] = true
+		containsHan := func(s string) bool {
+			return strings.ContainsFunc(s, func(r rune) bool { return unicode.Is(unicode.Han, r) })
+		}
+		if !containsHan(comment) || !containsHan(tableComment) {
+			t.Errorf("missing Chinese comment: %s.%s", table, col)
+		}
+		allowNull := strings.Contains(","+nullable[table]+",", ","+col+",")
+		if notNull == allowNull {
+			t.Errorf("unexpected nullability: %s.%s", table, col)
+		}
+		if col == "id" && typ != "bigint" {
+			t.Errorf("ID is not BIGINT: %s", table)
+		}
+		if (col == "cost_amount" || col == "billing_quantity") && typ != "numeric(20,8)" {
+			t.Errorf("inexact numeric type: %s.%s", table, col)
+		}
+		if strings.Contains(typ, "timestamp") && typ != "timestamp with time zone" {
+			t.Errorf("non-UTC timestamp type: %s.%s", table, col)
+		}
+		if table == "operation_log" && (col == "is_deleted" || col == "created_by" || col == "updated_by" || col == "updated_at") {
+			t.Errorf("audit inherited mutable field: %s", col)
+		}
+		if (table == "ai_request" || table == "usage_record") && col == "is_deleted" {
+			t.Errorf("fact table is soft deletable: %s", table)
+		}
+		if table == "ai_resource" && col == "provider_model_id" {
+			t.Error("resource incorrectly belongs to provider model")
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(tables) != 14 {
+		t.Fatalf("expected 14 business tables, got %d", len(tables))
+	}
+	var count int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace WHERE n.nspname=$1 AND c.contype='f'`, schema).Scan(&count); err != nil || count != 0 {
+		t.Fatal("foreign key found", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.columns WHERE table_schema=$1 AND table_name<>'goose_db_version' AND column_name='id' AND (column_default IS NOT NULL OR is_identity='YES')`, schema).Scan(&count); err != nil || count != 0 {
+		t.Fatal("IDs must be generated by application", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM pg_index i JOIN pg_class c ON c.oid=i.indrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1 AND c.relname NOT IN ('goose_db_version','ai_request','usage_record','operation_log') AND i.indisunique AND NOT i.indisprimary AND i.indpred IS NULL`, schema).Scan(&count); err != nil || count != 0 {
+		t.Fatal("mutable business uniqueness must be partial", err)
+	}
+}
+
+func withFixture(t *testing.T, ctx context.Context, pool *pgxpool.Pool, run func(pgx.Tx)) {
+	t.Helper()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(context.Background())
+	mustExec(t, ctx, tx, `INSERT INTO organization (id,organization_code,organization_name,status,created_by,updated_by,created_at,updated_at) VALUES (1,'test','Test','ACTIVE','system','system',now(),now());
+INSERT INTO principal (id,organization_id,principal_type,name,status,created_by,updated_by,created_at,updated_at) VALUES (10,1,'MEMBER','Member','ACTIVE','system','system',now(),now());
+INSERT INTO ai_group (id,organization_id,group_code,group_name,status,created_by,updated_by,created_at,updated_at) VALUES (20,1,'first','First','ACTIVE','system','system',now(),now()),(21,1,'second','Second','ACTIVE','system','system',now(),now());
+INSERT INTO ai_model (id,model_code,display_name,input_modalities,output_modalities,status,created_by,updated_by,created_at,updated_at) VALUES (30,'sonnet','Sonnet','["TEXT","IMAGE"]','["TEXT"]','ACTIVE','system','system',now(),now()),(31,'opus','Opus','["TEXT","IMAGE"]','["TEXT"]','ACTIVE','system','system',now(),now());
+INSERT INTO ai_provider (id,provider_code,provider_name,provider_type,anthropic_base_url,status,created_by,updated_by,created_at,updated_at) VALUES (40,'anthropic','Anthropic','OFFICIAL','https://api.anthropic.com','ACTIVE','system','system',now(),now());
+INSERT INTO provider_model (id,provider_id,model_id,upstream_model_code,protocol_type,status,created_by,updated_by,created_at,updated_at) VALUES (50,40,30,'sonnet-upstream','ANTHROPIC','ACTIVE','system','system',now(),now()),(51,40,31,'opus-upstream','ANTHROPIC','ACTIVE','system','system',now(),now());`)
+	run(tx)
+}
+
+func mustExec(t *testing.T, ctx context.Context, tx pgx.Tx, sql string, args ...any) {
+	t.Helper()
+	if _, err := tx.Exec(ctx, sql, args...); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustReject(t *testing.T, ctx context.Context, tx pgx.Tx, code, sql string, args ...any) {
+	t.Helper()
+	savepoint, err := tx.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = savepoint.Exec(ctx, sql, args...)
+	_ = savepoint.Rollback(ctx)
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != code {
+		t.Fatalf("want PostgreSQL error %s, got %v", code, err)
+	}
+}
+
+func checkBootstrap(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+	t.Helper()
+	store := NewBootstrapStore(pool)
+	// 以非法映射制造后半段失败，确认前面插入的组织和 Provider 一并回滚。
+	err := store.InitializeOnce(ctx, bootstrap.Seed{OrganizationID: 1, ProviderID: 2, CreatedAt: time.Now().UTC(), Models: []bootstrap.Model{{ID: 3, ProviderModelID: 4, Code: "bad", Name: "Bad", UpstreamCode: ""}}})
+	if err == nil {
+		t.Fatal("invalid bootstrap unexpectedly succeeded")
+	}
+	var count int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM organization").Scan(&count); err != nil || count != 0 {
+		t.Fatal("partial bootstrap committed", err)
+	}
+	ids, err := idgen.New(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := bootstrap.New(store, ids, "initial-sonnet", "initial-opus")
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Go(func() {
+			if err := service.Initialize(ctx); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	wg.Wait()
+	if err := service.Check(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for table, want := range map[string]int{"organization": 1, "ai_provider": 1, "ai_model": 2, "provider_model": 2, "ai_resource": 0, "admin_user": 0} {
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM "+pgx.Identifier{table}.Sanitize()).Scan(&count); err != nil || count != want {
+			t.Fatalf("%s count=%d want=%d err=%v", table, count, want, err)
+		}
+	}
+	if _, err := pool.Exec(ctx, `UPDATE ai_model SET display_name='Admin Edited',status='DISABLED' WHERE model_code='claude-sonnet'; UPDATE provider_model SET upstream_model_code='admin-edited' WHERE model_id=(SELECT id FROM ai_model WHERE model_code='claude-sonnet')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := bootstrap.New(store, ids, "replacement-sonnet", "replacement-opus").Initialize(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var preserved bool
+	if err := pool.QueryRow(ctx, `SELECT m.display_name='Admin Edited' AND m.status='DISABLED' AND pm.upstream_model_code='admin-edited' FROM ai_model m JOIN provider_model pm ON pm.model_id=m.id WHERE m.model_code='claude-sonnet'`).Scan(&preserved); err != nil || !preserved {
+		t.Fatal("bootstrap overwrote administrator changes", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE organization SET is_deleted=true; UPDATE ai_model SET is_deleted=true`); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Initialize(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM organization WHERE is_deleted=false`).Scan(&count); err != nil || count != 0 {
+		t.Fatal("bootstrap resurrected a deleted organization", err)
+	}
+}

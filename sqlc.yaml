@@ -1,0 +1,14 @@
+version: "2"
+sql:
+  - engine: postgresql
+    schema: internal/infrastructure/postgres/migrations
+    queries: internal/infrastructure/postgres/queries
+    gen:
+      go:
+        package: dbgen
+        out: internal/infrastructure/postgres/dbgen
+        sql_package: pgx/v5
+        emit_empty_slices: true
+        emit_pointers_for_null_types: true
+        # 不生成 JSON 标签，数据库记录不能直接作为 Admin API 响应。
+        emit_json_tags: false

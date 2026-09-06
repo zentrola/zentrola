@@ -1,0 +1,65 @@
+package security
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"github.com/zentrola/zentrola/internal/domain/admin"
+	"github.com/zentrola/zentrola/internal/domain/shared"
+	"strings"
+	"time"
+)
+
+const keyMarker = "zt_vk_"
+
+type Keys struct {
+	store KeyStore
+	ids   shared.IDGenerator
+}
+type CreatedKey struct {
+	ID        int64      `json:"id,string"`
+	Key       string     `json:"key"`
+	Prefix    string     `json:"prefix"`
+	Name      string     `json:"name"`
+	ExpiresAt *time.Time `json:"expiresAt"`
+}
+
+func NewKeys(store KeyStore, ids shared.IDGenerator) *Keys { return &Keys{store: store, ids: ids} }
+
+func (s *Keys) Create(ctx context.Context, actor admin.Identity, principalID int64, name string, expires *time.Time, meta RequestMeta) (CreatedKey, error) {
+	now := time.Now().UTC()
+	if principalID <= 0 || strings.TrimSpace(name) == "" || strings.ContainsRune(name, 0) || len(name) > 128 || (expires != nil && !expires.After(now)) {
+		return CreatedKey{}, ErrInvalidArgument
+	}
+	var entropy [32]byte
+	_, _ = rand.Read(entropy[:])
+	full := keyMarker + base64.RawURLEncoding.EncodeToString(entropy[:])
+	digest := sha256.Sum256([]byte(full))
+	id, err := s.ids.NextID()
+	if err != nil {
+		return CreatedKey{}, ErrUnavailable
+	}
+	row := KeyRecord{ID: id, OrganizationID: actor.OrganizationID, PrincipalID: principalID, Hash: digest[:], Prefix: full[:14], Name: name, ExpiresAt: expires, CreatedAt: now}
+	if err := s.store.Create(ctx, actor, row, meta); err != nil {
+		return CreatedKey{}, err
+	}
+	// 完整值仅存在于本次创建返回值，不传给 Repository 或操作日志。
+	return CreatedKey{ID: id, Key: full, Prefix: row.Prefix, Name: name, ExpiresAt: expires}, nil
+}
+func (s *Keys) Revoke(ctx context.Context, actor admin.Identity, keyID int64, meta RequestMeta) error {
+	if keyID <= 0 {
+		return ErrInvalidArgument
+	}
+	return s.store.Revoke(ctx, actor, keyID, meta)
+}
+func (s *Keys) Authenticate(ctx context.Context, full string) (PrincipalIdentity, error) {
+	if !strings.HasPrefix(full, keyMarker) || len(full) != len(keyMarker)+43 {
+		return PrincipalIdentity{}, ErrUnauthenticated
+	}
+	if raw, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(full, keyMarker)); err != nil || len(raw) != 32 {
+		return PrincipalIdentity{}, ErrUnauthenticated
+	}
+	digest := sha256.Sum256([]byte(full))
+	return s.store.Authenticate(ctx, digest[:], time.Now().UTC())
+}

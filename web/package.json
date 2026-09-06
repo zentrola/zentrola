@@ -1,0 +1,29 @@
+{
+  "name": "zentrola-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "playwright test"
+  },
+  "dependencies": {
+    "vue": "3.5.42",
+    "vue-i18n": "11.4.10",
+    "vue-router": "4.6.4"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "24.10.1",
+    "@vitejs/plugin-vue": "6.0.8",
+    "prettier": "3.6.2",
+    "typescript": "5.9.3",
+    "vite": "8.2.2",
+    "vue-tsc": "3.3.11"
+  }
+}

@@ -1,0 +1,2 @@
+// 审计快照中的 RawMessage 是 JSON 对象，不是字节数组。
+replace encoding/json.RawMessage object

@@ -1,0 +1,144 @@
+// Package gateway 编排 Anthropic 原生调用；不包含 HTTP 管理响应或数据库记录。
+package gateway
+
+import (
+	"context"
+	"errors"
+	"io"
+	"time"
+
+	appsec "github.com/zentrola/zentrola/internal/application/security"
+	"github.com/zentrola/zentrola/internal/domain/catalog"
+	"github.com/zentrola/zentrola/internal/domain/usage"
+)
+
+type Failure struct {
+	Code, Type, Message string
+	Status              int
+}
+
+func (f *Failure) Error() string { return f.Code }
+
+var (
+	ErrAuthentication = &Failure{"UNAUTHENTICATED", "authentication_error", "Authentication failed.", 401}
+	ErrInvalid        = &Failure{"INVALID_REQUEST", "invalid_request_error", "Invalid request.", 400}
+	ErrModelUnknown   = &Failure{"MODEL_NOT_FOUND", "not_found_error", "Model not found.", 404}
+	ErrModelDisabled  = &Failure{"MODEL_DISABLED", "permission_error", "Model is disabled.", 403}
+	ErrPermission     = &Failure{"MODEL_PERMISSION_DENIED", "permission_error", "Model permission denied.", 403}
+	ErrRoute          = &Failure{"MODEL_ROUTE_UNAVAILABLE", "api_error", "No active model route is available.", 503}
+	ErrResource       = &Failure{"RESOURCE_UNAVAILABLE", "api_error", "No active resource is available.", 503}
+	ErrCredential     = &Failure{"CREDENTIAL_UNRECOVERABLE", "api_error", "Resource credential is unavailable.", 503}
+	ErrUnavailable    = &Failure{"DEPENDENCY_UNAVAILABLE", "api_error", "Service unavailable.", 503}
+	ErrUpstream       = &Failure{"UPSTREAM_UNAVAILABLE", "api_error", "Upstream service unavailable.", 502}
+	ErrTimeout        = &Failure{"UPSTREAM_TIMEOUT", "api_error", "Upstream request timed out.", 504}
+	ErrCancelled      = &Failure{"REQUEST_CANCELLED", "api_error", "Request cancelled.", 499}
+)
+
+type Route struct {
+	ModelID, ProviderID, ProviderModelID, ResourceID int64
+	UpstreamModel, BaseURL                           string
+	Credential                                       catalog.SealedCredential
+}
+
+const AnthropicProtocol = "ANTHROPIC"
+const OpenAIProtocol = "OPENAI"
+
+type Model struct {
+	ID      string `json:"id"`
+	Object  string `json:"object"`
+	Created int64  `json:"created"`
+	OwnedBy string `json:"owned_by"`
+}
+type ModelStore interface {
+	Models(context.Context, appsec.PrincipalIdentity) ([]Model, error)
+}
+type Store interface {
+	Resolve(context.Context, appsec.PrincipalIdentity, string, ...string) (Route, error)
+}
+type Cipher interface {
+	Decrypt(catalog.SealedCredential, catalog.CredentialOwner) ([]byte, error)
+}
+type Request struct {
+	Trace                          *usage.Event
+	Path, Version, Beta, RequestID string
+	Protocol                       string
+	BetaQuery                      bool
+	Body                           []byte
+	ProtocolHeaders                map[string][]string
+}
+type Response struct {
+	Status  int
+	Headers map[string][]string
+	Body    io.ReadCloser
+}
+type Upstream interface {
+	Open(context.Context, Route, Request, []byte) (*Response, error)
+}
+type Service struct {
+	store    Store
+	cipher   Cipher
+	upstream Upstream
+}
+
+func New(store Store, cipher Cipher, upstream Upstream) *Service {
+	return &Service{store: store, cipher: cipher, upstream: upstream}
+}
+
+func (s *Service) Forward(ctx context.Context, identity appsec.PrincipalIdentity, request Request) (*Response, error) {
+	if identity.ID <= 0 || identity.OrganizationID <= 0 || identity.AccessKeyID <= 0 {
+		return nil, ErrAuthentication
+	}
+	if request.Protocol == "" {
+		request.Protocol = AnthropicProtocol
+	}
+	if (request.Protocol == AnthropicProtocol && request.Path != "/v1/messages" && request.Path != "/v1/messages/count_tokens") || (request.Protocol == OpenAIProtocol && request.Path != "/v1/chat/completions") || (request.Protocol != AnthropicProtocol && request.Protocol != OpenAIProtocol) {
+		return nil, ErrInvalid
+	}
+	parseRequest := Parse
+	if request.Protocol == OpenAIProtocol {
+		parseRequest = ParseOpenAI
+	}
+	parsed, err := parseRequest(request.Body)
+	if err != nil {
+		return nil, err
+	}
+	if request.Path == "/v1/messages/count_tokens" && parsed.Stream {
+		return nil, ErrInvalid
+	}
+	route, err := s.store.Resolve(ctx, identity, parsed.Model, request.Protocol)
+	if request.Trace != nil {
+		request.Trace.ModelID = route.ModelID
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !validModel(route.UpstreamModel) {
+		return nil, ErrRoute
+	}
+	credential, err := s.cipher.Decrypt(route.Credential, catalog.CredentialOwner{OrganizationID: identity.OrganizationID, ProviderID: route.ProviderID, ResourceID: route.ResourceID})
+	if err != nil {
+		return nil, ErrCredential
+	}
+	defer clear(credential)
+	request.Body = parsed.Rewrite(request.Body, route.UpstreamModel)
+	// HTTP 客户端须在 Open 返回前完成请求体发送；响应体由调用方及时关闭。
+	if request.Trace != nil {
+		request.Trace.Attempt = &usage.Attempt{ProviderID: route.ProviderID, ProviderModelID: route.ProviderModelID, ResourceID: route.ResourceID, ModelID: route.ModelID, StartedAt: time.Now().UTC()}
+	}
+	response, err := s.upstream.Open(ctx, route, request, credential)
+	if request.Trace != nil && (errors.Is(err, ErrRoute) || errors.Is(err, ErrInvalid) || errors.Is(err, ErrCredential)) {
+		request.Trace.Attempt = nil
+	}
+	return response, err
+}
+
+func (s *Service) Models(ctx context.Context, identity appsec.PrincipalIdentity) ([]Model, error) {
+	if identity.ID <= 0 || identity.OrganizationID <= 0 || identity.AccessKeyID <= 0 {
+		return nil, ErrAuthentication
+	}
+	store, ok := s.store.(ModelStore)
+	if !ok {
+		return nil, ErrUnavailable
+	}
+	return store.Models(ctx, identity)
+}
