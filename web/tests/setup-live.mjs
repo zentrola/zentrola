@@ -48,7 +48,7 @@ try {
   assert.equal(repeated.status(), 409)
   assert.equal((await repeated.json()).code, 'ALREADY_INITIALIZED')
   await page.reload()
-  await page.getByRole('heading', { name: '欢迎回来' }).waitFor()
+  await page.getByRole('heading', { name: '成员', exact: true }).waitFor()
   assert.equal(await page.getByRole('button', { name: '创建管理员', exact: true }).count(), 0)
   assert.equal(errors.length, 0)
   passed = true

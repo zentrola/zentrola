@@ -147,12 +147,12 @@ func TestJWTValidation(t *testing.T) {
 	}
 	now := time.Now().UTC().Truncate(time.Second)
 	j.now = func() time.Time { return now }
-	full, expires, err := j.Issue(admin.Identity{ID: 101, OrganizationID: 201})
+	full, expires, err := j.Issue(admin.Identity{ID: 101, OrganizationID: 201, CredentialVersion: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
 	identity, err := j.Verify(full)
-	if err != nil || identity.ID != 101 || identity.OrganizationID != 201 {
+	if err != nil || identity.ID != 101 || identity.OrganizationID != 201 || identity.CredentialVersion != 3 {
 		t.Fatal("JWT round trip failed")
 	}
 	if !expires.Equal(now.Add(8 * time.Hour)) {
@@ -164,6 +164,17 @@ func TestJWTValidation(t *testing.T) {
 	}
 	j.now = func() time.Time { return now }
 	claims := AdminClaims{OrganizationID: "201", Kind: "ADMIN", RegisteredClaims: jwt.RegisteredClaims{Issuer: adminIssuer, Subject: "101", Audience: jwt.ClaimStrings{adminAudience}, IssuedAt: jwt.NewNumericDate(now), ExpiresAt: jwt.NewNumericDate(expires), ID: "jti"}}
+	// 升级前签发的 Token 没有凭证版本，兼容为 0；账号首次重置后不再匹配。
+	legacy, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"organization_id": "201", "kind": "ADMIN", "iss": adminIssuer, "sub": "101",
+		"aud": adminAudience, "iat": now.Unix(), "exp": expires.Unix(), "jti": "legacy",
+	}).SignedString(j.key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if identity, err := j.Verify(legacy); err != nil || identity.CredentialVersion != 0 {
+		t.Fatal("legacy token version compatibility failed")
+	}
 	for _, test := range []struct {
 		name   string
 		mutate func(*AdminClaims)
@@ -175,6 +186,7 @@ func TestJWTValidation(t *testing.T) {
 		{"missing issued at", func(c *AdminClaims) { c.IssuedAt = nil }, jwt.SigningMethodHS256},
 		{"missing jti", func(c *AdminClaims) { c.ID = "" }, jwt.SigningMethodHS256},
 		{"wrong kind", func(c *AdminClaims) { c.Kind = "PRINCIPAL" }, jwt.SigningMethodHS256},
+		{"negative credential version", func(c *AdminClaims) { c.CredentialVersion = -1 }, jwt.SigningMethodHS256},
 		{"future issuance", func(c *AdminClaims) { c.IssuedAt = jwt.NewNumericDate(now.Add(time.Hour)) }, jwt.SigningMethodHS256},
 		{"unexpected algorithm", func(c *AdminClaims) {}, jwt.SigningMethodHS384},
 	} {

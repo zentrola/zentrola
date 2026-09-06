@@ -46,9 +46,9 @@ test('空系统创建首位管理员，校验确认密码后切换为登录', as
   await page.getByLabel('密码', { exact: true }).fill('owner-password-123')
   await page.getByRole('button', { name: '登录控制台' }).click()
   await expect(page.getByRole('heading', { name: '成员', exact: true })).toBeVisible()
-  expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0])
+  expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([1, 0])
   await page.reload()
-  await expect(page.getByRole('heading', { name: '欢迎回来' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '成员', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '创建管理员', exact: true })).toHaveCount(0)
 })
 

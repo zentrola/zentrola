@@ -168,7 +168,7 @@ func (q *Queries) DisableUnrecoverableResource(ctx context.Context, arg DisableU
 }
 
 const getActiveAdmin = `-- name: GetActiveAdmin :one
-SELECT a.id,a.organization_id,a.username,a.display_name FROM admin_user a JOIN organization o ON o.id=a.organization_id
+SELECT a.id,a.organization_id,a.username,a.display_name,a.credential_version FROM admin_user a JOIN organization o ON o.id=a.organization_id
 WHERE a.organization_id=$1 AND a.id=$2 AND a.is_deleted=false AND a.status='ACTIVE'
 AND o.is_deleted=false AND o.status='ACTIVE'
 `
@@ -179,10 +179,11 @@ type GetActiveAdminParams struct {
 }
 
 type GetActiveAdminRow struct {
-	ID             int64
-	OrganizationID int64
-	Username       string
-	DisplayName    string
+	ID                int64
+	OrganizationID    int64
+	Username          string
+	DisplayName       string
+	CredentialVersion int64
 }
 
 func (q *Queries) GetActiveAdmin(ctx context.Context, arg GetActiveAdminParams) (GetActiveAdminRow, error) {
@@ -193,6 +194,7 @@ func (q *Queries) GetActiveAdmin(ctx context.Context, arg GetActiveAdminParams) 
 		&i.OrganizationID,
 		&i.Username,
 		&i.DisplayName,
+		&i.CredentialVersion,
 	)
 	return i, err
 }
@@ -220,7 +222,7 @@ func (q *Queries) GetActiveOrganization(ctx context.Context) (Organization, erro
 }
 
 const getAdminForLogin = `-- name: GetAdminForLogin :one
-SELECT a.id, a.is_deleted, a.organization_id, a.username, a.password_hash, a.display_name, a.status, a.failed_login_count, a.locked_until, a.last_login_at, a.created_by, a.updated_by, a.created_at, a.updated_at, (o.status='ACTIVE') AS organization_active
+SELECT a.id, a.is_deleted, a.organization_id, a.username, a.password_hash, a.display_name, a.status, a.failed_login_count, a.locked_until, a.last_login_at, a.created_by, a.updated_by, a.created_at, a.updated_at, a.credential_version, (o.status='ACTIVE') AS organization_active
 FROM admin_user a JOIN organization o ON o.id=a.organization_id
 WHERE a.username=$1 AND a.is_deleted=false AND o.is_deleted=false
 FOR UPDATE OF a
@@ -241,6 +243,7 @@ type GetAdminForLoginRow struct {
 	UpdatedBy          string
 	CreatedAt          pgtype.Timestamptz
 	UpdatedAt          pgtype.Timestamptz
+	CredentialVersion  int64
 	OrganizationActive bool
 }
 
@@ -262,6 +265,7 @@ func (q *Queries) GetAdminForLogin(ctx context.Context, username string) (GetAdm
 		&i.UpdatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CredentialVersion,
 		&i.OrganizationActive,
 	)
 	return i, err
@@ -389,6 +393,34 @@ func (q *Queries) ListResourcesForCredentialCheck(ctx context.Context) ([]AiReso
 		return nil, err
 	}
 	return items, nil
+}
+
+const resetAdminPassword = `-- name: ResetAdminPassword :execrows
+UPDATE admin_user SET password_hash=$3,failed_login_count=0,locked_until=NULL,
+credential_version=credential_version+1,updated_by=$5,updated_at=$4
+WHERE organization_id=$1 AND id=$2 AND is_deleted=false AND status='ACTIVE'
+`
+
+type ResetAdminPasswordParams struct {
+	OrganizationID int64
+	ID             int64
+	PasswordHash   string
+	UpdatedAt      pgtype.Timestamptz
+	UpdatedBy      string
+}
+
+func (q *Queries) ResetAdminPassword(ctx context.Context, arg ResetAdminPasswordParams) (int64, error) {
+	result, err := q.db.Exec(ctx, resetAdminPassword,
+		arg.OrganizationID,
+		arg.ID,
+		arg.PasswordHash,
+		arg.UpdatedAt,
+		arg.UpdatedBy,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const revokeAccessKey = `-- name: RevokeAccessKey :exec

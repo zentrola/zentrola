@@ -23,9 +23,14 @@ UPDATE admin_user SET failed_login_count=$3,locked_until=$4,last_login_at=$5,upd
 WHERE organization_id=$1 AND id=$2 AND is_deleted=false;
 
 -- name: GetActiveAdmin :one
-SELECT a.id,a.organization_id,a.username,a.display_name FROM admin_user a JOIN organization o ON o.id=a.organization_id
+SELECT a.id,a.organization_id,a.username,a.display_name,a.credential_version FROM admin_user a JOIN organization o ON o.id=a.organization_id
 WHERE a.organization_id=$1 AND a.id=$2 AND a.is_deleted=false AND a.status='ACTIVE'
 AND o.is_deleted=false AND o.status='ACTIVE';
+
+-- name: ResetAdminPassword :execrows
+UPDATE admin_user SET password_hash=$3,failed_login_count=0,locked_until=NULL,
+credential_version=credential_version+1,updated_by=$5,updated_at=$4
+WHERE organization_id=$1 AND id=$2 AND is_deleted=false AND status='ACTIVE';
 
 -- name: GetMemberForKey :one
 SELECT p.* FROM principal p JOIN organization o ON o.id=p.organization_id

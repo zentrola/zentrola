@@ -2,6 +2,7 @@ package security
 
 import (
 	"context"
+	"errors"
 	"github.com/zentrola/zentrola/internal/application/health"
 	"github.com/zentrola/zentrola/internal/domain/admin"
 	"strings"
@@ -76,11 +77,23 @@ func (s *AdminService) Check(ctx context.Context) error {
 }
 
 func (s *AdminService) Login(ctx context.Context, username, password string, meta RequestMeta) (LoginResult, error) {
+	identity, err := s.verifyCredentials(ctx, username, password, meta)
+	if err != nil {
+		return LoginResult{}, err
+	}
+	token, expires, err := s.tokens.Issue(identity)
+	if err != nil {
+		return LoginResult{}, ErrUnavailable
+	}
+	return LoginResult{Token: token, TokenType: "Bearer", ExpiresAt: expires}, nil
+}
+
+func (s *AdminService) verifyCredentials(ctx context.Context, username, password string, meta RequestMeta) (admin.Identity, error) {
 	if len(username) > 64 || strings.TrimSpace(username) == "" || strings.ContainsRune(username, 0) {
 		s.passwords.DummyVerify("invalid input")
-		return LoginResult{}, ErrUnauthenticated
+		return admin.Identity{}, ErrUnauthenticated
 	}
-	identity, err := s.store.Attempt(ctx, username, meta, func(account *admin.Account) admin.LoginDecision {
+	return s.store.Attempt(ctx, username, meta, func(account *admin.Account) admin.LoginDecision {
 		if account == nil {
 			s.passwords.DummyVerify(password)
 			return admin.LoginDecision{}
@@ -93,14 +106,29 @@ func (s *AdminService) Login(ctx context.Context, username, password string, met
 		}
 		return account.Attempt(matches, s.now(), s.policy)
 	})
-	if err != nil {
-		return LoginResult{}, err
+}
+
+func (s *AdminService) ChangePassword(ctx context.Context, actor admin.Identity, current, next string, meta RequestMeta) error {
+	if current == "" || current == next || !utf8.ValidString(next) || len(next) < 12 || len(next) > 72 || strings.ContainsRune(next, 0) {
+		return ErrInvalidArgument
 	}
-	token, expires, err := s.tokens.Issue(identity)
+	// 复用登录失败计数与锁定策略，避免通过修改密码接口无限猜测当前密码。
+	verified, err := s.verifyCredentials(ctx, actor.Username, current, meta)
 	if err != nil {
-		return LoginResult{}, ErrUnavailable
+		var locked *AccountLockedError
+		if errors.Is(err, ErrUnauthenticated) && !errors.As(err, &locked) {
+			return ErrCurrentPassword
+		}
+		return err
 	}
-	return LoginResult{Token: token, TokenType: "Bearer", ExpiresAt: expires}, nil
+	if verified.ID != actor.ID || verified.OrganizationID != actor.OrganizationID || verified.CredentialVersion != actor.CredentialVersion {
+		return ErrUnauthenticated
+	}
+	hash, err := s.passwords.Hash(next)
+	if err != nil {
+		return ErrUnavailable
+	}
+	return s.store.ChangePassword(ctx, actor, hash, meta)
 }
 
 func (s *AdminService) Authenticate(ctx context.Context, token string) (admin.Identity, error) {
@@ -108,5 +136,12 @@ func (s *AdminService) Authenticate(ctx context.Context, token string) (admin.Id
 	if err != nil {
 		return admin.Identity{}, ErrUnauthenticated
 	}
-	return s.store.GetActive(ctx, claims.OrganizationID, claims.ID)
+	identity, err := s.store.GetActive(ctx, claims.OrganizationID, claims.ID)
+	if err != nil {
+		return admin.Identity{}, err
+	}
+	if identity.CredentialVersion != claims.CredentialVersion {
+		return admin.Identity{}, ErrUnauthenticated
+	}
+	return identity, nil
 }

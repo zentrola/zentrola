@@ -10,6 +10,7 @@ import (
 
 var (
 	ErrUnauthenticated    = errors.New("authentication failed")
+	ErrCurrentPassword    = errors.New("current password is incorrect")
 	ErrInvalidArgument    = errors.New("invalid argument")
 	ErrNotFound           = errors.New("object not found")
 	ErrUnavailable        = errors.New("security service unavailable")
@@ -37,6 +38,7 @@ type Tokens interface {
 	Verify(string) (admin.Identity, error)
 }
 type AdminStore interface {
+	ChangePassword(context.Context, admin.Identity, string, RequestMeta) error
 	Attempt(context.Context, string, RequestMeta, func(*admin.Account) admin.LoginDecision) (admin.Identity, error)
 	GetActive(context.Context, int64, int64) (admin.Identity, error)
 	EnsureInitial(context.Context, string, func() (string, error)) error

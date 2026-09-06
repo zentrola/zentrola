@@ -1,9 +1,29 @@
 <script setup lang="ts">
-import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
-import { identity, sessionExpired, login, logout, errorText, api, ApiError } from './api'
+import {
+  identity,
+  sessionExpired,
+  login,
+  logout,
+  restoreSession,
+  clearSession,
+  sessionKey,
+  errorText,
+  api,
+  ApiError,
+} from './api'
 import { t } from './i18n'
 import Icon from './components/Icon.vue'
+import ChangePassword from './components/ChangePassword.vue'
+import AccountMenu from './components/AccountMenu.vue'
+const changingPassword = ref(false)
+async function passwordChanged() {
+  changingPassword.value = false
+  clearSession()
+  await nextTick()
+  notice.value = t('passwordChange.success')
+}
 const route = useRoute()
 const username = ref(''),
   password = ref(''),
@@ -16,6 +36,28 @@ const setupRequired = ref(false),
   setupError = ref(''),
   confirmPassword = ref(''),
   notice = ref('')
+const restoring = ref(true),
+  restoreError = ref('')
+let restoreRevision = 0
+async function initializeSession() {
+  const revision = ++restoreRevision
+  restoring.value = true
+  restoreError.value = ''
+  setupReady.value = false
+  try {
+    await restoreSession()
+    if (revision === restoreRevision && !identity.value) await loadSetup()
+  } catch (e) {
+    if (revision === restoreRevision) restoreError.value = errorText(e)
+  } finally {
+    if (revision === restoreRevision) restoring.value = false
+  }
+}
+function syncSession(event: StorageEvent) {
+  if (event.storageArea !== localStorage || (event.key !== sessionKey && event.key !== null)) return
+  clearSession(false, false)
+  void initializeSession()
+}
 // 只展示后端确认过的锁定，按提交时的账号保存，避免影响其他账号。
 const loginLocks = ref(new Map<string, number>())
 const lockNow = ref(Date.now())
@@ -108,9 +150,14 @@ async function loadSetup() {
     if (revision === setupRevision) setupLoading.value = false
   }
 }
-onMounted(loadSetup)
+onMounted(() => {
+  window.addEventListener('storage', syncSession)
+  void initializeSession()
+})
+onUnmounted(() => window.removeEventListener('storage', syncSession))
 watch(identity, (value) => {
-  if (!value) {
+  changingPassword.value = false
+  if (!value && !restoring.value) {
     notice.value = ''
     void loadSetup()
   }
@@ -190,8 +237,25 @@ async function signOut() {
     <main class="login-form-area">
       <form ref="form" class="login-form" :novalidate="setupRequired" @submit.prevent="signIn">
         <p class="login-label">{{ t('console') }}</p>
-        <h2>{{ t(setupRequired ? 'setup.title' : 'login.title') }}</h2>
+        <h2>
+          {{
+            t(
+              restoring || restoreError
+                ? 'login.restoring'
+                : setupRequired
+                  ? 'setup.title'
+                  : 'login.title',
+            )
+          }}
+        </h2>
         <p>{{ t(setupRequired ? 'setup.subtitle' : 'login.subtitle') }}</p>
+        <p v-if="restoring" role="status">{{ t('login.restoring') }}</p>
+        <div v-if="restoreError" class="alert error" role="alert">
+          {{ restoreError
+          }}<button type="button" class="text-button" @click="initializeSession">
+            {{ t('common.retry') }}
+          </button>
+        </div>
         <p v-if="setupLoading" role="status">{{ t('setup.checking') }}</p>
         <div v-if="setupError" class="alert error" role="alert">
           {{ setupError
@@ -205,7 +269,7 @@ async function signOut() {
             lockSeconds > 0 ? t('login.locked', { time: lockTime }) : error || t('login.expired')
           }}
         </div>
-        <template v-if="setupReady"
+        <template v-if="setupReady && !restoring && !restoreError"
           ><label for="auth-username"
             >{{ t('login.username')
             }}<input
@@ -316,18 +380,6 @@ async function signOut() {
           ></template
         >
       </nav>
-      <div class="sidebar-bottom">
-        <span class="avatar admin-avatar">{{
-          (identity.displayName || identity.username).slice(0, 1)
-        }}</span>
-        <div class="admin-info">
-          <strong>{{ identity.displayName || identity.username }}</strong
-          ><small>{{ t('admin') }}</small>
-        </div>
-        <button class="icon-button" :aria-label="t('logout')" @click="signOut">
-          <Icon name="logout" :size="19" />
-        </button>
-      </div>
     </aside>
     <div class="workspace">
       <header class="topbar">
@@ -340,9 +392,20 @@ async function signOut() {
             t(`nav.${String(route.name || 'members')}`)
           }}</strong>
         </div>
-        <div class="topbar-account"><span class="online-dot"></span>{{ identity.username }}</div>
+        <AccountMenu
+          :username="identity.username"
+          :display-name="identity.displayName"
+          @change-password="changingPassword = true"
+          @logout="signOut"
+        />
       </header>
       <main id="main" class="main-content"><RouterView /></main>
     </div>
+    <ChangePassword
+      v-if="changingPassword"
+      :username="identity.username"
+      @close="changingPassword = false"
+      @changed="passwordChanged"
+    />
   </div>
 </template>

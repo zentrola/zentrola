@@ -2,14 +2,16 @@ import { ref } from 'vue'
 import type { Identity, Page } from './types'
 import { t, i18n } from './i18n'
 
-// 管理员 JWT 只存在内存中，不进入 Web Storage、URL 或日志。
+// 只保存 Token 和服务端到期时间；身份信息每次启动都通过 /me 校验。
+export const sessionKey = 'zentrola.admin.session'
+type Session = { token: string; expiresAt: string }
 const token = ref('')
 export const identity = ref<Identity | null>(null)
 export const sessionExpired = ref(false)
 let generation = 0
 let expiry: ReturnType<typeof setTimeout> | undefined
 const pending = new Set<AbortController>()
-export function clearSession(expired = false) {
+export function clearSession(expired = false, removeStored = true) {
   generation++
   token.value = ''
   identity.value = null
@@ -17,6 +19,66 @@ export function clearSession(expired = false) {
   clearTimeout(expiry)
   for (const controller of pending) controller.abort()
   pending.clear()
+  if (removeStored) {
+    try {
+      localStorage.removeItem(sessionKey)
+    } catch {
+      // 浏览器禁用存储时仍可清理当前页面会话。
+    }
+  }
+}
+
+function validSession(value: unknown): value is Session {
+  if (!value || typeof value !== 'object') return false
+  const session = value as Partial<Session>
+  return (
+    typeof session.token === 'string' &&
+    session.token.length > 0 &&
+    typeof session.expiresAt === 'string' &&
+    Number.isFinite(Date.parse(session.expiresAt))
+  )
+}
+
+function scheduleExpiry(session: Session) {
+  clearTimeout(expiry)
+  const remaining = Date.parse(session.expiresAt) - Date.now()
+  if (remaining <= 0) {
+    clearSession(true)
+    return false
+  }
+  expiry = setTimeout(() => scheduleExpiry(session), Math.min(remaining, 2147483647))
+  return true
+}
+
+export async function restoreSession() {
+  let stored: string | null
+  try {
+    stored = localStorage.getItem(sessionKey)
+  } catch {
+    return
+  }
+  if (!stored) return
+  let session: unknown
+  try {
+    session = JSON.parse(stored)
+  } catch {
+    clearSession()
+    return
+  }
+  if (!validSession(session)) {
+    clearSession()
+    return
+  }
+  if (!scheduleExpiry(session)) return
+  token.value = session.token
+  try {
+    identity.value = await api<Identity>('/me')
+    sessionExpired.value = false
+  } catch (error) {
+    // 401 已由 api 清理；网络错误保留凭证，交给页面显示重试。
+    if (error instanceof ApiError && error.code === 'UNAUTHENTICATED') return
+    throw error
+  }
 }
 export class ApiError extends Error {
   constructor(
@@ -66,6 +128,7 @@ export async function api<T>(path: string, method = 'GET', body?: unknown): Prom
     }
     return data.data as T
   } catch (error) {
+    if (epoch !== generation) throw new ApiError('UNAUTHENTICATED')
     if (error instanceof ApiError) throw error
     throw new ApiError(controller.signal.reason === 'timeout' ? 'TIMEOUT' : 'NETWORK')
   } finally {
@@ -74,10 +137,13 @@ export async function api<T>(path: string, method = 'GET', body?: unknown): Prom
   }
 }
 export async function login(username: string, password: string) {
-  const result = await api<{ token: string; expiresAt: string }>('/auth/login', 'POST', {
+  clearSession()
+  const result = await api<Session>('/auth/login', 'POST', {
     username,
     password,
   })
+  if (!validSession(result)) throw new ApiError('UNKNOWN')
+  if (!scheduleExpiry(result)) throw new ApiError('UNAUTHENTICATED')
   token.value = result.token
   try {
     identity.value = await api<Identity>('/me')
@@ -86,10 +152,14 @@ export async function login(username: string, password: string) {
     throw error
   }
   sessionExpired.value = false
-  expiry = setTimeout(
-    () => clearSession(true),
-    Math.max(0, Math.min(Date.parse(result.expiresAt) - Date.now(), 2147483647)),
-  )
+  try {
+    localStorage.setItem(
+      sessionKey,
+      JSON.stringify({ token: result.token, expiresAt: result.expiresAt }),
+    )
+  } catch {
+    // 存储不可用时降级为当前页面会话，不阻断登录。
+  }
 }
 export async function logout() {
   try {

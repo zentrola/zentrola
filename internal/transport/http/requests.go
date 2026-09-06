@@ -2,6 +2,12 @@ package http
 
 import "time"
 
+type ChangePasswordRequest struct {
+	CurrentPassword string `json:"currentPassword" binding:"required"`
+	// NewPassword 为 12–72 个 UTF-8 字节，不能包含空字符，也不能与当前密码相同。
+	NewPassword string `json:"newPassword" binding:"required"`
+}
+
 type LoginRequest struct {
 	Username string `json:"username" binding:"required" example:"admin"`
 	Password string `json:"password" binding:"required" example:"your-admin-password"`

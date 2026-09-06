@@ -99,7 +99,7 @@ func (s *SecurityStore) GetActive(ctx context.Context, org, id int64) (admin.Ide
 	if err != nil {
 		return admin.Identity{}, appsec.ErrUnavailable
 	}
-	return admin.Identity{ID: row.ID, OrganizationID: row.OrganizationID, Username: row.Username, DisplayName: row.DisplayName}, nil
+	return admin.Identity{ID: row.ID, OrganizationID: row.OrganizationID, Username: row.Username, DisplayName: row.DisplayName, CredentialVersion: row.CredentialVersion}, nil
 }
 func (s *SecurityStore) Attempt(ctx context.Context, username string, meta appsec.RequestMeta, evaluate func(*admin.Account) admin.LoginDecision) (admin.Identity, error) {
 	tx, err := s.pool.Begin(ctx)
@@ -116,7 +116,7 @@ func (s *SecurityStore) Attempt(ctx context.Context, username string, meta appse
 	if err != nil {
 		return admin.Identity{}, appsec.ErrUnavailable
 	}
-	account := admin.Account{Identity: admin.Identity{ID: row.ID, OrganizationID: row.OrganizationID, Username: row.Username, DisplayName: row.DisplayName}, PasswordHash: row.PasswordHash,
+	account := admin.Account{Identity: admin.Identity{ID: row.ID, OrganizationID: row.OrganizationID, Username: row.Username, DisplayName: row.DisplayName, CredentialVersion: row.CredentialVersion}, PasswordHash: row.PasswordHash,
 		Active: row.Status == "ACTIVE" && row.OrganizationActive, FailedLogins: row.FailedLoginCount, LockedUntil: timePointer(row.LockedUntil), LastLoginAt: timePointer(row.LastLoginAt)}
 	decision := evaluate(&account)
 	state := decision.State

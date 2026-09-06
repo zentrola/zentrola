@@ -58,6 +58,18 @@ func (s *SecurityHandlers) mount(r chi.Router) {
 		api.Post("/auth/login", s.login)
 		api.Group(func(protected chi.Router) {
 			protected.Use(s.adminAuth)
+			// @Summary 修改当前管理员登录密码
+			// @Tags 认证
+			// @Description 验证当前密码后更新密码，使该账号所有已签发的登录凭证失效；成功后需要重新登录。
+			// @Accept json
+			// @Produce json
+			// @Security AdminBearer
+			// @Param body body ChangePasswordRequest true "请求参数"
+			// @Success 200 {object} response{data=LogoutResponse}
+			// @Failure 400,401,403,503 {object} response
+			// @Failure 429 {object} response{data=LoginLockResponse}
+			// @Router /api/v1/auth/password [post]
+			protected.Post("/auth/password", s.changePassword)
 			// @Summary 当前管理员
 			// @Tags 认证
 			// @Produce json
@@ -164,6 +176,18 @@ func (s *SecurityHandlers) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, r, http.StatusOK, response{Code: "OK", Data: result})
+}
+func (s *SecurityHandlers) changePassword(w http.ResponseWriter, r *http.Request) {
+	var input ChangePasswordRequest
+	if err := decodeBody(w, r, &input); err != nil {
+		securityError(w, r, appsec.ErrInvalidArgument)
+		return
+	}
+	if err := s.Admin.ChangePassword(r.Context(), adminFrom(r), input.CurrentPassword, input.NewPassword, requestMeta(r)); err != nil {
+		securityError(w, r, err)
+		return
+	}
+	writeJSON(w, r, http.StatusOK, response{Code: "OK", Data: LogoutResponse{ClearToken: true}})
 }
 func (s *SecurityHandlers) adminAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -302,6 +326,8 @@ func securityError(w http.ResponseWriter, r *http.Request, err error) {
 	}
 	status, code, message := http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Service unavailable."
 	switch {
+	case errors.Is(err, appsec.ErrCurrentPassword):
+		status, code, message = http.StatusForbidden, "CURRENT_PASSWORD_INCORRECT", "Current password is incorrect."
 	case errors.Is(err, appsec.ErrAlreadyInitialized):
 		status, code, message = http.StatusConflict, "ALREADY_INITIALIZED", "Administrator setup is already complete."
 	case errors.Is(err, appsec.ErrUnauthenticated):

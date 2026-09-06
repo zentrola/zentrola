@@ -7,10 +7,11 @@ import (
 )
 
 type Identity struct {
-	ID             int64  `json:"id,string"`
-	OrganizationID int64  `json:"organizationId,string"`
-	Username       string `json:"username"`
-	DisplayName    string `json:"displayName"`
+	CredentialVersion int64  `json:"-"`
+	ID                int64  `json:"id,string"`
+	OrganizationID    int64  `json:"organizationId,string"`
+	Username          string `json:"username"`
+	DisplayName       string `json:"displayName"`
 }
 
 type Account struct {

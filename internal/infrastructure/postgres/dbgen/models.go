@@ -74,6 +74,8 @@ type AdminUser struct {
 	CreatedAt pgtype.Timestamptz
 	// 更新时间，UTC
 	UpdatedAt pgtype.Timestamptz
+	// 凭证版本；重置密码递增，使旧管理员 JWT 失效
+	CredentialVersion int64
 }
 
 // AI 使用治理分组

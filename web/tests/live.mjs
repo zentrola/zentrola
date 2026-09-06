@@ -146,7 +146,7 @@ try {
   await page.getByText('当前时间范围内暂无调用记录。可调整筛选条件后重试。').waitFor()
   await page.getByRole('link', { name: '操作日志', exact: true }).click()
   await page.getByRole('button', { name: '详情', exact: true }).first().waitFor()
-  assert.deepEqual(await page.evaluate(() => [localStorage.length, sessionStorage.length]), [0, 0])
+  assert.deepEqual(await page.evaluate(() => [localStorage.length, sessionStorage.length]), [1, 0])
   assert.equal(errors.length, 0)
   report.push({ check: 'real_browser_go_postgres_flow', passed: true })
 } catch {

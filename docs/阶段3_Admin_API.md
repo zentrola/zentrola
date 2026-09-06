@@ -22,6 +22,7 @@
 | --- | --- | --- |
 | 400 | `INVALID_ARGUMENT` | 非法参数、ID、状态或 JSON，包含未知字段也被拒绝 |
 | 401 | `UNAUTHENTICATED` | JWT 无效或管理员 / 组织不可用 |
+| 403 | `CURRENT_PASSWORD_INCORRECT` | 修改登录密码时当前密码不正确 |
 | 404 | `NOT_FOUND` | 对象不存在、已删除或不属于当前组织 |
 | 409 | `CONFLICT` | Group 编码重复、关联对象状态不允许或同一 Provider 已有 ACTIVE Resource |
 | 409 | `PROVIDER_UNAVAILABLE` | 资源所属 Provider 已停用 |
@@ -31,6 +32,8 @@
 全部管理响应使用 `Cache-Control: no-store`；Header `X-Request-ID` 与响应体一致。BIGINT ID 均为字符串；请求体中的 `providerId` 也必须为字符串，避免前端 Number 精度丢失。
 
 ## 接口目录
+
+`POST /api/v1/auth/password` 用于当前管理员修改登录密码，请求体为 `{"currentPassword":"...","newPassword":"..."}`，必须携带 Admin JWT。新密码需为 12–72 UTF-8 字节、无空字符且不同于当前密码。当前密码错误复用登录失败计数与锁定策略，锁定返回 429 `ACCOUNT_LOCKED`。成功返回 `data.clearToken=true`，客户端需清除会话并重新登录；密码、凭证版本与审计日志在同一事务中保存，该账号全部旧 JWT 立即失效。
 
 | 方法 | 路径 | 请求体或用途 |
 | --- | --- | --- |

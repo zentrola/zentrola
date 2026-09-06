@@ -38,7 +38,7 @@ func (q *Queries) GetAccessKeyByHash(ctx context.Context, keyHash []byte) (Acces
 }
 
 const getAdminByUsername = `-- name: GetAdminByUsername :one
-SELECT id, is_deleted, organization_id, username, password_hash, display_name, status, failed_login_count, locked_until, last_login_at, created_by, updated_by, created_at, updated_at FROM admin_user WHERE organization_id = $1 AND username = $2 AND is_deleted = false
+SELECT id, is_deleted, organization_id, username, password_hash, display_name, status, failed_login_count, locked_until, last_login_at, created_by, updated_by, created_at, updated_at, credential_version FROM admin_user WHERE organization_id = $1 AND username = $2 AND is_deleted = false
 `
 
 type GetAdminByUsernameParams struct {
@@ -64,6 +64,7 @@ func (q *Queries) GetAdminByUsername(ctx context.Context, arg GetAdminByUsername
 		&i.UpdatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CredentialVersion,
 	)
 	return i, err
 }

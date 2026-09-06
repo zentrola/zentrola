@@ -14,6 +14,7 @@ const (
 
 const (
 	AdminInitialize          Type = "ADMIN_INITIALIZE"
+	AdminPasswordReset       Type = "ADMIN_PASSWORD_RESET"
 	MemberCreate             Type = "MEMBER_CREATE"
 	MemberDelete             Type = "MEMBER_DELETE"
 	MemberStatusChange       Type = "MEMBER_STATUS_CHANGE"

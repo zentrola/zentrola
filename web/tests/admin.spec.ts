@@ -586,14 +586,15 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
   await page.screenshot({ path: 'test-results/visual/usage.png', fullPage: true })
   expect(
     await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length })),
-  ).toEqual({ local: 0, session: 0 })
-  await page.getByRole('button', { name: '退出登录' }).click()
+  ).toEqual({ local: 1, session: 0 })
+  await page.getByRole('button', { name: '账号菜单' }).click()
+  await page.getByRole('menuitem', { name: '注销登录' }).click()
   await expect(page.getByRole('heading', { name: '欢迎回来' })).toBeVisible()
   expect(await page.content()).not.toContain('林知远')
   expect(errors).toEqual([])
 })
 
-test('会话失效清理页面、移动端导航与刷新不保存 JWT', async ({ page }) => {
+test('会话失效清理页面、移动端导航与刷新不恢复失效 JWT', async ({ page }) => {
   const state = await fixture(page)
   await page.setViewportSize({ width: 390, height: 844 })
   await signIn(page)
