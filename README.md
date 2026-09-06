@@ -6,7 +6,7 @@
 
 阶段 0～3 已实现：Go 四层结构、14 张业务表、sqlc / Goose、安全认证，以及成员、分组、模型、资源和操作日志管理 API。管理员可通过 API 完成创建成员、入组、授权模型、配置资源和签发 Key 的操作链。
 
-模型目录现支持手动新增和编辑官方名称、编码、JSONB 输入/输出类型及备注，详见 [模型目录管理](docs/模型目录管理.md)。
+模型目录现支持手动新增和编辑官方名称、编码、JSONB 输入/输出类型及备注。
 
 首次启动会原子创建默认 Organization、Anthropic Official、两个逻辑 Model 及对应 Provider Model。管理员由首次使用者在网页中设置，创建成功后关闭初始化入口；后续启动不会覆盖配置或恢复软删除记录，不预置 Resource Credential。
 阶段 4 Gateway 和阶段 5 Usage 已实现，另已按用户授权接入 DeepSeek 并通过真实 Messages、SSE、Tool Loop、count_tokens、权限和 Usage 归属验证。Usage 支持固定 Worker、批量写入、队列满同步兜底、停机 Flush 和管理查询。阶段 6 管理界面已在 `web/` 完成并通过真实后端联调；真实 Claude Code 客户端会话尚未验收。
@@ -15,12 +15,7 @@ OpenAI 兼容入口已实现：`POST /v1/chat/completions`、`GET /v1/models`，
 
 数据库、Master Key、基础数据和管理员均正常时，`/health/ready` 返回 200；这不代表已有可调用的 Resource 或上游账号已通过验证。
 
-完整管理接口、请求示例和操作顺序见 [阶段 3 Admin API](docs/阶段3_Admin_API.md)。
-Gateway 行为、超时配置与后续 Claude Code 接入步骤见 [阶段 4 Anthropic Gateway](docs/阶段4_Anthropic_Gateway.md)。
-DeepSeek 目录安装、资源配置、真实测试结果与客户端配置见 [DeepSeek 接入与实测](docs/DeepSeek_接入与实测.md)。
-Usage 归属、计数语义、查询接口、可靠性边界和停机验证见 [阶段 5 Usage](docs/阶段5_Usage归属与可靠写入.md)。
-OpenAI 客户端配置、已有环境升级和真实测试结果见 [OpenAI 兼容接口](docs/OpenAI_兼容接口.md)。
-页面功能和验收记录见 [阶段 6 Admin Web](docs/阶段6_Admin_Web.md)，前端开发命令见 [web/README](web/README.md)。
+管理接口与 Gateway 请求示例见下方 Swagger 接口文档说明，前端开发命令见 [web/README](web/README.md)。
 
 ## 工程结构
 
@@ -47,7 +42,6 @@ internal/
       queries/                      sqlc SQL 源文件
       dbgen/                        sqlc 生成的 pgx/v5 类型安全代码
   transport/http/                   chi 路由、中间件、HTTP 响应
-docs/                               产品方案与当前开发清单
 web/                                Vue 3 管理界面、Vite 构建及浏览器测试
 ```
 
@@ -109,9 +103,9 @@ go run ./cmd/server
 
 生成的 `internal/transport/http/apidocs/swagger.json` 与源代码一起提交。`.swaggo` 将审计快照的 `json.RawMessage` 映射为 JSON 对象；请求 DTO 与实际 Handler 共用，分页响应也复用同一泛型结构。Docker 构建会重新生成文档。路由测试检查文档覆盖、Schema 引用、业务 ID 类型以及各环境的页面访问行为。
 
-新环境打开管理页面，自行设置首位管理员的账号和密码，没有默认用户名或密码。已有管理员时直接登录，升级不修改旧账号。JWT 签名密钥仍需至少 32 随机 bytes 的 Base64，且与 Master Key 独立。流程与并发防护见 [首次管理员初始化](docs/首次管理员初始化.md)。
+新环境打开管理页面，自行设置首位管理员的账号和密码，没有默认用户名或密码。已有管理员时直接登录，升级不修改旧账号。JWT 签名密钥仍需至少 32 随机 bytes 的 Base64，且与 Master Key 独立。
 
-忘记管理员密码时，使用服务器上的 `zentrola password --username <账号>` 生成新密码。完整用法和部署注意事项见 [命令行与密码恢复](docs/命令行与密码恢复.md)。
+忘记管理员密码时，使用服务器上的 `zentrola password --username <账号>` 生成新密码。运行 `zentrola help password` 查看命令用法。
 
 ```powershell
 zentrola help
@@ -128,7 +122,7 @@ zentrola password --username admin
 
 `help`、`--help` 和 `-h` 无需配置文件或数据库连接，列出 `serve`、`migrate`、`healthcheck`、`password` 等自带命令。
 
-`start` 默认后台启动，支持 `--port` 单次覆盖端口；`restart` 沿用上次配置和端口，`stop` 优雅停止，`status` 显示进程与健康状态。状态和日志保存在程序旁的 `run` 目录。`start --foreground`、`serve` 和不带命令均为前台运行，兼容容器，通过 Ctrl+C 或容器信号停止。完整行为见 [启动、停止和重启](docs/命令行与密码恢复.md#启动停止和重启)。
+`start` 默认后台启动，支持 `--port` 单次覆盖端口；`restart` 沿用上次配置和端口，`stop` 优雅停止，`status` 显示进程与健康状态。状态和日志保存在程序旁的 `run` 目录。`start --foreground`、`serve` 和不带命令均为前台运行，兼容容器，通过 Ctrl+C 或容器信号停止。
 
 在 `bin` 目录执行一次 `./zentrola.exe config --file ../.env`，即可统一绑定项目配置。绝对路径保存在程序旁的 `config.json`，后续 `serve`、`migrate`、`password` 和 `healthcheck` 自动复用；`config --show` 显示路径与环境，不显示密码。单次 `--config <路径>` 优先于已保存绑定；未绑定时普通命令仍读取当前目录 `.env`，健康检查仍沿用系统 `HTTP_ADDR`。使用绑定或显式 `--config` 时，以配置所在目录作为运行目录，使 Master Key 和网页文件路径保持稳定。
 
@@ -155,8 +149,6 @@ go run ./cmd/server migrate
 `migrate` 只迁移 Schema，正常 `serve` 启动再执行首次 Bootstrap。预置逻辑模型 `claude-sonnet / claude-opus` 与真实上游编码分离，首次默认映射为 `claude-sonnet-5 / claude-opus-5`，依据 [Anthropic 模型文档](https://platform.claude.com/docs/en/models/overview)。可在首次启动前设置 `BOOTSTRAP_SONNET_MODEL / BOOTSTRAP_OPUS_MODEL`；初始化后运行时映射以数据库为准。预置映射不是上游账号可用性测试，实际连通性留到 Resource 和 Gateway 阶段验证。
 
 `ID_NODE` 默认 1，范围 1～65535。Sonyflake 使用固定 epoch `2026-01-01 UTC`，进程内共享同一生成器；同一数据库的并行写入进程必须分配不同节点号。P0-MVP 按单实例部署，不自动分配节点号或建设分布式协调服务。
-
-数据字段与阶段边界说明见 [阶段 1 数据基础](docs/阶段1_数据基础.md)。
 
 ## Docker Compose
 
@@ -201,9 +193,6 @@ docker run --rm --mount "type=bind,source=$($PWD.Path),target=/src" --workdir /s
 
 支持 race detector 的 Go 工具链上可执行 `go test -race ./...`。32 位 Windows Go 不支持 race detector。
 
-## 开发基线
-
-- [P0-MVP 开发清单](docs/P0-MVP_开发清单_Claude_Code_Governance_Slice_V1.0.md)：当前实现范围与验收依据。
-- [总体方案 V2.6.6](docs/AI_Coding_Control_Plane_企业AI_Coding能力治理平台_V2.6.6.md)：长期架构和工程规范。
+## 当前范围
 
 按用户追加授权支持 Anthropic / DeepSeek 两个固定官方 Provider，不建设通用多 Provider 路由。暂不实现 Redis、Failover、Cost、Knowledge、Skill、MCP 或 APPLICATION 闭环。
