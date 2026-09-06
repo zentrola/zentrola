@@ -1659,7 +1659,7 @@
                         "AdminBearer": []
                     }
                 ],
-                "description": "按 ID 升序分页；将 nextCursor 作为下一次请求的 after。",
+                "description": "按 ID 倒序分页，最新成员在前；将 nextCursor 作为下一次请求的 after，继续查询更小的 ID。",
                 "produces": [
                     "application/json"
                 ],
@@ -1964,7 +1964,7 @@
                         "AdminBearer": []
                     }
                 ],
-                "description": "按 ID 升序分页；将 nextCursor 作为下一次请求的 after。",
+                "description": "按 ID 倒序分页，最新签发的密钥在前；limit=1 获取最新一条，将 nextCursor 作为 after 查询更早的密钥。仅返回识别前缀，不返回完整密钥。",
                 "produces": [
                     "application/json"
                 ],

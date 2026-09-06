@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -47,36 +49,115 @@ import (
 // @name x-api-key
 // @description 成员 Access Key 原文，仅用于 Anthropic 接口；不要同时发送 Authorization。
 func main() {
-	if len(os.Args) == 2 && os.Args[1] == "healthcheck" {
-		if err := healthcheck(); err != nil {
-			os.Exit(1)
-		}
-		return
-	}
-	if err := run(); err != nil {
+	if err := run(os.Args[1:], os.Stdout); err != nil {
 		// run 的错误只包含安全诊断，不输出原始数据库错误或配置对象。
 		slog.Error("zentrola stopped", "error", err.Error())
 		os.Exit(1)
 	}
 }
 
-func run() (runErr error) {
-	mode := "serve"
-	if len(os.Args) > 1 {
-		mode = os.Args[1]
-	}
-	if len(os.Args) > 2 || (mode != "serve" && mode != "migrate" && mode != "setup-deepseek") {
-		return errors.New("usage: zentrola [serve|migrate|healthcheck|setup-deepseek]")
-	}
-	cfg, err := config.Load(".env")
+func run(args []string, output io.Writer) (runErr error) {
+	command, err := parseCommand(args)
 	if err != nil {
 		return err
+	}
+	if command.help {
+		return writeHelp(output, command.name)
+	}
+	mode := command.name
+	bindingPath, err := bindingFile()
+	if err != nil {
+		return err
+	}
+	if mode == "config" {
+		return configure(command, bindingPath, output)
+	}
+	if mode == "stop" || mode == "status" || mode == "restart" || (mode == "start" && !command.foreground) {
+		return manageProcess(command, bindingPath, output)
+	}
+	if mode == "healthcheck" && !command.configProvided {
+		addr, found, err := currentManagedAddress(runtimeDir(bindingPath))
+		if err != nil {
+			return err
+		}
+		if found {
+			return healthcheck(addr, output)
+		}
+	}
+	var selection configSelection
+	child := mode == "start" && command.foreground && os.Getenv("ZENTROLA_BACKGROUND_CHILD") == "1"
+	if child {
+		selection = configSelection{path: os.Getenv("ZENTROLA_CHILD_CONFIG"), pinned: os.Getenv("ZENTROLA_CHILD_PINNED") == "1"}
+		if !filepath.IsAbs(selection.path) {
+			return errors.New("后台启动配置路径无效")
+		}
+		if selection.pinned {
+			err = requireConfigFile(selection.path)
+		}
+	} else {
+		selection, err = selectConfig(command, bindingPath)
+	}
+	if err != nil {
+		return err
+	}
+	if child {
+		return managedChild(command, selection, bindingPath, output)
+	}
+	if mode == "healthcheck" {
+		addr := os.Getenv("HTTP_ADDR")
+		if selection.pinned {
+			addr, err = config.LoadHealthcheckAddress(selection.path)
+			if err != nil {
+				return err
+			}
+		}
+		if err := healthcheck(addr, output); err != nil {
+			return fmt.Errorf("健康检查失败：%w", err)
+		}
+		return nil
+	}
+	cfg, err := loadCommandConfig(selection.path)
+	if err != nil {
+		return err
+	}
+	if err := applyPort(&cfg, command.port); err != nil {
+		return err
+	}
+	return runService(command, selection, cfg, nil, output)
+}
+
+func runService(command commandOptions, selection configSelection, cfg config.Config, managed *managedProcess, output io.Writer) (runErr error) {
+	mode := command.name
+	// 显式绑定配置后，Master Key 和 web/dist 等相对路径也必须稳定。
+	if selection.pinned {
+		previous, err := os.Getwd()
+		if err != nil {
+			return errors.New("无法读取当前工作目录")
+		}
+		if err := os.Chdir(filepath.Dir(selection.path)); err != nil {
+			return errors.New("无法进入配置文件目录")
+		}
+		defer os.Chdir(previous)
 	}
 	logger := logging.New(os.Stdout, cfg.LogFormat, cfg.LogLevel)
 	slog.SetDefault(logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if managed != nil {
+		cancelWatch := context.AfterFunc(managed.ctx, stop)
+		defer cancelWatch()
+	}
+	// 先占用端口，避免端口冲突时已经迁移数据库或触碰资源凭证。
+	var listener net.Listener
+	if mode == "serve" || mode == "start" {
+		var err error
+		listener, err = net.Listen("tcp", cfg.HTTPAddr)
+		if err != nil {
+			return errors.New("cannot listen on HTTP_ADDR; port may already be in use")
+		}
+		defer listener.Close()
+	}
 	startup, cancel := context.WithTimeout(ctx, cfg.StartupTimeout)
 	defer cancel()
 	pool, err := postgres.Open(startup, cfg.Postgres)
@@ -97,18 +178,19 @@ func run() (runErr error) {
 	if err != nil {
 		return err
 	}
+	if mode == "password" {
+		passwords, err := cryptosec.NewPasswords(12)
+		if err != nil {
+			return err
+		}
+		reset := appsec.NewPasswordReset(postgres.NewSecurityStore(pool, ids), passwords)
+		return resetPassword(startup, output, command.username, reset.Reset)
+	}
 	bootstrapService := bootstrap.New(postgres.NewBootstrapStore(pool), ids, cfg.BootstrapSonnet, cfg.BootstrapOpus)
 	if err := bootstrapService.Initialize(startup); err != nil {
 		return err
 	}
 	logger.Info("database bootstrap complete")
-	if mode == "setup-deepseek" {
-		if err := bootstrap.SetupDeepSeek(startup, postgres.NewBootstrapStore(pool), ids); err != nil {
-			return err
-		}
-		logger.Info("DeepSeek catalog ready; existing statuses and permissions preserved")
-		return nil
-	}
 	master, err := cryptosec.LoadMasterKey(cfg.Security.MasterKey, cfg.Security.ExternalMasterKeyPath, cfg.Security.MasterKeyPath)
 	if err != nil {
 		return err
@@ -198,13 +280,12 @@ func run() (runErr error) {
 		// 不设全局 WriteTimeout，避免截断后续的长 SSE 请求。
 		ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}
-	listener, err := net.Listen("tcp", cfg.HTTPAddr)
-	if err != nil {
-		return errors.New("cannot listen on HTTP_ADDR")
-	}
 	logger.Info("zentrola listening", "address", listener.Addr().String(), "environment", cfg.Environment)
 	serveResult := make(chan error, 1)
 	go func() { serveResult <- server.Serve(listener) }()
+	if managed != nil {
+		managed.setPhase("running")
+	}
 	// 先结束所有 Handler 的 Usage 提交，再执行前面注册的 Writer.Close。
 	defer func() {
 		_ = server.Close()
@@ -233,8 +314,7 @@ func run() (runErr error) {
 	return nil
 }
 
-func healthcheck() error {
-	addr := os.Getenv("HTTP_ADDR")
+func healthcheck(addr string, output io.Writer) error {
 	if addr == "" {
 		addr = ":8080"
 	}
@@ -252,6 +332,9 @@ func healthcheck() error {
 		return err
 	}
 	defer resp.Body.Close()
+	if _, err := io.Copy(output, resp.Body); err != nil {
+		return fmt.Errorf("读取或输出健康检查响应失败：%w", err)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("health check returned %d", resp.StatusCode)
 	}

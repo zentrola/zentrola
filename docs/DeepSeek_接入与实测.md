@@ -24,14 +24,9 @@
 
 ## 新环境配置
 
-先配置 `.env`，使用新二进制。`setup-deepseek` 是显式目录初始化命令，按已有 Bootstrap 方式以 `system` 创建目录元数据，不接受密钥，也不赋予成员权限。运行时应停止同一 `ID_NODE` 的服务进程，避免多个 ID 生成器使用同一节点。
+DeepSeek 目录由数据库维护，不再提供专用命令写入目录。已有数据库中的 Provider、Model、Provider Model、Resource、权限和审计记录保持不变；服务启动不会自动安装或重置 DeepSeek 目录。
 
-```powershell
-go run ./cmd/server setup-deepseek
-go run ./cmd/server
-```
-
-当前版本命令在一个事务内增加一个 Provider、两个 Model 和四个 Provider Model（每个模型各有 Anthropic、OpenAI 两种映射），可对已有 Anthropic 环境执行，也可为旧 DeepSeek 目录补齐 OpenAI 映射。重复执行不创建重复目录，也不恢复停用或软删除记录。若已有同名模型、Provider 或映射与预期冲突，整个事务回滚并返回错误，需检查数据库目录历史。普通 `serve` 不自动安装或重置 DeepSeek 目录。
+新环境应先通过数据库目录维护流程配置 `ai_provider`、`ai_model` 和 `provider_model`：一个 DeepSeek Provider、所需逻辑模型，以及各模型的 Anthropic/OpenAI 协议映射。逻辑模型的名称、编码、模态和启停状态可在模型管理页面维护；Provider 与协议映射目前没有配置界面，仍需通过数据库维护。维护时遵循现有业务 ID、必填元数据、软删除和唯一性约束，不恢复停用或已删除记录。
 
 管理员随后通过 [阶段 3 管理 API](阶段3_Admin_API.md) 完成：
 

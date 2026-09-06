@@ -76,10 +76,58 @@ func Load(path string) (Config, error) {
 	return load(path, os.LookupEnv)
 }
 
+// LoadForEnvironment 用于重启时复用上次启动所选环境，其余配置仍按既有优先级读取。
+func LoadForEnvironment(path, environment string) (Config, error) {
+	return load(path, func(key string) (string, bool) {
+		if key == "APP_ENV" {
+			return environment, true
+		}
+		return os.LookupEnv(key)
+	})
+}
+
 func load(path string, systemLookup func(string) (string, bool)) (Config, error) {
-	values, err := readOptionalEnv(path, ".env")
+	lookup, err := layeredLookup(path, systemLookup)
 	if err != nil {
 		return Config{}, err
+	}
+	return parse(lookup)
+}
+
+// Environment 只读取所选环境，不返回其他配置值。
+func Environment(path string) (string, error) {
+	lookup, err := layeredLookup(path, os.LookupEnv)
+	if err != nil {
+		return "", err
+	}
+	value, _ := lookup("APP_ENV")
+	return value, nil
+}
+
+// LoadHealthcheckAddress 复用分层配置，不校验或连接数据库。
+func LoadHealthcheckAddress(path string) (string, error) {
+	lookup, err := layeredLookup(path, os.LookupEnv)
+	if err != nil {
+		return "", err
+	}
+	addr, ok := lookup("HTTP_ADDR")
+	if !ok {
+		addr = ":8080"
+	}
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "", errors.New("HTTP_ADDR must be host:port")
+	}
+	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+		return "", errors.New("HTTP_ADDR port is invalid")
+	}
+	return addr, nil
+}
+
+func layeredLookup(path string, systemLookup func(string) (string, bool)) (func(string) (string, bool), error) {
+	values, err := readOptionalEnv(path, ".env")
+	if err != nil {
+		return nil, err
 	}
 	environment, ok := systemLookup("APP_ENV")
 	if !ok {
@@ -90,19 +138,19 @@ func load(path string, systemLookup func(string) (string, bool)) (Config, error)
 	}
 	environment, err = normalizeEnvironment(environment)
 	if err != nil {
-		return Config{}, err
+		return nil, err
 	}
 	overrides, err := readOptionalEnv(path+"."+environment, ".env."+environment)
 	if err != nil {
-		return Config{}, err
+		return nil, err
 	}
 	if _, ok := overrides["APP_ENV"]; ok {
-		return Config{}, errors.New("APP_ENV must be set in system environment or .env, not in an environment-specific file")
+		return nil, errors.New("APP_ENV must be set in system environment or .env, not in an environment-specific file")
 	}
 	for key, value := range overrides {
 		values[key] = value
 	}
-	return parse(func(key string) (string, bool) {
+	return func(key string) (string, bool) {
 		if key == "APP_ENV" {
 			return environment, true
 		}
@@ -111,7 +159,7 @@ func load(path string, systemLookup func(string) (string, bool)) (Config, error)
 		}
 		value, ok := values[key]
 		return value, ok
-	})
+	}, nil
 }
 
 func readOptionalEnv(path, label string) (map[string]string, error) {

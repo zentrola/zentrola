@@ -13,6 +13,7 @@ const paths: Record<string, string> = {
   close: 'm6 6 12 12M18 6 6 18',
   refresh: 'M20 7a9 9 0 1 0 1 9M20 2v6h-6',
   key: 'M14 6a5 5 0 1 1-4 8l-7 7H1v-4l7-7a5 5 0 0 1 6-4Z',
+  eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Zm13 0a3 3 0 1 1-6 0 3 3 0 0 1 6 0',
   logout: 'M9 4H3v16h6M13 8l4 4-4 4m-5-4h13',
   menu: 'M3 6h18M3 12h18M3 18h18',
   check: 'm5 12 4 4L19 6',

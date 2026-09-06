@@ -11,7 +11,11 @@ import (
 	"time"
 )
 
-const keyMarker = "zt_vk_"
+const (
+	keyMarker       = "vk-"
+	legacyKeyMarker = "zt_vk_"
+	keyPrefixChars  = 8
+)
 
 type Keys struct {
 	store KeyStore
@@ -40,7 +44,7 @@ func (s *Keys) Create(ctx context.Context, actor admin.Identity, principalID int
 	if err != nil {
 		return CreatedKey{}, ErrUnavailable
 	}
-	row := KeyRecord{ID: id, OrganizationID: actor.OrganizationID, PrincipalID: principalID, Hash: digest[:], Prefix: full[:14], Name: name, ExpiresAt: expires, CreatedAt: now}
+	row := KeyRecord{ID: id, OrganizationID: actor.OrganizationID, PrincipalID: principalID, Hash: digest[:], Prefix: full[:len(keyMarker)+keyPrefixChars], Name: name, ExpiresAt: expires, CreatedAt: now}
 	if err := s.store.Create(ctx, actor, row, meta); err != nil {
 		return CreatedKey{}, err
 	}
@@ -54,10 +58,15 @@ func (s *Keys) Revoke(ctx context.Context, actor admin.Identity, keyID int64, me
 	return s.store.Revoke(ctx, actor, keyID, meta)
 }
 func (s *Keys) Authenticate(ctx context.Context, full string) (PrincipalIdentity, error) {
-	if !strings.HasPrefix(full, keyMarker) || len(full) != len(keyMarker)+43 {
+	marker := keyMarker
+	// 已签发的旧密钥继续按原文摘要认证，不修改现有凭证。
+	if strings.HasPrefix(full, legacyKeyMarker) {
+		marker = legacyKeyMarker
+	}
+	if !strings.HasPrefix(full, marker) || len(full) != len(marker)+43 {
 		return PrincipalIdentity{}, ErrUnauthenticated
 	}
-	if raw, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(full, keyMarker)); err != nil || len(raw) != 32 {
+	if raw, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(full, marker)); err != nil || len(raw) != 32 {
 		return PrincipalIdentity{}, ErrUnauthenticated
 	}
 	digest := sha256.Sum256([]byte(full))

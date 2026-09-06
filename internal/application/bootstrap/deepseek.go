@@ -13,6 +13,7 @@ type DeepSeekStore interface {
 	InstallDeepSeek(context.Context, Seed) error
 }
 
+// SetupDeepSeek 仅供隔离数据库测试构建目录夹具；生产命令不调用此函数。
 func SetupDeepSeek(ctx context.Context, store DeepSeekStore, generator shared.IDGenerator) error {
 	ids := make([]int64, 7)
 	for i := range ids {

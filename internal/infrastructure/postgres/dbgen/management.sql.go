@@ -414,7 +414,7 @@ func (q *Queries) ManageGroups(ctx context.Context, arg ManageGroupsParams) ([]A
 
 const manageKeys = `-- name: ManageKeys :many
 SELECT id,name,key_prefix,status,expires_at,revoked_at,created_at FROM access_key
-WHERE organization_id=$1 AND principal_id=$2 AND is_deleted=false AND id>$3 ORDER BY id LIMIT $4
+WHERE organization_id=$1 AND principal_id=$2 AND is_deleted=false AND (id<$3 OR $3=0) ORDER BY id DESC LIMIT $4
 `
 
 type ManageKeysParams struct {
@@ -519,7 +519,7 @@ func (q *Queries) ManageMemberStatus(ctx context.Context, arg ManageMemberStatus
 }
 
 const manageMembers = `-- name: ManageMembers :many
-SELECT id, is_deleted, organization_id, principal_type, name, remark, status, created_by, updated_by, created_at, updated_at FROM principal WHERE organization_id=$1 AND is_deleted=false AND principal_type='MEMBER' AND id>$2 ORDER BY id LIMIT $3
+SELECT id, is_deleted, organization_id, principal_type, name, remark, status, created_by, updated_by, created_at, updated_at FROM principal WHERE organization_id=$1 AND is_deleted=false AND principal_type='MEMBER' AND (id<$2 OR $2=0) ORDER BY id DESC LIMIT $3
 `
 
 type ManageMembersParams struct {

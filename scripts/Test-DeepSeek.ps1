@@ -90,7 +90,7 @@ try {
     $login=$null
     $models=Admin-Request GET '/models'
     $model=@($models.items|Where-Object code -eq 'deepseek-v4-flash')[0]
-    if (!$model) { throw 'Run setup-deepseek first' }
+    if (!$model) { throw 'Configure the DeepSeek provider and model mappings in the database first' }
     $stamp=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds().ToString()
     $member=Admin-Request POST '/members' @{name="DeepSeek 验证 $stamp";remark='真实接口验证；执行结束后停用'}
     $group=Admin-Request POST '/groups' @{code="deepseek-check-$stamp";name='DeepSeek 接入验证';remark='执行结束后清除授权'}

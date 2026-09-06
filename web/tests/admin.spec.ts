@@ -90,7 +90,8 @@ async function fixture(page: Page) {
     if (path === '/auth/logout') return reply({ clearToken: true })
     const pageReply = (items: any[]) => reply({ items, nextCursor: null })
     if (segments.length === 1 && method === 'GET') {
-      if (path === '/members') return pageReply(members)
+      if (path === '/members')
+        return pageReply([...members].sort((a, b) => (BigInt(a.id) > BigInt(b.id) ? -1 : 1)))
       if (path === '/models') return pageReply(models)
       if (path === '/providers') return pageReply(providers)
       if (path === '/groups') return pageReply(groups)
@@ -165,19 +166,23 @@ async function fixture(page: Page) {
       return reply(row)
     }
     if (segments[0] === 'members' && segments[2] === 'keys') {
-      if (method === 'GET')
-        return pageReply(
-          keys
-            .filter((k) => k.memberID === segments[1])
-            .map(({ key: _, memberID: __, ...safe }) => safe),
-        )
+      if (method === 'GET') {
+        const limit = Number(url.searchParams.get('limit') || '50')
+        const after = url.searchParams.get('after')
+        const items = keys
+          .filter((k) => k.memberID === segments[1] && (!after || BigInt(k.id) < BigInt(after)))
+          .sort((a, b) => (BigInt(a.id) > BigInt(b.id) ? -1 : 1))
+          .slice(0, limit)
+          .map(({ key: _, memberID: __, ...safe }) => safe)
+        return reply({ items, nextCursor: items.length === limit ? items.at(-1)!.id : null })
+      }
       expect(segments[1]).toBe(longID)
       const row = {
         ...body,
         id: next(),
         memberID: segments[1],
-        key: 'fixture-key-shown-once',
-        prefix: 'fixture-key',
+        key: 'vk-fixture-key-shown-once',
+        prefix: 'vk-fixture1',
         status: 'ACTIVE',
         createdAt: stamp,
         revokedAt: null,
@@ -186,6 +191,7 @@ async function fixture(page: Page) {
       return reply(row, 201)
     }
     if (segments[0] === 'access-keys') {
+      if (conflict) return reply(null, 409, 'CONFLICT')
       const row = keys.find((k) => k.id === segments[1])
       row.status = 'REVOKED'
       row.revokedAt = stamp
@@ -244,18 +250,18 @@ async function signIn(page: Page) {
   await expect(page.getByRole('heading', { name: '成员', exact: true })).toBeVisible()
 }
 const modal = (page: Page) => page.locator('dialog').last()
-test('成员列表直接展示多个 Key、分配校验以及删除确认和失败恢复', async ({ page }) => {
+test('成员列表只展示最新 Key、分配后替换展示以及删除确认和失败恢复', async ({ page }) => {
   const state = await fixture(page)
   state.keys.push(
     {
       id: '801',
       memberID: longID,
       name: '工作站',
-      prefix: 'zt_vk_work',
+      prefix: 'vk-work1234',
       status: 'ACTIVE',
       expiresAt: null,
       revokedAt: null,
-      createdAt: stamp,
+      createdAt: '2019-01-01T00:00:00Z',
     },
     {
       id: '802',
@@ -265,30 +271,112 @@ test('成员列表直接展示多个 Key、分配校验以及删除确认和失�
       status: 'ACTIVE',
       expiresAt: '2020-01-01T00:00:00Z',
       revokedAt: null,
-      createdAt: stamp,
+      createdAt: '2019-02-01T00:00:00Z',
     },
   )
   await signIn(page)
   const row = page.getByRole('row').filter({ hasText: '林知远' })
   await expect(page.getByRole('button', { name: '管理 Key' })).toHaveCount(0)
-  await expect(row).toContainText('zt_vk_work…')
-  await expect(row).toContainText('长期有效')
+  await expect(page.getByRole('columnheader', { name: '密钥', exact: true })).toBeVisible()
+  await expect(row.locator('code')).toHaveCount(1)
+  await expect(row).not.toContainText('vk-work1234********')
+  await expect(row).toContainText('zt_vk_temp********')
+  await expect(row.getByText('工作站', { exact: true })).toHaveCount(0)
+  await expect(row.locator('code')).toHaveAttribute('title', '临时测试')
+  await expect(row).not.toContainText('长期有效')
   await expect(row).toContainText('2020年1月1日')
-  await expect(row).toContainText('已过期')
+  await expect(row).not.toContainText('已过期')
+  await expect(row.getByRole('button', { name: '撤销', exact: true })).toHaveCount(0)
+  const viewKeys = row.getByRole('button', { name: '查看密钥', exact: true })
+  await viewKeys.click()
+  await expect(modal(page)).toHaveAccessibleName('林知远的密钥')
+  await expect(modal(page).getByRole('columnheader')).toHaveText([
+    '显示名称',
+    '密钥',
+    '过期日期',
+    '操作',
+  ])
+  await expect(modal(page).locator('tbody tr td:first-child')).toHaveText(['临时测试', '工作站'])
+  await expect(modal(page).locator('code')).toHaveText([
+    'zt_vk_temp********',
+    'vk-work1234********',
+  ])
+  await expect(modal(page)).toContainText('长期有效')
+  await expect(modal(page)).toContainText('2020年1月1日')
+  await expect(modal(page).locator('tbody tr').first().locator('td').nth(2)).toHaveText(
+    '2020年1月1日',
+  )
+  await expect(
+    modal(page)
+      .getByRole('row')
+      .filter({ hasText: '临时测试' })
+      .getByRole('button', { name: '撤销' }),
+  ).toHaveCount(0)
+  const historyDialog = page.getByRole('dialog', { name: '林知远的密钥', exact: true })
+  const historyRevoke = historyDialog
+    .getByRole('row')
+    .filter({ hasText: '工作站' })
+    .getByRole('button', { name: '撤销' })
+  await historyRevoke.click()
+  await expect(modal(page)).toContainText('确认撤销「工作站」')
+  await modal(page).getByRole('button', { name: '取消', exact: true }).click()
+  expect(state.keys[0].status).toBe('ACTIVE')
+  await historyRevoke.click()
+  state.conflict(true)
+  await modal(page).getByRole('button', { name: '撤销', exact: true }).click()
+  await expect(modal(page).getByRole('alert')).toContainText('操作冲突')
+  expect(state.keys[0].status).toBe('ACTIVE')
+  state.conflict(false)
+  await modal(page).getByRole('button', { name: '撤销', exact: true }).click()
+  await expect(page.locator('dialog')).toHaveCount(1)
+  await expect(historyDialog.getByRole('status')).toContainText('Key 已撤销')
+  await expect(historyRevoke).toHaveCount(0)
+  expect(state.keys[0].status).toBe('REVOKED')
+  expect(state.keys[1].status).toBe('ACTIVE')
+  await mkdir('../.cache/web-visual', { recursive: true })
+  await page.screenshot({ path: '../.cache/web-visual/member-key-list.png', fullPage: true })
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await modal(page).evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
+  await page.screenshot({ path: '../.cache/web-visual/member-key-list-mobile.png', fullPage: true })
+  await page.keyboard.press('Escape')
+  await expect(page.locator('dialog')).toHaveCount(0)
+  await expect(viewKeys).toBeFocused()
+  await page.setViewportSize({ width: 1440, height: 1000 })
   await expect(
     page.getByRole('row').filter({ hasText: '周予安' }).getByRole('button', { name: '分配 Key' }),
   ).toBeDisabled()
   await row.getByRole('button', { name: '分配 Key' }).click()
   await modal(page).getByLabel('Key 名称').fill('自动化')
-  await modal(page).getByLabel('到期时间（可选）').fill('2020-01-01T12:00')
+  await expect(modal(page).getByLabel('到期日期（可选）')).toHaveAttribute('type', 'date')
+  await modal(page).getByLabel('到期日期（可选）').fill('2020-01-01')
   await modal(page).getByRole('button', { name: '分配 Key' }).click()
-  await expect(modal(page).getByRole('alert')).toContainText('必须晚于当前时间')
-  await modal(page).getByLabel('到期时间（可选）').fill('2099-12-31T12:00')
+  await expect(modal(page).getByRole('alert')).toContainText('不能早于今天')
+  await modal(page).getByLabel('到期日期（可选）').fill('2099-12-31')
   await modal(page).getByRole('button', { name: '分配 Key' }).click()
   await modal(page).getByRole('button', { name: '我已保存，关闭' }).click()
   await expect(page.locator('dialog')).toHaveCount(0)
-  await expect(row).toContainText('自动化')
+  await expect(row).toContainText('vk-fixture1********')
+  await expect(row.locator('code')).toHaveCount(1)
+  await expect(row.locator('code')).toHaveAttribute('title', '自动化')
+  await expect(row).not.toContainText('zt_vk_temp********')
+  await expect(row).not.toContainText('2020年1月1日')
+  expect(state.keys).toHaveLength(3)
   await expect(row).toContainText('2099年12月31日')
+  await expect(row.locator('.key-expiry')).toHaveText('2099年12月31日')
+  expect(
+    await page.evaluate((value) => {
+      const expiry = new Date(value)
+      return [
+        expiry.getFullYear(),
+        expiry.getMonth() + 1,
+        expiry.getDate(),
+        expiry.getHours(),
+        expiry.getMinutes(),
+        expiry.getSeconds(),
+        expiry.getMilliseconds(),
+      ]
+    }, state.keys.at(-1).expiresAt),
+  ).toEqual([2099, 12, 31, 23, 59, 59, 999])
   await mkdir('../.cache/web-visual', { recursive: true })
   await page.screenshot({ path: '../.cache/web-visual/members-keys.png', fullPage: true })
   await row.getByRole('button', { name: '删除', exact: true }).click()
@@ -324,6 +412,53 @@ test('成员 Key 加载失败可重试', async ({ page }) => {
   await row.getByRole('button', { name: '重试' }).click()
   await expect(row.getByRole('alert')).toHaveCount(0)
   await expect(row).toContainText('还没有访问密钥')
+})
+
+test('主列表只请求最新密钥，弹层分页失败重试保留记录且不泄露完整密钥', async ({ page }) => {
+  const state = await fixture(page)
+  for (let i = 0; i < 51; i++) {
+    state.keys.push({
+      id: (90071992547409931n + BigInt(i)).toString(),
+      memberID: longID,
+      name: `设备 ${i}`,
+      prefix: `vk-${String(i).padStart(8, '0')}`,
+      key: `secret-fixture-full-key-${i}`,
+      status: 'ACTIVE',
+      expiresAt: null,
+      revokedAt: null,
+      createdAt: stamp,
+    })
+  }
+  const requests: URLSearchParams[] = []
+  let failMore = true
+  await page.route(`**/api/v1/members/${longID}/keys?*`, async (route) => {
+    const query = new URL(route.request().url()).searchParams
+    requests.push(query)
+    if (query.has('after') && failMore)
+      return route.fulfill({ status: 503, json: { code: 'SERVICE_UNAVAILABLE' } })
+    return route.fallback()
+  })
+  await signIn(page)
+  const row = page.getByRole('row').filter({ hasText: '林知远' })
+  await expect(row.locator('code')).toHaveText('vk-00000050********')
+  expect(requests.map((query) => query.get('limit'))).toEqual(['1'])
+  await row.getByRole('button', { name: '查看密钥' }).click()
+  const dialog = modal(page)
+  await expect(dialog.locator('tbody tr')).toHaveCount(50)
+  await expect(dialog.locator('tbody tr').first()).toContainText('设备 50')
+  expect(requests.at(-1)!.get('limit')).toBe('50')
+  await dialog.getByRole('button', { name: '加载更多' }).click()
+  await expect(dialog.getByRole('alert')).toContainText('服务暂时不可用')
+  await expect(dialog.locator('tbody tr')).toHaveCount(50)
+  expect(requests.at(-1)!.get('after')).toBe('90071992547409932')
+  failMore = false
+  await dialog.getByRole('button', { name: '重试' }).click()
+  await expect(dialog.locator('tbody tr')).toHaveCount(51)
+  await expect(dialog.locator('tbody tr').last()).toContainText('设备 0')
+  await expect(dialog.getByRole('button', { name: '加载更多' })).toHaveCount(0)
+  expect(await page.content()).not.toContain('secret-fixture-full-key')
+  await dialog.getByRole('button', { name: '关闭', exact: true }).click()
+  await expect(row.locator('code')).toHaveCount(1)
 })
 
 test('模型新增编辑、模态校验、冲突恢复和窄屏表单', async ({ page }) => {
@@ -544,19 +679,29 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
   await modal(page).getByLabel('Key 名称').fill('工作站')
   await modal(page).getByRole('button', { name: '分配 Key' }).click()
   await expect(page.getByRole('textbox', { name: '完整 Key 仅展示这一次' })).toHaveValue(
-    'fixture-key-shown-once',
+    'vk-fixture-key-shown-once',
   )
   await modal(page).getByRole('button', { name: '我已保存，关闭' }).click()
-  expect(await page.content()).not.toContain('fixture-key-shown-once')
+  expect(await page.content()).not.toContain('vk-fixture-key-shown-once')
   await page
     .getByRole('row')
     .filter({ hasText: '林知远' })
-    .getByRole('button', { name: '撤销', exact: true })
+    .getByRole('button', { name: '查看密钥', exact: true })
     .click()
   await modal(page).getByRole('button', { name: '撤销', exact: true }).click()
+  await modal(page).getByRole('button', { name: '撤销', exact: true }).click()
+  await expect(page.locator('dialog')).toHaveCount(1)
+  await expect(modal(page).getByRole('button', { name: '撤销', exact: true })).toHaveCount(0)
+  await modal(page).getByRole('button', { name: '关闭', exact: true }).click()
+  await expect(page.locator('dialog')).toHaveCount(0)
   await expect(
-    page.getByRole('row').filter({ hasText: '林知远' }).getByText('已撤销', { exact: true }),
-  ).toBeVisible()
+    page
+      .getByRole('row')
+      .filter({ hasText: '林知远' })
+      .getByRole('button', { name: '撤销', exact: true }),
+  ).toHaveCount(0)
+  await expect(page.getByRole('row').filter({ hasText: '林知远' })).not.toContainText('已撤销')
+  expect(state.keys[0].status).toBe('REVOKED')
   await page
     .getByRole('row')
     .filter({ hasText: '林知远' })
@@ -618,7 +763,7 @@ test('会话失效清理页面、移动端导航与刷新不恢复失效 JWT', a
   await expect(page.getByRole('heading', { name: '欢迎回来' })).toBeVisible()
 })
 
-test('列表分页保持长 ID，并拒绝无效用量时间范围', async ({ page }) => {
+test('成员列表按 ID 倒序追加分页，保持长 ID 并拒绝无效用量时间范围', async ({ page }) => {
   await fixture(page)
   let pages = 0
   await page.route('**/api/v1/members?**', async (route) => {
@@ -631,7 +776,7 @@ test('列表分页保持长 ID，并拒绝无效用量时间范围', async ({ pa
         data: {
           items: [
             {
-              id: after ? '90071992547409932' : longID,
+              id: after ? '90071992547409930' : longID,
               name: after ? '第二页成员' : '第一页成员',
               status: 'ACTIVE',
               createdAt: stamp,
@@ -646,6 +791,7 @@ test('列表分页保持长 ID，并拒绝无效用量时间范围', async ({ pa
   await page.getByRole('button', { name: '加载更多' }).click()
   await expect(page.getByText('第一页成员', { exact: true })).toBeVisible()
   await expect(page.getByText('第二页成员', { exact: true })).toBeVisible()
+  await expect(page.locator('tbody tr .person strong')).toHaveText(['第一页成员', '第二页成员'])
   expect(pages).toBe(2)
   await page.getByRole('link', { name: '用量记录' }).click()
   await expect(page.getByRole('button', { name: '搜索', exact: true })).toBeEnabled()

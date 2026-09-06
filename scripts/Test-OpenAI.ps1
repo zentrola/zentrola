@@ -53,7 +53,7 @@ try {
     $login=AdminCall POST '/auth/login' @{username=$AdminUsername;password=[Net.NetworkCredential]::new('',$AdminPassword).Password}
     $adminHeaders.Authorization="Bearer $($login.token)";$login=$null
     $models=AdminCall GET '/models';$model=@($models.items|Where-Object code -eq 'deepseek-v4-flash')[0]
-    if (!$model){throw 'Run setup-deepseek first'}
+    if (!$model){throw 'Configure the DeepSeek provider and model mappings in the database first'}
     $providers=AdminCall GET '/providers';$provider=@($providers.items|Where-Object code -eq 'deepseek-official')[0]
     $resources=AdminCall GET '/resources';$resource=@($resources.items|Where-Object {$_.providerId -eq $provider.id -and $_.status -eq 'ACTIVE'})[0]
     if (!$resource){throw 'An ACTIVE DeepSeek resource is required'}

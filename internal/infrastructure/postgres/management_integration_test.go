@@ -213,6 +213,29 @@ func TestStage3Integration(t *testing.T) {
 		if _, err := keys.Authenticate(ctx, virtualKey); !errors.Is(err, appsec.ErrUnauthenticated) {
 			t.Fatal("revoked key accepted")
 		}
+		newer := stage3Data[appsec.CreatedKey](t, request("POST", memberPath+"/keys", map[string]string{"name": "新设备"}, 201))
+		type keyPage struct {
+			Items []mgmt.Key `json:"items"`
+			Next  *string    `json:"nextCursor"`
+		}
+		first := stage3Data[keyPage](t, request("GET", memberPath+"/keys?limit=1", nil, 200))
+		if len(first.Items) != 1 || first.Items[0].ID != newer.ID || first.Next == nil || *first.Next != sid(newer.ID) {
+			t.Fatal("key list must return the newest key first")
+		}
+		olderResponse := request("GET", memberPath+"/keys?after="+*first.Next, nil, 200)
+		older := stage3Data[keyPage](t, olderResponse)
+		if len(older.Items) != 1 || older.Items[0].ID != created.ID || older.Next != nil {
+			t.Fatal("key pagination must return older keys without duplicates")
+		}
+		allResponse := request("GET", memberPath+"/keys", nil, 200)
+		if strings.Contains(allResponse.Body.String(), newer.Key) || strings.Contains(allResponse.Body.String(), virtualKey) || strings.Contains(allResponse.Body.String(), "hash") {
+			t.Fatal("key history leaked a secret")
+		}
+		request("POST", "/api/v1/access-keys/"+sid(newer.ID)+"/revoke", nil, 200)
+		latestRevoked := stage3Data[keyPage](t, request("GET", memberPath+"/keys?limit=1", nil, 200))
+		if len(latestRevoked.Items) != 1 || latestRevoked.Items[0].ID != newer.ID || latestRevoked.Items[0].Status != "REVOKED" {
+			t.Fatal("latest key lookup must not silently fall back to an older key")
+		}
 	})
 
 	t.Run("union and irreversible relationship deletion", func(t *testing.T) {
@@ -321,14 +344,29 @@ func TestStage3Integration(t *testing.T) {
 		for _, path := range []string{"/api/v1/members/bad", "/api/v1/members?after=-1", "/api/v1/members?limit=101", "/api/v1/members?limit=1&limit=2"} {
 			request("GET", path, nil, 400)
 		}
-		page := stage3Data[struct {
+		earlier := stage3Data[mgmt.Member](t, request("POST", "/api/v1/members", map[string]string{"name": "分页较早成员"}, 201))
+		latest := stage3Data[mgmt.Member](t, request("POST", "/api/v1/members", map[string]string{"name": "分页最新成员"}, 201))
+		type memberPage struct {
 			Items []mgmt.Member `json:"items"`
 			Next  *string       `json:"nextCursor"`
-		}](t, request("GET", "/api/v1/members?limit=1", nil, 200))
-		if len(page.Items) != 1 || page.Next == nil {
-			t.Fatal("pagination cursor missing")
 		}
-		request("GET", "/api/v1/members?after="+*page.Next, nil, 200)
+		page := stage3Data[memberPage](t, request("GET", "/api/v1/members?limit=1", nil, 200))
+		if len(page.Items) != 1 || page.Items[0].ID != latest.ID || page.Next == nil || *page.Next != sid(latest.ID) {
+			t.Fatal("descending first page must contain the latest member and its cursor")
+		}
+		inserted := stage3Data[mgmt.Member](t, request("POST", "/api/v1/members", map[string]string{"name": "翻页期间新增成员"}, 201))
+		second := stage3Data[memberPage](t, request("GET", "/api/v1/members?limit=1&after="+*page.Next, nil, 200))
+		if len(second.Items) != 1 || second.Items[0].ID != earlier.ID || second.Next == nil {
+			t.Fatal("descending second page skipped or repeated a member after insertion")
+		}
+		tail := stage3Data[memberPage](t, request("GET", "/api/v1/members?after="+*second.Next, nil, 200))
+		if len(tail.Items) != 1 || tail.Items[0].ID != member.ID || tail.Next != nil {
+			t.Fatal("descending final page must contain only the original member")
+		}
+		refreshed := stage3Data[memberPage](t, request("GET", "/api/v1/members?limit=1&after=0", nil, 200))
+		if len(refreshed.Items) != 1 || refreshed.Items[0].ID != inserted.ID {
+			t.Fatal("refresh must show the newly inserted member first")
+		}
 		foreignID, _ := ids.NextID()
 		if _, err := pool.Exec(ctx, "INSERT INTO principal(id,organization_id,principal_type,name,status,created_by,updated_by,created_at,updated_at) VALUES($1,$2,'MEMBER','foreign','ACTIVE','system','system',now(),now())", foreignID, actor.OrganizationID+1); err != nil {
 			t.Fatal(err)

@@ -70,7 +70,7 @@
 | POST | `/api/v1/resources/{id}/test-connection` | 使用已保存的凭证测试连接，无请求体 |
 | GET | `/api/v1/operation-logs` | 当前组织的审计记录与安全快照 |
 
-所有列表支持 `?limit=50&after=<ID>`，默认 50，最大 100，按 ID 升序。返回 `data.items / data.nextCursor`；空列表是 `[]`。当本页恰好达到 limit 时返回最后一个 ID 作为下一页游标，因此最后一次请求可能返回空页。
+所有列表支持 `?limit=50&after=<ID>`，默认 50，最大 100。成员列表及成员密钥列表按 ID 倒序，最新记录在前，后续页查询小于 after 的 ID；其他列表按 ID 升序。成员密钥列表可用 `limit=1` 获取最新签发的一条（包括已过期或已撤销的记录），列表只返回识别前缀，不返回完整密钥。返回 `data.items / data.nextCursor`；空列表是 `[]`。当本页恰好达到 limit 时返回最后一个 ID 作为下一页游标，因此最后一次请求可能返回空页。
 
 成员和资源名称长度为 1～128 bytes，Group 编码为 1～64 bytes，备注最多 2000 bytes；不接受首尾空白、NUL 或无效 UTF-8。Credential 为 1～4096 bytes 可见 ASCII，不接受换行或空白。HTTP JSON 请求体上限为 16 KiB。
 

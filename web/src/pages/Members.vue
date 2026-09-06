@@ -1,16 +1,16 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
-import { api, all, errorText } from '../api'
-import { useCollection, useAction, useListSearch, date, validText } from '../composables'
+import { api, errorText } from '../api'
+import { useCollection, useAction, useListSearch, date, dateOnly, validText } from '../composables'
 import { t } from '../i18n'
-import type { Member, AccessKey, CreatedKey } from '../types'
+import type { Member, AccessKey, CreatedKey, Page } from '../types'
 import Icon from '../components/Icon.vue'
-import Status from '../components/Status.vue'
 import StatusSwitch from '../components/StatusSwitch.vue'
 import Modal from '../components/Modal.vue'
 import PageHeader from '../components/PageHeader.vue'
 import ListFooter from '../components/ListFooter.vue'
 import ListSearch from '../components/ListSearch.vue'
+import MemberKeys from '../components/MemberKeys.vue'
 const { items, cursor, loading, error, load } = useCollection<Member>(() => '/members')
 const { busy, error: actionError, run } = useAction()
 const notice = ref(''),
@@ -20,6 +20,7 @@ const notice = ref(''),
   validation = ref('')
 const statusTarget = ref<Member | null>(null),
   selected = ref<Member | null>(null),
+  viewingKeys = ref<Member | null>(null),
   deleteTarget = ref<Member | null>(null),
   memberKeys = ref<Record<string, AccessKey[]>>({}),
   keyErrors = ref<Record<string, string>>({}),
@@ -27,7 +28,6 @@ const statusTarget = ref<Member | null>(null),
 const keyName = ref(''),
   expires = ref(''),
   createdKey = ref<CreatedKey | null>(null),
-  revokeTarget = ref<{ member: Member; key: AccessKey } | null>(null),
   copied = ref('')
 const { keyword, query, visible, search, reset } = useListSearch(
   items,
@@ -80,7 +80,8 @@ async function refreshKeys(memberID: string) {
   keysLoading.value[memberID] = true
   delete keyErrors.value[memberID]
   try {
-    memberKeys.value[memberID] = await all<AccessKey>(`/members/${memberID}/keys`)
+    const result = await api<Page<AccessKey>>(`/members/${memberID}/keys?limit=1`)
+    memberKeys.value[memberID] = result.items
   } catch (error) {
     keyErrors.value[memberID] = errorText(error)
   } finally {
@@ -112,10 +113,9 @@ function issueKey() {
     validation.value = t('common.byteLimit')
     return
   }
-  if (
-    expires.value &&
-    (!Number.isFinite(Date.parse(expires.value)) || Date.parse(expires.value) <= Date.now())
-  ) {
+  // 日期按浏览器本地时区解释，选中当天仍可使用至当天结束。
+  const expiresAt = expires.value ? new Date(`${expires.value}T23:59:59.999`) : null
+  if (expiresAt && (!Number.isFinite(expiresAt.getTime()) || expiresAt.getTime() <= Date.now())) {
     validation.value = t('members.future')
     return
   }
@@ -123,7 +123,7 @@ function issueKey() {
     const memberID = selected.value!.id
     createdKey.value = await api<CreatedKey>(`/members/${memberID}/keys`, 'POST', {
       name: keyName.value,
-      ...(expires.value ? { expiresAt: new Date(expires.value).toISOString() } : {}),
+      ...(expiresAt ? { expiresAt: expiresAt.toISOString() } : {}),
     })
     copied.value = ''
     keyName.value = ''
@@ -132,24 +132,6 @@ function issueKey() {
     notice.value = t('members.keyCreated')
     await refreshKeys(memberID)
   })
-}
-function revoke() {
-  void run(async () => {
-    const { member, key } = revokeTarget.value!
-    await api(`/access-keys/${key.id}/revoke`, 'POST')
-    revokeTarget.value = null
-    notice.value = t('members.revoked')
-    await refreshKeys(member.id)
-  })
-}
-function openRevoke(member: Member, key: AccessKey) {
-  actionError.value = ''
-  revokeTarget.value = { member, key }
-}
-function keyState(key: AccessKey) {
-  if (key.revokedAt || key.status === 'REVOKED') return 'REVOKED'
-  if (key.expiresAt && Date.parse(key.expiresAt) <= Date.now()) return 'EXPIRED'
-  return key.status
 }
 async function copyKey() {
   try {
@@ -221,17 +203,15 @@ async function copyKey() {
               }}</span>
               <template v-else>
                 <div v-for="key in memberKeys[member.id]" :key="key.id" class="member-key">
-                  <strong class="key-name" :title="key.name">{{ key.name }}</strong>
                   <div class="key-details">
-                    <code>{{ key.prefix }}…</code>
-                    <Status v-if="keyState(key) !== 'ACTIVE'" :value="keyState(key)" />
+                    <code :title="key.name">{{ key.prefix }}********</code>
                     <button
-                      v-if="keyState(key) !== 'REVOKED'"
-                      class="text-button danger"
-                      :disabled="busy"
-                      @click="openRevoke(member, key)"
+                      class="icon-button view-keys"
+                      :aria-label="t('members.viewKeys')"
+                      :title="t('members.viewKeys')"
+                      @click="viewingKeys = member"
                     >
-                      {{ t('members.revoke') }}
+                      <Icon name="eye" :size="17" />
                     </button>
                   </div>
                 </div>
@@ -247,7 +227,7 @@ async function copyKey() {
                   :key="key.id"
                   class="member-key key-expiry"
                 >
-                  {{ key.expiresAt ? date(key.expiresAt) : t('members.noExpiry') }}
+                  {{ key.expiresAt ? dateOnly(key.expiresAt) : t('members.noExpiry') }}
                 </div>
               </template>
               <span
@@ -294,6 +274,7 @@ async function copyKey() {
     </div>
     <ListFooter :count="items.length" :cursor="cursor" :loading="loading" @more="load(true)" />
   </section>
+  <MemberKeys v-if="viewingKeys" :member="viewingKeys" @close="viewingKeys = null" />
   <Modal v-if="creating" :title="t('members.create')" :busy="busy" @close="creating = false"
     ><form @submit.prevent="create">
       <label
@@ -361,8 +342,9 @@ async function copyKey() {
         >{{ t('members.keyName') }}<input v-model="keyName" required autofocus :disabled="busy"
       /></label>
       <label
-        >{{ t('members.expires') }}<input v-model="expires" type="datetime-local" :disabled="busy"
+        >{{ t('members.expires') }}<input v-model="expires" type="date" :disabled="busy"
       /></label>
+      <p class="muted">{{ t('members.expiresHint') }}</p>
       <p v-if="validation || actionError" class="alert error" role="alert">
         {{ validation || actionError }}
       </p>
@@ -376,21 +358,6 @@ async function copyKey() {
       </footer>
     </form>
   </Modal>
-  <Modal
-    v-if="revokeTarget"
-    :title="t('members.revokeTitle')"
-    :busy="busy"
-    @close="revokeTarget = null"
-    ><p>{{ t('members.revokeHint', { name: revokeTarget.key.name }) }}</p>
-    <p v-if="actionError" class="alert error" role="alert">{{ actionError }}</p>
-    <footer class="form-footer">
-      <button class="button" :disabled="busy" @click="revokeTarget = null">
-        {{ t('common.cancel') }}</button
-      ><button class="button danger-fill" :disabled="busy" @click="revoke">
-        {{ t('members.revoke') }}
-      </button>
-    </footer></Modal
-  >
   <Modal v-if="createdKey" :title="t('members.oneTime')" locked
     ><p>{{ t('members.oneTimeHint') }}</p>
     <textarea
@@ -430,19 +397,19 @@ async function copyKey() {
 .member-key + .member-key {
   border-top: 1px solid var(--line);
 }
-.key-name {
-  max-width: 240px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 .key-details {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 11px;
+  font-size: 12px;
 }
 .key-expiry {
   align-items: flex-start;
+}
+.view-keys {
+  width: 28px;
+  height: 28px;
+  color: var(--blue);
 }
 .key-error {
   max-width: 260px;

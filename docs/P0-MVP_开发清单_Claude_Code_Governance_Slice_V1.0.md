@@ -4,7 +4,7 @@
 > 目标：验证“企业是否需要以 MEMBER / Group 为单位治理 Claude Code 的模型访问和 Usage”  
 > 原则：**范围做 MVP，地基保持生产级；不实现清单外任何功能。**
 
-> 2026-09-06 范围补充：用户授权使用 DeepSeek 完成真实模型验证。增加显式 `setup-deepseek` 目录初始化命令和固定 DeepSeek Anthropic 兼容入口；默认 Bootstrap 保留 Anthropic，不增加通用 Provider CRUD、动态选路或跨协议转换。详见 [DeepSeek 接入与实测](DeepSeek_接入与实测.md)。原清单中的真实 Claude Code 客户端验收仍需单独执行。
+> 2026-09-06 范围补充：用户授权使用 DeepSeek 完成真实模型验证，增加固定 DeepSeek Anthropic 兼容入口。最初提供的一次性目录初始化命令已按后续要求移除，目录统一通过数据库维护；默认 Bootstrap 保留 Anthropic，不增加通用 Provider CRUD、动态选路或跨协议转换。详见 [DeepSeek 接入与实测](DeepSeek_接入与实测.md)。原清单中的真实 Claude Code 客户端验收仍需单独执行。
 
 > 同日追加范围：用户要求支持 OpenAI，已实现 `/v1/chat/completions` 和 `/v1/models`，复用 DeepSeek 官方资源，完成真实普通响应、SSE、工具往返和 Usage 验证。模型映射唯一性调整为每个逻辑模型、每种协议最多一个 ACTIVE 映射；其他治理规则共用。详见 [OpenAI 兼容接口](OpenAI_兼容接口.md)。该次接入不含 Responses 或 OpenAI 官方 Provider；随后阶段 6 已在 `web/` 完成，见 [Admin Web 验收](阶段6_Admin_Web.md)。
 

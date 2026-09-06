@@ -122,20 +122,18 @@ try {
   ).id
   const output = page.getByRole('textbox', { name: '完整 Key 仅展示这一次' })
   await output.waitFor()
-  assert.ok((await output.inputValue()).startsWith('zt_vk_'))
+  assert.ok((await output.inputValue()).startsWith('vk-'))
   await dialog().getByRole('button', { name: '我已保存，关闭' }).click()
   assert.equal(await output.count(), 0)
   await page
     .getByRole('row')
     .filter({ hasText: memberName })
-    .getByRole('button', { name: '撤销', exact: true })
+    .getByRole('button', { name: '查看密钥', exact: true })
     .click()
   await dialog().getByRole('button', { name: '撤销', exact: true }).click()
-  await page
-    .getByRole('row')
-    .filter({ hasText: memberName })
-    .getByText('已撤销', { exact: true })
-    .waitFor()
+  await dialog().getByRole('button', { name: '撤销', exact: true }).click()
+  await dialog().getByRole('status').filter({ hasText: 'Key 已撤销' }).waitFor()
+  await dialog().getByRole('button', { name: '关闭', exact: true }).click()
   assert.ok((await api(`/members/${memberID}/keys`)).items[0].revokedAt)
   step = 'usage_and_logs'
   await page.getByRole('link', { name: '用量记录' }).click()

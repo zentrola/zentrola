@@ -111,6 +111,27 @@ go run ./cmd/server
 
 新环境打开管理页面，自行设置首位管理员的账号和密码，没有默认用户名或密码。已有管理员时直接登录，升级不修改旧账号。JWT 签名密钥仍需至少 32 随机 bytes 的 Base64，且与 Master Key 独立。流程与并发防护见 [首次管理员初始化](docs/首次管理员初始化.md)。
 
+忘记管理员密码时，使用服务器上的 `zentrola password --username <账号>` 生成新密码。完整用法和部署注意事项见 [命令行与密码恢复](docs/命令行与密码恢复.md)。
+
+```powershell
+zentrola help
+zentrola config --file .env
+zentrola config --show
+zentrola start --port 8081
+zentrola status
+zentrola restart
+zentrola stop
+zentrola help password
+zentrola password --username admin
+# Windows 在当前目录执行二进制时：.\zentrola.exe password --username admin
+```
+
+`help`、`--help` 和 `-h` 无需配置文件或数据库连接，列出 `serve`、`migrate`、`healthcheck`、`password` 等自带命令。
+
+`start` 默认后台启动，支持 `--port` 单次覆盖端口；`restart` 沿用上次配置和端口，`stop` 优雅停止，`status` 显示进程与健康状态。状态和日志保存在程序旁的 `run` 目录。`start --foreground`、`serve` 和不带命令均为前台运行，兼容容器，通过 Ctrl+C 或容器信号停止。完整行为见 [启动、停止和重启](docs/命令行与密码恢复.md#启动停止和重启)。
+
+在 `bin` 目录执行一次 `./zentrola.exe config --file ../.env`，即可统一绑定项目配置。绝对路径保存在程序旁的 `config.json`，后续 `serve`、`migrate`、`password` 和 `healthcheck` 自动复用；`config --show` 显示路径与环境，不显示密码。单次 `--config <路径>` 优先于已保存绑定；未绑定时普通命令仍读取当前目录 `.env`，健康检查仍沿用系统 `HTTP_ADDR`。使用绑定或显式 `--config` 时，以配置所在目录作为运行目录，使 Master Key 和网页文件路径保持稳定。
+
 ```powershell
 Invoke-RestMethod http://localhost:8080/health/live
 # 管理员初始化完成且依赖正常后应返回 HTTP 200 / READY。

@@ -46,16 +46,15 @@ try {
 
 ## 已有环境升级
 
-使用新二进制，先停止使用同一 `ID_NODE` 的旧服务，再执行：
+使用新二进制，先停止使用同一 `ID_NODE` 的旧服务，再启动：
 
 ```powershell
-go run ./cmd/server setup-deepseek
 go run ./cmd/server
 ```
 
 默认自动应用 `00004_openai_protocol.sql`。关闭自动迁移时先执行 `go run ./cmd/server migrate`。新迁移增加 `ai_provider.openai_base_url`，允许 `OPENAI` 协议，并将 ACTIVE 映射唯一约束改为“每个逻辑模型、每种协议最多一个”。已有 Anthropic 映射和 Usage 历史不改写。
 
-`setup-deepseek` 为两种 DeepSeek 模型补齐 OpenAI 映射，复用原 Provider、逻辑 Model 和 Resource，不修改凭证、成员权限或已有记录的启停状态。缺失的新映射继承 Anthropic 映射的状态；原映射已软删除则新增映射为 DISABLED。重复执行不恢复已有 OpenAI 映射。出现冲突时整个目录事务回滚；普通 `serve` 不自动安装 DeepSeek 目录。
+DeepSeek 的 OpenAI 映射通过数据库目录维护，复用原 Provider、逻辑 Model 和 Resource；检查 `ai_provider.openai_base_url` 及 `provider_model` 中对应的 OPENAI 协议映射。服务启动不自动补齐目录，也不修改凭证、成员权限或已有记录的启停状态。目录配置方式见 [DeepSeek 新环境配置](DeepSeek_接入与实测.md#新环境配置)。
 
 新环境仍需通过 [管理 API](阶段3_Admin_API.md) 创建和启用 DeepSeek Resource、为成员所在 Group 授权模型并签发 Virtual Key。已有模型授权对两个协议入口共用，无需重复添加；模型可用性还取决于对应协议映射。
 

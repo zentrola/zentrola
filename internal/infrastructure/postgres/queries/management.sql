@@ -4,7 +4,7 @@ WHERE o.id=$1 AND a.id=$2 AND o.is_deleted=false AND o.status='ACTIVE'
 AND a.is_deleted=false AND a.status='ACTIVE' FOR UPDATE OF o FOR SHARE OF a;
 
 -- name: ManageMembers :many
-SELECT * FROM principal WHERE organization_id=$1 AND is_deleted=false AND principal_type='MEMBER' AND id>$2 ORDER BY id LIMIT $3;
+SELECT * FROM principal WHERE organization_id=$1 AND is_deleted=false AND principal_type='MEMBER' AND (id<$2 OR $2=0) ORDER BY id DESC LIMIT $3;
 -- name: ManageMember :one
 SELECT * FROM principal WHERE organization_id=$1 AND id=$2 AND is_deleted=false AND principal_type='MEMBER';
 -- name: ManageCreateMember :exec
@@ -82,7 +82,7 @@ WHERE organization_id=$1 AND id=$2 AND is_deleted=false;
 
 -- name: ManageKeys :many
 SELECT id,name,key_prefix,status,expires_at,revoked_at,created_at FROM access_key
-WHERE organization_id=$1 AND principal_id=$2 AND is_deleted=false AND id>$3 ORDER BY id LIMIT $4;
+WHERE organization_id=$1 AND principal_id=$2 AND is_deleted=false AND (id<$3 OR $3=0) ORDER BY id DESC LIMIT $4;
 -- name: ManageOperations :many
 SELECT id,operator_name,operation_type,target_type,target_id,request_id,result,error_code,before_data,after_data,created_at
 FROM operation_log WHERE organization_id=$1 AND id>$2 ORDER BY id LIMIT $3;

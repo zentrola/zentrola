@@ -10,6 +10,9 @@
 coverage.out
 *.test
 *.exe
+/config.json
+/run/
+.zentrola-config-*
 .idea/
 .vscode/
 /web/node_modules/
