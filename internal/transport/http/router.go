@@ -27,7 +27,6 @@ func NewRouter(logger *slog.Logger, readiness *health.Service, corsConfig config
 		}).Handler)
 	}
 	mountSwagger(r, environment)
-	mountWeb(r)
 	// @Summary 进程存活检查
 	// @Tags 健康检查
 	// @Produce json

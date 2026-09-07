@@ -43,7 +43,7 @@ func TestDeepSeekConnectionUsesOfficialModels(t *testing.T) {
 		}
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"data":[{"id":"deepseek-v4-flash"}]}`))}, nil
 	})
-	if result := tester.Test(context.Background(), "https://api.deepseek.com/anthropic", []byte("upstream-secret")); !result.OK {
+	if result := tester.Test(context.Background(), "ANTHROPIC", "https://api.deepseek.com/anthropic", []byte("upstream-secret"), nil); !result.OK {
 		t.Fatal(result)
 	}
 	if headers.Get("Authorization") != "" {
@@ -60,11 +60,11 @@ func TestDeepSeekRejectsUntrustedURLs(t *testing.T) {
 	})
 	client.client.Transport = transport
 	tester.client.Transport = transport
-	for _, base := range []string{"http://api.deepseek.com/anthropic", "https://api.deepseek.com", "https://api.deepseek.com/anthropic/../", "https://api.deepseek.com.evil.test/anthropic", "https://api.deepseek.com@evil.test/anthropic", "https://api.deepseek.com/anthropic?target=evil", "https://api.deepseek.com/anthropic#fragment", "https://api.deepseek.com/anthropic//"} {
+	for _, base := range []string{"http://api.deepseek.com/anthropic", "https://127.0.0.1/anthropic", "https://localhost/anthropic", "https://api.deepseek.com/anthropic/../", "https://api.deepseek.com@evil.test/anthropic", "https://api.deepseek.com/anthropic?target=evil", "https://api.deepseek.com/anthropic#fragment", "https://api.deepseek.com/anthropic//"} {
 		if _, err := client.Open(context.Background(), gw.Route{BaseURL: base}, gw.Request{Path: "/v1/messages"}, []byte("secret")); !errors.Is(err, gw.ErrRoute) {
 			t.Fatal("unsafe Gateway URL accepted")
 		}
-		if result := tester.Test(context.Background(), base, []byte("secret")); result.Code != "UPSTREAM_URL_REJECTED" {
+		if result := tester.Test(context.Background(), "ANTHROPIC", base, []byte("secret"), nil); result.Code != "UPSTREAM_URL_REJECTED" {
 			t.Fatal("unsafe probe URL accepted")
 		}
 	}

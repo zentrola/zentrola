@@ -19,14 +19,28 @@ type CreateKeyRequest struct {
 }
 
 type CreateMemberRequest struct {
-	Name   string `json:"name" binding:"required" example:"开发者"`
-	Remark string `json:"remark" example:"研发成员"`
+	Name     string   `json:"name" binding:"required" example:"开发者"`
+	Remark   string   `json:"remark" example:"研发成员"`
+	GroupIDs []string `json:"groupIds" example:"123456789,987654321"`
+}
+
+type UpdateMemberRequest struct {
+	Name     string   `json:"name" binding:"required" example:"开发者"`
+	Remark   string   `json:"remark" example:"研发成员"`
+	GroupIDs []string `json:"groupIds" example:"123456789,987654321"`
 }
 
 type CreateGroupRequest struct {
-	Code   string `json:"code" binding:"required" example:"engineering"`
-	Name   string `json:"name" binding:"required" example:"研发组"`
-	Remark string `json:"remark" example:"研发模型权限组"`
+	// Code 仅为兼容旧客户端保留；为空时由服务端生成内部编码。
+	Code     string   `json:"code,omitempty" example:"engineering"`
+	Name     string   `json:"name" binding:"required" example:"研发组"`
+	Remark   string   `json:"remark" example:"研发模型权限组"`
+	ModelIDs []string `json:"modelIds" example:"123456789,987654321"`
+}
+type UpdateGroupRequest struct {
+	Name     string   `json:"name" binding:"required" example:"研发组"`
+	Remark   string   `json:"remark" example:"研发模型权限组"`
+	ModelIDs []string `json:"modelIds" example:"123456789,987654321"`
 }
 
 type CreateResourceRequest struct {

@@ -3,6 +3,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"time"
@@ -28,6 +29,7 @@ var (
 	ErrRoute          = &Failure{"MODEL_ROUTE_UNAVAILABLE", "api_error", "No active model route is available.", 503}
 	ErrResource       = &Failure{"RESOURCE_UNAVAILABLE", "api_error", "No active resource is available.", 503}
 	ErrCredential     = &Failure{"CREDENTIAL_UNRECOVERABLE", "api_error", "Resource credential is unavailable.", 503}
+	ErrProxy          = &Failure{"PROXY_CONFIGURATION_UNRECOVERABLE", "api_error", "Provider proxy configuration is unavailable.", 503}
 	ErrUnavailable    = &Failure{"DEPENDENCY_UNAVAILABLE", "api_error", "Service unavailable.", 503}
 	ErrUpstream       = &Failure{"UPSTREAM_UNAVAILABLE", "api_error", "Upstream service unavailable.", 502}
 	ErrTimeout        = &Failure{"UPSTREAM_TIMEOUT", "api_error", "Upstream request timed out.", 504}
@@ -38,6 +40,9 @@ type Route struct {
 	ModelID, ProviderID, ProviderModelID, ResourceID int64
 	UpstreamModel, BaseURL                           string
 	Credential                                       catalog.SealedCredential
+	ProxyEnabled                                     bool
+	ProxyURL, ProxyHeaders                           catalog.SealedCredential
+	Proxy                                            *catalog.OutboundProxy
 }
 
 const AnthropicProtocol = "ANTHROPIC"
@@ -57,7 +62,34 @@ type Store interface {
 }
 type Cipher interface {
 	Decrypt(catalog.SealedCredential, catalog.CredentialOwner) ([]byte, error)
+	DecryptProviderProxy(catalog.SealedCredential, catalog.ProviderProxyOwner) ([]byte, error)
 }
+
+func (s *Service) decryptProxy(route Route) (*catalog.OutboundProxy, error) {
+	if !route.ProxyEnabled {
+		return nil, nil
+	}
+	urlBytes, err := s.cipher.DecryptProviderProxy(route.ProxyURL, catalog.ProviderProxyOwner{ProviderID: route.ProviderID, Field: "url"})
+	if err != nil {
+		return nil, ErrProxy
+	}
+	proxy := &catalog.OutboundProxy{URL: string(urlBytes), Headers: map[string]string{}}
+	clear(urlBytes)
+	if route.ProxyHeaders.KeyVersion == 0 {
+		return proxy, nil
+	}
+	headerBytes, err := s.cipher.DecryptProviderProxy(route.ProxyHeaders, catalog.ProviderProxyOwner{ProviderID: route.ProviderID, Field: "headers"})
+	if err != nil {
+		return nil, ErrProxy
+	}
+	err = json.Unmarshal(headerBytes, &proxy.Headers)
+	clear(headerBytes)
+	if err != nil {
+		return nil, ErrProxy
+	}
+	return proxy, nil
+}
+
 type Request struct {
 	Trace                          *usage.Event
 	Path, Version, Beta, RequestID string
@@ -120,13 +152,17 @@ func (s *Service) Forward(ctx context.Context, identity appsec.PrincipalIdentity
 		return nil, ErrCredential
 	}
 	defer clear(credential)
+	route.Proxy, err = s.decryptProxy(route)
+	if err != nil {
+		return nil, err
+	}
 	request.Body = parsed.Rewrite(request.Body, route.UpstreamModel)
 	// HTTP 客户端须在 Open 返回前完成请求体发送；响应体由调用方及时关闭。
 	if request.Trace != nil {
 		request.Trace.Attempt = &usage.Attempt{ProviderID: route.ProviderID, ProviderModelID: route.ProviderModelID, ResourceID: route.ResourceID, ModelID: route.ModelID, StartedAt: time.Now().UTC()}
 	}
 	response, err := s.upstream.Open(ctx, route, request, credential)
-	if request.Trace != nil && (errors.Is(err, ErrRoute) || errors.Is(err, ErrInvalid) || errors.Is(err, ErrCredential)) {
+	if request.Trace != nil && (errors.Is(err, ErrRoute) || errors.Is(err, ErrInvalid) || errors.Is(err, ErrCredential) || errors.Is(err, ErrProxy)) {
 		request.Trace.Attempt = nil
 	}
 	return response, err

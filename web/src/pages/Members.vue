@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
-import { api, errorText } from '../api'
+import { computed, onMounted, ref, watch } from 'vue'
+import { all, api, errorText } from '../api'
 import { useCollection, useAction, useListSearch, date, dateOnly, validText } from '../composables'
 import { t } from '../i18n'
-import type { Member, AccessKey, CreatedKey, Page } from '../types'
+import type { Member, Group, AccessKey, CreatedKey, Page } from '../types'
 import Icon from '../components/Icon.vue'
 import StatusSwitch from '../components/StatusSwitch.vue'
 import Modal from '../components/Modal.vue'
@@ -15,9 +15,14 @@ const { items, cursor, loading, error, load } = useCollection<Member>(() => '/me
 const { busy, error: actionError, run } = useAction()
 const notice = ref(''),
   creating = ref(false),
+  editing = ref<Member | null>(null),
   name = ref(''),
   remark = ref(''),
-  validation = ref('')
+  validation = ref(''),
+  groupCandidates = ref<Group[]>([]),
+  selectedGroupIDs = ref<string[]>([]),
+  originalGroupIDs = ref<string[]>([]),
+  groupsReady = ref(false)
 const statusTarget = ref<Member | null>(null),
   selected = ref<Member | null>(null),
   viewingKeys = ref<Member | null>(null),
@@ -34,28 +39,70 @@ const { keyword, query, visible, search, reset } = useListSearch(
   (m) => `${m.name} ${m.id} ${m.remark || ''}`,
   load,
 )
+const originalGroupIDSet = computed(() => new Set(originalGroupIDs.value))
 watch(items, (members) => {
   for (const member of members) void refreshKeys(member.id)
 })
 onMounted(() => load())
 function newMember() {
+  editing.value = null
   name.value = ''
   remark.value = ''
   validation.value = ''
+  groupCandidates.value = []
+  selectedGroupIDs.value = []
+  originalGroupIDs.value = []
+  groupsReady.value = false
   actionError.value = ''
   creating.value = true
+  void run(loadMemberGroups)
 }
-function create() {
+async function loadMemberGroups() {
+  groupsReady.value = false
+  const member = editing.value
+  const [groups, current] = await Promise.all([
+    all<Group>('/groups?status=ACTIVE'),
+    member ? all<Group>(`/members/${member.id}/groups`) : Promise.resolve([]),
+  ])
+  groupCandidates.value = groups
+  const activeGroupIDs = new Set(groups.map((group) => group.id))
+  originalGroupIDs.value = current
+    .filter((group) => activeGroupIDs.has(group.id))
+    .map((group) => group.id)
+  selectedGroupIDs.value = [...originalGroupIDs.value]
+  groupsReady.value = true
+}
+function openEdit(member: Member) {
+  creating.value = false
+  editing.value = member
+  name.value = member.name
+  remark.value = member.remark || ''
+  validation.value = ''
+  groupCandidates.value = []
+  selectedGroupIDs.value = []
+  originalGroupIDs.value = []
+  groupsReady.value = false
+  actionError.value = ''
+  void run(loadMemberGroups)
+}
+function closeMemberForm() {
+  creating.value = false
+  editing.value = null
+}
+function saveMember() {
+  validation.value = ''
   if (!validText(name.value, 128) || !validText(remark.value, 2000, false)) {
     validation.value = t('common.byteLimit')
     return
   }
   void run(async () => {
-    await api('/members', 'POST', {
+    const member = editing.value
+    await api(member ? `/members/${member.id}` : '/members', member ? 'PUT' : 'POST', {
       name: name.value,
-      ...(remark.value ? { remark: remark.value } : {}),
+      remark: remark.value,
+      groupIds: selectedGroupIDs.value,
     })
-    creating.value = false
+    closeMemberForm()
     notice.value = t('common.saved')
     await load()
   })
@@ -63,6 +110,26 @@ function create() {
 function openStatus(member: Member) {
   actionError.value = ''
   statusTarget.value = member
+}
+function statusDisabled(member: Member) {
+  if (busy.value || loading.value) return true
+  if (member.status === 'ACTIVE') return false
+  return (
+    !!keysLoading.value[member.id] ||
+    !!keyErrors.value[member.id] ||
+    !memberKeys.value[member.id]?.length
+  )
+}
+function statusTitle(member: Member) {
+  if (
+    member.status !== 'ACTIVE' &&
+    !keysLoading.value[member.id] &&
+    !keyErrors.value[member.id] &&
+    !memberKeys.value[member.id]?.length
+  ) {
+    return t('members.keyRequired')
+  }
+  return undefined
 }
 function changeStatus() {
   void run(async () => {
@@ -150,7 +217,13 @@ async function copyKey() {
   >
   <p v-if="notice" class="notice" role="status">{{ notice }}</p>
   <section class="panel">
-    <ListSearch v-model="keyword" :loading="loading" @search="search" @reset="reset" />
+    <ListSearch
+      v-model="keyword"
+      :loading="loading"
+      :placeholder="t('members.searchPlaceholder')"
+      @search="search"
+      @reset="reset"
+    />
     <div v-if="error" class="alert error" role="alert">
       {{ error }}<button class="text-button" @click="load()">{{ t('common.retry') }}</button>
     </div>
@@ -182,8 +255,9 @@ async function copyKey() {
               <StatusSwitch
                 :value="member.status"
                 :name="member.name"
-                :disabled="busy || loading"
+                :disabled="statusDisabled(member)"
                 :busy="busy && statusTarget?.id === member.id"
+                :title="statusTitle(member)"
                 @change="openStatus(member)"
               />
             </td>
@@ -204,7 +278,7 @@ async function copyKey() {
               <template v-else>
                 <div v-for="key in memberKeys[member.id]" :key="key.id" class="member-key">
                   <div class="key-details">
-                    <code :title="key.name">{{ key.prefix }}********</code>
+                    <code :title="key.name">{{ key.prefix }}</code>
                     <button
                       class="icon-button view-keys"
                       :aria-label="t('members.viewKeys')"
@@ -235,15 +309,18 @@ async function copyKey() {
                   keyErrors[member.id] || keysLoading[member.id] || !memberKeys[member.id]?.length
                 "
                 class="muted"
-                >{{ t('common.none') }}</span
+                >{{ t('members.none') }}</span
               >
             </td>
             <td class="remark-cell" :title="member.remark || ''">
-              {{ member.remark || t('common.none') }}
+              {{ member.remark || t('members.none') }}
             </td>
             <td>{{ date(member.createdAt) }}</td>
             <td>
               <div class="row-actions">
+                <button class="text-button" :disabled="busy || loading" @click="openEdit(member)">
+                  {{ t('members.edit') }}
+                </button>
                 <button
                   class="text-button danger"
                   :disabled="busy || loading"
@@ -253,13 +330,10 @@ async function copyKey() {
                 </button>
                 <button
                   class="text-button"
-                  :disabled="
-                    busy || loading || keysLoading[member.id] || member.status !== 'ACTIVE'
-                  "
-                  :title="member.status !== 'ACTIVE' ? t('members.disabled') : undefined"
+                  :disabled="busy || loading || keysLoading[member.id]"
                   @click="openKeys(member)"
                 >
-                  <Icon name="key" :size="15" />{{ t('members.assignKey') }}
+                  {{ t('members.assignKey') }}
                 </button>
               </div>
             </td>
@@ -275,21 +349,67 @@ async function copyKey() {
     <ListFooter :count="items.length" :cursor="cursor" :loading="loading" @more="load(true)" />
   </section>
   <MemberKeys v-if="viewingKeys" :member="viewingKeys" @close="viewingKeys = null" />
-  <Modal v-if="creating" :title="t('members.create')" :busy="busy" @close="creating = false"
-    ><form @submit.prevent="create">
+  <Modal
+    v-if="creating || editing"
+    :title="editing ? t('members.editTitle', { name: editing.name }) : t('members.create')"
+    :busy="busy"
+    medium
+    @close="closeMemberForm"
+    ><form @submit.prevent="saveMember">
       <label
         >{{ t('common.name') }}<input v-model="name" required autofocus :disabled="busy" /></label
       ><label
         >{{ t('common.remark') }}<textarea v-model="remark" rows="3" :disabled="busy"></textarea>
       </label>
+      <section class="member-group-field" aria-labelledby="member-groups-title">
+        <div class="member-group-field-head">
+          <h3 id="member-groups-title">{{ t('members.groups') }}</h3>
+          <span v-if="groupsReady">{{
+            t('members.groupSelectionCount', {
+              count: selectedGroupIDs.length,
+              total: groupCandidates.length,
+            })
+          }}</span>
+        </div>
+        <div class="member-group-list">
+          <label v-for="group in groupCandidates" :key="group.id" class="member-group-option">
+            <input
+              v-model="selectedGroupIDs"
+              type="checkbox"
+              :value="group.id"
+              :aria-label="t('members.groupSelection', { name: group.name })"
+              :disabled="
+                busy ||
+                !groupsReady ||
+                (!originalGroupIDSet.has(group.id) &&
+                  (group.status !== 'ACTIVE' || editing?.status === 'DISABLED'))
+              "
+            />
+            <strong>{{ group.name }}</strong>
+          </label>
+          <p v-if="busy && !groupsReady" class="empty-compact">{{ t('common.loading') }}</p>
+          <p v-else-if="groupsReady && !groupCandidates.length" class="empty-compact">
+            {{ t('members.noGroups') }}
+          </p>
+        </div>
+      </section>
       <div v-if="validation || actionError" class="alert error" role="alert">
-        {{ validation || actionError }}
+        {{ validation || actionError
+        }}<button
+          v-if="actionError && !groupsReady"
+          type="button"
+          class="text-button"
+          :disabled="busy"
+          @click="run(loadMemberGroups)"
+        >
+          {{ t('common.retry') }}
+        </button>
       </div>
       <footer class="form-footer">
-        <button type="button" class="button" :disabled="busy" @click="creating = false">
+        <button type="button" class="button" :disabled="busy" @click="closeMemberForm">
           {{ t('common.cancel') }}</button
-        ><button class="button primary" :disabled="busy">
-          {{ t(busy ? 'common.working' : 'common.create') }}
+        ><button class="button primary" :disabled="busy || !groupsReady">
+          {{ t(busy ? 'common.working' : editing ? 'common.save' : 'common.create') }}
         </button>
       </footer>
     </form></Modal
@@ -415,5 +535,60 @@ async function copyKey() {
   max-width: 260px;
   white-space: normal;
   color: var(--danger);
+}
+.member-group-field {
+  margin-top: 20px;
+}
+.member-group-field-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 7px;
+}
+.member-group-field-head h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.member-group-field-head span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.member-group-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+  max-height: 240px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.member-group-option {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  margin: 0;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.member-group-option input {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  margin: 0;
+  accent-color: var(--blue);
+}
+.member-group-option strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.member-group-list > .empty-compact {
+  grid-column: 1 / -1;
 }
 </style>

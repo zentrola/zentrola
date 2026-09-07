@@ -78,7 +78,7 @@ type CreateBootstrapProviderParams struct {
 	ID               int64
 	ProviderCode     string
 	ProviderName     string
-	AnthropicBaseUrl string
+	AnthropicBaseUrl *string
 	CreatedAt        pgtype.Timestamptz
 }
 

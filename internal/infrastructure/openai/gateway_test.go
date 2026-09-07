@@ -45,7 +45,7 @@ func TestNativeOpenAIForwarding(t *testing.T) {
 	if headers.Get("Authorization") != "" {
 		t.Fatal("credential retained after Close")
 	}
-	for _, base := range []string{"http://api.deepseek.com", "https://api.deepseek.com/anthropic", "https://api.deepseek.com.evil.test", "https://api.deepseek.com@evil.test", "https://api.deepseek.com?x=1"} {
+	for _, base := range []string{"http://api.deepseek.com", "https://127.0.0.1", "https://localhost", "https://api.deepseek.com@evil.test", "https://api.deepseek.com?x=1", "https://api.deepseek.com/path/../escape"} {
 		if _, err := c.Open(context.Background(), gw.Route{BaseURL: base}, gw.Request{Protocol: gw.OpenAIProtocol, Path: "/v1/chat/completions"}, []byte("key")); !errors.Is(err, gw.ErrRoute) {
 			t.Fatal("untrusted destination accepted")
 		}

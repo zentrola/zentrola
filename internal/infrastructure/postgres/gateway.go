@@ -64,10 +64,13 @@ func (s *GatewayStore) Resolve(ctx context.Context, identity appsec.PrincipalIde
 	mapping := mappings[0]
 	baseURL := mapping.AnthropicBaseUrl
 	if protocol == gw.OpenAIProtocol {
-		if mapping.OpenaiBaseUrl == nil || *mapping.OpenaiBaseUrl != "https://api.deepseek.com" {
+		if mapping.OpenaiBaseUrl == nil {
 			return gw.Route{ModelID: m.ID}, gw.ErrRoute
 		}
-		baseURL = *mapping.OpenaiBaseUrl
+		baseURL = mapping.OpenaiBaseUrl
+	}
+	if baseURL == nil {
+		return gw.Route{ModelID: m.ID}, gw.ErrRoute
 	}
 	resources, err := q.GatewayResources(ctx, dbgen.GatewayResourcesParams{OrganizationID: identity.OrganizationID, ProviderID: mapping.ProviderID})
 	if err != nil {
@@ -80,7 +83,19 @@ func (s *GatewayStore) Resolve(ctx context.Context, identity appsec.PrincipalIde
 	if err := tx.Commit(ctx); err != nil {
 		return gw.Route{ModelID: m.ID}, gw.ErrUnavailable
 	}
-	return gw.Route{ModelID: m.ID, ProviderID: mapping.ProviderID, ProviderModelID: mapping.ID, ResourceID: r.ID, UpstreamModel: mapping.UpstreamModelCode, BaseURL: baseURL, Credential: catalog.SealedCredential{Ciphertext: r.CredentialCiphertext, Nonce: r.CredentialNonce, KeyVersion: r.KeyVersion}}, nil
+	route := gw.Route{
+		ModelID: m.ID, ProviderID: mapping.ProviderID, ProviderModelID: mapping.ID, ResourceID: r.ID,
+		UpstreamModel: mapping.UpstreamModelCode, BaseURL: *baseURL,
+		Credential:   catalog.SealedCredential{Ciphertext: r.CredentialCiphertext, Nonce: r.CredentialNonce, KeyVersion: r.KeyVersion},
+		ProxyEnabled: mapping.ProxyEnabled,
+	}
+	if mapping.ProxyUrlKeyVersion != nil {
+		route.ProxyURL = catalog.SealedCredential{Ciphertext: mapping.ProxyUrlCiphertext, Nonce: mapping.ProxyUrlNonce, KeyVersion: *mapping.ProxyUrlKeyVersion}
+	}
+	if mapping.ProxyHeadersKeyVersion != nil {
+		route.ProxyHeaders = catalog.SealedCredential{Ciphertext: mapping.ProxyHeadersCiphertext, Nonce: mapping.ProxyHeadersNonce, KeyVersion: *mapping.ProxyHeadersKeyVersion}
+	}
+	return route, nil
 }
 
 func (s *GatewayStore) Models(ctx context.Context, identity appsec.PrincipalIdentity) ([]gw.Model, error) {

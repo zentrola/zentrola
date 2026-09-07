@@ -111,7 +111,7 @@ SELECT id, provider_type, anthropic_base_url,openai_base_url FROM ai_provider WH
 type DeepSeekProviderHistoryRow struct {
 	ID               int64
 	ProviderType     string
-	AnthropicBaseUrl string
+	AnthropicBaseUrl *string
 	OpenaiBaseUrl    *string
 }
 

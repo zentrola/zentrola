@@ -1,66 +1,8 @@
 name: zentrola
 
-services:
-  app:
-    build: .
-    image: zentrola:dev
-    ports:
-      - "127.0.0.1:${HTTP_PUBLISHED_PORT:-8080}:8080"
-    environment:
-      APP_ENV: prod
-      HTTP_ADDR: :8080
-      LOG_FORMAT: json
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_DB: ${POSTGRES_DB:-zentrola}
-      POSTGRES_USER: ${POSTGRES_USER:-zentrola}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
-      POSTGRES_SSLMODE: disable
-      MIGRATIONS_AUTO_APPLY: "true"
-      ID_NODE: ${ID_NODE:-1}
-      BOOTSTRAP_SONNET_MODEL: ${BOOTSTRAP_SONNET_MODEL:-claude-sonnet-5}
-      BOOTSTRAP_OPUS_MODEL: ${BOOTSTRAP_OPUS_MODEL:-claude-opus-5}
-      CORS_ENABLED: ${CORS_ENABLED:-false}
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
-      SHUTDOWN_TIMEOUT: 20s
-      MASTER_KEY_PATH: /data/secrets/master.key
-      ACP_MASTER_KEY: ${ACP_MASTER_KEY:-}
-      ADMIN_JWT_SECRET: ${ADMIN_JWT_SECRET:?Set a Base64 random ADMIN_JWT_SECRET in .env}
-      ADMIN_LOGIN_MAX_FAILURES: ${ADMIN_LOGIN_MAX_FAILURES:-5}
-      ADMIN_LOGIN_LOCK_DURATION: ${ADMIN_LOGIN_LOCK_DURATION:-15m}
-      GATEWAY_MAX_BODY_BYTES: ${GATEWAY_MAX_BODY_BYTES:-33554432}
-      GATEWAY_REQUEST_TIMEOUT: ${GATEWAY_REQUEST_TIMEOUT:-15m}
-      GATEWAY_HEADER_TIMEOUT: ${GATEWAY_HEADER_TIMEOUT:-120s}
-      GATEWAY_BODY_READ_TIMEOUT: ${GATEWAY_BODY_READ_TIMEOUT:-30s}
-      GATEWAY_WRITE_TIMEOUT: ${GATEWAY_WRITE_TIMEOUT:-30s}
-      USAGE_QUEUE_SIZE: ${USAGE_QUEUE_SIZE:-10000}
-      USAGE_BATCH_SIZE: ${USAGE_BATCH_SIZE:-100}
-      USAGE_FLUSH_INTERVAL: ${USAGE_FLUSH_INTERVAL:-500ms}
-      USAGE_WRITE_TIMEOUT: ${USAGE_WRITE_TIMEOUT:-3s}
-      USAGE_SHUTDOWN_TIMEOUT: ${USAGE_SHUTDOWN_TIMEOUT:-5s}
-    volumes:
-      - secrets_data:/data/secrets
-    depends_on:
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "/zentrola", "healthcheck"]
-      interval: 10s
-      timeout: 3s
-      start_period: 10s
-      retries: 3
-    stop_grace_period: 30s
-    read_only: true
-    security_opt:
-      - no-new-privileges:true
-    cap_drop: [ALL]
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+# 可选的 PostgreSQL 快速安装示例；Backend 和 Admin Web 均直接运行发布包中的可执行文件。
 
+services:
   postgres:
     image: postgres:17-alpine
     ports:
@@ -81,4 +23,3 @@ services:
 
 volumes:
   postgres_data:
-  secrets_data:

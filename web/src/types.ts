@@ -34,9 +34,34 @@ export interface Provider {
   id: string
   code: string
   name: string
+  type: 'OFFICIAL' | 'PLATFORM' | 'PARTNER' | 'CUSTOM'
   status: string
-  baseUrl: string
+  website: string | null
+  baseUrl: string | null
   openaiBaseUrl: string | null
+  proxyEnabled: boolean
+  proxyUrl: string | null
+  proxyHeaders: ProviderProxyHeader[]
+  createdAt: string
+  updatedAt: string
+}
+export interface ProviderProxyHeader {
+  key: string
+  configured: boolean
+}
+export type ProviderProtocol = 'ANTHROPIC' | 'OPENAI'
+export interface ProviderMapping {
+  id: string
+  providerId: string
+  modelId: string
+  upstreamModelCode: string
+  protocolType: ProviderProtocol
+  status: string
+  createdAt: string
+  updatedAt: string
+}
+export interface ProviderDetail extends Provider {
+  mappings: ProviderMapping[]
 }
 export interface Resource {
   id: string

@@ -128,7 +128,44 @@ func modelView(r dbgen.AiModel) mgmt.Model {
 	return mgmt.Model{ID: r.ID, Code: r.ModelCode, Name: r.DisplayName, Status: r.Status, InputModalities: input, OutputModalities: output, Remark: r.Remark, CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time}
 }
 func providerView(r dbgen.AiProvider) mgmt.Provider {
-	return mgmt.Provider{ID: r.ID, Code: r.ProviderCode, Name: r.ProviderName, BaseURL: r.AnthropicBaseUrl, OpenAIBaseURL: r.OpenaiBaseUrl, Status: r.Status}
+	names := []string{}
+	_ = json.Unmarshal(r.ProxyHeaderNames, &names)
+	headers := make([]mgmt.ProviderProxyHeader, 0, len(names))
+	for _, name := range names {
+		headers = append(headers, mgmt.ProviderProxyHeader{Key: name, Configured: true})
+	}
+	provider := mgmt.Provider{
+		ID: r.ID, Code: r.ProviderCode, Name: r.ProviderName, Type: r.ProviderType,
+		Website: r.OfficialWebsite, BaseURL: r.AnthropicBaseUrl, OpenAIBaseURL: r.OpenaiBaseUrl,
+		ProxyEnabled: r.ProxyEnabled, ProxyURL: r.ProxyUrlDisplay, ProxyHeaders: headers,
+		Status: r.Status, CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time,
+	}
+	if r.ProxyUrlKeyVersion != nil {
+		provider.ProxyURLSealed = catalog.SealedCredential{Ciphertext: r.ProxyUrlCiphertext, Nonce: r.ProxyUrlNonce, KeyVersion: *r.ProxyUrlKeyVersion}
+	}
+	if r.ProxyHeadersKeyVersion != nil {
+		provider.ProxyHeadersSealed = catalog.SealedCredential{Ciphertext: r.ProxyHeadersCiphertext, Nonce: r.ProxyHeadersNonce, KeyVersion: *r.ProxyHeadersKeyVersion}
+	}
+	return provider
+}
+
+func providerHeaderNames(p mgmt.Provider) ([]byte, error) {
+	names := make([]string, 0, len(p.ProxyHeaders))
+	for _, header := range p.ProxyHeaders {
+		names = append(names, header.Key)
+	}
+	return json.Marshal(names)
+}
+
+func sealedVersion(sealed catalog.SealedCredential) *int32 {
+	if sealed.KeyVersion <= 0 {
+		return nil
+	}
+	version := sealed.KeyVersion
+	return &version
+}
+func providerMappingView(r dbgen.ProviderModel) mgmt.ProviderMapping {
+	return mgmt.ProviderMapping{ID: r.ID, ProviderID: r.ProviderID, ModelID: r.ModelID, UpstreamModelCode: r.UpstreamModelCode, ProtocolType: r.ProtocolType, Status: r.Status, CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time}
 }
 func resourceView(r dbgen.ManageResourcesRow) mgmt.Resource {
 	return mgmt.Resource{ID: r.ID, ProviderID: r.ProviderID, Name: r.ResourceName, Status: r.Status, CredentialConfigured: true, CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time}
@@ -150,8 +187,8 @@ func (s *managementSession) Members(ctx context.Context, p mgmt.Page) ([]mgmt.Me
 	}
 	return result, nil
 }
-func (s *managementSession) Groups(ctx context.Context, p mgmt.Page) ([]mgmt.Group, error) {
-	rows, err := s.q.ManageGroups(ctx, dbgen.ManageGroupsParams{OrganizationID: s.actor.OrganizationID, ID: p.After, Limit: p.Limit})
+func (s *managementSession) Groups(ctx context.Context, p mgmt.Page, status string) ([]mgmt.Group, error) {
+	rows, err := s.q.ManageGroups(ctx, dbgen.ManageGroupsParams{OrganizationID: s.actor.OrganizationID, Status: status, AfterID: p.After, PageLimit: p.Limit})
 	if err != nil {
 		return nil, err
 	}
@@ -161,8 +198,8 @@ func (s *managementSession) Groups(ctx context.Context, p mgmt.Page) ([]mgmt.Gro
 	}
 	return result, nil
 }
-func (s *managementSession) Models(ctx context.Context, p mgmt.Page) ([]mgmt.Model, error) {
-	rows, err := s.q.ManageModels(ctx, dbgen.ManageModelsParams{ID: p.After, Limit: p.Limit})
+func (s *managementSession) Models(ctx context.Context, p mgmt.Page, status string) ([]mgmt.Model, error) {
+	rows, err := s.q.ManageModels(ctx, dbgen.ManageModelsParams{Status: status, AfterID: p.After, PageLimit: p.Limit})
 	if err != nil {
 		return nil, err
 	}
@@ -180,6 +217,17 @@ func (s *managementSession) Providers(ctx context.Context, p mgmt.Page) ([]mgmt.
 	result := make([]mgmt.Provider, 0, len(rows))
 	for _, row := range rows {
 		result = append(result, providerView(row))
+	}
+	return result, nil
+}
+func (s *managementSession) ProviderMappings(ctx context.Context, providerID int64) ([]mgmt.ProviderMapping, error) {
+	rows, err := s.q.ManageProviderMappings(ctx, providerID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]mgmt.ProviderMapping, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, providerMappingView(row))
 	}
 	return result, nil
 }
@@ -213,6 +261,17 @@ func (s *managementSession) GroupMembers(ctx context.Context, id int64, p mgmt.P
 	result := make([]mgmt.Member, 0, len(rows))
 	for _, row := range rows {
 		result = append(result, memberView(row))
+	}
+	return result, nil
+}
+func (s *managementSession) MemberGroups(ctx context.Context, id int64, p mgmt.Page) ([]mgmt.Group, error) {
+	rows, err := s.q.ManageMemberGroups(ctx, dbgen.ManageMemberGroupsParams{OrganizationID: s.actor.OrganizationID, PrincipalID: id, ID: p.After, Limit: p.Limit})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]mgmt.Group, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, groupView(row))
 	}
 	return result, nil
 }
@@ -262,6 +321,9 @@ func (s *managementSession) Resource(ctx context.Context, id int64) (mgmt.Resour
 func (s *managementSession) CreateMember(ctx context.Context, m mgmt.Member) error {
 	return s.q.ManageCreateMember(ctx, dbgen.ManageCreateMemberParams{ID: m.ID, OrganizationID: s.actor.OrganizationID, Name: m.Name, Remark: m.Remark, CreatedBy: actorRef(s.actor.ID), CreatedAt: pgTime(m.CreatedAt)})
 }
+func (s *managementSession) UpdateMember(ctx context.Context, m mgmt.Member) error {
+	return s.q.ManageUpdateMember(ctx, dbgen.ManageUpdateMemberParams{OrganizationID: s.actor.OrganizationID, ID: m.ID, Name: m.Name, Remark: m.Remark, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(time.Now())})
+}
 func (s *managementSession) SetMemberStatus(ctx context.Context, id int64, status string) error {
 	return s.q.ManageMemberStatus(ctx, dbgen.ManageMemberStatusParams{OrganizationID: s.actor.OrganizationID, ID: id, Status: status, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(time.Now())})
 }
@@ -278,6 +340,22 @@ func (s *managementSession) DeleteMember(ctx context.Context, id int64) error {
 }
 func (s *managementSession) CreateGroup(ctx context.Context, g mgmt.Group) error {
 	return s.q.ManageCreateGroup(ctx, dbgen.ManageCreateGroupParams{ID: g.ID, OrganizationID: s.actor.OrganizationID, GroupCode: g.Code, GroupName: g.Name, Remark: g.Remark, CreatedBy: actorRef(s.actor.ID), CreatedAt: pgTime(g.CreatedAt)})
+}
+func (s *managementSession) UpdateGroup(ctx context.Context, g mgmt.Group) error {
+	return s.q.ManageUpdateGroup(ctx, dbgen.ManageUpdateGroupParams{OrganizationID: s.actor.OrganizationID, ID: g.ID, GroupName: g.Name, Remark: g.Remark, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(time.Now())})
+}
+func (s *managementSession) SetGroupStatus(ctx context.Context, id int64, status string) error {
+	return s.q.ManageGroupStatus(ctx, dbgen.ManageGroupStatusParams{OrganizationID: s.actor.OrganizationID, ID: id, Status: status, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(time.Now())})
+}
+func (s *managementSession) DeleteGroup(ctx context.Context, id int64) error {
+	now, actor := pgTime(time.Now()), actorRef(s.actor.ID)
+	if err := s.q.ManageDeleteGroup(ctx, dbgen.ManageDeleteGroupParams{OrganizationID: s.actor.OrganizationID, ID: id, UpdatedBy: actor, UpdatedAt: now}); err != nil {
+		return err
+	}
+	if err := s.q.ManageDeleteGroupMembers(ctx, dbgen.ManageDeleteGroupMembersParams{OrganizationID: s.actor.OrganizationID, GroupID: id, UpdatedBy: actor, UpdatedAt: now}); err != nil {
+		return err
+	}
+	return s.q.ManageDeleteGroupModels(ctx, dbgen.ManageDeleteGroupModelsParams{OrganizationID: s.actor.OrganizationID, GroupID: id, UpdatedBy: actor, UpdatedAt: now})
 }
 func (s *managementSession) SetGroupMember(ctx context.Context, groupID, memberID int64, add bool) (bool, error) {
 	exists, err := s.q.ManageMembershipExists(ctx, dbgen.ManageMembershipExistsParams{OrganizationID: s.actor.OrganizationID, GroupID: groupID, PrincipalID: memberID})
@@ -313,6 +391,58 @@ func (s *managementSession) SetGroupModel(ctx context.Context, groupID, modelID 
 }
 func (s *managementSession) SetModelStatus(ctx context.Context, id int64, status string) error {
 	return s.q.ManageModelStatus(ctx, dbgen.ManageModelStatusParams{ID: id, Status: status, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(time.Now())})
+}
+
+func (s *managementSession) CreateProvider(ctx context.Context, p mgmt.Provider) error {
+	headerNames, err := providerHeaderNames(p)
+	if err != nil {
+		return err
+	}
+	return s.q.ManageCreateProvider(ctx, dbgen.ManageCreateProviderParams{
+		ID: p.ID, ProviderCode: p.Code, ProviderName: p.Name, ProviderType: p.Type,
+		OfficialWebsite: p.Website, AnthropicBaseUrl: p.BaseURL, OpenaiBaseUrl: p.OpenAIBaseURL,
+		ProxyEnabled: p.ProxyEnabled, ProxyUrlDisplay: p.ProxyURL,
+		ProxyUrlCiphertext: p.ProxyURLSealed.Ciphertext, ProxyUrlNonce: p.ProxyURLSealed.Nonce, ProxyUrlKeyVersion: sealedVersion(p.ProxyURLSealed),
+		ProxyHeaderNames: headerNames, ProxyHeadersCiphertext: p.ProxyHeadersSealed.Ciphertext,
+		ProxyHeadersNonce: p.ProxyHeadersSealed.Nonce, ProxyHeadersKeyVersion: sealedVersion(p.ProxyHeadersSealed),
+		Status: p.Status, CreatedBy: actorRef(s.actor.ID), CreatedAt: pgTime(p.CreatedAt),
+	})
+}
+func (s *managementSession) UpdateProvider(ctx context.Context, p mgmt.Provider) error {
+	headerNames, err := providerHeaderNames(p)
+	if err != nil {
+		return err
+	}
+	return s.q.ManageUpdateProvider(ctx, dbgen.ManageUpdateProviderParams{
+		ID: p.ID, ProviderName: p.Name, OfficialWebsite: p.Website, AnthropicBaseUrl: p.BaseURL, OpenaiBaseUrl: p.OpenAIBaseURL,
+		ProxyEnabled: p.ProxyEnabled, ProxyUrlDisplay: p.ProxyURL,
+		ProxyUrlCiphertext: p.ProxyURLSealed.Ciphertext, ProxyUrlNonce: p.ProxyURLSealed.Nonce, ProxyUrlKeyVersion: sealedVersion(p.ProxyURLSealed),
+		ProxyHeaderNames: headerNames, ProxyHeadersCiphertext: p.ProxyHeadersSealed.Ciphertext,
+		ProxyHeadersNonce: p.ProxyHeadersSealed.Nonce, ProxyHeadersKeyVersion: sealedVersion(p.ProxyHeadersSealed),
+		UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(p.UpdatedAt),
+	})
+}
+func (s *managementSession) DeleteProvider(ctx context.Context, id int64, at time.Time) error {
+	actor, updatedAt := actorRef(s.actor.ID), pgTime(at)
+	if err := s.q.ManageDeleteProviderMappings(ctx, dbgen.ManageDeleteProviderMappingsParams{ProviderID: id, UpdatedBy: actor, UpdatedAt: updatedAt}); err != nil {
+		return err
+	}
+	if err := s.q.ManageDeleteProviderResources(ctx, dbgen.ManageDeleteProviderResourcesParams{ProviderID: id, UpdatedBy: actor, UpdatedAt: updatedAt}); err != nil {
+		return err
+	}
+	return s.q.ManageDeleteProvider(ctx, dbgen.ManageDeleteProviderParams{ID: id, UpdatedBy: actor, UpdatedAt: updatedAt})
+}
+func (s *managementSession) SetProviderStatus(ctx context.Context, id int64, status string) error {
+	return s.q.ManageProviderStatus(ctx, dbgen.ManageProviderStatusParams{ID: id, Status: status, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(time.Now())})
+}
+func (s *managementSession) CreateProviderMapping(ctx context.Context, mapping mgmt.ProviderMapping) error {
+	return s.q.ManageCreateProviderMapping(ctx, dbgen.ManageCreateProviderMappingParams{ID: mapping.ID, ProviderID: mapping.ProviderID, ModelID: mapping.ModelID, UpstreamModelCode: mapping.UpstreamModelCode, ProtocolType: mapping.ProtocolType, Status: mapping.Status, CreatedBy: actorRef(s.actor.ID), CreatedAt: pgTime(mapping.CreatedAt)})
+}
+func (s *managementSession) UpdateProviderMapping(ctx context.Context, mapping mgmt.ProviderMapping) error {
+	return s.q.ManageUpdateProviderMapping(ctx, dbgen.ManageUpdateProviderMappingParams{ID: mapping.ID, ProviderID: mapping.ProviderID, UpstreamModelCode: mapping.UpstreamModelCode, Status: mapping.Status, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(mapping.UpdatedAt)})
+}
+func (s *managementSession) DeleteProviderMapping(ctx context.Context, providerID, mappingID int64, at time.Time) error {
+	return s.q.ManageDeleteProviderMapping(ctx, dbgen.ManageDeleteProviderMappingParams{ID: mappingID, ProviderID: providerID, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(at)})
 }
 func (s *managementSession) CreateModel(ctx context.Context, m mgmt.Model) error {
 	input, err := json.Marshal(m.InputModalities)

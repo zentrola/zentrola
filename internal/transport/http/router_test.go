@@ -26,7 +26,7 @@ func TestHealthAndRequestCorrelation(t *testing.T) {
 	)
 	router := NewRouter(logging.New(&logs, "json", slog.LevelInfo), service, config.CORS{}, time.Second, "prod")
 	seen := map[string]bool{}
-	for path, want := range map[string]int{"/health/live": 200, "/health/ready": 503, "/missing": 404} {
+	for path, want := range map[string]int{"/health/live": 200, "/health/ready": 503, "/": 404, "/missing": 404} {
 		req := httptest.NewRequest("GET", path+"?token=query-secret", nil)
 		req.Header.Set("X-Request-ID", "untrusted-client-id")
 		req.Header.Set("Authorization", "Bearer header-secret")
@@ -70,15 +70,15 @@ func TestReadyWhenAllDependenciesReady(t *testing.T) {
 
 func TestCORSAllowlist(t *testing.T) {
 	router := NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), health.New(),
-		config.CORS{Enabled: true, Origins: []string{"http://localhost:5173"}}, time.Second, "prod")
+		config.CORS{Enabled: true, Origins: []string{"http://127.0.0.1:3000"}}, time.Second, "prod")
 	for _, tt := range []struct {
 		name, origin, method, headers string
 		allowed                       bool
 	}{
-		{"allowed", "http://localhost:5173", "POST", "authorization,content-type,x-request-id", true},
+		{"allowed", "http://127.0.0.1:3000", "POST", "authorization,content-type,x-request-id", true},
 		{"foreign origin", "https://untrusted.example", "POST", "authorization", false},
-		{"unknown method", "http://localhost:5173", "TRACE", "", false},
-		{"unknown header", "http://localhost:5173", "POST", "x-unapproved", false},
+		{"unknown method", "http://127.0.0.1:3000", "TRACE", "", false},
+		{"unknown header", "http://127.0.0.1:3000", "POST", "x-unapproved", false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest("OPTIONS", "/api/v1/members", nil)

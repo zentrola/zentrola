@@ -68,7 +68,7 @@ test('后端锁定提示、账号切换、刷新重查和倒计时到期重试',
   await expect(page.getByRole('alert')).toHaveCount(0)
   await password.fill('correct-password')
   await submit.click()
-  await expect(page.getByRole('heading', { name: '成员', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '用户', exact: true })).toBeVisible()
   expect(calls).toBe(3)
 })
 

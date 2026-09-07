@@ -144,8 +144,8 @@ type AiProvider struct {
 	ProviderName string
 	// 供应方类型：OFFICIAL=官方供应方
 	ProviderType string
-	// Anthropic 协议上游基础地址
-	AnthropicBaseUrl string
+	// Anthropic 兼容协议上游基础地址；NULL=未配置
+	AnthropicBaseUrl *string
 	// 状态：ACTIVE=启用；DISABLED=停用
 	Status string
 	// 创建者引用：system、admin:<id> 或 principal:<id>
@@ -158,6 +158,26 @@ type AiProvider struct {
 	UpdatedAt pgtype.Timestamptz
 	// OpenAI 兼容协议上游基础地址；NULL=未配置
 	OpenaiBaseUrl *string
+	// 服务商官方网站；NULL=未填写
+	OfficialWebsite *string
+	// 是否通过服务商专属出站代理访问上游
+	ProxyEnabled bool
+	// 脱敏后的代理 URL，仅用于管理端展示
+	ProxyUrlDisplay *string
+	// 完整代理 URL 的 AES-256-GCM 密文，可包含用户名和密码
+	ProxyUrlCiphertext []byte
+	// 代理 URL 密文的 AES-GCM 随机 Nonce
+	ProxyUrlNonce []byte
+	// 代理 URL 密文的根密钥版本
+	ProxyUrlKeyVersion *int32
+	// 代理 Header 名称列表，不含 Header Value
+	ProxyHeaderNames []byte
+	// 代理 Header Key/Value 对象的 AES-256-GCM 密文
+	ProxyHeadersCiphertext []byte
+	// 代理 Header 密文的 AES-GCM 随机 Nonce
+	ProxyHeadersNonce []byte
+	// 代理 Header 密文的根密钥版本
+	ProxyHeadersKeyVersion *int32
 }
 
 // 主体视角的一次 AI 请求事实；无逻辑删除
@@ -256,11 +276,11 @@ type OperationLog struct {
 	OperatorID *int64
 	// 操作人名称快照
 	OperatorName string
-	// 业务模块：MEMBER=成员；ACCESS_KEY=调用凭证；GROUP=分组；MODEL=模型；RESOURCE=资源；AUTH=认证
+	// 业务模块：MEMBER=成员；ACCESS_KEY=调用凭证；GROUP=分组；MODEL=模型；PROVIDER=服务商；RESOURCE=服务商凭证；AUTH=认证
 	Module string
 	// ADMIN_INITIALIZE=初始化首位管理员；操作类型：MEMBER_CREATE=创建成员；MEMBER_STATUS_CHANGE=成员状态变更；ACCESS_KEY_CREATE=创建调用凭证；ACCESS_KEY_REVOKE=撤销调用凭证；GROUP_CREATE=创建分组；GROUP_MEMBER_ADD=成员加入分组；GROUP_MEMBER_REMOVE=成员移出分组；GROUP_MODEL_GRANT=分组模型授权；GROUP_MODEL_REVOKE=撤销分组模型授权；MODEL_STATUS_CHANGE=模型状态变更；RESOURCE_CREATE=创建资源；RESOURCE_CREDENTIAL_UPDATE=更新资源凭证；RESOURCE_STATUS_CHANGE=资源状态变更；RESOURCE_CONNECTION_TEST=测试资源连接；LOGIN_SUCCESS=登录成功；LOGIN_FAILED=登录失败；LOGIN_LOCKED=登录锁定
 	OperationType string
-	// 目标类型：PRINCIPAL=治理主体；ACCESS_KEY=调用凭证；GROUP=分组；MODEL=模型；RESOURCE=资源；ADMIN_USER=管理员
+	// 目标类型：PRINCIPAL=治理主体；ACCESS_KEY=调用凭证；GROUP=分组；MODEL=模型；PROVIDER=服务商；RESOURCE=服务商凭证；ADMIN_USER=管理员
 	TargetType string
 	// 目标 ID；NULL=失败操作尚未创建对象
 	TargetID *int64

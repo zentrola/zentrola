@@ -8,11 +8,11 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
 	gw "github.com/zentrola/zentrola/internal/application/gateway"
+	"github.com/zentrola/zentrola/internal/infrastructure/provider"
 )
 
 type GatewayClient struct{ client *http.Client }
@@ -28,8 +28,8 @@ func NewGatewayClient(headerTimeout time.Duration) *GatewayClient {
 }
 func (c *GatewayClient) CloseIdleConnections() { c.client.CloseIdleConnections() }
 func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Request, credential []byte) (*gw.Response, error) {
-	// 本轮只启用有真实兼容协议验证的 DeepSeek 官方地址。
-	if strings.TrimSuffix(route.BaseURL, "/") != "https://api.deepseek.com" {
+	baseURL, allowed := provider.BaseURL(route.BaseURL)
+	if !allowed {
 		return nil, gw.ErrRoute
 	}
 	if input.Protocol != gw.OpenAIProtocol || input.Path != "/v1/chat/completions" || input.BetaQuery {
@@ -43,7 +43,7 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 			return nil, gw.ErrCredential
 		}
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.deepseek.com/chat/completions", bytes.NewReader(input.Body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/chat/completions", bytes.NewReader(input.Body))
 	if err != nil {
 		return nil, gw.ErrInvalid
 	}
@@ -56,8 +56,13 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 		req.Header.Set("X-Request-ID", input.RequestID)
 	}
 	// 客户端 Authorization / Cookie / Anthropic / SDK Header 均不复制到上游。
-	resp, err := c.client.Do(req)
+	client, cleanup, err := provider.ClientWithProxy(c.client, route.Proxy)
 	if err != nil {
+		return nil, gw.ErrProxy
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		cleanup()
 		if errors.Is(ctx.Err(), context.Canceled) {
 			return nil, gw.ErrCancelled
 		}
@@ -69,9 +74,10 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 	}
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
 		resp.Body.Close()
+		cleanup()
 		return nil, gw.ErrUpstream
 	}
-	return &gw.Response{Status: resp.StatusCode, Headers: resp.Header, Body: &responseBody{ReadCloser: resp.Body, headers: req.Header}}, nil
+	return &gw.Response{Status: resp.StatusCode, Headers: resp.Header, Body: &responseBody{ReadCloser: resp.Body, headers: req.Header, cleanup: cleanup}}, nil
 }
 
 type responseBody struct {
@@ -79,9 +85,16 @@ type responseBody struct {
 	headers http.Header
 	once    sync.Once
 	err     error
+	cleanup func()
 }
 
 func (b *responseBody) Close() error {
-	b.once.Do(func() { b.err = b.ReadCloser.Close(); b.headers.Del("Authorization") })
+	b.once.Do(func() {
+		b.err = b.ReadCloser.Close()
+		b.headers.Del("Authorization")
+		if b.cleanup != nil {
+			b.cleanup()
+		}
+	})
 	return b.err
 }

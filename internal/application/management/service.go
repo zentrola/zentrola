@@ -2,6 +2,8 @@ package management
 
 import (
 	"context"
+	"encoding/json"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -55,7 +57,10 @@ func (s *Service) next() (int64, error) {
 }
 
 func (s *Service) CreateMember(ctx context.Context, actor admin.Identity, name, note string, meta appsec.RequestMeta) (Member, error) {
-	if !validText(name, 128) || !validRemark(note) {
+	return s.CreateMemberWithGroups(ctx, actor, name, note, nil, meta)
+}
+func (s *Service) CreateMemberWithGroups(ctx context.Context, actor admin.Identity, name, note string, groupIDs []int64, meta appsec.RequestMeta) (Member, error) {
+	if !validText(name, 128) || !validRemark(note) || !uniquePositiveIDs(groupIDs) {
 		return Member{}, appsec.ErrInvalidArgument
 	}
 	id, err := s.next()
@@ -64,12 +69,113 @@ func (s *Service) CreateMember(ctx context.Context, actor admin.Identity, name, 
 	}
 	m := Member{ID: id, Name: name, Remark: remark(note), Status: "ACTIVE", CreatedAt: time.Now().UTC()}
 	err = s.store.Write(ctx, actor, func(w Writer) error {
+		groups := make(map[int64]Group, len(groupIDs))
+		for _, groupID := range groupIDs {
+			group, err := w.Group(ctx, groupID)
+			if err != nil {
+				return err
+			}
+			if group.Status != "ACTIVE" {
+				return ErrConflict
+			}
+			groups[groupID] = group
+		}
 		if err := w.CreateMember(ctx, m); err != nil {
 			return err
 		}
-		return w.Audit(ctx, Audit{Event: operation.MemberCreate, Target: "PRINCIPAL", ID: id, Name: name, After: m}, meta)
+		if err := w.Audit(ctx, Audit{Event: operation.MemberCreate, Target: "PRINCIPAL", ID: id, Name: name, After: m}, meta); err != nil {
+			return err
+		}
+		for _, groupID := range groupIDs {
+			changed, err := w.SetGroupMember(ctx, groupID, id, true)
+			if err != nil {
+				return err
+			}
+			if !changed {
+				return ErrConflict
+			}
+			group := groups[groupID]
+			if err := w.Audit(ctx, Audit{Event: operation.GroupMemberAdd, Target: "GROUP", ID: groupID, Name: group.Name, Before: map[string]any{"memberId": idString(id), "included": false}, After: map[string]any{"memberId": idString(id), "included": true}}, meta); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	return m, err
+}
+func (s *Service) UpdateMemberWithGroups(ctx context.Context, actor admin.Identity, id int64, name, note string, groupIDs []int64, meta appsec.RequestMeta) (Member, error) {
+	if id <= 0 || !validText(name, 128) || !validRemark(note) || !uniquePositiveIDs(groupIDs) {
+		return Member{}, appsec.ErrInvalidArgument
+	}
+	var updated Member
+	err := s.store.Write(ctx, actor, func(w Writer) error {
+		current, err := w.Member(ctx, id)
+		if err != nil {
+			return err
+		}
+		currentGroups, err := w.MemberGroups(ctx, id, Page{Limit: 1<<31 - 1})
+		if err != nil {
+			return err
+		}
+		currentIDs := make(map[int64]Group, len(currentGroups))
+		for _, group := range currentGroups {
+			currentIDs[group.ID] = group
+		}
+		selectedGroups := make(map[int64]Group, len(groupIDs))
+		for _, groupID := range groupIDs {
+			group, err := w.Group(ctx, groupID)
+			if err != nil {
+				return err
+			}
+			if _, alreadyIncluded := currentIDs[groupID]; !alreadyIncluded && (group.Status != "ACTIVE" || current.Status != "ACTIVE") {
+				return ErrConflict
+			}
+			selectedGroups[groupID] = group
+		}
+
+		updated = current
+		updated.Name = name
+		updated.Remark = remark(note)
+		if err := w.UpdateMember(ctx, updated); err != nil {
+			return err
+		}
+		if err := w.Audit(ctx, Audit{Event: operation.MemberUpdate, Target: "PRINCIPAL", ID: id, Name: name, Before: current, After: updated}, meta); err != nil {
+			return err
+		}
+		for _, group := range currentGroups {
+			if _, keep := selectedGroups[group.ID]; keep {
+				continue
+			}
+			changed, err := w.SetGroupMember(ctx, group.ID, id, false)
+			if err != nil {
+				return err
+			}
+			if !changed {
+				return ErrConflict
+			}
+			if err := w.Audit(ctx, Audit{Event: operation.GroupMemberRemove, Target: "GROUP", ID: group.ID, Name: group.Name, Before: map[string]any{"memberId": idString(id), "included": true}, After: map[string]any{"memberId": idString(id), "included": false}}, meta); err != nil {
+				return err
+			}
+		}
+		for _, groupID := range groupIDs {
+			if _, exists := currentIDs[groupID]; exists {
+				continue
+			}
+			changed, err := w.SetGroupMember(ctx, groupID, id, true)
+			if err != nil {
+				return err
+			}
+			if !changed {
+				return ErrConflict
+			}
+			group := selectedGroups[groupID]
+			if err := w.Audit(ctx, Audit{Event: operation.GroupMemberAdd, Target: "GROUP", ID: groupID, Name: group.Name, Before: map[string]any{"memberId": idString(id), "included": false}, After: map[string]any{"memberId": idString(id), "included": true}}, meta); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return updated, err
 }
 func (s *Service) SetMemberStatus(ctx context.Context, actor admin.Identity, id int64, status string, meta appsec.RequestMeta) error {
 	if id <= 0 || !validStatus(status) {
@@ -82,6 +188,15 @@ func (s *Service) SetMemberStatus(ctx context.Context, actor admin.Identity, id 
 		}
 		if m.Status == status {
 			return nil
+		}
+		if status == "ACTIVE" {
+			keys, err := w.Keys(ctx, id, Page{Limit: 1})
+			if err != nil {
+				return err
+			}
+			if len(keys) == 0 {
+				return ErrConflict
+			}
 		}
 		if err := w.SetMemberStatus(ctx, id, status); err != nil {
 			return err
@@ -105,21 +220,168 @@ func (s *Service) DeleteMember(ctx context.Context, actor admin.Identity, id int
 	})
 }
 func (s *Service) CreateGroup(ctx context.Context, actor admin.Identity, code, name, note string, meta appsec.RequestMeta) (Group, error) {
-	if !validText(code, 64) || !validText(name, 128) || !validRemark(note) {
+	return s.createGroup(ctx, actor, code, name, note, nil, meta)
+}
+func (s *Service) CreateGroupWithModels(ctx context.Context, actor admin.Identity, code, name, note string, modelIDs []int64, meta appsec.RequestMeta) (Group, error) {
+	return s.createGroup(ctx, actor, code, name, note, modelIDs, meta)
+}
+func (s *Service) createGroup(ctx context.Context, actor admin.Identity, code, name, note string, modelIDs []int64, meta appsec.RequestMeta) (Group, error) {
+	if (code != "" && !validText(code, 64)) || !validText(name, 128) || !validRemark(note) || !uniquePositiveIDs(modelIDs) {
 		return Group{}, appsec.ErrInvalidArgument
 	}
 	id, err := s.next()
 	if err != nil {
 		return Group{}, err
 	}
+	if code == "" {
+		code = "group-" + strconv.FormatInt(id, 10)
+	}
 	g := Group{ID: id, Code: code, Name: name, Remark: remark(note), Status: "ACTIVE", CreatedAt: time.Now().UTC()}
 	err = s.store.Write(ctx, actor, func(w Writer) error {
+		for _, modelID := range modelIDs {
+			model, err := w.Model(ctx, modelID)
+			if err != nil {
+				return err
+			}
+			if model.Status != "ACTIVE" {
+				return ErrConflict
+			}
+		}
 		if err := w.CreateGroup(ctx, g); err != nil {
 			return err
 		}
-		return w.Audit(ctx, Audit{Event: operation.GroupCreate, Target: "GROUP", ID: id, Name: name, After: g}, meta)
+		if err := w.Audit(ctx, Audit{Event: operation.GroupCreate, Target: "GROUP", ID: id, Name: name, After: g}, meta); err != nil {
+			return err
+		}
+		for _, modelID := range modelIDs {
+			changed, err := w.SetGroupModel(ctx, id, modelID, true)
+			if err != nil {
+				return err
+			}
+			if !changed {
+				return ErrConflict
+			}
+			if err := w.Audit(ctx, Audit{Event: operation.GroupModelGrant, Target: "GROUP", ID: id, Name: name, Before: map[string]any{"modelId": idString(modelID), "allowed": false}, After: map[string]any{"modelId": idString(modelID), "allowed": true}}, meta); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	return g, err
+}
+func uniquePositiveIDs(ids []int64) bool {
+	seen := make(map[int64]struct{}, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			return false
+		}
+		if _, exists := seen[id]; exists {
+			return false
+		}
+		seen[id] = struct{}{}
+	}
+	return true
+}
+func (s *Service) UpdateGroupWithModels(ctx context.Context, actor admin.Identity, id int64, name, note string, modelIDs []int64, meta appsec.RequestMeta) (Group, error) {
+	if id <= 0 || !validText(name, 128) || !validRemark(note) || !uniquePositiveIDs(modelIDs) {
+		return Group{}, appsec.ErrInvalidArgument
+	}
+	var updated Group
+	err := s.store.Write(ctx, actor, func(w Writer) error {
+		current, err := w.Group(ctx, id)
+		if err != nil {
+			return err
+		}
+		currentModels, err := w.GroupModels(ctx, id, Page{Limit: 1<<31 - 1})
+		if err != nil {
+			return err
+		}
+		currentIDs := make(map[int64]struct{}, len(currentModels))
+		for _, model := range currentModels {
+			currentIDs[model.ID] = struct{}{}
+		}
+		selectedIDs := make(map[int64]struct{}, len(modelIDs))
+		for _, modelID := range modelIDs {
+			model, err := w.Model(ctx, modelID)
+			if err != nil {
+				return err
+			}
+			_, alreadyGranted := currentIDs[modelID]
+			if !alreadyGranted && (model.Status != "ACTIVE" || current.Status != "ACTIVE") {
+				return ErrConflict
+			}
+			selectedIDs[modelID] = struct{}{}
+		}
+
+		updated = current
+		updated.Name = name
+		updated.Remark = remark(note)
+		if err := w.UpdateGroup(ctx, updated); err != nil {
+			return err
+		}
+		if err := w.Audit(ctx, Audit{Event: operation.GroupUpdate, Target: "GROUP", ID: id, Name: name, Before: current, After: updated}, meta); err != nil {
+			return err
+		}
+		for _, model := range currentModels {
+			if _, keep := selectedIDs[model.ID]; keep {
+				continue
+			}
+			if changed, err := w.SetGroupModel(ctx, id, model.ID, false); err != nil {
+				return err
+			} else if changed {
+				if err := w.Audit(ctx, Audit{Event: operation.GroupModelRevoke, Target: "GROUP", ID: id, Name: name, Before: map[string]any{"modelId": idString(model.ID), "allowed": true}, After: map[string]any{"modelId": idString(model.ID), "allowed": false}}, meta); err != nil {
+					return err
+				}
+			}
+		}
+		for _, modelID := range modelIDs {
+			if _, exists := currentIDs[modelID]; exists {
+				continue
+			}
+			if changed, err := w.SetGroupModel(ctx, id, modelID, true); err != nil {
+				return err
+			} else if changed {
+				if err := w.Audit(ctx, Audit{Event: operation.GroupModelGrant, Target: "GROUP", ID: id, Name: name, Before: map[string]any{"modelId": idString(modelID), "allowed": false}, After: map[string]any{"modelId": idString(modelID), "allowed": true}}, meta); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+	return updated, err
+}
+func (s *Service) SetGroupStatus(ctx context.Context, actor admin.Identity, id int64, status string, meta appsec.RequestMeta) error {
+	if id <= 0 || !validStatus(status) {
+		return appsec.ErrInvalidArgument
+	}
+	return s.store.Write(ctx, actor, func(w Writer) error {
+		group, err := w.Group(ctx, id)
+		if err != nil {
+			return err
+		}
+		if group.Status == status {
+			return nil
+		}
+		if err := w.SetGroupStatus(ctx, id, status); err != nil {
+			return err
+		}
+		return w.Audit(ctx, Audit{Event: operation.GroupStatusChange, Target: "GROUP", ID: id, Name: group.Name, Before: map[string]string{"status": group.Status}, After: map[string]string{"status": status}}, meta)
+	})
+}
+func (s *Service) DeleteGroup(ctx context.Context, actor admin.Identity, id int64, meta appsec.RequestMeta) error {
+	if id <= 0 {
+		return appsec.ErrInvalidArgument
+	}
+	return s.store.Write(ctx, actor, func(w Writer) error {
+		group, err := w.Group(ctx, id)
+		if err != nil {
+			return err
+		}
+		if err := w.DeleteGroup(ctx, id); err != nil {
+			return err
+		}
+		return w.Audit(ctx, Audit{Event: operation.GroupDelete, Target: "GROUP", ID: id, Name: group.Name, Before: group, After: map[string]bool{"deleted": true}}, meta)
+	})
 }
 func (s *Service) SetGroupMember(ctx context.Context, actor admin.Identity, groupID, memberID int64, add bool, meta appsec.RequestMeta) error {
 	if groupID <= 0 || memberID <= 0 {
@@ -197,6 +459,31 @@ func (s *Service) SetModelStatus(ctx context.Context, actor admin.Identity, id i
 func owner(actor admin.Identity, r Resource) catalog.CredentialOwner {
 	return catalog.CredentialOwner{OrganizationID: actor.OrganizationID, ProviderID: r.ProviderID, ResourceID: r.ID}
 }
+
+func (s *Service) decryptedProviderProxy(provider Provider) (*catalog.OutboundProxy, error) {
+	if !provider.ProxyEnabled {
+		return nil, nil
+	}
+	urlBytes, err := s.cipher.DecryptProviderProxy(provider.ProxyURLSealed, proxyOwner(provider.ID, "url"))
+	if err != nil {
+		return nil, err
+	}
+	proxy := &catalog.OutboundProxy{URL: string(urlBytes), Headers: map[string]string{}}
+	clear(urlBytes)
+	if provider.ProxyHeadersSealed.KeyVersion == 0 {
+		return proxy, nil
+	}
+	headerBytes, err := s.cipher.DecryptProviderProxy(provider.ProxyHeadersSealed, proxyOwner(provider.ID, "headers"))
+	if err != nil {
+		return nil, err
+	}
+	err = json.Unmarshal(headerBytes, &proxy.Headers)
+	clear(headerBytes)
+	if err != nil {
+		return nil, err
+	}
+	return proxy, nil
+}
 func (s *Service) CreateResource(ctx context.Context, actor admin.Identity, providerID int64, name, credential string, meta appsec.RequestMeta) (Resource, error) {
 	if providerID <= 0 || !validText(name, 128) || !validCredential(credential) {
 		return Resource{}, appsec.ErrInvalidArgument
@@ -206,7 +493,7 @@ func (s *Service) CreateResource(ctx context.Context, actor admin.Identity, prov
 		return Resource{}, err
 	}
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	r := Resource{ID: id, ProviderID: providerID, Name: name, Status: "DISABLED", CredentialConfigured: true, CreatedAt: now, UpdatedAt: now}
+	r := Resource{ID: id, ProviderID: providerID, Name: name, Status: "ACTIVE", CredentialConfigured: true, CreatedAt: now, UpdatedAt: now}
 	plain := []byte(credential)
 	defer clear(plain)
 	sealed, err := s.cipher.Encrypt(plain, owner(actor, r))
@@ -214,12 +501,8 @@ func (s *Service) CreateResource(ctx context.Context, actor admin.Identity, prov
 		return Resource{}, appsec.ErrUnavailable
 	}
 	err = s.store.Write(ctx, actor, func(w Writer) error {
-		p, err := w.Provider(ctx, providerID)
-		if err != nil {
+		if _, err := w.Provider(ctx, providerID); err != nil {
 			return err
-		}
-		if p.Status != "ACTIVE" {
-			return ErrProvider
 		}
 		if err := w.CreateResource(ctx, ResourceRecord{Resource: r, Sealed: sealed}); err != nil {
 			return err
@@ -304,13 +587,24 @@ func (s *Service) TestResource(ctx context.Context, actor admin.Identity, id int
 		return ConnectionResult{}, err
 	}
 	result := ConnectionResult{Code: "PROVIDER_UNAVAILABLE"}
-	if provider.Status == "ACTIVE" {
+	protocol, baseURL := "", ""
+	if provider.BaseURL != nil {
+		protocol, baseURL = "ANTHROPIC", *provider.BaseURL
+	} else if provider.OpenAIBaseURL != nil {
+		protocol, baseURL = "OPENAI", *provider.OpenAIBaseURL
+	}
+	if baseURL != "" {
 		plain, err := s.cipher.Decrypt(resource.Sealed, owner(actor, resource.Resource))
 		if err != nil {
 			result.Code = "CREDENTIAL_UNRECOVERABLE"
 		} else {
 			defer clear(plain)
-			result = s.tester.Test(ctx, provider.BaseURL, plain)
+			proxy, proxyErr := s.decryptedProviderProxy(provider)
+			if proxyErr != nil {
+				result.Code = "PROXY_CONFIGURATION_UNRECOVERABLE"
+			} else {
+				result = s.tester.Test(ctx, protocol, baseURL, plain, proxy)
+			}
 		}
 	}
 	// 网络调用不占有数据库事务；即使调用方取消，仍尽力保存有界审计记录。

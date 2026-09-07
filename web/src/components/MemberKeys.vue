@@ -6,6 +6,7 @@ import { useCollection, useAction, dateOnly } from '../composables'
 import { t } from '../i18n'
 import Modal from './Modal.vue'
 import ListFooter from './ListFooter.vue'
+import Icon from './Icon.vue'
 
 const props = defineProps<{ member: Member }>()
 defineEmits<{ close: [] }>()
@@ -61,6 +62,9 @@ function revoke() {
     medium
     @close="$emit('close')"
   >
+    <div class="context-note key-prefix-note" role="note">
+      <Icon name="shield" :size="18" /><span>{{ t('members.prefixHint') }}</span>
+    </div>
     <p v-if="notice" class="notice" role="status">{{ notice }}</p>
     <div v-if="error" class="alert error" role="alert">
       {{ error }}
@@ -83,7 +87,7 @@ function revoke() {
           <tr v-for="key in items" :key="key.id">
             <td class="key-display-name">{{ key.name }}</td>
             <td>
-              <code>{{ key.prefix }}********</code>
+              <code>{{ key.prefix }}</code>
             </td>
             <td>{{ key.expiresAt ? dateOnly(key.expiresAt) : t('members.noExpiry') }}</td>
             <td class="align-right">
@@ -136,5 +140,8 @@ function revoke() {
   white-space: normal;
   overflow-wrap: anywhere;
   max-width: 240px;
+}
+.key-prefix-note {
+  margin-bottom: 16px;
 }
 </style>

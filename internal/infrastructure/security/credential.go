@@ -45,3 +45,23 @@ func (c *Credentials) Decrypt(sealed SealedCredential, owner CredentialOwner) ([
 	}
 	return plain, nil
 }
+
+func (c *Credentials) EncryptProviderProxy(plain []byte, owner catalog.ProviderProxyOwner) (SealedCredential, error) {
+	if len(plain) == 0 || !owner.Valid() {
+		return SealedCredential{}, errors.New("provider proxy secret and owner are required")
+	}
+	nonce := make([]byte, c.aead.NonceSize())
+	_, _ = rand.Read(nonce)
+	return SealedCredential{Ciphertext: c.aead.Seal(nil, nonce, plain, owner.AAD()), Nonce: nonce, KeyVersion: 1}, nil
+}
+
+func (c *Credentials) DecryptProviderProxy(sealed SealedCredential, owner catalog.ProviderProxyOwner) ([]byte, error) {
+	if sealed.KeyVersion != 1 || len(sealed.Nonce) != c.aead.NonceSize() || !owner.Valid() {
+		return nil, errors.New("provider proxy secret unavailable")
+	}
+	plain, err := c.aead.Open(nil, sealed.Nonce, sealed.Ciphertext, owner.AAD())
+	if err != nil {
+		return nil, errors.New("provider proxy secret unavailable")
+	}
+	return plain, nil
+}

@@ -87,7 +87,7 @@ func TestStage5Integration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	models, _ := management.Models(ctx, actor, mgmt.Page{Limit: 50})
+	models, _ := management.Models(ctx, actor, mgmt.Page{Limit: 50}, "")
 	var modelID int64
 	for _, m := range models {
 		if m.Code == "claude-sonnet" {
@@ -282,6 +282,11 @@ func TestStage5Integration(t *testing.T) {
 	filtered, err := app.NewQuery(store).Query(ctx, actor, filter)
 	if err != nil || len(filtered) != 7 {
 		t.Fatal("combined filters did not isolate attempts")
+	}
+	for i := 1; i < len(filtered); i++ {
+		if filtered[i-1].ID <= filtered[i].ID {
+			t.Fatal("usage records are not ordered by descending ID")
+		}
 	}
 	filter.After = filtered[0].ID
 	filter.Limit = 1

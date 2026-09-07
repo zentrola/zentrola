@@ -13,7 +13,7 @@ import (
 func (s *SecurityHandlers) mountUsage(r chi.Router) {
 	// @Summary 用量记录
 	// @Tags 用量统计
-	// @Description 只查询当前组织；时间区间最长 366 天。
+	// @Description 只查询当前组织；按 ID 倒序分页，最新记录在前；时间区间最长 366 天。
 	// @Produce json
 	// @Security AdminBearer
 	// @Param after query string false "上一页 nextCursor，默认从头查询"

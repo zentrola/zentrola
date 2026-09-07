@@ -5,7 +5,7 @@ import { i18n } from './i18n'
 import Members from './pages/Members.vue'
 import Groups from './pages/Groups.vue'
 import Models from './pages/Models.vue'
-import Resources from './pages/Resources.vue'
+import Providers from './pages/Providers.vue'
 import Usage from './pages/Usage.vue'
 import Operations from './pages/Operations.vue'
 import './style.css'
@@ -18,10 +18,11 @@ const router = createRouter({
       members: Members,
       groups: Groups,
       models: Models,
-      resources: Resources,
+      providers: Providers,
       usage: Usage,
       operations: Operations,
     }).map(([name, component]) => ({ path: `/${name}`, name, component })),
+    { path: '/resources', redirect: '/providers' },
     { path: '/:pathMatch(.*)*', redirect: '/members' },
   ],
 })

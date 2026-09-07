@@ -40,12 +40,12 @@ SELECT r.id,r.request_id,r.client_protocol,r.principal_id,r.model_id,r.request_a
 u.id AS usage_id,u.attempt_no,u.provider_id,u.provider_model_id,u.resource_id,u.input_tokens,u.output_tokens,u.cached_input_tokens,u.status AS attempt_status,u.error_type AS attempt_error_type
 FROM ai_request r LEFT JOIN usage_record u ON u.request_id=r.request_id AND u.organization_id=r.organization_id
 WHERE r.organization_id=$1
-AND r.id>$2::bigint
+AND (r.id<$2::bigint OR $2::bigint=0)
 AND r.request_at>=$3::timestamptz AND r.request_at<$4::timestamptz
 AND ($5::bigint IS NULL OR r.principal_id=$5)
 AND ($6::bigint IS NULL OR r.model_id=$6)
 AND ($7::bigint IS NULL OR u.resource_id=$7)
-ORDER BY r.id LIMIT $8::int
+ORDER BY r.id DESC LIMIT $8::int
 `
 
 type QueryUsageParams struct {

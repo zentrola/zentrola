@@ -112,7 +112,7 @@ func LoadHealthcheckAddress(path string) (string, error) {
 	}
 	addr, ok := lookup("HTTP_ADDR")
 	if !ok {
-		addr = ":8080"
+		addr = ":9527"
 	}
 	_, port, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -218,7 +218,7 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 	}
 	cfg := Config{
 		Environment:       get("APP_ENV", "dev"),
-		HTTPAddr:          get("HTTP_ADDR", ":8080"),
+		HTTPAddr:          get("HTTP_ADDR", ":9527"),
 		ReadHeaderTimeout: duration("HTTP_READ_HEADER_TIMEOUT", "5s"),
 		IdleTimeout:       duration("HTTP_IDLE_TIMEOUT", "120s"),
 		ShutdownTimeout:   duration("SHUTDOWN_TIMEOUT", "20s"),

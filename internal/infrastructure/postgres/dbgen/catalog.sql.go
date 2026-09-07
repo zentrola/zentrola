@@ -120,7 +120,7 @@ func (q *Queries) GetPrincipal(ctx context.Context, arg GetPrincipalParams) (Pri
 }
 
 const getProvider = `-- name: GetProvider :one
-SELECT id, is_deleted, provider_code, provider_name, provider_type, anthropic_base_url, status, created_by, updated_by, created_at, updated_at, openai_base_url FROM ai_provider WHERE id = $1 AND is_deleted = false
+SELECT id, is_deleted, provider_code, provider_name, provider_type, anthropic_base_url, status, created_by, updated_by, created_at, updated_at, openai_base_url, official_website, proxy_enabled, proxy_url_display, proxy_url_ciphertext, proxy_url_nonce, proxy_url_key_version, proxy_header_names, proxy_headers_ciphertext, proxy_headers_nonce, proxy_headers_key_version FROM ai_provider WHERE id = $1 AND is_deleted = false
 `
 
 func (q *Queries) GetProvider(ctx context.Context, id int64) (AiProvider, error) {
@@ -139,6 +139,16 @@ func (q *Queries) GetProvider(ctx context.Context, id int64) (AiProvider, error)
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.OpenaiBaseUrl,
+		&i.OfficialWebsite,
+		&i.ProxyEnabled,
+		&i.ProxyUrlDisplay,
+		&i.ProxyUrlCiphertext,
+		&i.ProxyUrlNonce,
+		&i.ProxyUrlKeyVersion,
+		&i.ProxyHeaderNames,
+		&i.ProxyHeadersCiphertext,
+		&i.ProxyHeadersNonce,
+		&i.ProxyHeadersKeyVersion,
 	)
 	return i, err
 }

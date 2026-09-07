@@ -1,198 +1,432 @@
-# zentrola
+# Zentrola
 
-企业 AI Coding 能力治理平台。当前开发范围为 P0-MVP Claude Code Governance Slice，按用户追加授权扩展 DeepSeek 和 OpenAI 兼容接口。
+Zentrola 是面向研发团队的企业 AI Coding 能力治理平台（AI Coding Control Plane）。
 
-## 当前状态
-
-阶段 0～3 已实现：Go 四层结构、14 张业务表、sqlc / Goose、安全认证，以及成员、分组、模型、资源和操作日志管理 API。管理员可通过 API 完成创建成员、入组、授权模型、配置资源和签发 Key 的操作链。
-
-模型目录现支持手动新增和编辑官方名称、编码、JSONB 输入/输出类型及备注。
-
-首次启动会原子创建默认 Organization、Anthropic Official、两个逻辑 Model 及对应 Provider Model。管理员由首次使用者在网页中设置，创建成功后关闭初始化入口；后续启动不会覆盖配置或恢复软删除记录，不预置 Resource Credential。
-阶段 4 Gateway 和阶段 5 Usage 已实现，另已按用户授权接入 DeepSeek 并通过真实 Messages、SSE、Tool Loop、count_tokens、权限和 Usage 归属验证。Usage 支持固定 Worker、批量写入、队列满同步兜底、停机 Flush 和管理查询。阶段 6 管理界面已在 `web/` 完成并通过真实后端联调；真实 Claude Code 客户端会话尚未验收。
-
-OpenAI 兼容入口已实现：`POST /v1/chat/completions`、`GET /v1/models`，支持普通响应、SSE 和工具往返，并通过真实 DeepSeek 及 Usage 验证。当前上游为 DeepSeek，未提供 OpenAI 官方 GPT 模型或 Responses API。
-
-数据库、Master Key、基础数据和管理员均正常时，`/health/ready` 返回 200；这不代表已有可调用的 Resource 或上游账号已通过验证。
-
-管理接口与 Gateway 请求示例见下方 Swagger 接口文档说明，前端开发命令见 [web/README](web/README.md)。
-
-## 工程结构
+它位于 Codex、Claude Code 等 AI Coding Client 与企业模型订阅之间，在不改变研发人员工作习惯的前提下，统一治理并分发企业提供的模型、工具、知识和 Skill，同时管理权限、用量、成本与操作记录。
 
 ```text
-cmd/server/                         启动、依赖装配与进程生命周期
-internal/
-  domain/                           当前领域的机器语义和 ID 生成接口
-  application/
-    bootstrap/                      首次数据初始化编排
-    health/                         就绪检查编排
-    security/                       管理员认证和 Access Key 用例
-    management/                     成员、分组、模型、资源和审计用例
-    gateway/                        模型路由、权限及原生请求转发编排
-    usage/                          有界写入队列、固定 Worker 与管理查询
-  infrastructure/
-    config/                         System ENV > .env.{环境} > .env > 默认值
-    logging/                        slog 与请求上下文
-    idgen/                          Sonyflake 正数 int64 ID
-    security/                       bcrypt、JWT、Master Key 与 AES-GCM
-    anthropic/                      官方连接检查与 Messages 上游 HTTP 客户端
-    openai/                         DeepSeek 原生 Chat Completions 上游 HTTP 客户端
-    postgres/
-      migrations/                   嵌入到二进制的 SQL Migration
-      queries/                      sqlc SQL 源文件
-      dbgen/                        sqlc 生成的 pgx/v5 类型安全代码
-  transport/http/                   chi 路由、中间件、HTTP 响应
-web/                                Vue 3 管理界面、Vite 构建及浏览器测试
+Codex / Claude Code / 其他 AI Coding Client
+                      ↓
+                  Zentrola
+                      ↓
+          模型 / 工具 / 知识 / Skill
 ```
 
-Domain 不依赖数据库或 HTTP；Application 编排用例；Infrastructure 实现外部依赖；Transport 负责协议。使用显式构造函数装配，不引入 DI 容器。sqlc 数据库记录不直接暴露为 API 响应，管理写入和完整关联校验随对应 Application 用例实现。
+Zentrola 不取代 AI Coding Client，也不是另一套聊天界面。管理员通过管理后台配置企业 AI 能力；研发人员继续使用熟悉的客户端，通过企业分配的 Virtual Key 使用授权能力。
 
-## 本地运行
+> 当前版本聚焦 Model Governance MVP，已经形成成员、Group、模型订阅、Virtual Key、Gateway 和 Usage 的最小治理闭环。Tool、Knowledge、Skill、Cost 等属于产品后续能力，不代表当前版本已经实现。
 
-需要 Go 1.26 或以上版本，以及 PostgreSQL 17。建议使用与 Windows 系统匹配的 amd64 Go 安装包。
+## 为什么选择 Zentrola
+
+### 保留现有工作方式
+
+研发人员继续使用 Codex、Claude Code 或其他兼容客户端，不需要迁移到企业自建的聊天页面，也不需要改变日常 Coding Workflow。
+
+### 统一管理模型订阅
+
+企业可以在管理后台集中配置采购或接入的模型订阅，通过逻辑模型向成员分发能力。研发人员只选择被授权的模型，不需要理解 Provider、Provider Model 和 Resource。
+
+### 隔离真实 Provider Credential
+
+Provider Credential 由管理员统一配置并加密保存，不下发给普通成员。成员只持有独立 Virtual Key，离职、权限变化或密钥泄露时可以单独撤销。
+
+### 以成员和 Group 为单位治理
+
+模型权限不绑定在共享 API Key 上，而是通过 MEMBER Principal、Group 和 Model Allowlist 统一管理。同一个成员可以加入多个 Group，授权关系清晰可追踪。
+
+### 解耦客户端与 Provider
+
+客户端使用稳定的逻辑模型编码。管理员可以调整其背后的 Provider、上游模型或 Resource，而无需要求所有成员更换 Virtual Key 或修改客户端中的模型名称。
+
+### 统一归属 Usage 与管理操作
+
+模型请求可以归属到成员、逻辑模型和 Resource；管理员对成员、Group、模型订阅、Resource 和 Virtual Key 的主要操作进入 Operation Log。
+
+### 不把通用 Gateway 当作最终产品
+
+Gateway 是 Zentrola 的基础设施层。产品重点是企业如何把模型及后续的 Tool、Knowledge、Skill 安全、可控地交付给研发人员，而不只是转发 API Traffic。
+
+## 总体架构
+
+```text
+                            管理员
+                              │
+                              ▼
+                     Admin Web（独立运行）
+                              │
+                              ▼
+                         Admin API
+                              │
+┌──────────────────────── Zentrola ────────────────────────┐
+│                                                          │
+│  Principal / Group / Permission / Model Governance       │
+│  Access Key / Resource / Usage / Operation Log            │
+│                                                          │
+│  AI Coding Client ──▶ Gateway ──▶ Model / Resource 路由   │
+└──────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+                 Anthropic / DeepSeek / Future Provider
+                              │
+                              ▼
+                          PostgreSQL
+```
+
+管理面与调用面相互隔离：
+
+- 管理面：管理员通过 Admin Web 和 Admin API 配置平台。
+- 调用面：MEMBER 使用 Virtual Key 访问标准 Gateway API。
+- Admin JWT 不能调用 Gateway。
+- Virtual Key 不能访问 Admin API。
+
+## 职责边界
+
+| 参与方 | 主要职责 |
+| --- | --- |
+| AI Coding Client | 模型选择、会话与上下文管理、用户交互、Tool Call、MCP Client 和 Skill 执行 |
+| Zentrola | Access Key 鉴权、Principal 与 Group 权限、逻辑模型解析、Resource 选择、Streaming 转发、Usage 归属和操作审计 |
+| Provider | 执行真实模型推理并返回原生协议响应 |
+| 管理员 | 配置模型订阅、Provider Credential、成员、Group、授权策略和 Virtual Key |
+| 研发人员 | 在授权范围内选择逻辑模型，不接触真实 Provider Credential，也不指定 Resource |
+
+Zentrola 遵循 Client-native First 和 Thin Gateway 原则：客户端已经具备的会话、上下文和工具能力不在平台中重复实现；Gateway 只承担治理、路由和必要的协议处理。
+
+## 核心概念
+
+| 概念 | 含义 |
+| --- | --- |
+| Model | 向研发人员暴露的稳定逻辑模型 |
+| Provider | 提供模型服务的官方或兼容服务方 |
+| Provider Model | Provider 实际提供的上游模型，以及它与逻辑 Model 的映射 |
+| Resource | 企业持有的一份可用模型订阅或调用资源，包含加密保存的 Provider Credential |
+| MEMBER Principal | 被治理的企业研发人员 |
+| Group | 成员集合，也是当前模型授权的主要载体 |
+| Virtual Key | 成员访问 Gateway 的身份凭证，只负责识别 Principal，不直接承载权限 |
+| Usage | 一次模型调用及其 Token 等使用事实 |
+| Operation Log | 管理员执行重要治理操作的追加记录 |
+
+## 当前版本能力
+
+当前版本可用于验证以成员和 Group 为单位的 AI Coding 模型治理：
+
+- 首位管理员初始化、登录、退出、修改密码和密码重置
+- MEMBER 创建、状态管理和删除
+- Group 创建、成员分配和 Group Model Allowlist
+- 在管理后台配置模型订阅、逻辑模型及其上游映射
+- Provider Credential 加密存储、Resource 启停和连接测试
+- Virtual Key 签发、有效期管理和撤销
+- Anthropic Messages、Count Tokens、SSE 和原生 Tool Loop
+- OpenAI Models、Chat Completions、SSE 和工具调用往返
+- 按成员、逻辑模型和 Resource 记录 Usage
+- 查看主要 Operation Log
+
+当前尚未完成：
+
+- Claude Code 和 Codex 正式客户端的完整 E2E 验收
+- OpenAI Responses Native Path
+- APPLICATION Principal 与 App Key 管理闭环
+- 多 Provider Routing、Resource Health、Failover 和实时限流
+- Cost、Budget、企业计费和账单
+- Enterprise Knowledge、Skill Registry 和 Managed MCP
+- SSO、OIDC、LDAP、SCIM、多组织和高可用部署
+
+当前 OpenAI Compatible 入口用于已配置的 DeepSeek Official 订阅及其 Chat Completions 协议，不提供 OpenAI Official GPT 模型或 Responses API。正式 Codex Native Path 仍需按 Responses API 单独实现和验收。
+
+## 发布包结构
+
+Backend 和 Admin Web 是两个独立程序，分别下载、配置和运行。
+
+Backend 发布目录：
+
+```text
+zentrola-backend/
+├── zentrola          # MacOS/Linux
+├── zentrola.exe      # Windows
+├── .env.example
+└── compose.yaml      # 可选：只用于快速启动 PostgreSQL
+```
+
+Admin Web 发布目录：
+
+```text
+zentrola-web/
+├── zentrola-web          # MacOS/Linux
+├── zentrola-web.exe      # Windows
+├── .env.example
+└── dist/
+    ├── index.html
+    ├── config.js
+    └── assets/
+```
+
+实际发布包只包含对应操作系统的一个可执行文件，不会同时包含无扩展名和 `.exe` 两个版本。
+
+## 安装 Backend
+
+### 1. 准备配置
+
+进入 Backend 发布目录，将示例配置改名为 `.env`。
+
+MacOS/Linux：
+
+```bash
+mv .env.example .env
+```
+
+Windows PowerShell：
 
 ```powershell
-Copy-Item .env.example .env
-# 编辑 .env：填入数据库密码和 ADMIN_JWT_SECRET；管理员在网页首次设置。
-# 确认 zentrola 数据库已创建；保留已有 .env 时不要重新复制覆盖。
-go mod download
-go run ./cmd/server
+Rename-Item .env.example .env
 ```
 
-程序只迁移指定数据库，不自动创建数据库或覆盖已有业务数据。连接参数分别配置，密码中的特殊字符无需手工 URL 编码。
-本地 `.env` 和 `.env.dev/test/prod` 已被 Git 和 Docker 构建上下文忽略，禁止提交；仓库仅保留不含真实凭证的 `.env*.example`。不要在日志中打印配置对象、连接字符串或原始凭证。
+至少设置以下配置：
 
-### 运行环境与配置覆盖
+```dotenv
+POSTGRES_HOST=127.0.0.1
+POSTGRES_PORT=5432
+POSTGRES_DB=zentrola
+POSTGRES_USER=zentrola
+POSTGRES_PASSWORD=请填写数据库密码
 
-`APP_ENV` 支持 `dev / test / prod`，默认 `dev`。先从系统环境变量、再从通用 `.env` 中选择环境，随后只读取同目录下对应的 `.env.dev`、`.env.test` 或 `.env.prod`。保留旧值 `development / production` 的兼容，分别归一化为 `dev / prod`，使用短名称的环境文件。
+ADMIN_JWT_SECRET=请填写至少包含32随机字节的Base64字符串
 
-配置优先级：**系统环境变量 > 当前环境文件 > 通用 `.env` > 代码默认值**。环境文件可新增配置或覆盖通用值，未定义的键继承低优先级配置；显式空值也会覆盖，必填项为空时启动报错。环境文件不得定义 `APP_ENV`，避免加载过程中切换环境。非法环境名称和已存在但无法读取或解析的配置文件会使启动失败；文件不存在则跳过，最终配置仍须通过校验。加载过程不修改进程环境变量。
+CORS_ENABLED=true
+CORS_ALLOWED_ORIGINS=http://127.0.0.1:3000
+```
+
+MacOS/Linux 可以使用 OpenSSL 生成 `ADMIN_JWT_SECRET`：
+
+```bash
+openssl rand -base64 32
+```
+
+Windows PowerShell：
 
 ```powershell
-# 本地开发：.env 中 APP_ENV=dev，按需添加开发环境覆盖。
-Copy-Item .env.dev.example .env.dev
-go run ./cmd/server
-
-# 测试部署：使用 .env 通用配置，再叠加 .env.test。
-Copy-Item .env.test.example .env.test
-$env:APP_ENV = 'test'
-go run ./cmd/server
-Remove-Item Env:APP_ENV
+$jwtBytes = New-Object byte[] 32
+$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+$rng.GetBytes($jwtBytes)
+[Convert]::ToBase64String($jwtBytes)
+$rng.Dispose()
 ```
 
-已有环境文件时不要重复复制覆盖。生产环境可设系统环境变量 `APP_ENV=prod`，配合 `.env.prod` 或完全由系统环境变量提供配置。`test` 表示测试部署环境，`go test` 不会自动设置它。配置在启动时读取，修改后需重启。
+`ADMIN_JWT_SECRET` 不得与数据库密码、Provider Credential 或 Master Key 共用。
 
-### Swagger 接口文档
+### 2. 准备 PostgreSQL
 
-`APP_ENV=dev/test` 时，启动后访问 [Swagger 页面](http://localhost:8080/swagger/index.html)；原始文档为 `/swagger/doc.json`，也可访问 `/swagger` 自动跳转。文档覆盖健康检查、认证、成员、分组授权、资源、操作日志、用量及 Anthropic/OpenAI Gateway。地址随服务端口变化，文档请求与调试使用当前访问域名，不固定 localhost。UI 静态资源与文档 JSON 都随二进制打包，不依赖 CDN。
+如果已经有 PostgreSQL 17，只需创建 `.env` 中指定的数据库和用户，随后直接运行 Backend。
 
-`APP_ENV=prod` 时不注册页面、文档 JSON 和静态资源路由，访问返回 404。环境开关在启动时判断，不在业务请求中逐次判断；文档依赖和资源仍包含在二进制中。程序启动不执行生成器，不扫描源码。
+发布目录中的 `compose.yaml` 是可选的 PostgreSQL 快速安装示例，只启动数据库，不运行 Zentrola Backend 或 Admin Web：
 
-管理接口先调用 `POST /api/v1/auth/login`，将响应中的 `data.token` 以 `Bearer <token>` 形式填入右上角 **Authorize → AdminBearer**。Gateway 使用成员 Access Key：OpenAI 填入 **GatewayBearer**，Anthropic 可选 **GatewayKey**（Key 原文）或 **GatewayBearer**，两者不要同时使用。页面不持久保存授权；真实推理与连接测试会调用已配置的上游。Gateway 的原生 JSON 请求示例见各接口描述；SSE 建议使用 curl 或 SDK 验证。
+```shell
+docker compose up -d postgres
+```
 
-接口旁的 Swaggo 注释是文档来源，生成器版本由 `go.mod` 的 tool 依赖固定。修改接口或 DTO 后，在构建、重启前重新生成：
+示例会读取同目录 `.env` 中的 `POSTGRES_DB`、`POSTGRES_USER` 和 `POSTGRES_PASSWORD`，并将数据库映射到宿主机端口 `15432`。使用该示例时，只需将 Backend 的数据库端口调整为：
+
+```dotenv
+POSTGRES_PORT=15432
+```
+
+Docker 会自动创建 `zentrola_postgres_data` 命名卷，不需要预先创建。正式环境应在首次启动前确定 PostgreSQL 的备份、恢复和主机故障迁移方案。
+
+### 3. 运行 Backend
+
+MacOS/Linux：
+
+```bash
+chmod +x zentrola
+./zentrola
+```
+
+Windows PowerShell：
 
 ```powershell
-# 从项目根目录执行；脚本优先使用 PATH 中的 Go，也支持项目缓存工具链。
-./scripts/Generate-ApiDocs.ps1
-
-# 等价命令（需要 go 已加入 PATH）
-go tool swag init -d ./cmd/server,./internal/transport/http -g main.go --parseInternal --parseDependencyLevel 1 --parseFuncBody --outputTypes json -o ./internal/transport/http/apidocs
-go run ./cmd/server
+.\zentrola.exe
 ```
 
-生成的 `internal/transport/http/apidocs/swagger.json` 与源代码一起提交。`.swaggo` 将审计快照的 `json.RawMessage` 映射为 JSON 对象；请求 DTO 与实际 Handler 共用，分页响应也复用同一泛型结构。Docker 构建会重新生成文档。路由测试检查文档覆盖、Schema 引用、业务 ID 类型以及各环境的页面访问行为。
+不带参数运行时，Backend 在当前终端前台运行并读取同目录的 `.env`。默认地址为 `http://127.0.0.1:9527`，按 `Ctrl+C` 可以优雅停止。
 
-新环境打开管理页面，自行设置首位管理员的账号和密码，没有默认用户名或密码。已有管理员时直接登录，升级不修改旧账号。JWT 签名密钥仍需至少 32 随机 bytes 的 Base64，且与 Master Key 独立。
+需要后台运行时：
 
-忘记管理员密码时，使用服务器上的 `zentrola password --username <账号>` 生成新密码。运行 `zentrola help password` 查看命令用法。
+MacOS/Linux：
+
+```bash
+./zentrola start
+./zentrola status
+```
+
+Windows PowerShell：
 
 ```powershell
-zentrola help
-zentrola config --file .env
-zentrola config --show
-zentrola start --port 8081
-zentrola status
-zentrola restart
-zentrola stop
-zentrola help password
-zentrola password --username admin
-# Windows 在当前目录执行二进制时：.\zentrola.exe password --username admin
+.\zentrola.exe start
+.\zentrola.exe status
 ```
 
-`help`、`--help` 和 `-h` 无需配置文件或数据库连接，列出 `serve`、`migrate`、`healthcheck`、`password` 等自带命令。
+后台运行状态和日志保存在可执行文件旁的 `run` 目录。
 
-`start` 默认后台启动，支持 `--port` 单次覆盖端口；`restart` 沿用上次配置和端口，`stop` 优雅停止，`status` 显示进程与健康状态。状态和日志保存在程序旁的 `run` 目录。`start --foreground`、`serve` 和不带命令均为前台运行，兼容容器，通过 Ctrl+C 或容器信号停止。
+## 安装 Admin Web
 
-在 `bin` 目录执行一次 `./zentrola.exe config --file ../.env`，即可统一绑定项目配置。绝对路径保存在程序旁的 `config.json`，后续 `serve`、`migrate`、`password` 和 `healthcheck` 自动复用；`config --show` 显示路径与环境，不显示密码。单次 `--config <路径>` 优先于已保存绑定；未绑定时普通命令仍读取当前目录 `.env`，健康检查仍沿用系统 `HTTP_ADDR`。使用绑定或显式 `--config` 时，以配置所在目录作为运行目录，使 Master Key 和网页文件路径保持稳定。
+### 1. 准备配置
+
+进入 Admin Web 发布目录，将示例配置改名为 `.env`。
+
+MacOS/Linux：
+
+```bash
+mv .env.example .env
+```
+
+Windows PowerShell：
 
 ```powershell
-Invoke-RestMethod http://localhost:8080/health/live
-# 管理员初始化完成且依赖正常后应返回 HTTP 200 / READY。
-curl.exe -i http://localhost:8080/health/ready
+Rename-Item .env.example .env
 ```
 
-请求进入时生成新的 `X-Request-ID`，不信任客户端传入的 ID。健康检查响应中的 `requestId` 与 Header 一致；日志字段使用 `request_id`。
+配置监听端口和浏览器能够访问的 Backend 地址：
 
-## Migration
+```dotenv
+WEB_ADDR=:3000
+WEB_API_BASE_URL=http://127.0.0.1:9527
+```
 
-采用 [Goose Provider](https://pressly.github.io/goose/documentation/provider/)，通过 pgx 连接 PostgreSQL，并使用数据库会话锁串行执行迁移。
-Migration SQL 随二进制嵌入：`00001` 为空迁移，`00002` 创建清单内 14 张业务表、中文 COMMENT、CHECK 约束和索引，`00003` 补充 Usage 请求事实查询索引，`00004` 增加 OpenAI 上游地址、协议约束及按协议唯一的模型映射，`00005` 增加首位管理员初始化审计及查询索引，`00006` 增加模型发布方、JSONB 输入输出类型、备注和模型新增编辑审计，`00007` 移除模型发布方字段。
+远程部署时，`WEB_API_BASE_URL` 必须填写用户浏览器能够访问的地址，例如 `https://api.zentrola.example.com`。同时需要把 Admin Web 的实际 Origin 配置到 Backend 的 `CORS_ALLOWED_ORIGINS`。
+
+### 2. 运行 Admin Web
+
+MacOS/Linux：
+
+```bash
+chmod +x zentrola-web
+./zentrola-web
+```
+
+Windows PowerShell：
 
 ```powershell
-go run ./cmd/server migrate
+.\zentrola-web.exe
 ```
 
-默认启动自动执行未应用的 Migration；如需独立迁移，设置 `MIGRATIONS_AUTO_APPLY=false`。
-已执行的 Migration 不回写修改；变更使用新版本文件。业务表使用应用侧 BIGINT ID、中文 COMMENT、Partial Unique Index 和无外键规范；Goose 自身的版本表属于工具元数据。
+Admin Web 默认地址为 `http://127.0.0.1:3000`。程序读取同目录的 `.env` 和 `dist`，启动后不需要 Node.js、npm 或 Vite。
 
-`migrate` 只迁移 Schema，正常 `serve` 启动再执行首次 Bootstrap。预置逻辑模型 `claude-sonnet / claude-opus` 与真实上游编码分离，首次默认映射为 `claude-sonnet-5 / claude-opus-5`，依据 [Anthropic 模型文档](https://platform.claude.com/docs/en/models/overview)。可在首次启动前设置 `BOOTSTRAP_SONNET_MODEL / BOOTSTRAP_OPUS_MODEL`；初始化后运行时映射以数据库为准。预置映射不是上游账号可用性测试，实际连通性留到 Resource 和 Gateway 阶段验证。
+## 首次使用
 
-`ID_NODE` 默认 1，范围 1～65535。Sonyflake 使用固定 epoch `2026-01-01 UTC`，进程内共享同一生成器；同一数据库的并行写入进程必须分配不同节点号。P0-MVP 按单实例部署，不自动分配节点号或建设分布式协调服务。
+首次打开 Admin Web 时创建首位管理员。系统不提供默认用户名或密码，创建成功后初始化入口自动关闭。
 
-## Docker Compose
+管理员按以下顺序完成第一条治理链路：
 
-本地开发前端时，先启动 Go 后端，然后在 `web/` 执行 `npm.cmd ci`、`npm.cmd run dev`，访问 `http://127.0.0.1:5173`。执行 `npm.cmd run build` 后，Go 可直接提供管理页面，默认入口 `http://127.0.0.1:8080/`；从仓库根目录启动并保留 `web/dist`。
+1. 在“模型”中维护客户端统一使用的逻辑模型。
+2. 在“服务商”中维护协议地址、逻辑模型到服务商模型名称的映射和 Provider Credential，并执行连接测试。
+3. 创建成员和 Group，将成员加入对应 Group。
+4. 为 Group 授权可用逻辑模型。
+5. 为成员签发 Virtual Key。
+6. 将 Gateway Base URL、Virtual Key 和逻辑模型编码交给研发人员。
+7. 在 Usage 和 Operation Log 中检查使用归属与治理操作。
+
+普通成员不登录 Admin Web，也不能获取真实 Provider Credential、选择 Provider 或指定 Resource。
+
+## Gateway 接入
+
+Virtual Key 只负责识别 MEMBER Principal，实际权限来自成员所属 Group 的 Model Allowlist。
+
+### Anthropic Compatible
+
+| 配置 | 值 |
+| --- | --- |
+| Base URL | `http://<backend-host>:9527/anthropic` |
+| Messages | `POST /anthropic/v1/messages` |
+| Count Tokens | `POST /anthropic/v1/messages/count_tokens` |
+| 认证 | `x-api-key: <Virtual Key>` 或 `Authorization: Bearer <Virtual Key>` |
+
+两种认证方式不要同时发送。
+
+### OpenAI Compatible
+
+| 配置 | 值 |
+| --- | --- |
+| Base URL | `http://<backend-host>:9527/v1` |
+| Models | `GET /v1/models` |
+| Chat Completions | `POST /v1/chat/completions` |
+| 认证 | `Authorization: Bearer <Virtual Key>` |
+
+请求中的 `model` 使用管理员分配的逻辑模型编码，而不是上游 Provider Model 编码。
+
+## 日常运维
+
+Backend 后台进程管理：
+
+MacOS/Linux：
+
+```bash
+./zentrola status
+./zentrola restart
+./zentrola stop
+```
+
+Windows PowerShell：
 
 ```powershell
-# 先配置 .env 中的数据库密码及独立 JWT 签名密钥，启动后在网页设置管理员。
-docker compose up --build -d
-docker compose logs -f app
-docker compose stop
+.\zentrola.exe status
+.\zentrola.exe restart
+.\zentrola.exe stop
 ```
 
-Compose 仅包含 `app + postgres`，使用独立 PostgreSQL 数据卷，宿主机默认端口 `15432`，与本地已有 `5432` 实例隔离。切换本地程序连接到 Compose 数据库时，将 `.env` 中的 `POSTGRES_PORT` 改为 `15432`。
+健康检查：
 
-Docker 多阶段构建会安装前端锁定依赖并生成静态页面，最终镜像只保留 Go 二进制和页面产物，不运行 Node 服务。管理界面与 API 同源，访问应用根地址即可登录。
+```shell
+curl -fsS http://127.0.0.1:9527/health/live
+curl -i http://127.0.0.1:9527/health/ready
+```
 
-当前 Compose 将应用环境固定为 `prod`，通过 `environment` 注入配置；镜像不包含 `.env` 文件。应用的分层加载不会自动让 Compose 读取宿主机 `.env.prod`。如需将其中的值用于 Compose 变量插值，使用 `docker compose --env-file .env --env-file .env.prod up --build -d`；只有 `compose.yaml` 中映射的变量会传入容器，固定值仍以 Compose 定义为准。
+`/health/live` 表示 Backend 能够响应请求。`/health/ready` 还会检查 PostgreSQL、Master Key、基础数据和管理员初始化状态，但不表示 Provider Resource 已经配置或上游账号可用。
 
-镜像默认输出 JSON 日志，以非 root 身份和只读根文件系统运行。`secrets_data` 持久卷保存 `/data/secrets/master.key`，文件权限为 `0600`，拥有者为 UID 65532；重建应用容器复用原 Key。容器健康检查使用 liveness，业务就绪状态通过 `/health/ready` 检查。
+管理员密码恢复：
 
-本地直接运行时，Master Key 默认保存于 `data/secrets/master.key`；Windows 使用当前用户和 SYSTEM 专用 DACL。Master Key 不存数据库，须与数据库一起保留。连接同一数据库的不同运行方式必须使用同一 Master Key；本地文件与 Compose 卷不会自动同步。
+MacOS/Linux：
 
-SIGINT / SIGTERM 触发停止接收请求、等待在途请求结束、关闭并排空 Usage Queue，最后关闭数据库。HTTP 不设全局 WriteTimeout，以支持长 SSE。
+```bash
+./zentrola password --username <管理员账号>
+```
 
-## 开发检查
+Windows PowerShell：
 
 ```powershell
-go test ./...
-go vet ./...
-go build -o bin/zentrola.exe ./cmd/server
-
-# PostgreSQL 集成测试：仅在随机隔离 schema 中验证并清理，不修改 public 业务表。
-$env:ZENTROLA_INTEGRATION = '1'
-go test ./internal/infrastructure/postgres -count=1 -v
-Remove-Item Env:ZENTROLA_INTEGRATION
-
-# 修改 Migration 或查询之后，使用 sqlc 1.30.0 重新生成。
-sqlc generate
-# 无本地 sqlc 时，在项目根目录使用固定版本镜像：
-docker run --rm --mount "type=bind,source=$($PWD.Path),target=/src" --workdir /src sqlc/sqlc:1.30.0 generate
+.\zentrola.exe password --username <管理员账号>
 ```
 
-支持 race detector 的 Go 工具链上可执行 `go test -race ./...`。32 位 Windows Go 不支持 race detector。
+执行密码恢复前，应先停止使用相同 `ID_NODE` 的 Backend。新密码只显示一次，应保存到密码管理器，不要把命令输出写入共享日志。
 
-## 当前范围
+## 数据与备份
 
-按用户追加授权支持 Anthropic / DeepSeek 两个固定官方 Provider，不建设通用多 Provider 路由。暂不实现 Redis、Failover、Cost、Knowledge、Skill、MCP 或 APPLICATION 闭环。
+Backend 默认在发布目录下生成：
+
+```text
+data/secrets/master.key
+```
+
+Master Key 用于加密 Provider Credential，不存储在 PostgreSQL 中。PostgreSQL 数据与 Master Key 必须作为一组备份和恢复；只有数据库而没有原 Master Key 时，已经保存的 Provider Credential 无法解密。
+
+如果使用 PostgreSQL Docker 示例，停止数据库不会删除数据：
+
+```shell
+docker compose stop postgres
+```
+
+不要执行 `docker compose down -v`，除非明确要永久删除 PostgreSQL 数据卷。
+
+## 安全说明
+
+- 不要提交或对外发送 `.env`、Provider Credential、Virtual Key、管理员密码和 Master Key。
+- Admin JWT 与 Virtual Key 用途不同，禁止混用。
+- 正式环境应通过 HTTPS 暴露 Admin Web 和 Gateway。
+- CORS 只允许实际使用的 Admin Web Origin，不使用通配符。
+- 不在日志、Issue、截图或客户端配置示例中暴露任何 Credential。
+
+## 接口文档
+
+`APP_ENV=dev` 或 `APP_ENV=test` 时，Backend 提供：
+
+- Swagger UI：`http://<backend-host>:<backend-port>/swagger/index.html`
+- Swagger JSON：`http://<backend-host>:<backend-port>/swagger/doc.json`
+
+`APP_ENV=prod` 时不注册 Swagger 路由。完整 Backend 配置见 [.env.example](.env.example)。

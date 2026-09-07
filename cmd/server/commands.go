@@ -165,7 +165,7 @@ start --foreground 和 serve 前台运行，通过 Ctrl+C 或容器信号停止�
 检查服务的 /health/live，原样输出接口响应体；HTTP 200 退出码为 0，失败为非 0。
 优先检查当前受管理后台服务的实际端口；--config 可临时指定其他配置。
 没有后台服务时复用 config 绑定，只读取 HTTP_ADDR，不连接数据库。
-未绑定且未传 --config 时沿用系统 HTTP_ADDR（默认 :8080），兼容容器探针。`)
+未绑定且未传 --config 时沿用系统 HTTP_ADDR（默认 :9527）。`)
 		return err
 	}
 	if name == "password" {
@@ -197,7 +197,7 @@ start --foreground 和 serve 前台运行，通过 Ctrl+C 或容器信号停止�
 
 支持 zentrola --help、zentrola -h 及 <命令> --help。
 运行命令统一复用 config 绑定，支持 --config <路径> 临时覆盖。
-未绑定时默认读取当前目录 .env；healthcheck 沿用系统 HTTP_ADDR（默认 :8080）。
+未绑定时默认读取当前目录 .env；healthcheck 沿用系统 HTTP_ADDR（默认 :9527）。
 除帮助外，命令按既有配置规则运行；help 无需配置文件或数据库连接。
 执行 password 前，停止使用相同 ID_NODE 的服务进程。`)
 	return err

@@ -8,7 +8,7 @@ param(
     [switch]$VerifyUsage
 )
 $ErrorActionPreference = 'Stop'
-$base = 'http://127.0.0.1:8080'
+$base = 'http://127.0.0.1:9527'
 $adminHeaders = @{}
 $member = $null
 $group = $null

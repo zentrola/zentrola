@@ -46,6 +46,7 @@ func (s *BootstrapStore) initialize(ctx context.Context, seed bootstrap.Seed) er
 		return tx.Commit(ctx)
 	}
 	at := pgtype.Timestamptz{Time: seed.CreatedAt, Valid: true}
+	anthropicBaseURL := "https://api.anthropic.com"
 	if err := queries.CreateBootstrapOrganization(ctx, dbgen.CreateBootstrapOrganizationParams{
 		ID: seed.OrganizationID, OrganizationCode: "default", OrganizationName: "zentrola", CreatedAt: at,
 	}); err != nil {
@@ -53,7 +54,7 @@ func (s *BootstrapStore) initialize(ctx context.Context, seed bootstrap.Seed) er
 	}
 	if err := queries.CreateBootstrapProvider(ctx, dbgen.CreateBootstrapProviderParams{
 		ID: seed.ProviderID, ProviderCode: catalog.AnthropicOfficialCode, ProviderName: "Anthropic Official",
-		AnthropicBaseUrl: "https://api.anthropic.com", CreatedAt: at,
+		AnthropicBaseUrl: &anthropicBaseURL, CreatedAt: at,
 	}); err != nil {
 		return err
 	}

@@ -13,6 +13,27 @@ type CredentialOwner struct{ OrganizationID, ProviderID, ResourceID int64 }
 func (o CredentialOwner) Valid() bool {
 	return o.OrganizationID > 0 && o.ProviderID > 0 && o.ResourceID > 0
 }
+
+// ProviderProxyOwner 为全局服务商代理秘密提供独立 AAD，避免与组织资源凭证混用。
+type ProviderProxyOwner struct {
+	ProviderID int64
+	Field      string
+}
+
+func (o ProviderProxyOwner) Valid() bool {
+	return o.ProviderID > 0 && (o.Field == "url" || o.Field == "headers")
+}
+func (o ProviderProxyOwner) AAD() []byte {
+	data := []byte("zentrola:provider-proxy:v1:" + o.Field + ":")
+	return binary.BigEndian.AppendUint64(data, uint64(o.ProviderID))
+}
+
+// OutboundProxy 仅在一次上游调用期间保存解密后的代理配置，不可序列化或记录日志。
+type OutboundProxy struct {
+	URL     string            `json:"-"`
+	Headers map[string]string `json:"-"`
+}
+
 func (o CredentialOwner) AAD() []byte {
 	data := []byte("zentrola:resource:v1:")
 	data = binary.BigEndian.AppendUint64(data, uint64(o.OrganizationID))

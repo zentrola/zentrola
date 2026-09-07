@@ -70,7 +70,7 @@ func TestLoadLayeredConfiguration(t *testing.T) {
 		wantError   string
 	}{
 		{
-			name: "default dev without files", environment: "dev", addr: ":8080", format: "text",
+			name: "default dev without files", environment: "dev", addr: ":9527", format: "text",
 		},
 		{
 			name:        "default dev loads overlay without common file",

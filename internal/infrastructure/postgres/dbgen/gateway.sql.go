@@ -34,10 +34,13 @@ func (q *Queries) GatewayIdentityActive(ctx context.Context, arg GatewayIdentity
 }
 
 const gatewayMappings = `-- name: GatewayMappings :many
-SELECT pm.id,pm.provider_id,pm.upstream_model_code,p.anthropic_base_url,p.openai_base_url FROM provider_model pm
+SELECT pm.id,pm.provider_id,pm.upstream_model_code,p.anthropic_base_url,p.openai_base_url,
+       p.proxy_enabled,p.proxy_url_ciphertext,p.proxy_url_nonce,p.proxy_url_key_version,
+       p.proxy_headers_ciphertext,p.proxy_headers_nonce,p.proxy_headers_key_version
+FROM provider_model pm
 JOIN ai_provider p ON p.id=pm.provider_id
 WHERE pm.model_id=$1 AND NOT pm.is_deleted AND pm.status='ACTIVE' AND pm.protocol_type=$2
-AND NOT p.is_deleted AND p.status='ACTIVE' AND p.provider_type='OFFICIAL' AND p.provider_code IN ('anthropic-official','deepseek-official')
+AND NOT p.is_deleted AND p.status='ACTIVE'
 ORDER BY pm.id LIMIT 2
 `
 
@@ -47,11 +50,18 @@ type GatewayMappingsParams struct {
 }
 
 type GatewayMappingsRow struct {
-	ID                int64
-	ProviderID        int64
-	UpstreamModelCode string
-	AnthropicBaseUrl  string
-	OpenaiBaseUrl     *string
+	ID                     int64
+	ProviderID             int64
+	UpstreamModelCode      string
+	AnthropicBaseUrl       *string
+	OpenaiBaseUrl          *string
+	ProxyEnabled           bool
+	ProxyUrlCiphertext     []byte
+	ProxyUrlNonce          []byte
+	ProxyUrlKeyVersion     *int32
+	ProxyHeadersCiphertext []byte
+	ProxyHeadersNonce      []byte
+	ProxyHeadersKeyVersion *int32
 }
 
 func (q *Queries) GatewayMappings(ctx context.Context, arg GatewayMappingsParams) ([]GatewayMappingsRow, error) {
@@ -69,6 +79,13 @@ func (q *Queries) GatewayMappings(ctx context.Context, arg GatewayMappingsParams
 			&i.UpstreamModelCode,
 			&i.AnthropicBaseUrl,
 			&i.OpenaiBaseUrl,
+			&i.ProxyEnabled,
+			&i.ProxyUrlCiphertext,
+			&i.ProxyUrlNonce,
+			&i.ProxyUrlKeyVersion,
+			&i.ProxyHeadersCiphertext,
+			&i.ProxyHeadersNonce,
+			&i.ProxyHeadersKeyVersion,
 		); err != nil {
 			return nil, err
 		}
@@ -143,7 +160,7 @@ func (q *Queries) GatewayResources(ctx context.Context, arg GatewayResourcesPara
 const openAIModels = `-- name: OpenAIModels :many
 SELECT m.model_code,m.created_at,p.provider_code FROM ai_model m
 JOIN provider_model pm ON pm.model_id=m.id AND NOT pm.is_deleted AND pm.status='ACTIVE' AND pm.protocol_type='OPENAI'
-JOIN ai_provider p ON p.id=pm.provider_id AND NOT p.is_deleted AND p.status='ACTIVE' AND p.provider_code='deepseek-official' AND p.openai_base_url='https://api.deepseek.com'
+JOIN ai_provider p ON p.id=pm.provider_id AND NOT p.is_deleted AND p.status='ACTIVE' AND p.openai_base_url IS NOT NULL
 WHERE NOT m.is_deleted AND m.status='ACTIVE'
 AND EXISTS(SELECT 1 FROM ai_resource r WHERE r.provider_id=p.id AND r.organization_id=$1 AND NOT r.is_deleted AND r.status='ACTIVE')
 AND EXISTS(SELECT 1 FROM principal_group pg JOIN ai_group g ON g.id=pg.group_id AND g.organization_id=pg.organization_id

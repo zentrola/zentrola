@@ -1,7 +1,7 @@
 import { computed, ref, onBeforeUnmount, type Ref } from 'vue'
 import { api, errorText } from './api'
 import type { Page } from './types'
-import { t } from './i18n'
+import { activeLocale, t } from './i18n'
 
 export function useListSearch<T>(
   items: Ref<T[]>,
@@ -76,7 +76,7 @@ export function useAction() {
 }
 export function date(value: string | null | undefined) {
   return value
-    ? new Intl.DateTimeFormat('zh-CN', {
+    ? new Intl.DateTimeFormat(activeLocale.value, {
         dateStyle: 'medium',
         timeStyle: 'short',
         hour12: false,
@@ -85,11 +85,11 @@ export function date(value: string | null | undefined) {
 }
 export function dateOnly(value: string | null | undefined) {
   return value
-    ? new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium' }).format(new Date(value))
+    ? new Intl.DateTimeFormat(activeLocale.value, { dateStyle: 'medium' }).format(new Date(value))
     : t('common.none')
 }
 export function count(value: number | null) {
-  return value === null ? '—' : new Intl.NumberFormat('zh-CN').format(value)
+  return value === null ? '—' : new Intl.NumberFormat(activeLocale.value).format(value)
 }
 export function validText(value: string, bytes: number, required = true) {
   return (

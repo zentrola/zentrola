@@ -12,6 +12,7 @@ import (
 	"time"
 
 	gw "github.com/zentrola/zentrola/internal/application/gateway"
+	"github.com/zentrola/zentrola/internal/infrastructure/provider"
 )
 
 type GatewayClient struct{ client *http.Client }
@@ -77,8 +78,13 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 	if input.RequestID != "" {
 		req.Header.Set("X-Request-ID", input.RequestID)
 	}
-	resp, err := c.client.Do(req)
+	client, cleanup, err := provider.ClientWithProxy(c.client, route.Proxy)
 	if err != nil {
+		return nil, gw.ErrProxy
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		cleanup()
 		if errors.Is(ctx.Err(), context.Canceled) {
 			return nil, gw.ErrCancelled
 		}
@@ -90,9 +96,10 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 	}
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
 		resp.Body.Close()
+		cleanup()
 		return nil, gw.ErrUpstream
 	}
-	return &gw.Response{Status: resp.StatusCode, Headers: resp.Header, Body: &gatewayBody{ReadCloser: resp.Body, headers: req.Header}}, nil
+	return &gw.Response{Status: resp.StatusCode, Headers: resp.Header, Body: &gatewayBody{ReadCloser: resp.Body, headers: req.Header, cleanup: cleanup}}, nil
 }
 
 // 请求 Header 仅保留到 HTTP 事务结束；Body 关闭后再修改，避免与 transport 并发使用。
@@ -101,9 +108,16 @@ type gatewayBody struct {
 	headers http.Header
 	once    sync.Once
 	err     error
+	cleanup func()
 }
 
 func (b *gatewayBody) Close() error {
-	b.once.Do(func() { b.err = b.ReadCloser.Close(); b.headers.Del("x-api-key") })
+	b.once.Do(func() {
+		b.err = b.ReadCloser.Close()
+		b.headers.Del("x-api-key")
+		if b.cleanup != nil {
+			b.cleanup()
+		}
+	})
 	return b.err
 }

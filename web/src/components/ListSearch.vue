@@ -3,7 +3,7 @@ import { t } from '../i18n'
 import Icon from './Icon.vue'
 
 const keyword = defineModel<string>({ required: true })
-defineProps<{ loading?: boolean }>()
+defineProps<{ loading?: boolean; placeholder?: string }>()
 defineEmits<{ search: []; reset: [] }>()
 </script>
 
@@ -14,8 +14,8 @@ defineEmits<{ search: []; reset: [] }>()
       <input
         v-model="keyword"
         type="search"
-        :aria-label="t('common.search')"
-        :placeholder="t('common.search')"
+        :aria-label="placeholder || t('common.search')"
+        :placeholder="placeholder || t('common.search')"
         :disabled="loading"
       />
     </div>

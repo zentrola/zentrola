@@ -3,9 +3,15 @@ import { chromium } from '@playwright/test'
 import { randomBytes } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 import assert from 'node:assert/strict'
-const base = process.env.ZENTROLA_SETUP_WEB_URL
-if (!base || !['127.0.0.1', 'localhost'].includes(new URL(base).hostname))
-  throw new Error('Explicit local setup test URL required')
+const webBase = process.env.ZENTROLA_SETUP_WEB_URL
+const apiBase = process.env.ZENTROLA_SETUP_API_URL
+if (
+  !webBase ||
+  !apiBase ||
+  !['127.0.0.1', 'localhost'].includes(new URL(webBase).hostname) ||
+  !['127.0.0.1', 'localhost'].includes(new URL(apiBase).hostname)
+)
+  throw new Error('Explicit local setup test Web and API URLs are required')
 const browser = await chromium.launch()
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
 const page = await context.newPage(),
@@ -19,11 +25,11 @@ const password = randomBytes(24).toString('base64'),
 let step = 'initial_status',
   passed = false
 try {
-  const initial = await context.request.get(`${base}/api/v1/auth/setup`)
+  const initial = await context.request.get(`${apiBase}/api/v1/auth/setup`)
   assert.equal(initial.status(), 200)
   assert.equal((await initial.json()).data.required, true)
-  assert.equal((await context.request.get(`${base}/health/ready`)).status(), 503)
-  await page.goto(base)
+  assert.equal((await context.request.get(`${apiBase}/health/ready`)).status(), 503)
+  await page.goto(webBase)
   await page.getByRole('heading', { name: '初始化管理员' }).waitFor()
   await mkdir('../.cache/web-visual', { recursive: true })
   await page.screenshot({ path: '../.cache/web-visual/setup.png', fullPage: true })
@@ -37,18 +43,18 @@ try {
   step = 'login'
   await page.getByLabel('密码', { exact: true }).fill(password)
   await page.getByRole('button', { name: '登录控制台' }).click()
-  await page.getByRole('heading', { name: '成员', exact: true }).waitFor()
-  assert.equal((await context.request.get(`${base}/health/ready`)).status(), 200)
+  await page.getByRole('heading', { name: '用户', exact: true }).waitFor()
+  assert.equal((await context.request.get(`${apiBase}/health/ready`)).status(), 200)
   step = 'closed_setup'
-  const status = await context.request.get(`${base}/api/v1/auth/setup`)
+  const status = await context.request.get(`${apiBase}/api/v1/auth/setup`)
   assert.equal((await status.json()).data.required, false)
-  const repeated = await context.request.post(`${base}/api/v1/auth/setup`, {
+  const repeated = await context.request.post(`${apiBase}/api/v1/auth/setup`, {
     data: { username, password },
   })
   assert.equal(repeated.status(), 409)
   assert.equal((await repeated.json()).code, 'ALREADY_INITIALIZED')
   await page.reload()
-  await page.getByRole('heading', { name: '成员', exact: true }).waitFor()
+  await page.getByRole('heading', { name: '用户', exact: true }).waitFor()
   assert.equal(await page.getByRole('button', { name: '创建管理员', exact: true }).count(), 0)
   assert.equal(errors.length, 0)
   passed = true

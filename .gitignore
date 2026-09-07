@@ -4,6 +4,7 @@
 !.env.dev.example
 !.env.test.example
 !.env.prod.example
+!/web/.env.example
 /bin/
 /.cache/
 /data/

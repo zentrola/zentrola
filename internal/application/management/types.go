@@ -58,12 +58,59 @@ type ModelInput struct {
 	Remark           string   `json:"remark"`
 }
 type Provider struct {
-	ID            int64   `json:"id,string"`
-	Code          string  `json:"code"`
-	Name          string  `json:"name"`
-	BaseURL       string  `json:"baseUrl"`
-	OpenAIBaseURL *string `json:"openaiBaseUrl"`
-	Status        string  `json:"status"`
+	ID                 int64                    `json:"id,string"`
+	Code               string                   `json:"code"`
+	Name               string                   `json:"name"`
+	Type               string                   `json:"type"`
+	Website            *string                  `json:"website"`
+	BaseURL            *string                  `json:"baseUrl"`
+	OpenAIBaseURL      *string                  `json:"openaiBaseUrl"`
+	ProxyEnabled       bool                     `json:"proxyEnabled"`
+	ProxyURL           *string                  `json:"proxyUrl"`
+	ProxyHeaders       []ProviderProxyHeader    `json:"proxyHeaders"`
+	Status             string                   `json:"status"`
+	CreatedAt          time.Time                `json:"createdAt"`
+	UpdatedAt          time.Time                `json:"updatedAt"`
+	ProxyURLSealed     catalog.SealedCredential `json:"-"`
+	ProxyHeadersSealed catalog.SealedCredential `json:"-"`
+}
+type ProviderProxyHeader struct {
+	Key        string `json:"key"`
+	Configured bool   `json:"configured"`
+}
+type ProviderProxyHeaderInput struct {
+	Key   string `json:"key" binding:"required"`
+	Value string `json:"value"`
+}
+type ProviderInput struct {
+	Name          string                     `json:"name" binding:"required"`
+	Website       string                     `json:"website"`
+	BaseURL       string                     `json:"baseUrl"`
+	OpenAIBaseURL string                     `json:"openaiBaseUrl"`
+	ProxyEnabled  bool                       `json:"proxyEnabled"`
+	ProxyURL      string                     `json:"proxyUrl"`
+	ProxyHeaders  []ProviderProxyHeaderInput `json:"proxyHeaders"`
+	Mappings      []ProviderMappingInput     `json:"mappings" binding:"required"`
+}
+type ProviderMappingInput struct {
+	ModelID           int64  `json:"modelId,string" binding:"required"`
+	UpstreamModelCode string `json:"upstreamModelCode" binding:"required"`
+	ProtocolType      string `json:"protocolType" binding:"required" enums:"ANTHROPIC,OPENAI"`
+	Status            string `json:"status" binding:"required" enums:"ACTIVE,DISABLED"`
+}
+type ProviderMapping struct {
+	ID                int64     `json:"id,string"`
+	ProviderID        int64     `json:"providerId,string"`
+	ModelID           int64     `json:"modelId,string"`
+	UpstreamModelCode string    `json:"upstreamModelCode"`
+	ProtocolType      string    `json:"protocolType"`
+	Status            string    `json:"status"`
+	CreatedAt         time.Time `json:"createdAt"`
+	UpdatedAt         time.Time `json:"updatedAt"`
+}
+type ProviderDetail struct {
+	Provider
+	Mappings []ProviderMapping `json:"mappings"`
 }
 type Resource struct {
 	ID                   int64     `json:"id,string"`
@@ -111,14 +158,16 @@ type Audit struct {
 type Reader interface {
 	Members(context.Context, Page) ([]Member, error)
 	Member(context.Context, int64) (Member, error)
-	Groups(context.Context, Page) ([]Group, error)
+	Groups(context.Context, Page, string) ([]Group, error)
 	Group(context.Context, int64) (Group, error)
+	MemberGroups(context.Context, int64, Page) ([]Group, error)
 	GroupMembers(context.Context, int64, Page) ([]Member, error)
 	GroupModels(context.Context, int64, Page) ([]Model, error)
-	Models(context.Context, Page) ([]Model, error)
+	Models(context.Context, Page, string) ([]Model, error)
 	Model(context.Context, int64) (Model, error)
 	Providers(context.Context, Page) ([]Provider, error)
 	Provider(context.Context, int64) (Provider, error)
+	ProviderMappings(context.Context, int64) ([]ProviderMapping, error)
 	Resources(context.Context, Page) ([]Resource, error)
 	Resource(context.Context, int64) (ResourceRecord, error)
 	Keys(context.Context, int64, Page) ([]Key, error)
@@ -127,14 +176,25 @@ type Reader interface {
 type Writer interface {
 	Reader
 	CreateMember(context.Context, Member) error
+	UpdateMember(context.Context, Member) error
 	SetMemberStatus(context.Context, int64, string) error
 	DeleteMember(context.Context, int64) error
 	CreateGroup(context.Context, Group) error
+	UpdateGroup(context.Context, Group) error
+	SetGroupStatus(context.Context, int64, string) error
+	DeleteGroup(context.Context, int64) error
 	SetGroupMember(context.Context, int64, int64, bool) (bool, error)
 	SetGroupModel(context.Context, int64, int64, bool) (bool, error)
 	SetModelStatus(context.Context, int64, string) error
 	CreateModel(context.Context, Model) error
 	UpdateModel(context.Context, Model) error
+	CreateProvider(context.Context, Provider) error
+	UpdateProvider(context.Context, Provider) error
+	DeleteProvider(context.Context, int64, time.Time) error
+	SetProviderStatus(context.Context, int64, string) error
+	CreateProviderMapping(context.Context, ProviderMapping) error
+	UpdateProviderMapping(context.Context, ProviderMapping) error
+	DeleteProviderMapping(context.Context, int64, int64, time.Time) error
 	CreateResource(context.Context, ResourceRecord) error
 	UpdateResource(context.Context, ResourceRecord) error
 	Audit(context.Context, Audit, appsec.RequestMeta) error
@@ -146,6 +206,8 @@ type Store interface {
 type Cipher interface {
 	Encrypt([]byte, catalog.CredentialOwner) (catalog.SealedCredential, error)
 	Decrypt(catalog.SealedCredential, catalog.CredentialOwner) ([]byte, error)
+	EncryptProviderProxy([]byte, catalog.ProviderProxyOwner) (catalog.SealedCredential, error)
+	DecryptProviderProxy(catalog.SealedCredential, catalog.ProviderProxyOwner) ([]byte, error)
 }
 type ConnectionResult struct {
 	OK         bool   `json:"ok"`
@@ -154,5 +216,5 @@ type ConnectionResult struct {
 	LatencyMS  int64  `json:"latencyMs"`
 }
 type ConnectionTester interface {
-	Test(context.Context, string, []byte) ConnectionResult
+	Test(context.Context, string, string, []byte, *catalog.OutboundProxy) ConnectionResult
 }

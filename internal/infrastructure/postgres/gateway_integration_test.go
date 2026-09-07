@@ -87,7 +87,7 @@ func TestStage4Integration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	models, err := management.Models(ctx, actor, mgmt.Page{Limit: 50})
+	models, err := management.Models(ctx, actor, mgmt.Page{Limit: 50}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,6 +261,9 @@ func TestStage4Integration(t *testing.T) {
 			t.Fatal(err)
 		}
 		if err := management.SetGroupModel(ctx, actor, group.ID, modelID, true, appsec.RequestMeta{}); err != nil {
+			t.Fatal(err)
+		}
+		if err := management.SetResourceStatus(ctx, actor, resource.ID, "DISABLED", appsec.RequestMeta{}); err != nil {
 			t.Fatal(err)
 		}
 		checkFailure(503, "RESOURCE_UNAVAILABLE")

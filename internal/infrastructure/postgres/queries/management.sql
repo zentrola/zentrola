@@ -10,6 +10,9 @@ SELECT * FROM principal WHERE organization_id=$1 AND id=$2 AND is_deleted=false 
 -- name: ManageCreateMember :exec
 INSERT INTO principal(id,organization_id,principal_type,name,remark,status,created_by,updated_by,created_at,updated_at)
 VALUES($1,$2,'MEMBER',$3,$4,'ACTIVE',$5,$5,$6,$6);
+-- name: ManageUpdateMember :exec
+UPDATE principal SET name=$3,remark=$4,updated_by=$5,updated_at=$6
+WHERE organization_id=$1 AND id=$2 AND is_deleted=false AND principal_type='MEMBER';
 -- name: ManageMemberStatus :exec
 UPDATE principal SET status=$3,updated_by=$4,updated_at=$5 WHERE organization_id=$1 AND id=$2 AND is_deleted=false AND principal_type='MEMBER';
 
@@ -24,18 +27,42 @@ UPDATE access_key SET status='REVOKED',revoked_at=$4,updated_by=$3,updated_at=$4
 WHERE organization_id=$1 AND principal_id=$2 AND is_deleted=false AND status<>'REVOKED';
 
 -- name: ManageGroups :many
-SELECT * FROM ai_group WHERE organization_id=$1 AND is_deleted=false AND id>$2 ORDER BY id LIMIT $3;
+SELECT * FROM ai_group
+WHERE organization_id=sqlc.arg(organization_id)
+  AND is_deleted=false
+  AND (sqlc.arg(status)::text = '' OR status = sqlc.arg(status)::text)
+  AND (id<sqlc.arg(after_id) OR sqlc.arg(after_id)=0)
+ORDER BY id DESC
+LIMIT sqlc.arg(page_limit);
 -- name: ManageGroup :one
 SELECT * FROM ai_group WHERE organization_id=$1 AND id=$2 AND is_deleted=false;
 -- name: ManageCreateGroup :exec
 INSERT INTO ai_group(id,organization_id,group_code,group_name,remark,status,created_by,updated_by,created_at,updated_at)
 VALUES($1,$2,$3,$4,$5,'ACTIVE',$6,$6,$7,$7);
+-- name: ManageUpdateGroup :exec
+UPDATE ai_group SET group_name=$3,remark=$4,updated_by=$5,updated_at=$6
+WHERE organization_id=$1 AND id=$2 AND is_deleted=false;
+-- name: ManageGroupStatus :exec
+UPDATE ai_group SET status=$3,updated_by=$4,updated_at=$5
+WHERE organization_id=$1 AND id=$2 AND is_deleted=false;
+-- name: ManageDeleteGroup :exec
+UPDATE ai_group SET is_deleted=true,status='DISABLED',updated_by=$3,updated_at=$4
+WHERE organization_id=$1 AND id=$2 AND is_deleted=false;
+-- name: ManageDeleteGroupMembers :exec
+UPDATE principal_group SET is_deleted=true,updated_by=$3,updated_at=$4
+WHERE organization_id=$1 AND group_id=$2 AND is_deleted=false;
+-- name: ManageDeleteGroupModels :exec
+UPDATE group_model_permission SET is_deleted=true,updated_by=$3,updated_at=$4
+WHERE organization_id=$1 AND group_id=$2 AND is_deleted=false;
 -- name: ManageGroupMembers :many
 SELECT p.* FROM principal p JOIN principal_group g ON g.principal_id=p.id AND g.organization_id=p.organization_id
-WHERE p.organization_id=$1 AND g.group_id=$2 AND g.is_deleted=false AND p.is_deleted=false AND p.principal_type='MEMBER' AND p.id>$3 ORDER BY p.id LIMIT $4;
+WHERE p.organization_id=$1 AND g.group_id=$2 AND g.is_deleted=false AND p.is_deleted=false AND p.principal_type='MEMBER' AND (p.id<$3 OR $3=0) ORDER BY p.id DESC LIMIT $4;
+-- name: ManageMemberGroups :many
+SELECT g.* FROM ai_group g JOIN principal_group pg ON pg.group_id=g.id AND pg.organization_id=g.organization_id
+WHERE g.organization_id=$1 AND pg.principal_id=$2 AND pg.is_deleted=false AND g.is_deleted=false AND (g.id<$3 OR $3=0) ORDER BY g.id DESC LIMIT $4;
 -- name: ManageGroupModels :many
 SELECT m.* FROM ai_model m JOIN group_model_permission g ON g.model_id=m.id
-WHERE g.organization_id=$1 AND g.group_id=$2 AND g.is_deleted=false AND m.is_deleted=false AND m.id>$3 ORDER BY m.id LIMIT $4;
+WHERE g.organization_id=$1 AND g.group_id=$2 AND g.is_deleted=false AND m.is_deleted=false AND (m.id<$3 OR $3=0) ORDER BY m.id DESC LIMIT $4;
 -- name: ManageMembershipExists :one
 SELECT EXISTS(SELECT 1 FROM principal_group WHERE organization_id=$1 AND group_id=$2 AND principal_id=$3 AND is_deleted=false);
 -- name: ManageAddMember :exec
@@ -52,7 +79,12 @@ VALUES($1,$2,$3,$4,$5,$5,$6,$6);
 UPDATE group_model_permission SET is_deleted=true,updated_by=$4,updated_at=$5 WHERE organization_id=$1 AND group_id=$2 AND model_id=$3 AND is_deleted=false;
 
 -- name: ManageModels :many
-SELECT * FROM ai_model WHERE is_deleted=false AND id>$1 ORDER BY id LIMIT $2;
+SELECT * FROM ai_model
+WHERE is_deleted=false
+  AND (sqlc.arg(status)::text = '' OR status = sqlc.arg(status)::text)
+  AND (id<sqlc.arg(after_id) OR sqlc.arg(after_id)=0)
+ORDER BY id DESC
+LIMIT sqlc.arg(page_limit);
 -- name: ManageModel :one
 SELECT * FROM ai_model WHERE id=$1 AND is_deleted=false;
 -- name: ManageModelStatus :exec
@@ -64,13 +96,55 @@ VALUES($1,$2,$3,$4,$5,$6,'DISABLED',$7,$7,$8,$8);
 UPDATE ai_model SET model_code=$2,display_name=$3,input_modalities=$4,output_modalities=$5,remark=$6,updated_by=$7,updated_at=$8
 WHERE id=$1 AND is_deleted=false;
 -- name: ManageProviders :many
-SELECT * FROM ai_provider WHERE is_deleted=false AND provider_code IN ('anthropic-official','deepseek-official') AND provider_type='OFFICIAL' AND id>$1 ORDER BY id LIMIT $2;
+SELECT * FROM ai_provider WHERE is_deleted=false AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2;
 -- name: ManageProvider :one
-SELECT * FROM ai_provider WHERE id=$1 AND is_deleted=false AND provider_code IN ('anthropic-official','deepseek-official') AND provider_type='OFFICIAL';
+SELECT * FROM ai_provider WHERE id=$1 AND is_deleted=false;
+-- name: ManageCreateProvider :exec
+INSERT INTO ai_provider(id,provider_code,provider_name,provider_type,official_website,anthropic_base_url,openai_base_url,proxy_enabled,proxy_url_display,proxy_url_ciphertext,proxy_url_nonce,proxy_url_key_version,proxy_header_names,proxy_headers_ciphertext,proxy_headers_nonce,proxy_headers_key_version,status,created_by,updated_by,created_at,updated_at)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$18,$19,$19);
+-- name: ManageUpdateProvider :exec
+UPDATE ai_provider SET provider_name=$2,official_website=$3,anthropic_base_url=$4,openai_base_url=$5,proxy_enabled=$6,proxy_url_display=$7,proxy_url_ciphertext=$8,proxy_url_nonce=$9,proxy_url_key_version=$10,proxy_header_names=$11,proxy_headers_ciphertext=$12,proxy_headers_nonce=$13,proxy_headers_key_version=$14,updated_by=$15,updated_at=$16
+WHERE id=$1 AND is_deleted=false;
+-- name: ManageDeleteProvider :exec
+UPDATE ai_provider
+SET status='DISABLED',is_deleted=true,proxy_enabled=false,proxy_url_display=NULL,
+    proxy_url_ciphertext=NULL,proxy_url_nonce=NULL,proxy_url_key_version=NULL,
+    proxy_header_names='[]'::jsonb,proxy_headers_ciphertext=NULL,proxy_headers_nonce=NULL,
+    proxy_headers_key_version=NULL,updated_by=$2,updated_at=$3
+WHERE id=$1 AND is_deleted=false;
+-- name: ManageDeleteProviderMappings :exec
+UPDATE provider_model
+SET status='DISABLED',is_deleted=true,updated_by=$2,updated_at=$3
+WHERE provider_id=$1 AND is_deleted=false;
+-- name: ManageDeleteProviderResources :exec
+UPDATE ai_resource
+SET status='DISABLED',is_deleted=true,updated_by=$2,updated_at=$3
+WHERE provider_id=$1 AND is_deleted=false;
+-- name: ManageProviderStatus :exec
+UPDATE ai_provider SET status=$2,updated_by=$3,updated_at=$4 WHERE id=$1 AND is_deleted=false;
+
+-- name: ManageProviderMappings :many
+SELECT * FROM provider_model
+WHERE provider_id=$1 AND is_deleted=false
+ORDER BY id;
+
+-- name: ManageCreateProviderMapping :exec
+INSERT INTO provider_model(id,provider_id,model_id,upstream_model_code,protocol_type,status,created_by,updated_by,created_at,updated_at)
+VALUES($1,$2,$3,$4,$5,$6,$7,$7,$8,$8);
+
+-- name: ManageUpdateProviderMapping :exec
+UPDATE provider_model
+SET upstream_model_code=$3,status=$4,updated_by=$5,updated_at=$6
+WHERE id=$1 AND provider_id=$2 AND is_deleted=false;
+
+-- name: ManageDeleteProviderMapping :exec
+UPDATE provider_model
+SET status='DISABLED',is_deleted=true,updated_by=$3,updated_at=$4
+WHERE id=$1 AND provider_id=$2 AND is_deleted=false;
 
 -- name: ManageResources :many
 SELECT id,provider_id,resource_name,status,created_at,updated_at FROM ai_resource
-WHERE organization_id=$1 AND is_deleted=false AND id>$2 ORDER BY id LIMIT $3;
+WHERE organization_id=$1 AND is_deleted=false AND (id<$2 OR $2=0) ORDER BY id DESC LIMIT $3;
 -- name: ManageResource :one
 SELECT * FROM ai_resource WHERE organization_id=$1 AND id=$2 AND is_deleted=false;
 -- name: ManageCreateResource :exec
@@ -85,4 +159,4 @@ SELECT id,name,key_prefix,status,expires_at,revoked_at,created_at FROM access_ke
 WHERE organization_id=$1 AND principal_id=$2 AND is_deleted=false AND (id<$3 OR $3=0) ORDER BY id DESC LIMIT $4;
 -- name: ManageOperations :many
 SELECT id,operator_name,operation_type,target_type,target_id,request_id,result,error_code,before_data,after_data,created_at
-FROM operation_log WHERE organization_id=$1 AND id>$2 ORDER BY id LIMIT $3;
+FROM operation_log WHERE organization_id=$1 AND (id<$2 OR $2=0) ORDER BY id DESC LIMIT $3;

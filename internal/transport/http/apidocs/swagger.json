@@ -790,7 +790,7 @@
                         "AdminBearer": []
                     }
                 ],
-                "description": "按 ID 升序分页；将 nextCursor 作为下一次请求的 after。",
+                "description": "按 ID 倒序分页，最新分组在前；将 nextCursor 作为下一次请求的 after，继续查询更小的 ID。",
                 "produces": [
                     "application/json"
                 ],
@@ -812,6 +812,16 @@
                         "default": 50,
                         "description": "每页数量",
                         "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "ACTIVE",
+                            "DISABLED"
+                        ],
+                        "type": "string",
+                        "description": "分组状态",
+                        "name": "status",
                         "in": "query"
                     }
                 ],
@@ -1030,6 +1040,148 @@
                         }
                     }
                 }
+            },
+            "put": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "description": "更新分组名称、备注和允许访问的模型，所有变更在同一事务内生效。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "分组与授权"
+                ],
+                "summary": "编辑分组",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "分组 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "请求参数",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.UpdateGroupRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/management.Group"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "description": "逻辑删除分组，并解除其用户关系和模型授权；保留操作日志。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "分组与授权"
+                ],
+                "summary": "删除分组",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "分组 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
             }
         },
         "/api/v1/groups/{id}/members": {
@@ -1039,7 +1191,7 @@
                         "AdminBearer": []
                     }
                 ],
-                "description": "按 ID 升序分页；将 nextCursor 作为下一次请求的 after。",
+                "description": "按成员 ID 倒序分页；将 nextCursor 作为下一次请求的 after，继续查询更小的 ID。",
                 "produces": [
                     "application/json"
                 ],
@@ -1316,7 +1468,7 @@
                         "AdminBearer": []
                     }
                 ],
-                "description": "按 ID 升序分页；将 nextCursor 作为下一次请求的 after。",
+                "description": "按模型 ID 倒序分页；将 nextCursor 作为下一次请求的 after，继续查询更小的 ID。",
                 "produces": [
                     "application/json"
                 ],
@@ -1520,6 +1672,105 @@
                         "name": "modelId",
                         "in": "path",
                         "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/http.UpdatedResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "请求追踪 ID"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/groups/{id}/status": {
+            "patch": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "分组与授权"
+                ],
+                "summary": "修改分组状态",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "业务 ID（正整数字符串）",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "请求参数",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.UpdateStatusRequest"
+                        }
                     }
                 ],
                 "responses": {
@@ -1900,6 +2151,92 @@
                     }
                 }
             },
+            "put": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "description": "更新用户名称、备注和所属分组，所有变更在同一事务内生效。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "成员管理"
+                ],
+                "summary": "编辑用户",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "用户 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "请求参数",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.UpdateMemberRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/management.Member"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            },
             "delete": {
                 "security": [
                     {
@@ -1928,6 +2265,97 @@
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/members/{id}/groups": {
+            "get": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "description": "按分组 ID 倒序分页；用于查看和编辑用户的分组关系。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "成员管理"
+                ],
+                "summary": "用户所属分组列表",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "用户 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "上一页 nextCursor，默认从头查询",
+                        "name": "after",
+                        "in": "query"
+                    },
+                    {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer",
+                        "default": 50,
+                        "description": "每页数量",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/http.PageResponse-management_Group"
+                                        }
+                                    }
+                                }
+                            ]
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "请求追踪 ID"
+                            }
                         }
                     },
                     "400": {
@@ -2252,7 +2680,7 @@
                         "AdminBearer": []
                     }
                 ],
-                "description": "按 ID 升序分页；将 nextCursor 作为下一次请求的 after。",
+                "description": "按 ID 倒序分页，最新模型在前；可通过 status 只查询启用或停用模型；将 nextCursor 作为下一次请求的 after。",
                 "produces": [
                     "application/json"
                 ],
@@ -2274,6 +2702,16 @@
                         "default": 50,
                         "description": "每页数量",
                         "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "ACTIVE",
+                            "DISABLED"
+                        ],
+                        "type": "string",
+                        "description": "模型状态",
+                        "name": "status",
                         "in": "query"
                     }
                 ],
@@ -2663,7 +3101,7 @@
                         "AdminBearer": []
                     }
                 ],
-                "description": "按 ID 升序分页；将 nextCursor 作为下一次请求的 after。",
+                "description": "按 ID 倒序分页，最新操作在前；将 nextCursor 作为下一次请求的 after，继续查询更小的 ID。",
                 "produces": [
                     "application/json"
                 ],
@@ -2747,7 +3185,7 @@
                         "AdminBearer": []
                     }
                 ],
-                "description": "按 ID 升序分页；将 nextCursor 作为下一次请求的 after。",
+                "description": "按 ID 倒序分页，最新供应商在前；将 nextCursor 作为下一次请求的 after，继续查询更小的 ID。",
                 "produces": [
                     "application/json"
                 ],
@@ -2822,6 +3260,321 @@
                         }
                     }
                 }
+            },
+            "post": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "description": "新服务商默认停用；至少配置一种 HTTPS 兼容协议地址和一条模型映射，映射与服务商在同一事务创建。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "模型与资源"
+                ],
+                "summary": "创建服务商",
+                "parameters": [
+                    {
+                        "description": "服务商字段",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/management.ProviderInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/management.Provider"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/providers/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "模型与资源"
+                ],
+                "summary": "服务商详情",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "服务商 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/management.ProviderDetail"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "description": "替换服务商接入信息和模型映射；移除的映射将停用并逻辑删除。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "模型与资源"
+                ],
+                "summary": "编辑服务商",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "服务商 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "服务商字段",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/management.ProviderInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/management.Provider"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/providers/{id}/status": {
+            "patch": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "模型与资源"
+                ],
+                "summary": "修改服务商状态",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "服务商 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "请求参数",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.UpdateStatusRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/http.UpdatedResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
             }
         },
         "/api/v1/resources": {
@@ -2831,7 +3584,7 @@
                         "AdminBearer": []
                     }
                 ],
-                "description": "按 ID 升序分页；将 nextCursor 作为下一次请求的 after。",
+                "description": "按 ID 倒序分页，最新资源在前；将 nextCursor 作为下一次请求的 after，继续查询更小的 ID。",
                 "produces": [
                     "application/json"
                 ],
@@ -2913,7 +3666,7 @@
                         "AdminBearer": []
                     }
                 ],
-                "description": "新资源默认 DISABLED；先测试连接，再显式启用。",
+                "description": "凭证加密保存并默认启用；服务商停用时不会参与实际调用。",
                 "consumes": [
                     "application/json"
                 ],
@@ -3367,7 +4120,7 @@
                         "AdminBearer": []
                     }
                 ],
-                "description": "只查询当前组织；时间区间最长 366 天。",
+                "description": "只查询当前组织；按 ID 倒序分页，最新记录在前；时间区间最长 366 天。",
                 "produces": [
                     "application/json"
                 ],
@@ -3951,13 +4704,23 @@
         "http.CreateGroupRequest": {
             "type": "object",
             "required": [
-                "code",
                 "name"
             ],
             "properties": {
                 "code": {
+                    "description": "Code 仅为兼容旧客户端保留；为空时由服务端生成内部编码。",
                     "type": "string",
                     "example": "engineering"
+                },
+                "modelIds": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "123456789",
+                        "987654321"
+                    ]
                 },
                 "name": {
                     "type": "string",
@@ -3991,6 +4754,16 @@
                 "name"
             ],
             "properties": {
+                "groupIds": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "123456789",
+                        "987654321"
+                    ]
+                },
                 "name": {
                     "type": "string",
                     "example": "开发者"
@@ -4258,6 +5031,58 @@
                 }
             }
         },
+        "http.UpdateGroupRequest": {
+            "type": "object",
+            "required": [
+                "name"
+            ],
+            "properties": {
+                "modelIds": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "123456789",
+                        "987654321"
+                    ]
+                },
+                "name": {
+                    "type": "string",
+                    "example": "研发组"
+                },
+                "remark": {
+                    "type": "string",
+                    "example": "研发模型权限组"
+                }
+            }
+        },
+        "http.UpdateMemberRequest": {
+            "type": "object",
+            "required": [
+                "name"
+            ],
+            "properties": {
+                "groupIds": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "123456789",
+                        "987654321"
+                    ]
+                },
+                "name": {
+                    "type": "string",
+                    "example": "开发者"
+                },
+                "remark": {
+                    "type": "string",
+                    "example": "研发成员"
+                }
+            }
+        },
         "http.UpdateStatusRequest": {
             "type": "object",
             "required": [
@@ -4504,6 +5329,9 @@
                 "code": {
                     "type": "string"
                 },
+                "createdAt": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "string",
                     "example": "0"
@@ -4514,7 +5342,210 @@
                 "openaiBaseUrl": {
                     "type": "string"
                 },
+                "proxyEnabled": {
+                    "type": "boolean"
+                },
+                "proxyHeaders": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/management.ProviderProxyHeader"
+                    }
+                },
+                "proxyUrl": {
+                    "type": "string"
+                },
                 "status": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "updatedAt": {
+                    "type": "string"
+                },
+                "website": {
+                    "type": "string"
+                }
+            }
+        },
+        "management.ProviderDetail": {
+            "type": "object",
+            "properties": {
+                "baseUrl": {
+                    "type": "string"
+                },
+                "code": {
+                    "type": "string"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "mappings": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/management.ProviderMapping"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "openaiBaseUrl": {
+                    "type": "string"
+                },
+                "proxyEnabled": {
+                    "type": "boolean"
+                },
+                "proxyHeaders": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/management.ProviderProxyHeader"
+                    }
+                },
+                "proxyUrl": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "updatedAt": {
+                    "type": "string"
+                },
+                "website": {
+                    "type": "string"
+                }
+            }
+        },
+        "management.ProviderInput": {
+            "type": "object",
+            "required": [
+                "mappings",
+                "name"
+            ],
+            "properties": {
+                "baseUrl": {
+                    "type": "string"
+                },
+                "mappings": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/management.ProviderMappingInput"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "openaiBaseUrl": {
+                    "type": "string"
+                },
+                "proxyEnabled": {
+                    "type": "boolean"
+                },
+                "proxyHeaders": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/management.ProviderProxyHeaderInput"
+                    }
+                },
+                "proxyUrl": {
+                    "type": "string"
+                },
+                "website": {
+                    "type": "string"
+                }
+            }
+        },
+        "management.ProviderMapping": {
+            "type": "object",
+            "properties": {
+                "createdAt": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "modelId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "protocolType": {
+                    "type": "string"
+                },
+                "providerId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updatedAt": {
+                    "type": "string"
+                },
+                "upstreamModelCode": {
+                    "type": "string"
+                }
+            }
+        },
+        "management.ProviderMappingInput": {
+            "type": "object",
+            "required": [
+                "modelId",
+                "protocolType",
+                "status",
+                "upstreamModelCode"
+            ],
+            "properties": {
+                "modelId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "protocolType": {
+                    "type": "string",
+                    "enum": [
+                        "ANTHROPIC",
+                        "OPENAI"
+                    ]
+                },
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "ACTIVE",
+                        "DISABLED"
+                    ]
+                },
+                "upstreamModelCode": {
+                    "type": "string"
+                }
+            }
+        },
+        "management.ProviderProxyHeader": {
+            "type": "object",
+            "properties": {
+                "configured": {
+                    "type": "boolean"
+                },
+                "key": {
+                    "type": "string"
+                }
+            }
+        },
+        "management.ProviderProxyHeaderInput": {
+            "type": "object",
+            "required": [
+                "key"
+            ],
+            "properties": {
+                "key": {
+                    "type": "string"
+                },
+                "value": {
                     "type": "string"
                 }
             }

@@ -8,9 +8,12 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	mgmt "github.com/zentrola/zentrola/internal/application/management"
+	"github.com/zentrola/zentrola/internal/domain/catalog"
+	"github.com/zentrola/zentrola/internal/infrastructure/provider"
 )
 
 type ConnectionTester struct{ client *http.Client }
@@ -23,7 +26,7 @@ func NewConnectionTester() *ConnectionTester {
 	transport.ResponseHeaderTimeout = 10 * time.Second
 	return &ConnectionTester{client: &http.Client{Transport: transport, Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 }
-func (t *ConnectionTester) Test(ctx context.Context, baseURL string, credential []byte) (result mgmt.ConnectionResult) {
+func (t *ConnectionTester) Test(ctx context.Context, protocol, baseURL string, credential []byte, proxy *catalog.OutboundProxy) (result mgmt.ConnectionResult) {
 	started := time.Now()
 	defer func() { result.LatencyMS = time.Since(started).Milliseconds() }()
 	base, allowed := allowedBaseURL(baseURL)
@@ -41,16 +44,24 @@ func (t *ConnectionTester) Test(ctx context.Context, baseURL string, credential 
 		result.Code = "CREDENTIAL_INVALID"
 		return
 	}
-	probeURL := "https://api.anthropic.com/v1/models?limit=1"
-	if base == "https://api.deepseek.com/anthropic" {
+	probeURL := base + "/v1/models?limit=1"
+	bearer := false
+	if protocol == "OPENAI" {
+		probeURL = strings.TrimSuffix(base, "/") + "/models"
+		bearer = true
+	} else if protocol != "ANTHROPIC" {
+		result.Code = "UPSTREAM_URL_REJECTED"
+		return
+	} else if base == "https://api.deepseek.com/anthropic" {
 		probeURL = "https://api.deepseek.com/models"
+		bearer = true
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, probeURL, nil)
 	if err != nil {
 		result.Code = "UPSTREAM_UNAVAILABLE"
 		return
 	}
-	if base == "https://api.deepseek.com/anthropic" {
+	if bearer {
 		req.Header.Set("Authorization", "Bearer "+string(credential))
 	} else {
 		req.Header.Set("x-api-key", string(credential))
@@ -58,7 +69,13 @@ func (t *ConnectionTester) Test(ctx context.Context, baseURL string, credential 
 	}
 	defer func() { req.Header.Del("Authorization"); req.Header.Del("x-api-key") }()
 	req.Header.Set("Accept", "application/json")
-	resp, err := t.client.Do(req)
+	client, cleanup, err := provider.ClientWithProxy(t.client, proxy)
+	if err != nil {
+		result.Code = "PROXY_CONFIGURATION_UNRECOVERABLE"
+		return
+	}
+	defer cleanup()
+	resp, err := client.Do(req)
 	if err != nil {
 		result.Code = connectionErrorCode(ctx, err)
 		return

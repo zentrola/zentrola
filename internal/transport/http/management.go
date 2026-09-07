@@ -26,6 +26,22 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 		err := m.DeleteMember(req.Context(), adminFrom(req), routeID(req, "id"), requestMeta(req))
 		adminResult(w, req, 200, map[string]bool{"deleted": true}, err)
 	})
+	// @Summary 删除分组
+	// @Tags 分组与授权
+	// @Description 逻辑删除分组，并解除其用户关系和模型授权；保留操作日志。
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "分组 ID"
+	// @Success 200 {object} response
+	// @Failure 400 {object} response
+	// @Failure 401 {object} response
+	// @Failure 404 {object} response
+	// @Failure 503 {object} response
+	// @Router /api/v1/groups/{id} [delete]
+	r.Delete("/groups/{id}", func(w http.ResponseWriter, req *http.Request) {
+		err := m.DeleteGroup(req.Context(), adminFrom(req), routeID(req, "id"), requestMeta(req))
+		adminResult(w, req, 200, map[string]bool{"deleted": true}, err)
+	})
 	// @Summary 创建官方模型
 	// @Tags 模型与资源
 	// @Description 官方名称、编码及非空输入输出类型必填；新模型默认停用，接入映射单独配置。
@@ -72,6 +88,68 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 		data, err := m.UpdateModel(req.Context(), adminFrom(req), routeID(req, "id"), input, requestMeta(req))
 		adminResult(w, req, 200, data, err)
 	})
+	// @Summary 创建服务商
+	// @Tags 模型与资源
+	// @Description 新服务商默认停用；至少配置一种 HTTPS 兼容协议地址和一条模型映射，映射与服务商在同一事务创建。
+	// @Accept json
+	// @Produce json
+	// @Security AdminBearer
+	// @Param body body mgmt.ProviderInput true "服务商字段"
+	// @Success 201 {object} response{data=mgmt.Provider}
+	// @Failure 400 {object} response
+	// @Failure 401 {object} response
+	// @Failure 409 {object} response
+	// @Failure 503 {object} response
+	// @Router /api/v1/providers [post]
+	r.Post("/providers", func(w http.ResponseWriter, req *http.Request) {
+		var input mgmt.ProviderInput
+		if err := decodeBody(w, req, &input); err != nil {
+			securityError(w, req, appsec.ErrInvalidArgument)
+			return
+		}
+		data, err := m.CreateProvider(req.Context(), adminFrom(req), input, requestMeta(req))
+		adminResult(w, req, 201, data, err)
+	})
+	// @Summary 编辑服务商
+	// @Tags 模型与资源
+	// @Description 替换服务商接入信息和模型映射；移除的映射将停用并逻辑删除。
+	// @Accept json
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "服务商 ID"
+	// @Param body body mgmt.ProviderInput true "服务商字段"
+	// @Success 200 {object} response{data=mgmt.Provider}
+	// @Failure 400 {object} response
+	// @Failure 401 {object} response
+	// @Failure 404 {object} response
+	// @Failure 409 {object} response
+	// @Failure 503 {object} response
+	// @Router /api/v1/providers/{id} [put]
+	r.Put("/providers/{id}", func(w http.ResponseWriter, req *http.Request) {
+		var input mgmt.ProviderInput
+		if err := decodeBody(w, req, &input); err != nil {
+			securityError(w, req, appsec.ErrInvalidArgument)
+			return
+		}
+		data, err := m.UpdateProvider(req.Context(), adminFrom(req), routeID(req, "id"), input, requestMeta(req))
+		adminResult(w, req, 200, data, err)
+	})
+	// @Summary 删除服务商
+	// @Tags 模型与资源
+	// @Description 逻辑删除服务商，并停用其模型映射和所有组织下的服务商密钥；历史用量和操作日志保留。
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "服务商 ID"
+	// @Success 200 {object} response
+	// @Failure 400 {object} response
+	// @Failure 401 {object} response
+	// @Failure 404 {object} response
+	// @Failure 503 {object} response
+	// @Router /api/v1/providers/{id} [delete]
+	r.Delete("/providers/{id}", func(w http.ResponseWriter, req *http.Request) {
+		err := m.DeleteProvider(req.Context(), adminFrom(req), routeID(req, "id"), requestMeta(req))
+		adminResult(w, req, 200, map[string]bool{"deleted": true}, err)
+	})
 	// @Summary 模型详情
 	// @Tags 模型与资源
 	// @Produce json
@@ -106,11 +184,12 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 	}, func(v mgmt.Member) int64 { return v.ID }))
 	// @Summary 分组列表
 	// @Tags 分组与授权
-	// @Description 按 ID 升序分页；将 nextCursor 作为下一次请求的 after。
+	// @Description 按 ID 倒序分页，最新分组在前；将 nextCursor 作为下一次请求的 after，继续查询更小的 ID。
 	// @Produce json
 	// @Security AdminBearer
 	// @Param after query string false "上一页 nextCursor，默认从头查询"
 	// @Param limit query int false "每页数量" minimum(1) maximum(100) default(50)
+	// @Param status query string false "分组状态" Enums(ACTIVE,DISABLED)
 	// @Success 200 {object} response{data=PageResponse[mgmt.Group]}
 	// @Header all {string} X-Request-ID "请求追踪 ID"
 	// @Failure 400 {object} response
@@ -119,15 +198,24 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 	// @Failure 404 {object} response
 	// @Router /api/v1/groups [get]
 	r.Get("/groups", listEndpoint(func(req *http.Request, p mgmt.Page) ([]mgmt.Group, error) {
-		return m.Groups(req.Context(), adminFrom(req), p)
+		values, exists := req.URL.Query()["status"]
+		if exists && len(values) != 1 {
+			return nil, appsec.ErrInvalidArgument
+		}
+		status := ""
+		if exists {
+			status = values[0]
+		}
+		return m.GroupsByStatus(req.Context(), adminFrom(req), p, status)
 	}, func(v mgmt.Group) int64 { return v.ID }))
 	// @Summary 逻辑模型列表
 	// @Tags 模型与资源
-	// @Description 按 ID 升序分页；将 nextCursor 作为下一次请求的 after。
+	// @Description 按 ID 倒序分页，最新模型在前；可通过 status 只查询启用或停用模型；将 nextCursor 作为下一次请求的 after。
 	// @Produce json
 	// @Security AdminBearer
 	// @Param after query string false "上一页 nextCursor，默认从头查询"
 	// @Param limit query int false "每页数量" minimum(1) maximum(100) default(50)
+	// @Param status query string false "模型状态" Enums(ACTIVE,DISABLED)
 	// @Success 200 {object} response{data=PageResponse[mgmt.Model]}
 	// @Header all {string} X-Request-ID "请求追踪 ID"
 	// @Failure 400 {object} response
@@ -136,11 +224,19 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 	// @Failure 404 {object} response
 	// @Router /api/v1/models [get]
 	r.Get("/models", listEndpoint(func(req *http.Request, p mgmt.Page) ([]mgmt.Model, error) {
-		return m.Models(req.Context(), adminFrom(req), p)
+		values, exists := req.URL.Query()["status"]
+		if exists && len(values) != 1 {
+			return nil, appsec.ErrInvalidArgument
+		}
+		status := ""
+		if exists {
+			status = values[0]
+		}
+		return m.Models(req.Context(), adminFrom(req), p, status)
 	}, func(v mgmt.Model) int64 { return v.ID }))
 	// @Summary 供应商列表
 	// @Tags 模型与资源
-	// @Description 按 ID 升序分页；将 nextCursor 作为下一次请求的 after。
+	// @Description 按 ID 倒序分页，最新供应商在前；将 nextCursor 作为下一次请求的 after，继续查询更小的 ID。
 	// @Produce json
 	// @Security AdminBearer
 	// @Param after query string false "上一页 nextCursor，默认从头查询"
@@ -157,7 +253,7 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 	}, func(v mgmt.Provider) int64 { return v.ID }))
 	// @Summary 资源列表
 	// @Tags 模型与资源
-	// @Description 按 ID 升序分页；将 nextCursor 作为下一次请求的 after。
+	// @Description 按 ID 倒序分页，最新资源在前；将 nextCursor 作为下一次请求的 after，继续查询更小的 ID。
 	// @Produce json
 	// @Security AdminBearer
 	// @Param after query string false "上一页 nextCursor，默认从头查询"
@@ -174,7 +270,7 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 	}, func(v mgmt.Resource) int64 { return v.ID }))
 	// @Summary 操作日志
 	// @Tags 操作日志
-	// @Description 按 ID 升序分页；将 nextCursor 作为下一次请求的 after。
+	// @Description 按 ID 倒序分页，最新操作在前；将 nextCursor 作为下一次请求的 after，继续查询更小的 ID。
 	// @Produce json
 	// @Security AdminBearer
 	// @Param after query string false "上一页 nextCursor，默认从头查询"
@@ -207,9 +303,27 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 	r.Get("/members/{id}/keys", listEndpoint(func(req *http.Request, p mgmt.Page) ([]mgmt.Key, error) {
 		return m.Keys(req.Context(), adminFrom(req), routeID(req, "id"), p)
 	}, func(v mgmt.Key) int64 { return v.ID }))
+	// @Summary 用户所属分组列表
+	// @Tags 成员管理
+	// @Description 按分组 ID 倒序分页；用于查看和编辑用户的分组关系。
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "用户 ID"
+	// @Param after query string false "上一页 nextCursor，默认从头查询"
+	// @Param limit query int false "每页数量" minimum(1) maximum(100) default(50)
+	// @Success 200 {object} response{data=PageResponse[mgmt.Group]}
+	// @Header all {string} X-Request-ID "请求追踪 ID"
+	// @Failure 400 {object} response
+	// @Failure 401 {object} response
+	// @Failure 404 {object} response
+	// @Failure 503 {object} response
+	// @Router /api/v1/members/{id}/groups [get]
+	r.Get("/members/{id}/groups", listEndpoint(func(req *http.Request, p mgmt.Page) ([]mgmt.Group, error) {
+		return m.MemberGroups(req.Context(), adminFrom(req), routeID(req, "id"), p)
+	}, func(v mgmt.Group) int64 { return v.ID }))
 	// @Summary 分组成员列表
 	// @Tags 分组与授权
-	// @Description 按 ID 升序分页；将 nextCursor 作为下一次请求的 after。
+	// @Description 按成员 ID 倒序分页；将 nextCursor 作为下一次请求的 after，继续查询更小的 ID。
 	// @Produce json
 	// @Security AdminBearer
 	// @Param id path string true "业务 ID（正整数字符串）"
@@ -227,7 +341,7 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 	}, func(v mgmt.Member) int64 { return v.ID }))
 	// @Summary 分组授权模型列表
 	// @Tags 分组与授权
-	// @Description 按 ID 升序分页；将 nextCursor 作为下一次请求的 after。
+	// @Description 按模型 ID 倒序分页；将 nextCursor 作为下一次请求的 after，继续查询更小的 ID。
 	// @Produce json
 	// @Security AdminBearer
 	// @Param id path string true "业务 ID（正整数字符串）"
@@ -291,6 +405,21 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 		data, err := m.Resource(req.Context(), adminFrom(req), routeID(req, "id"))
 		adminResult(w, req, 200, data, err)
 	})
+	// @Summary 服务商详情
+	// @Tags 模型与资源
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "服务商 ID"
+	// @Success 200 {object} response{data=mgmt.ProviderDetail}
+	// @Failure 400 {object} response
+	// @Failure 401 {object} response
+	// @Failure 404 {object} response
+	// @Failure 503 {object} response
+	// @Router /api/v1/providers/{id} [get]
+	r.Get("/providers/{id}", func(w http.ResponseWriter, req *http.Request) {
+		data, err := m.Provider(req.Context(), adminFrom(req), routeID(req, "id"))
+		adminResult(w, req, 200, data, err)
+	})
 
 	// @Summary 创建成员
 	// @Tags 成员管理
@@ -313,8 +442,42 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 			securityError(w, req, appsec.ErrInvalidArgument)
 			return
 		}
-		data, err := m.CreateMember(req.Context(), adminFrom(req), input.Name, input.Remark, requestMeta(req))
+		groupIDs, err := requestIDs(input.GroupIDs)
+		if err != nil {
+			securityError(w, req, appsec.ErrInvalidArgument)
+			return
+		}
+		data, err := m.CreateMemberWithGroups(req.Context(), adminFrom(req), input.Name, input.Remark, groupIDs, requestMeta(req))
 		adminResult(w, req, 201, data, err)
+	})
+	// @Summary 编辑用户
+	// @Tags 成员管理
+	// @Description 更新用户名称、备注和所属分组，所有变更在同一事务内生效。
+	// @Produce json
+	// @Security AdminBearer
+	// @Accept json
+	// @Param id path string true "用户 ID"
+	// @Param body body UpdateMemberRequest true "请求参数"
+	// @Success 200 {object} response{data=mgmt.Member}
+	// @Failure 400 {object} response
+	// @Failure 401 {object} response
+	// @Failure 404 {object} response
+	// @Failure 409 {object} response
+	// @Failure 503 {object} response
+	// @Router /api/v1/members/{id} [put]
+	r.Put("/members/{id}", func(w http.ResponseWriter, req *http.Request) {
+		var input UpdateMemberRequest
+		if err := decodeBody(w, req, &input); err != nil {
+			securityError(w, req, appsec.ErrInvalidArgument)
+			return
+		}
+		groupIDs, err := requestIDs(input.GroupIDs)
+		if err != nil {
+			securityError(w, req, appsec.ErrInvalidArgument)
+			return
+		}
+		data, err := m.UpdateMemberWithGroups(req.Context(), adminFrom(req), routeID(req, "id"), input.Name, input.Remark, groupIDs, requestMeta(req))
+		adminResult(w, req, 200, data, err)
 	})
 	// @Summary 创建分组
 	// @Tags 分组与授权
@@ -337,12 +500,46 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 			securityError(w, req, appsec.ErrInvalidArgument)
 			return
 		}
-		data, err := m.CreateGroup(req.Context(), adminFrom(req), input.Code, input.Name, input.Remark, requestMeta(req))
+		modelIDs, err := requestIDs(input.ModelIDs)
+		if err != nil {
+			securityError(w, req, appsec.ErrInvalidArgument)
+			return
+		}
+		data, err := m.CreateGroupWithModels(req.Context(), adminFrom(req), input.Code, input.Name, input.Remark, modelIDs, requestMeta(req))
 		adminResult(w, req, 201, data, err)
+	})
+	// @Summary 编辑分组
+	// @Tags 分组与授权
+	// @Description 更新分组名称、备注和允许访问的模型，所有变更在同一事务内生效。
+	// @Produce json
+	// @Security AdminBearer
+	// @Accept json
+	// @Param id path string true "分组 ID"
+	// @Param body body UpdateGroupRequest true "请求参数"
+	// @Success 200 {object} response{data=mgmt.Group}
+	// @Failure 400 {object} response
+	// @Failure 401 {object} response
+	// @Failure 404 {object} response
+	// @Failure 409 {object} response
+	// @Failure 503 {object} response
+	// @Router /api/v1/groups/{id} [put]
+	r.Put("/groups/{id}", func(w http.ResponseWriter, req *http.Request) {
+		var input UpdateGroupRequest
+		if err := decodeBody(w, req, &input); err != nil {
+			securityError(w, req, appsec.ErrInvalidArgument)
+			return
+		}
+		modelIDs, err := requestIDs(input.ModelIDs)
+		if err != nil {
+			securityError(w, req, appsec.ErrInvalidArgument)
+			return
+		}
+		data, err := m.UpdateGroupWithModels(req.Context(), adminFrom(req), routeID(req, "id"), input.Name, input.Remark, modelIDs, requestMeta(req))
+		adminResult(w, req, 200, data, err)
 	})
 	// @Summary 创建资源
 	// @Tags 模型与资源
-	// @Description 新资源默认 DISABLED；先测试连接，再显式启用。
+	// @Description 凭证加密保存并默认启用；服务商停用时不会参与实际调用。
 	// @Produce json
 	// @Security AdminBearer
 	// @Accept json
@@ -412,6 +609,32 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 		adminResult(w, req, 200, data, err)
 	})
 
+	// @Summary 修改分组状态
+	// @Tags 分组与授权
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "业务 ID（正整数字符串）"
+	// @Accept json
+	// @Param body body UpdateStatusRequest true "请求参数"
+	// @Success 200 {object} response{data=UpdatedResponse}
+	// @Header all {string} X-Request-ID "请求追踪 ID"
+	// @Failure 400 {object} response
+	// @Failure 503 {object} response
+	// @Failure 401 {object} response
+	// @Failure 404 {object} response
+	// @Failure 409 {object} response
+	// @Failure 422 {object} response
+	// @Router /api/v1/groups/{id}/status [patch]
+	r.Patch("/groups/{id}/status", func(w http.ResponseWriter, req *http.Request) {
+		var input UpdateStatusRequest
+		if err := decodeBody(w, req, &input); err != nil {
+			securityError(w, req, appsec.ErrInvalidArgument)
+			return
+		}
+		err := m.SetGroupStatus(req.Context(), adminFrom(req), routeID(req, "id"), input.Status, requestMeta(req))
+		adminResult(w, req, 200, UpdatedResponse{Updated: true}, err)
+	})
+
 	// @Summary 修改成员状态
 	// @Tags 成员管理
 	// @Produce json
@@ -461,6 +684,30 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 			return
 		}
 		err := m.SetModelStatus(req.Context(), adminFrom(req), routeID(req, "id"), input.Status, requestMeta(req))
+		adminResult(w, req, 200, UpdatedResponse{Updated: true}, err)
+	})
+
+	// @Summary 修改服务商状态
+	// @Tags 模型与资源
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "服务商 ID"
+	// @Accept json
+	// @Param body body UpdateStatusRequest true "请求参数"
+	// @Success 200 {object} response{data=UpdatedResponse}
+	// @Failure 400 {object} response
+	// @Failure 401 {object} response
+	// @Failure 404 {object} response
+	// @Failure 409 {object} response
+	// @Failure 503 {object} response
+	// @Router /api/v1/providers/{id}/status [patch]
+	r.Patch("/providers/{id}/status", func(w http.ResponseWriter, req *http.Request) {
+		var input UpdateStatusRequest
+		if err := decodeBody(w, req, &input); err != nil {
+			securityError(w, req, appsec.ErrInvalidArgument)
+			return
+		}
+		err := m.SetProviderStatus(req.Context(), adminFrom(req), routeID(req, "id"), input.Status, requestMeta(req))
 		adminResult(w, req, 200, UpdatedResponse{Updated: true}, err)
 	})
 
@@ -577,6 +824,17 @@ func routeID(r *http.Request, name string) int64 {
 		return 0
 	}
 	return id
+}
+func requestIDs(values []string) ([]int64, error) {
+	ids := make([]int64, len(values))
+	for index, value := range values {
+		id, err := positiveID(value)
+		if err != nil {
+			return nil, err
+		}
+		ids[index] = id
+	}
+	return ids, nil
 }
 func adminResult(w http.ResponseWriter, r *http.Request, status int, data any, err error) {
 	if err != nil {

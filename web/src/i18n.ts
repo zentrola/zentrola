@@ -1,17 +1,49 @@
 import { createI18n } from 'vue-i18n'
+import enUS from './locales/en-US'
+
+export const localeKey = 'zentrola.ui.locale'
+export const supportedLocales = ['zh-CN', 'en-US'] as const
+export type SupportedLocale = (typeof supportedLocales)[number]
+
+function detectedLocale(): SupportedLocale {
+  try {
+    const saved = localStorage.getItem(localeKey)
+    if (supportedLocales.includes(saved as SupportedLocale)) return saved as SupportedLocale
+  } catch {
+    // 存储不可用时仍按浏览器语言初始化。
+  }
+  const languages =
+    typeof navigator === 'undefined' ? [] : navigator.languages || [navigator.language]
+  for (const language of languages) {
+    const normalized = language.toLowerCase()
+    if (normalized.startsWith('zh')) return 'zh-CN'
+    if (normalized.startsWith('en')) return 'en-US'
+  }
+  return 'en-US'
+}
+
+const initialLocale = detectedLocale()
 
 export const i18n = createI18n({
   legacy: false,
-  locale: 'zh-CN',
-  fallbackLocale: 'zh-CN',
+  locale: initialLocale,
+  fallbackLocale: 'en-US',
   messages: {
     'zh-CN': {
-      brand: 'zentrola',
+      brand: 'Zentrola',
+      meta: { title: 'Zentrola · 管理控制台' },
+      language: {
+        label: '界面语言',
+        chinese: '中文',
+        english: 'EN',
+      },
       console: '管理控制台',
-      governance: '访问治理',
+      governance: '基础配置',
       records: '使用记录',
       admin: '管理员',
       menu: '打开导航',
+      collapseNavigation: '收起导航',
+      expandNavigation: '展开导航',
       close: '关闭',
       logout: '注销登录',
       accountMenu: {
@@ -55,30 +87,32 @@ export const i18n = createI18n({
         submit: '登录控制台',
         session: '登录状态将在此浏览器中保留至到期，使用完毕可退出登录。',
         restoring: '正在恢复登录状态…',
-        heading: '让每一次 AI 调用，都有清晰的归属。',
-        description: '从成员到分组，从模型授权到使用记录。在同一处管理团队的 AI 访问。',
-        member: '成员身份',
-        group: '分组授权',
-        model: '模型访问',
-        usage: '用量归属',
+        heading: '企业 AI Coding 能力治理平台',
+        description:
+          '面向研发团队的开源平台，统一接入和分发模型、工具、知识与 Skill，并集中治理权限、用量和成本。',
+        protocols: '同时支持 OpenAI / Anthropic 双协议',
+        protocolHabit: '继续使用现有客户端与工作流，无需改变使用习惯。',
         expired: '登录已失效，请重新登录。',
         locked: '登录失败次数过多，账号已临时锁定，请在 {time} 后重试。',
+        lockDuration: '{minutes} 分 {seconds} 秒',
         retryIn: '{time} 后重试',
       },
       nav: {
-        members: '成员',
+        members: '用户',
         groups: '分组',
         models: '模型',
-        resources: '资源',
+        providers: '服务商',
+        resources: '服务商凭证',
         usage: '用量记录',
         operations: '操作日志',
       },
       desc: {
-        members: '管理团队成员及其访问密钥。模型权限由所属分组决定。',
-        groups: '按团队分配成员，为每个分组明确允许使用的模型。',
+        members: '管理用户及其访问密钥。模型权限由所属分组决定。',
+        groups: '按团队分配用户，为每个分组明确允许使用的模型。',
         models: '维护官方模型名称、编码与输入输出类型，管理模型启停。',
-        resources: '集中管理上游凭证，检查连接并控制资源可用状态。',
-        usage: '按成员、模型和资源追踪每次调用的归属与用量。',
+        providers: '管理模型服务商、兼容协议地址及调用凭证。',
+        resources: '集中管理服务商 API Key，检查连接并控制凭证可用状态。',
+        usage: '按用户、模型和服务商凭证追踪每次调用的归属与用量。',
         operations: '查看管理操作的执行结果与请求追踪信息。',
       },
       common: {
@@ -123,6 +157,8 @@ export const i18n = createI18n({
         reset: '重置',
         id: 'ID',
         remove: '移除',
+        yes: '是',
+        no: '否',
         add: '添加',
         choose: '选择',
         required: '请填写必填项。',
@@ -145,54 +181,66 @@ export const i18n = createI18n({
         CANCELLED: '已取消',
       },
       members: {
-        create: '创建成员',
-        empty: '添加第一位成员，再通过分组分配模型权限。',
-        assignedKeys: '密钥',
-        viewKeys: '查看密钥',
-        keyListTitle: '{name}的密钥',
+        create: '创建用户',
+        edit: '编辑',
+        editTitle: '编辑 {name}',
+        empty: '添加第一位用户，再通过分组分配模型权限。',
+        searchPlaceholder: '请输入用户名称',
+        assignedKeys: 'Key 前缀',
+        viewKeys: '查看 Key 记录',
+        keyListTitle: '{name}的 Key 记录',
         keyDisplayName: '显示名称',
         expiryDate: '过期日期',
-        assignKey: '分配 Key',
+        none: '-',
+        assignKey: '分配密钥',
         delete: '删除',
-        deleteTitle: '删除成员',
+        deleteTitle: '删除用户',
         deleteHint:
-          '确认删除成员「{name}」？删除后该成员的所有 Key 将失效，并解除分组关联。历史用量与操作日志保留。',
-        deleted: '成员已删除',
-        member: '成员',
-        keyTitle: '为 {name} 分配 Key',
-        keyHint: 'Virtual Key 用于客户端调用模型；权限来自成员所在分组。',
+          '确认删除用户「{name}」？删除后该用户的所有 Key 将失效，并解除分组关联。历史用量与操作日志保留。',
+        deleted: '用户已删除',
+        member: '用户',
+        keyTitle: '为 {name} 分配密钥',
+        keyHint: 'Virtual Key 用于客户端调用模型；权限来自用户所在分组。',
         keyName: 'Key 名称',
         expires: '到期日期（可选）',
         expiresHint: '有效至所选日期当天结束，按当前时区计算；不选则长期有效。',
         noExpiry: '长期有效',
         prefix: 'Key 前缀',
+        prefixHint:
+          '这里只显示用于识别的 Key 前缀。完整 Key 仅在分配成功时展示一次，关闭后无法恢复。',
         revoke: '撤销',
         revokeTitle: '撤销访问密钥',
         revokeHint: '确认撤销「{name}」？撤销后无法恢复。',
         oneTime: '完整 Key 仅展示这一次',
-        oneTimeHint: '请立即复制并妥善保存。关闭后无法再次查看，可撤销后重新签发。',
+        oneTimeHint:
+          '这是唯一一次查看完整 Key 的机会，请立即复制并妥善保存。关闭后系统无法恢复，只能撤销后重新分配。',
         acknowledged: '我已保存，关闭',
         future: '到期日期不能早于今天。',
-        disabled: '该成员已停用，无法签发新的 Key。',
-        keyCreated: 'Key 已分配',
+        disabled: '该用户已停用，无法签发新的 Key。',
+        keyRequired: '请先为该用户分配密钥，再启用用户。',
+        groups: '用户分组',
+        groupSelectionCount: '已选择 {count} / 共 {total} 个分组',
+        groupSelection: '选择分组 {name}',
+        noGroups: '暂无分组，请先在分组页面创建。',
+        keyCreated: '密钥已分配',
         revoked: 'Key 已撤销',
         noKeys: '还没有访问密钥。',
       },
       groups: {
         create: '创建分组',
+        searchPlaceholder: '请输入分组名称',
         empty: '创建一个分组，开始为团队分配访问权限。',
-        members: '成员分配',
-        models: '模型授权',
-        memberHint: '新加入的成员需要处于启用状态；移除后不再继承本组权限。',
+        models: '编辑',
+        editTitle: '编辑 {name}',
+        allowedModels: '允许访问的模型',
+        selectionCount: '已选择 {count} / 共 {total} 个模型',
         modelHint:
-          '勾选即授权，取消勾选即撤销，立即生效。停用模型不能新增授权；成员权限取所在分组的并集。',
+          '勾选即授权，取消勾选即撤销，立即生效。停用模型不能新增授权；用户权限取所在分组的并集。',
         selectModel: '授权',
         modelSelection: '授权 {name}',
         modelCount: '已授权 {count} / 共 {total} 个模型',
         noModelCatalog: '暂无模型，请先在模型页面添加。',
-        addMember: '添加成员',
         addModel: '授权模型',
-        noMembers: '此分组尚未分配成员。',
         noModels: '此分组尚未授权模型。',
         granted: '已授权',
         notGranted: '未授权',
@@ -200,15 +248,14 @@ export const i18n = createI18n({
         revoke: '撤销授权',
         revokeTitle: '撤销模型授权',
         revokeHint: '确认撤销「{name}」的此项模型授权？',
-        removeTitle: '移除成员',
-        removeHint: '确认将「{name}」移出当前分组？',
         assigned: '关联已更新',
-        noEligible: '没有可添加的启用记录。',
+        delete: '删除',
+        deleteTitle: '删除分组',
+        deleteHint: '确认删除分组「{name}」？删除后用户关联和模型授权将失效，且无法恢复。',
       },
       models: {
         editAction: '编辑',
-        catalog:
-          '使用官方模型名称和编码维护目录。模型接入由服务商映射配置，停用模型会影响所有获授权成员。',
+        searchPlaceholder: '请输入模型名称',
         empty: '暂无模型，添加官方模型并填写输入、输出类型。',
         create: '添加模型',
         edit: '编辑模型',
@@ -216,7 +263,6 @@ export const i18n = createI18n({
         code: '官方模型编码',
         input: '输入类型',
         output: '输出类型',
-        multimodal: '多模态',
         TEXT: '文本',
         IMAGE: '图片',
         AUDIO: '音频',
@@ -227,30 +273,98 @@ export const i18n = createI18n({
         modalityRequired: '输入类型和输出类型都至少选择一项。',
         remarkPlaceholder: '说明模型用途、限制或其他注意事项',
       },
+      providers: {
+        create: '添加服务商',
+        edit: '编辑',
+        editTitle: '编辑服务商',
+        searchPlaceholder: '请输入服务商名称或接口地址',
+        name: '服务商名称',
+        website: '网站',
+        visitWebsite: '访问网站',
+        openWebsiteFor: '在新页面打开 {name} 官网',
+        anthropicEndpoint: 'Anthropic 接口地址',
+        openaiEndpoint: 'OpenAI 接口地址',
+        endpoints: '接口地址',
+        credential: '密钥',
+        keyConfiguration: '配置密钥',
+        proxyAccess: '代理访问',
+        configureKey: '配置密钥',
+        editKey: '修改密钥',
+        configureKeyFor: '配置 {name} 的密钥',
+        configureCredential: '配置密钥',
+        editCredentialFor: '修改 {name} 的密钥',
+        credentialHint: '为“{name}”配置密钥。保存后直接启用，且不会回显完整密钥。',
+        testConnectionFor: '测试 {name} 的连接',
+        connectionTitle: '基础配置',
+        configTabs: '服务商配置',
+        modelConfig: '模型配置',
+        proxyConfig: '代理配置',
+        endpointHint: '至少填写一种协议地址。接口地址必须使用 HTTPS，且不能包含查询参数或片段。',
+        endpointRequired: '请至少填写一种协议接口地址。',
+        urlInvalid: '请输入有效的网站或 HTTPS 接口地址。',
+        proxyEnabled: '启用代理',
+        proxyHint: '仅该服务商的连接测试和模型调用使用此代理，默认直连。',
+        proxyUrl: '代理服务器地址',
+        proxyUrlHint:
+          '支持 http:// 或 https://，可直接包含用户名和密码；完整地址将加密保存，之后只显示脱敏值。',
+        proxyUrlInvalid: '请输入有效的 HTTP 或 HTTPS 代理地址，地址不能包含路径、查询参数或片段。',
+        proxyHeaders: '代理 Header',
+        proxyHeadersHint: 'Header Value 加密保存，且只发送给代理服务器。',
+        addProxyHeader: '添加 Header',
+        proxyHeaderKey: 'KEY',
+        proxyHeaderValue: 'VALUE',
+        proxyHeaderValuePlaceholder: '请输入 Header Value',
+        proxyHeaderValueConfigured: '已配置；留空保持不变',
+        proxyHeadersInvalid: '请填写有效且不重复的代理 Header；新增或改名时必须填写 Value。',
+        removeProxyHeader: '删除第 {index} 个代理 Header',
+        mappingTitle: '模型映射',
+        mappingHint: '勾选服务商支持的系统模型；编码不同时再填写，协议由接口配置自动确定。',
+        mappingSelectionCount: '已启用 {count} / {total}',
+        mappingSelectionFor: '启用 {name} 映射',
+        logicalModel: '系统模型',
+        protocol: '协议',
+        upstreamModelCode: '服务商模型编码',
+        upstreamModelPlaceholder: '留空则使用 {code}',
+        mappingModelFor: '第 {index} 条映射的系统模型',
+        mappingProtocolFor: '第 {index} 条映射的协议',
+        mappingCodeFor: '{name} 的服务商模型编码',
+        mappingStatusFor: '第 {index} 条映射的状态',
+        noModels: '当前没有可映射的逻辑模型，请先到“模型”中添加模型。',
+        mappingRequired: '请至少启用一个系统模型。',
+        mappingInvalid: '请完整填写有效的逻辑模型和服务商模型编码。',
+        mappingDuplicate: '同一逻辑模型不能重复配置。',
+        mappingEndpointMissing: '每条映射都必须有对应协议的接口地址。',
+        empty: '添加第一个服务商，再为它配置模型映射和服务商凭证。',
+        disableHint: '停用服务商后，其全部模型映射和凭证将停止参与调用。',
+        delete: '删除',
+        deleteTitle: '删除服务商',
+        deleteHint:
+          '确认删除服务商「{name}」？其模型映射和已配置密钥将立即停止参与调用，且无法恢复。历史用量与操作日志保留。',
+      },
       resources: {
-        create: '添加资源',
-        provider: '上游服务',
-        credential: '上游 API Key',
+        create: '添加服务商凭证',
+        provider: '服务商',
+        credential: 'API Key',
         configured: '已配置',
         missing: '未配置',
-        replace: '覆盖凭证',
-        replaceHint: '输入新凭证后将覆盖旧值，保存后不会回显。资源当前状态保持不变。',
-        createHint: '凭证加密保存。新资源默认为停用，请先测试连接，再启用。',
+        replace: '更新 API Key',
+        replaceHint: '输入新的 API Key 后将覆盖旧值，保存后不会回显。',
+        createHint: 'API Key 加密保存，新服务商凭证保存后直接启用。',
         test: '测试连接',
         testing: '正在测试连接…',
         testPassed: '连接测试通过',
         testHint: '仅检查上游模型列表；通过不代表所有模型均可推理。',
-        empty: '添加上游资源，为已授权模型提供调用凭证。',
-        limit: '同一上游服务最多启用一个资源。',
-        credentialHint: '仅录入时可见；保存后不再返回完整凭证。',
+        empty: '添加服务商凭证，为已授权模型提供调用能力。',
+        limit: '同一服务商最多启用一个凭证。',
+        credentialHint: 'API Key 仅录入时可见；保存后不再返回完整内容。',
         result: '连接测试结果',
         latency: '耗时',
         credentialRequired: '凭证必须为 1～4096 个非空白可见 ASCII 字符。',
       },
       usage: {
-        member: '成员',
+        member: '用户',
         model: '模型',
-        resource: '资源',
+        resource: '服务商凭证',
         protocol: '协议',
         input: '输入 Token',
         output: '输出 Token',
@@ -285,9 +399,10 @@ export const i18n = createI18n({
         ACCOUNT_LOCKED: '登录失败次数过多，账号已临时锁定，请稍后重试。',
         INVALID_ARGUMENT: '参数无效，请检查填写内容。',
         NOT_FOUND: '记录不存在或已不可用，请刷新列表。',
-        CONFLICT: '操作冲突，请检查重复编码、对象状态或已启用资源。',
+        CONFLICT: '操作冲突，请检查重复编码、对象状态或已启用的服务商凭证。',
         PROVIDER_UNAVAILABLE: '上游服务已停用。',
         CREDENTIAL_UNRECOVERABLE: '凭证无法解密，请重新录入。',
+        PROXY_CONFIGURATION_UNRECOVERABLE: '代理配置无法解密，请重新保存服务商代理配置。',
         SERVICE_UNAVAILABLE: '服务暂时不可用，请稍后重试。',
         NETWORK: '无法连接服务，请检查后端是否已启动。写操作请刷新确认结果后再试。',
         TIMEOUT: '请求超时，请刷新确认结果后再试。',
@@ -300,10 +415,28 @@ export const i18n = createI18n({
         UPSTREAM_URL_REJECTED: '上游地址不符合允许规则。',
         CREDENTIAL_INVALID: '凭证格式不正确。',
         REQUEST_CANCELLED: '请求已取消。',
-        RESOURCE_CHANGED: '测试期间资源已变化，请重新测试。',
+        RESOURCE_CHANGED: '测试期间服务商凭证已变化，请重新测试。',
       },
     },
+    'en-US': enUS,
   },
 })
+
+export const activeLocale = i18n.global.locale
+
+export function setLocale(locale: SupportedLocale) {
+  i18n.global.locale.value = locale
+  document.documentElement.lang = locale
+  document.title = i18n.global.t('meta.title')
+  try {
+    localStorage.setItem(localeKey, locale)
+  } catch {
+    // 存储不可用时仅在当前页面切换。
+  }
+}
+
+document.documentElement.lang = initialLocale
+document.title = i18n.global.t('meta.title')
+
 export const t = (key: string, values: Record<string, string | number> = {}) =>
   i18n.global.t(key, values)

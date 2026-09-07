@@ -2,6 +2,12 @@ import { ref } from 'vue'
 import type { Identity, Page } from './types'
 import { t, i18n } from './i18n'
 
+declare global {
+  interface Window {
+    __ZENTROLA_CONFIG__?: { apiBaseUrl?: string }
+  }
+}
+
 // 只保存 Token 和服务端到期时间；身份信息每次启动都通过 /me 校验。
 export const sessionKey = 'zentrola.admin.session'
 type Session = { token: string; expiresAt: string }
@@ -11,6 +17,13 @@ export const sessionExpired = ref(false)
 let generation = 0
 let expiry: ReturnType<typeof setTimeout> | undefined
 const pending = new Set<AbortController>()
+const apiBaseUrl = (
+  window.__ZENTROLA_CONFIG__?.apiBaseUrl ||
+  import.meta.env.VITE_API_BASE_URL ||
+  ''
+)
+  .trim()
+  .replace(/\/+$/, '')
 export function clearSession(expired = false, removeStored = true) {
   generation++
   token.value = ''
@@ -100,7 +113,7 @@ export async function api<T>(path: string, method = 'GET', body?: unknown): Prom
   const epoch = generation
   const timeout = setTimeout(() => controller.abort('timeout'), 25000)
   try {
-    const response = await fetch(`/api/v1${path}`, {
+    const response = await fetch(`${apiBaseUrl}/api/v1${path}`, {
       method,
       signal: controller.signal,
       cache: 'no-store',
@@ -172,8 +185,11 @@ export async function all<T>(path: string): Promise<T[]> {
   const items: T[] = []
   let after: string | null = null
   do {
-    const query = new URLSearchParams({ limit: '100', ...(after ? { after } : {}) })
-    const page: Page<T> = await api(`${path}?${query}`)
+    const url = new URL(path, 'http://zentrola.local')
+    url.searchParams.set('limit', '100')
+    if (after) url.searchParams.set('after', after)
+    else url.searchParams.delete('after')
+    const page: Page<T> = await api(`${url.pathname}?${url.searchParams}`)
     items.push(...page.items)
     if (page.nextCursor === after && after !== null) throw new ApiError('UNKNOWN')
     after = page.nextCursor

@@ -72,7 +72,7 @@ func TestOpenAIIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	models, _ := management.Models(ctx, actor, mgmt.Page{Limit: 50})
+	models, _ := management.Models(ctx, actor, mgmt.Page{Limit: 50}, "")
 	var modelID, claudeID int64
 	for _, m := range models {
 		if m.Code == "deepseek-v4-flash" {

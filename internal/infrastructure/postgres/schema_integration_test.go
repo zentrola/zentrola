@@ -196,7 +196,7 @@ WHERE n.nspname=$1 AND c.relkind='r' AND c.relname<>'goose_db_version' AND a.att
 	}
 	defer rows.Close()
 	nullable := map[string]string{
-		"ai_provider":  "openai_base_url",
+		"ai_provider":  "anthropic_base_url,openai_base_url,official_website",
 		"organization": "remark", "admin_user": "locked_until,last_login_at", "principal": "remark", "access_key": "expires_at,last_used_at,revoked_at",
 		"ai_group": "remark", "ai_resource": "last_active_at", "ai_request": "model_id,error_type",
 		"usage_record":  "input_tokens,output_tokens,cached_input_tokens,billing_quantity,cost_amount,cost_currency,error_type",

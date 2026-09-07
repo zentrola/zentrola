@@ -128,7 +128,7 @@ func run(args []string, output io.Writer) (runErr error) {
 
 func runService(command commandOptions, selection configSelection, cfg config.Config, managed *managedProcess, output io.Writer) (runErr error) {
 	mode := command.name
-	// 显式绑定配置后，Master Key 和 web/dist 等相对路径也必须稳定。
+	// 显式绑定配置后，Master Key 等相对运行路径也必须稳定。
 	if selection.pinned {
 		previous, err := os.Getwd()
 		if err != nil {
@@ -316,7 +316,7 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 
 func healthcheck(addr string, output io.Writer) error {
 	if addr == "" {
-		addr = ":8080"
+		addr = ":9527"
 	}
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {

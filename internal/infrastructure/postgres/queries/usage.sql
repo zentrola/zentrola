@@ -15,9 +15,9 @@ SELECT r.id,r.request_id,r.client_protocol,r.principal_id,r.model_id,r.request_a
 u.id AS usage_id,u.attempt_no,u.provider_id,u.provider_model_id,u.resource_id,u.input_tokens,u.output_tokens,u.cached_input_tokens,u.status AS attempt_status,u.error_type AS attempt_error_type
 FROM ai_request r LEFT JOIN usage_record u ON u.request_id=r.request_id AND u.organization_id=r.organization_id
 WHERE r.organization_id=sqlc.arg(organization_id)
-AND r.id>sqlc.arg(after_id)::bigint
+AND (r.id<sqlc.arg(after_id)::bigint OR sqlc.arg(after_id)::bigint=0)
 AND r.request_at>=sqlc.arg(from_time)::timestamptz AND r.request_at<sqlc.arg(to_time)::timestamptz
 AND (sqlc.narg(principal_id)::bigint IS NULL OR r.principal_id=sqlc.narg(principal_id))
 AND (sqlc.narg(model_id)::bigint IS NULL OR r.model_id=sqlc.narg(model_id))
 AND (sqlc.narg(resource_id)::bigint IS NULL OR u.resource_id=sqlc.narg(resource_id))
-ORDER BY r.id LIMIT sqlc.arg(page_limit)::int;
+ORDER BY r.id DESC LIMIT sqlc.arg(page_limit)::int;

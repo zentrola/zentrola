@@ -17,6 +17,7 @@ import { t } from './i18n'
 import Icon from './components/Icon.vue'
 import ChangePassword from './components/ChangePassword.vue'
 import AccountMenu from './components/AccountMenu.vue'
+import LanguageSwitch from './components/LanguageSwitch.vue'
 const changingPassword = ref(false)
 async function passwordChanged() {
   changingPassword.value = false
@@ -30,6 +31,14 @@ const username = ref(''),
   busy = ref(false),
   error = ref(''),
   mobile = ref(false)
+const compactSidebarQuery = '(min-width: 801px) and (max-width: 1024px)'
+const sidebarCollapsed = ref(
+  typeof window !== 'undefined' && window.matchMedia(compactSidebarQuery).matches,
+)
+let sidebarMedia: MediaQueryList | undefined
+function syncSidebarBreakpoint(event: MediaQueryListEvent | MediaQueryList) {
+  sidebarCollapsed.value = event.matches
+}
 const setupRequired = ref(false),
   setupReady = ref(false),
   setupLoading = ref(false),
@@ -67,9 +76,11 @@ const lockSeconds = computed(() =>
     ? 0
     : Math.max(0, Math.ceil(((loginLocks.value.get(username.value) ?? 0) - lockNow.value) / 1000)),
 )
-const lockTime = computed(
-  () =>
-    `${Math.floor(lockSeconds.value / 60)} 分 ${String(lockSeconds.value % 60).padStart(2, '0')} 秒`,
+const lockTime = computed(() =>
+  t('login.lockDuration', {
+    minutes: Math.floor(lockSeconds.value / 60),
+    seconds: String(lockSeconds.value % 60).padStart(2, '0'),
+  }),
 )
 function rememberLock(account: string, seconds: number) {
   lockNow.value = Date.now()
@@ -152,9 +163,15 @@ async function loadSetup() {
 }
 onMounted(() => {
   window.addEventListener('storage', syncSession)
+  sidebarMedia = window.matchMedia(compactSidebarQuery)
+  sidebarCollapsed.value = sidebarMedia.matches
+  sidebarMedia.addEventListener('change', syncSidebarBreakpoint)
   void initializeSession()
 })
-onUnmounted(() => window.removeEventListener('storage', syncSession))
+onUnmounted(() => {
+  window.removeEventListener('storage', syncSession)
+  sidebarMedia?.removeEventListener('change', syncSidebarBreakpoint)
+})
 watch(identity, (value) => {
   changingPassword.value = false
   if (!value && !restoring.value) {
@@ -162,7 +179,7 @@ watch(identity, (value) => {
     void loadSetup()
   }
 })
-const navigation = ['members', 'groups', 'models', 'resources', 'usage', 'operations']
+const navigation = ['members', 'groups', 'models', 'providers', 'usage', 'operations']
 watch(
   () => route.path,
   () => {
@@ -218,25 +235,27 @@ async function signOut() {
 <template>
   <div v-if="!identity" class="login-shell">
     <aside class="login-story">
-      <div class="brand"><span class="brand-mark">z</span><span>zentrola</span></div>
+      <div class="brand">
+        <span class="brand-mark">Z</span><span>{{ t('brand') }}</span>
+      </div>
       <div class="story-copy">
-        <div class="story-emblem"><Icon name="shield" :size="38" /></div>
         <h1>{{ t('login.heading') }}</h1>
         <p>{{ t('login.description') }}</p>
-        <div class="governance-flow">
-          <div v-for="(item, index) in ['member', 'group', 'model']" :key="item">
-            <span class="flow-node"
-              ><Icon :name="['members', 'groups', 'models'][index]" />{{ t(`login.${item}`) }}</span
-            ><Icon v-if="index < 2" name="arrow" :size="14" />
+        <div class="protocol-promise">
+          <Icon name="check" :size="18" />
+          <div>
+            <strong>{{ t('login.protocols') }}</strong>
+            <span>{{ t('login.protocolHabit') }}</span>
           </div>
         </div>
-        <div class="flow-result"><Icon name="usage" :size="17" />{{ t('login.usage') }}</div>
       </div>
-      <div class="story-footer">OpenAI <span>/</span> Anthropic</div>
     </aside>
     <main class="login-form-area">
       <form ref="form" class="login-form" :novalidate="setupRequired" @submit.prevent="signIn">
-        <p class="login-label">{{ t('console') }}</p>
+        <div class="login-form-head">
+          <p class="login-label">{{ t('console') }}</p>
+          <LanguageSwitch class="login-language" />
+        </div>
         <h2>
           {{
             t(
@@ -353,29 +372,34 @@ async function signOut() {
       </form>
     </main>
   </div>
-  <div v-else class="app-shell">
+  <div v-else class="app-shell" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
     <button
       v-if="mobile"
       class="nav-overlay"
       :aria-label="t('close')"
       @click="mobile = false"
     ></button>
-    <aside class="sidebar" :class="{ open: mobile }">
-      <RouterLink to="/members" class="brand"
-        ><span class="brand-mark">z</span><span>zentrola</span></RouterLink
+    <aside class="sidebar" :class="{ open: mobile, collapsed: sidebarCollapsed }">
+      <RouterLink to="/members" class="brand" :aria-label="t('console')" :title="t('console')"
+        ><span class="brand-mark">Z</span><span>{{ t('brand') }}</span></RouterLink
       >
-      <div class="workspace-label">
-        <span class="workspace-square"><Icon name="shield" :size="18" /></span>
-        <div>
-          {{ t('console') }}<small>{{ t('governance') }}</small>
-        </div>
-      </div>
-      <nav :aria-label="t('console')">
-        <template v-for="(item, index) in navigation" :key="item"
-          ><p v-if="index === 0 || index === 4" class="nav-section">
-            {{ t(index === 0 ? 'governance' : 'records') }}
+      <button
+        type="button"
+        class="sidebar-collapse"
+        :aria-label="t(sidebarCollapsed ? 'expandNavigation' : 'collapseNavigation')"
+        :title="t(sidebarCollapsed ? 'expandNavigation' : 'collapseNavigation')"
+        :aria-expanded="!sidebarCollapsed"
+        aria-controls="primary-navigation"
+        @click="sidebarCollapsed = !sidebarCollapsed"
+      >
+        <Icon name="arrow" :size="15" />
+      </button>
+      <nav id="primary-navigation" :aria-label="t('console')">
+        <template v-for="item in navigation" :key="item"
+          ><p v-if="item === 'members' || item === 'usage'" class="nav-section">
+            {{ t(item === 'members' ? 'governance' : 'records') }}
           </p>
-          <RouterLink :to="`/${item}`"
+          <RouterLink :to="`/${item}`" :aria-label="t(`nav.${item}`)" :data-label="t(`nav.${item}`)"
             ><Icon :name="item" /><span>{{ t(`nav.${item}`) }}</span></RouterLink
           ></template
         >
@@ -392,12 +416,15 @@ async function signOut() {
             t(`nav.${String(route.name || 'members')}`)
           }}</strong>
         </div>
-        <AccountMenu
-          :username="identity.username"
-          :display-name="identity.displayName"
-          @change-password="changingPassword = true"
-          @logout="signOut"
-        />
+        <div class="topbar-actions">
+          <LanguageSwitch />
+          <AccountMenu
+            :username="identity.username"
+            :display-name="identity.displayName"
+            @change-password="changingPassword = true"
+            @logout="signOut"
+          />
+        </div>
       </header>
       <main id="main" class="main-content"><RouterView /></main>
     </div>

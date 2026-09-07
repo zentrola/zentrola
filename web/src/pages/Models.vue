@@ -60,14 +60,11 @@ function save() {
     await load()
   })
 }
-function isMultimodal(model: Model) {
-  return new Set([...(model.inputModalities ?? []), ...(model.outputModalities ?? [])]).size > 1
-}
 const statusTarget = ref<Model | null>(null)
 const { keyword, query, visible, search, reset } = useListSearch(
   items,
   (model) =>
-    `${model.name} ${model.code} ${model.id} ${model.remark ?? ''} ${[...(model.inputModalities ?? []), ...(model.outputModalities ?? [])].map((value) => t(`models.${value}`)).join(' ')} ${isMultimodal(model) ? t('models.multimodal') : ''}`,
+    `${model.name} ${model.code} ${model.id} ${model.remark ?? ''} ${[...(model.inputModalities ?? []), ...(model.outputModalities ?? [])].map((value) => t(`models.${value}`)).join(' ')}`,
   load,
 )
 onMounted(() => load())
@@ -92,11 +89,14 @@ function changeStatus() {
       <Icon name="plus" :size="18" />{{ t('models.create') }}
     </button></PageHeader
   >
-  <div class="context-note">
-    <Icon name="shield" :size="19" /><span>{{ t('models.catalog') }}</span>
-  </div>
   <section class="panel">
-    <ListSearch v-model="keyword" :loading="loading" @search="search" @reset="reset" />
+    <ListSearch
+      v-model="keyword"
+      :loading="loading"
+      :placeholder="t('models.searchPlaceholder')"
+      @search="search"
+      @reset="reset"
+    />
     <p v-if="error" class="alert error" role="alert">
       {{ error }}<button class="text-button" @click="load()">{{ t('common.retry') }}</button>
     </p>
@@ -117,13 +117,10 @@ function changeStatus() {
           <tr v-for="model in visible" :key="model.id">
             <td>
               <div class="person">
-                <span class="avatar model-avatar"><Icon name="models" :size="19" /></span>
+                <span class="avatar">{{ model.name.slice(0, 1) }}</span>
                 <div>
                   <strong>{{ model.name }}</strong
                   ><small>{{ model.id }}</small>
-                  <span v-if="isMultimodal(model)" class="modality-tag">{{
-                    t('models.multimodal')
-                  }}</span>
                 </div>
               </div>
             </td>

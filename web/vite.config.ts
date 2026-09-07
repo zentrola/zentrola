@@ -8,7 +8,7 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       '/api': {
-        target: process.env.ZENTROLA_API_TARGET || 'http://127.0.0.1:8080',
+        target: process.env.ZENTROLA_API_TARGET || 'http://127.0.0.1:9527',
         changeOrigin: false,
       },
     },

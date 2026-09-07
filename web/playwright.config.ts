@@ -8,6 +8,7 @@ export default defineConfig({
   reporter: 'list',
   use: {
     baseURL: process.env.ZENTROLA_WEB_URL || 'http://127.0.0.1:5173',
+    locale: 'zh-CN',
     viewport: { width: 1440, height: 1000 },
     trace: 'off',
     screenshot: 'off',

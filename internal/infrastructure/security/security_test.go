@@ -13,6 +13,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/zentrola/zentrola/internal/domain/admin"
+	"github.com/zentrola/zentrola/internal/domain/catalog"
 )
 
 func TestMasterPersistenceAndPriority(t *testing.T) {
@@ -135,6 +136,30 @@ func TestCredentialAEAD(t *testing.T) {
 	second.KeyVersion = 2
 	if _, err := c.Decrypt(second, owner); err == nil {
 		t.Fatal("unknown key version accepted")
+	}
+}
+
+func TestProviderProxyAEADUsesIndependentOwner(t *testing.T) {
+	master, _ := decodeMaster(base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)), false)
+	c, _ := NewCredentials(master)
+	owner := catalog.ProviderProxyOwner{ProviderID: 81, Field: "url"}
+	secret := []byte("http://user:password@proxy.example.com:8080")
+	sealed, err := c.EncryptProviderProxy(secret, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(sealed.Ciphertext, []byte("password")) {
+		t.Fatal("proxy password was stored in plaintext")
+	}
+	plain, err := c.DecryptProviderProxy(sealed, owner)
+	if err != nil || !bytes.Equal(plain, secret) {
+		t.Fatal("provider proxy round trip failed", err)
+	}
+	if _, err := c.DecryptProviderProxy(sealed, catalog.ProviderProxyOwner{ProviderID: 82, Field: "url"}); err == nil {
+		t.Fatal("proxy ciphertext could be moved to another provider")
+	}
+	if _, err := c.DecryptProviderProxy(sealed, catalog.ProviderProxyOwner{ProviderID: 81, Field: "headers"}); err == nil {
+		t.Fatal("proxy URL ciphertext could be reused as proxy headers")
 	}
 }
 func TestJWTValidation(t *testing.T) {

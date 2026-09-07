@@ -139,6 +139,88 @@ func (q *Queries) ManageCreateModel(ctx context.Context, arg ManageCreateModelPa
 	return err
 }
 
+const manageCreateProvider = `-- name: ManageCreateProvider :exec
+INSERT INTO ai_provider(id,provider_code,provider_name,provider_type,official_website,anthropic_base_url,openai_base_url,proxy_enabled,proxy_url_display,proxy_url_ciphertext,proxy_url_nonce,proxy_url_key_version,proxy_header_names,proxy_headers_ciphertext,proxy_headers_nonce,proxy_headers_key_version,status,created_by,updated_by,created_at,updated_at)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$18,$19,$19)
+`
+
+type ManageCreateProviderParams struct {
+	ID                     int64
+	ProviderCode           string
+	ProviderName           string
+	ProviderType           string
+	OfficialWebsite        *string
+	AnthropicBaseUrl       *string
+	OpenaiBaseUrl          *string
+	ProxyEnabled           bool
+	ProxyUrlDisplay        *string
+	ProxyUrlCiphertext     []byte
+	ProxyUrlNonce          []byte
+	ProxyUrlKeyVersion     *int32
+	ProxyHeaderNames       []byte
+	ProxyHeadersCiphertext []byte
+	ProxyHeadersNonce      []byte
+	ProxyHeadersKeyVersion *int32
+	Status                 string
+	CreatedBy              string
+	CreatedAt              pgtype.Timestamptz
+}
+
+func (q *Queries) ManageCreateProvider(ctx context.Context, arg ManageCreateProviderParams) error {
+	_, err := q.db.Exec(ctx, manageCreateProvider,
+		arg.ID,
+		arg.ProviderCode,
+		arg.ProviderName,
+		arg.ProviderType,
+		arg.OfficialWebsite,
+		arg.AnthropicBaseUrl,
+		arg.OpenaiBaseUrl,
+		arg.ProxyEnabled,
+		arg.ProxyUrlDisplay,
+		arg.ProxyUrlCiphertext,
+		arg.ProxyUrlNonce,
+		arg.ProxyUrlKeyVersion,
+		arg.ProxyHeaderNames,
+		arg.ProxyHeadersCiphertext,
+		arg.ProxyHeadersNonce,
+		arg.ProxyHeadersKeyVersion,
+		arg.Status,
+		arg.CreatedBy,
+		arg.CreatedAt,
+	)
+	return err
+}
+
+const manageCreateProviderMapping = `-- name: ManageCreateProviderMapping :exec
+INSERT INTO provider_model(id,provider_id,model_id,upstream_model_code,protocol_type,status,created_by,updated_by,created_at,updated_at)
+VALUES($1,$2,$3,$4,$5,$6,$7,$7,$8,$8)
+`
+
+type ManageCreateProviderMappingParams struct {
+	ID                int64
+	ProviderID        int64
+	ModelID           int64
+	UpstreamModelCode string
+	ProtocolType      string
+	Status            string
+	CreatedBy         string
+	CreatedAt         pgtype.Timestamptz
+}
+
+func (q *Queries) ManageCreateProviderMapping(ctx context.Context, arg ManageCreateProviderMappingParams) error {
+	_, err := q.db.Exec(ctx, manageCreateProviderMapping,
+		arg.ID,
+		arg.ProviderID,
+		arg.ModelID,
+		arg.UpstreamModelCode,
+		arg.ProtocolType,
+		arg.Status,
+		arg.CreatedBy,
+		arg.CreatedAt,
+	)
+	return err
+}
+
 const manageCreateResource = `-- name: ManageCreateResource :exec
 INSERT INTO ai_resource(id,organization_id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,created_by,updated_by,created_at,updated_at)
 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10,$10)
@@ -169,6 +251,72 @@ func (q *Queries) ManageCreateResource(ctx context.Context, arg ManageCreateReso
 		arg.Status,
 		arg.CreatedBy,
 		arg.CreatedAt,
+	)
+	return err
+}
+
+const manageDeleteGroup = `-- name: ManageDeleteGroup :exec
+UPDATE ai_group SET is_deleted=true,status='DISABLED',updated_by=$3,updated_at=$4
+WHERE organization_id=$1 AND id=$2 AND is_deleted=false
+`
+
+type ManageDeleteGroupParams struct {
+	OrganizationID int64
+	ID             int64
+	UpdatedBy      string
+	UpdatedAt      pgtype.Timestamptz
+}
+
+func (q *Queries) ManageDeleteGroup(ctx context.Context, arg ManageDeleteGroupParams) error {
+	_, err := q.db.Exec(ctx, manageDeleteGroup,
+		arg.OrganizationID,
+		arg.ID,
+		arg.UpdatedBy,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const manageDeleteGroupMembers = `-- name: ManageDeleteGroupMembers :exec
+UPDATE principal_group SET is_deleted=true,updated_by=$3,updated_at=$4
+WHERE organization_id=$1 AND group_id=$2 AND is_deleted=false
+`
+
+type ManageDeleteGroupMembersParams struct {
+	OrganizationID int64
+	GroupID        int64
+	UpdatedBy      string
+	UpdatedAt      pgtype.Timestamptz
+}
+
+func (q *Queries) ManageDeleteGroupMembers(ctx context.Context, arg ManageDeleteGroupMembersParams) error {
+	_, err := q.db.Exec(ctx, manageDeleteGroupMembers,
+		arg.OrganizationID,
+		arg.GroupID,
+		arg.UpdatedBy,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const manageDeleteGroupModels = `-- name: ManageDeleteGroupModels :exec
+UPDATE group_model_permission SET is_deleted=true,updated_by=$3,updated_at=$4
+WHERE organization_id=$1 AND group_id=$2 AND is_deleted=false
+`
+
+type ManageDeleteGroupModelsParams struct {
+	OrganizationID int64
+	GroupID        int64
+	UpdatedBy      string
+	UpdatedAt      pgtype.Timestamptz
+}
+
+func (q *Queries) ManageDeleteGroupModels(ctx context.Context, arg ManageDeleteGroupModelsParams) error {
+	_, err := q.db.Exec(ctx, manageDeleteGroupModels,
+		arg.OrganizationID,
+		arg.GroupID,
+		arg.UpdatedBy,
+		arg.UpdatedAt,
 	)
 	return err
 }
@@ -214,6 +362,83 @@ func (q *Queries) ManageDeleteMemberGroups(ctx context.Context, arg ManageDelete
 		arg.UpdatedBy,
 		arg.UpdatedAt,
 	)
+	return err
+}
+
+const manageDeleteProvider = `-- name: ManageDeleteProvider :exec
+UPDATE ai_provider
+SET status='DISABLED',is_deleted=true,proxy_enabled=false,proxy_url_display=NULL,
+    proxy_url_ciphertext=NULL,proxy_url_nonce=NULL,proxy_url_key_version=NULL,
+    proxy_header_names='[]'::jsonb,proxy_headers_ciphertext=NULL,proxy_headers_nonce=NULL,
+    proxy_headers_key_version=NULL,updated_by=$2,updated_at=$3
+WHERE id=$1 AND is_deleted=false
+`
+
+type ManageDeleteProviderParams struct {
+	ID        int64
+	UpdatedBy string
+	UpdatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) ManageDeleteProvider(ctx context.Context, arg ManageDeleteProviderParams) error {
+	_, err := q.db.Exec(ctx, manageDeleteProvider, arg.ID, arg.UpdatedBy, arg.UpdatedAt)
+	return err
+}
+
+const manageDeleteProviderMapping = `-- name: ManageDeleteProviderMapping :exec
+UPDATE provider_model
+SET status='DISABLED',is_deleted=true,updated_by=$3,updated_at=$4
+WHERE id=$1 AND provider_id=$2 AND is_deleted=false
+`
+
+type ManageDeleteProviderMappingParams struct {
+	ID         int64
+	ProviderID int64
+	UpdatedBy  string
+	UpdatedAt  pgtype.Timestamptz
+}
+
+func (q *Queries) ManageDeleteProviderMapping(ctx context.Context, arg ManageDeleteProviderMappingParams) error {
+	_, err := q.db.Exec(ctx, manageDeleteProviderMapping,
+		arg.ID,
+		arg.ProviderID,
+		arg.UpdatedBy,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const manageDeleteProviderMappings = `-- name: ManageDeleteProviderMappings :exec
+UPDATE provider_model
+SET status='DISABLED',is_deleted=true,updated_by=$2,updated_at=$3
+WHERE provider_id=$1 AND is_deleted=false
+`
+
+type ManageDeleteProviderMappingsParams struct {
+	ProviderID int64
+	UpdatedBy  string
+	UpdatedAt  pgtype.Timestamptz
+}
+
+func (q *Queries) ManageDeleteProviderMappings(ctx context.Context, arg ManageDeleteProviderMappingsParams) error {
+	_, err := q.db.Exec(ctx, manageDeleteProviderMappings, arg.ProviderID, arg.UpdatedBy, arg.UpdatedAt)
+	return err
+}
+
+const manageDeleteProviderResources = `-- name: ManageDeleteProviderResources :exec
+UPDATE ai_resource
+SET status='DISABLED',is_deleted=true,updated_by=$2,updated_at=$3
+WHERE provider_id=$1 AND is_deleted=false
+`
+
+type ManageDeleteProviderResourcesParams struct {
+	ProviderID int64
+	UpdatedBy  string
+	UpdatedAt  pgtype.Timestamptz
+}
+
+func (q *Queries) ManageDeleteProviderResources(ctx context.Context, arg ManageDeleteProviderResourcesParams) error {
+	_, err := q.db.Exec(ctx, manageDeleteProviderResources, arg.ProviderID, arg.UpdatedBy, arg.UpdatedAt)
 	return err
 }
 
@@ -273,7 +498,7 @@ func (q *Queries) ManageGroup(ctx context.Context, arg ManageGroupParams) (AiGro
 
 const manageGroupMembers = `-- name: ManageGroupMembers :many
 SELECT p.id, p.is_deleted, p.organization_id, p.principal_type, p.name, p.remark, p.status, p.created_by, p.updated_by, p.created_at, p.updated_at FROM principal p JOIN principal_group g ON g.principal_id=p.id AND g.organization_id=p.organization_id
-WHERE p.organization_id=$1 AND g.group_id=$2 AND g.is_deleted=false AND p.is_deleted=false AND p.principal_type='MEMBER' AND p.id>$3 ORDER BY p.id LIMIT $4
+WHERE p.organization_id=$1 AND g.group_id=$2 AND g.is_deleted=false AND p.is_deleted=false AND p.principal_type='MEMBER' AND (p.id<$3 OR $3=0) ORDER BY p.id DESC LIMIT $4
 `
 
 type ManageGroupMembersParams struct {
@@ -322,7 +547,7 @@ func (q *Queries) ManageGroupMembers(ctx context.Context, arg ManageGroupMembers
 
 const manageGroupModels = `-- name: ManageGroupModels :many
 SELECT m.id, m.is_deleted, m.model_code, m.display_name, m.status, m.created_by, m.updated_by, m.created_at, m.updated_at, m.input_modalities, m.output_modalities, m.remark FROM ai_model m JOIN group_model_permission g ON g.model_id=m.id
-WHERE g.organization_id=$1 AND g.group_id=$2 AND g.is_deleted=false AND m.is_deleted=false AND m.id>$3 ORDER BY m.id LIMIT $4
+WHERE g.organization_id=$1 AND g.group_id=$2 AND g.is_deleted=false AND m.is_deleted=false AND (m.id<$3 OR $3=0) ORDER BY m.id DESC LIMIT $4
 `
 
 type ManageGroupModelsParams struct {
@@ -370,18 +595,54 @@ func (q *Queries) ManageGroupModels(ctx context.Context, arg ManageGroupModelsPa
 	return items, nil
 }
 
+const manageGroupStatus = `-- name: ManageGroupStatus :exec
+UPDATE ai_group SET status=$3,updated_by=$4,updated_at=$5
+WHERE organization_id=$1 AND id=$2 AND is_deleted=false
+`
+
+type ManageGroupStatusParams struct {
+	OrganizationID int64
+	ID             int64
+	Status         string
+	UpdatedBy      string
+	UpdatedAt      pgtype.Timestamptz
+}
+
+func (q *Queries) ManageGroupStatus(ctx context.Context, arg ManageGroupStatusParams) error {
+	_, err := q.db.Exec(ctx, manageGroupStatus,
+		arg.OrganizationID,
+		arg.ID,
+		arg.Status,
+		arg.UpdatedBy,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
 const manageGroups = `-- name: ManageGroups :many
-SELECT id, is_deleted, organization_id, group_code, group_name, remark, status, created_by, updated_by, created_at, updated_at FROM ai_group WHERE organization_id=$1 AND is_deleted=false AND id>$2 ORDER BY id LIMIT $3
+SELECT id, is_deleted, organization_id, group_code, group_name, remark, status, created_by, updated_by, created_at, updated_at FROM ai_group
+WHERE organization_id=$1
+  AND is_deleted=false
+  AND ($2::text = '' OR status = $2::text)
+  AND (id<$3 OR $3=0)
+ORDER BY id DESC
+LIMIT $4
 `
 
 type ManageGroupsParams struct {
 	OrganizationID int64
-	ID             int64
-	Limit          int32
+	Status         string
+	AfterID        int64
+	PageLimit      int32
 }
 
 func (q *Queries) ManageGroups(ctx context.Context, arg ManageGroupsParams) ([]AiGroup, error) {
-	rows, err := q.db.Query(ctx, manageGroups, arg.OrganizationID, arg.ID, arg.Limit)
+	rows, err := q.db.Query(ctx, manageGroups,
+		arg.OrganizationID,
+		arg.Status,
+		arg.AfterID,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -493,6 +754,55 @@ func (q *Queries) ManageMember(ctx context.Context, arg ManageMemberParams) (Pri
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const manageMemberGroups = `-- name: ManageMemberGroups :many
+SELECT g.id, g.is_deleted, g.organization_id, g.group_code, g.group_name, g.remark, g.status, g.created_by, g.updated_by, g.created_at, g.updated_at FROM ai_group g JOIN principal_group pg ON pg.group_id=g.id AND pg.organization_id=g.organization_id
+WHERE g.organization_id=$1 AND pg.principal_id=$2 AND pg.is_deleted=false AND g.is_deleted=false AND (g.id<$3 OR $3=0) ORDER BY g.id DESC LIMIT $4
+`
+
+type ManageMemberGroupsParams struct {
+	OrganizationID int64
+	PrincipalID    int64
+	ID             int64
+	Limit          int32
+}
+
+func (q *Queries) ManageMemberGroups(ctx context.Context, arg ManageMemberGroupsParams) ([]AiGroup, error) {
+	rows, err := q.db.Query(ctx, manageMemberGroups,
+		arg.OrganizationID,
+		arg.PrincipalID,
+		arg.ID,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AiGroup{}
+	for rows.Next() {
+		var i AiGroup
+		if err := rows.Scan(
+			&i.ID,
+			&i.IsDeleted,
+			&i.OrganizationID,
+			&i.GroupCode,
+			&i.GroupName,
+			&i.Remark,
+			&i.Status,
+			&i.CreatedBy,
+			&i.UpdatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const manageMemberStatus = `-- name: ManageMemberStatus :exec
@@ -623,16 +933,22 @@ func (q *Queries) ManageModelStatus(ctx context.Context, arg ManageModelStatusPa
 }
 
 const manageModels = `-- name: ManageModels :many
-SELECT id, is_deleted, model_code, display_name, status, created_by, updated_by, created_at, updated_at, input_modalities, output_modalities, remark FROM ai_model WHERE is_deleted=false AND id>$1 ORDER BY id LIMIT $2
+SELECT id, is_deleted, model_code, display_name, status, created_by, updated_by, created_at, updated_at, input_modalities, output_modalities, remark FROM ai_model
+WHERE is_deleted=false
+  AND ($1::text = '' OR status = $1::text)
+  AND (id<$2 OR $2=0)
+ORDER BY id DESC
+LIMIT $3
 `
 
 type ManageModelsParams struct {
-	ID    int64
-	Limit int32
+	Status    string
+	AfterID   int64
+	PageLimit int32
 }
 
 func (q *Queries) ManageModels(ctx context.Context, arg ManageModelsParams) ([]AiModel, error) {
-	rows, err := q.db.Query(ctx, manageModels, arg.ID, arg.Limit)
+	rows, err := q.db.Query(ctx, manageModels, arg.Status, arg.AfterID, arg.PageLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -666,7 +982,7 @@ func (q *Queries) ManageModels(ctx context.Context, arg ManageModelsParams) ([]A
 
 const manageOperations = `-- name: ManageOperations :many
 SELECT id,operator_name,operation_type,target_type,target_id,request_id,result,error_code,before_data,after_data,created_at
-FROM operation_log WHERE organization_id=$1 AND id>$2 ORDER BY id LIMIT $3
+FROM operation_log WHERE organization_id=$1 AND (id<$2 OR $2=0) ORDER BY id DESC LIMIT $3
 `
 
 type ManageOperationsParams struct {
@@ -739,7 +1055,7 @@ func (q *Queries) ManagePermissionExists(ctx context.Context, arg ManagePermissi
 }
 
 const manageProvider = `-- name: ManageProvider :one
-SELECT id, is_deleted, provider_code, provider_name, provider_type, anthropic_base_url, status, created_by, updated_by, created_at, updated_at, openai_base_url FROM ai_provider WHERE id=$1 AND is_deleted=false AND provider_code IN ('anthropic-official','deepseek-official') AND provider_type='OFFICIAL'
+SELECT id, is_deleted, provider_code, provider_name, provider_type, anthropic_base_url, status, created_by, updated_by, created_at, updated_at, openai_base_url, official_website, proxy_enabled, proxy_url_display, proxy_url_ciphertext, proxy_url_nonce, proxy_url_key_version, proxy_header_names, proxy_headers_ciphertext, proxy_headers_nonce, proxy_headers_key_version FROM ai_provider WHERE id=$1 AND is_deleted=false
 `
 
 func (q *Queries) ManageProvider(ctx context.Context, id int64) (AiProvider, error) {
@@ -758,12 +1074,81 @@ func (q *Queries) ManageProvider(ctx context.Context, id int64) (AiProvider, err
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.OpenaiBaseUrl,
+		&i.OfficialWebsite,
+		&i.ProxyEnabled,
+		&i.ProxyUrlDisplay,
+		&i.ProxyUrlCiphertext,
+		&i.ProxyUrlNonce,
+		&i.ProxyUrlKeyVersion,
+		&i.ProxyHeaderNames,
+		&i.ProxyHeadersCiphertext,
+		&i.ProxyHeadersNonce,
+		&i.ProxyHeadersKeyVersion,
 	)
 	return i, err
 }
 
+const manageProviderMappings = `-- name: ManageProviderMappings :many
+SELECT id, is_deleted, provider_id, model_id, upstream_model_code, protocol_type, status, created_by, updated_by, created_at, updated_at FROM provider_model
+WHERE provider_id=$1 AND is_deleted=false
+ORDER BY id
+`
+
+func (q *Queries) ManageProviderMappings(ctx context.Context, providerID int64) ([]ProviderModel, error) {
+	rows, err := q.db.Query(ctx, manageProviderMappings, providerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ProviderModel{}
+	for rows.Next() {
+		var i ProviderModel
+		if err := rows.Scan(
+			&i.ID,
+			&i.IsDeleted,
+			&i.ProviderID,
+			&i.ModelID,
+			&i.UpstreamModelCode,
+			&i.ProtocolType,
+			&i.Status,
+			&i.CreatedBy,
+			&i.UpdatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const manageProviderStatus = `-- name: ManageProviderStatus :exec
+UPDATE ai_provider SET status=$2,updated_by=$3,updated_at=$4 WHERE id=$1 AND is_deleted=false
+`
+
+type ManageProviderStatusParams struct {
+	ID        int64
+	Status    string
+	UpdatedBy string
+	UpdatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) ManageProviderStatus(ctx context.Context, arg ManageProviderStatusParams) error {
+	_, err := q.db.Exec(ctx, manageProviderStatus,
+		arg.ID,
+		arg.Status,
+		arg.UpdatedBy,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
 const manageProviders = `-- name: ManageProviders :many
-SELECT id, is_deleted, provider_code, provider_name, provider_type, anthropic_base_url, status, created_by, updated_by, created_at, updated_at, openai_base_url FROM ai_provider WHERE is_deleted=false AND provider_code IN ('anthropic-official','deepseek-official') AND provider_type='OFFICIAL' AND id>$1 ORDER BY id LIMIT $2
+SELECT id, is_deleted, provider_code, provider_name, provider_type, anthropic_base_url, status, created_by, updated_by, created_at, updated_at, openai_base_url, official_website, proxy_enabled, proxy_url_display, proxy_url_ciphertext, proxy_url_nonce, proxy_url_key_version, proxy_header_names, proxy_headers_ciphertext, proxy_headers_nonce, proxy_headers_key_version FROM ai_provider WHERE is_deleted=false AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2
 `
 
 type ManageProvidersParams struct {
@@ -793,6 +1178,16 @@ func (q *Queries) ManageProviders(ctx context.Context, arg ManageProvidersParams
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.OpenaiBaseUrl,
+			&i.OfficialWebsite,
+			&i.ProxyEnabled,
+			&i.ProxyUrlDisplay,
+			&i.ProxyUrlCiphertext,
+			&i.ProxyUrlNonce,
+			&i.ProxyUrlKeyVersion,
+			&i.ProxyHeaderNames,
+			&i.ProxyHeadersCiphertext,
+			&i.ProxyHeadersNonce,
+			&i.ProxyHeadersKeyVersion,
 		); err != nil {
 			return nil, err
 		}
@@ -860,7 +1255,7 @@ func (q *Queries) ManageResource(ctx context.Context, arg ManageResourceParams) 
 
 const manageResources = `-- name: ManageResources :many
 SELECT id,provider_id,resource_name,status,created_at,updated_at FROM ai_resource
-WHERE organization_id=$1 AND is_deleted=false AND id>$2 ORDER BY id LIMIT $3
+WHERE organization_id=$1 AND is_deleted=false AND (id<$2 OR $2=0) ORDER BY id DESC LIMIT $3
 `
 
 type ManageResourcesParams struct {
@@ -950,6 +1345,58 @@ func (q *Queries) ManageRevokeModel(ctx context.Context, arg ManageRevokeModelPa
 	return err
 }
 
+const manageUpdateGroup = `-- name: ManageUpdateGroup :exec
+UPDATE ai_group SET group_name=$3,remark=$4,updated_by=$5,updated_at=$6
+WHERE organization_id=$1 AND id=$2 AND is_deleted=false
+`
+
+type ManageUpdateGroupParams struct {
+	OrganizationID int64
+	ID             int64
+	GroupName      string
+	Remark         *string
+	UpdatedBy      string
+	UpdatedAt      pgtype.Timestamptz
+}
+
+func (q *Queries) ManageUpdateGroup(ctx context.Context, arg ManageUpdateGroupParams) error {
+	_, err := q.db.Exec(ctx, manageUpdateGroup,
+		arg.OrganizationID,
+		arg.ID,
+		arg.GroupName,
+		arg.Remark,
+		arg.UpdatedBy,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const manageUpdateMember = `-- name: ManageUpdateMember :exec
+UPDATE principal SET name=$3,remark=$4,updated_by=$5,updated_at=$6
+WHERE organization_id=$1 AND id=$2 AND is_deleted=false AND principal_type='MEMBER'
+`
+
+type ManageUpdateMemberParams struct {
+	OrganizationID int64
+	ID             int64
+	Name           string
+	Remark         *string
+	UpdatedBy      string
+	UpdatedAt      pgtype.Timestamptz
+}
+
+func (q *Queries) ManageUpdateMember(ctx context.Context, arg ManageUpdateMemberParams) error {
+	_, err := q.db.Exec(ctx, manageUpdateMember,
+		arg.OrganizationID,
+		arg.ID,
+		arg.Name,
+		arg.Remark,
+		arg.UpdatedBy,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
 const manageUpdateModel = `-- name: ManageUpdateModel :exec
 UPDATE ai_model SET model_code=$2,display_name=$3,input_modalities=$4,output_modalities=$5,remark=$6,updated_by=$7,updated_at=$8
 WHERE id=$1 AND is_deleted=false
@@ -974,6 +1421,79 @@ func (q *Queries) ManageUpdateModel(ctx context.Context, arg ManageUpdateModelPa
 		arg.InputModalities,
 		arg.OutputModalities,
 		arg.Remark,
+		arg.UpdatedBy,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const manageUpdateProvider = `-- name: ManageUpdateProvider :exec
+UPDATE ai_provider SET provider_name=$2,official_website=$3,anthropic_base_url=$4,openai_base_url=$5,proxy_enabled=$6,proxy_url_display=$7,proxy_url_ciphertext=$8,proxy_url_nonce=$9,proxy_url_key_version=$10,proxy_header_names=$11,proxy_headers_ciphertext=$12,proxy_headers_nonce=$13,proxy_headers_key_version=$14,updated_by=$15,updated_at=$16
+WHERE id=$1 AND is_deleted=false
+`
+
+type ManageUpdateProviderParams struct {
+	ID                     int64
+	ProviderName           string
+	OfficialWebsite        *string
+	AnthropicBaseUrl       *string
+	OpenaiBaseUrl          *string
+	ProxyEnabled           bool
+	ProxyUrlDisplay        *string
+	ProxyUrlCiphertext     []byte
+	ProxyUrlNonce          []byte
+	ProxyUrlKeyVersion     *int32
+	ProxyHeaderNames       []byte
+	ProxyHeadersCiphertext []byte
+	ProxyHeadersNonce      []byte
+	ProxyHeadersKeyVersion *int32
+	UpdatedBy              string
+	UpdatedAt              pgtype.Timestamptz
+}
+
+func (q *Queries) ManageUpdateProvider(ctx context.Context, arg ManageUpdateProviderParams) error {
+	_, err := q.db.Exec(ctx, manageUpdateProvider,
+		arg.ID,
+		arg.ProviderName,
+		arg.OfficialWebsite,
+		arg.AnthropicBaseUrl,
+		arg.OpenaiBaseUrl,
+		arg.ProxyEnabled,
+		arg.ProxyUrlDisplay,
+		arg.ProxyUrlCiphertext,
+		arg.ProxyUrlNonce,
+		arg.ProxyUrlKeyVersion,
+		arg.ProxyHeaderNames,
+		arg.ProxyHeadersCiphertext,
+		arg.ProxyHeadersNonce,
+		arg.ProxyHeadersKeyVersion,
+		arg.UpdatedBy,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const manageUpdateProviderMapping = `-- name: ManageUpdateProviderMapping :exec
+UPDATE provider_model
+SET upstream_model_code=$3,status=$4,updated_by=$5,updated_at=$6
+WHERE id=$1 AND provider_id=$2 AND is_deleted=false
+`
+
+type ManageUpdateProviderMappingParams struct {
+	ID                int64
+	ProviderID        int64
+	UpstreamModelCode string
+	Status            string
+	UpdatedBy         string
+	UpdatedAt         pgtype.Timestamptz
+}
+
+func (q *Queries) ManageUpdateProviderMapping(ctx context.Context, arg ManageUpdateProviderMappingParams) error {
+	_, err := q.db.Exec(ctx, manageUpdateProviderMapping,
+		arg.ID,
+		arg.ProviderID,
+		arg.UpstreamModelCode,
+		arg.Status,
 		arg.UpdatedBy,
 		arg.UpdatedAt,
 	)

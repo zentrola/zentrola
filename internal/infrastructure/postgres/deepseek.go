@@ -45,7 +45,7 @@ func (s *BootstrapStore) installDeepSeek(ctx context.Context, seed bootstrap.See
 	providerID := seed.ProviderID
 	if exists {
 		p := providers[0]
-		if p.ProviderType != "OFFICIAL" || p.AnthropicBaseUrl != "https://api.deepseek.com/anthropic" {
+		if p.ProviderType != "OFFICIAL" || p.AnthropicBaseUrl == nil || *p.AnthropicBaseUrl != "https://api.deepseek.com/anthropic" {
 			return conflict
 		}
 		providerID = p.ID
@@ -55,7 +55,8 @@ func (s *BootstrapStore) installDeepSeek(ctx context.Context, seed bootstrap.See
 	}
 	at := pgtype.Timestamptz{Time: seed.CreatedAt, Valid: true}
 	if !exists {
-		if err := q.CreateBootstrapProvider(ctx, dbgen.CreateBootstrapProviderParams{ID: providerID, ProviderCode: "deepseek-official", ProviderName: "DeepSeek Official", AnthropicBaseUrl: "https://api.deepseek.com/anthropic", CreatedAt: at}); err != nil {
+		anthropicBaseURL := "https://api.deepseek.com/anthropic"
+		if err := q.CreateBootstrapProvider(ctx, dbgen.CreateBootstrapProviderParams{ID: providerID, ProviderCode: "deepseek-official", ProviderName: "DeepSeek Official", AnthropicBaseUrl: &anthropicBaseURL, CreatedAt: at}); err != nil {
 			return err
 		}
 	}

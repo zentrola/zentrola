@@ -1,23 +1,41 @@
-# zentrola 管理界面
+# Zentrola 管理界面
 
 位于现有仓库的 `web/`，使用 Vue 3、TypeScript、Vue Router、vue-i18n 和 Vite。依赖版本与 lockfile 一起固定；框架用法参考 [Vue 官方指南](https://vuejs.org/guide/quick-start.html)，开发代理参考 [Vite 服务配置](https://vite.dev/config/server-options.html)。
 
 ## 开发
 
-日常开发测试统一使用 Vite 开发服务（`npm run dev`，端口 `5173`），前端修改通过热更新生效。后端修改后重新编译并重启本地 Go 服务（端口 `8080`）；Docker 镜像构建和容器更新仅用于明确需要的部署验证，不作为日常开发步骤。
+开发时不构建或运行 Zentrola 应用镜像。Backend 直接执行 `go run ./cmd/server`（端口 `9527`），Admin Web 使用 Vite 开发服务（`npm run dev`，端口 `5173`），前端修改通过热更新生效。Docker Compose 仅在本机没有可用 PostgreSQL 时用于启动数据库：`docker compose up -d postgres`。
 
 使用 Node.js 24 LTS。先在仓库根目录启动已有 Go 服务，再在另一终端执行：
 
+MacOS/Linux：
+
+```bash
+cd /path/to/zentrola/web
+npm ci
+npm run dev
+```
+
+Windows PowerShell：
+
 ```powershell
-cd D:\Workspace\Private\zentrola\web
+Set-Location D:\Workspace\Private\zentrola\web
 npm.cmd ci
 npm.cmd run dev
 ```
 
-打开 `http://127.0.0.1:5173`。浏览器只访问当前前端域名，Vite 将 `/api` 代理至 `http://127.0.0.1:8080`，无需为本地开发放开跨域。后端端口不同可在启动 Vite 前设置：
+打开 `http://127.0.0.1:5173`。浏览器只访问当前前端域名，Vite 将 `/api` 代理至 `http://127.0.0.1:9527`，无需为本地开发放开跨域。后端端口不同可在启动 Vite 前设置：
+
+MacOS/Linux：
+
+```bash
+ZENTROLA_API_TARGET='http://127.0.0.1:9528' npm run dev
+```
+
+Windows PowerShell：
 
 ```powershell
-$env:ZENTROLA_API_TARGET = 'http://127.0.0.1:8081'
+$env:ZENTROLA_API_TARGET = 'http://127.0.0.1:9528'
 npm.cmd run dev
 ```
 
@@ -27,19 +45,83 @@ npm.cmd run dev
 
 运行真实本地服务验收脚本 `tests/live.mjs` 时，需通过进程环境变量 `ZENTROLA_TEST_ADMIN_USERNAME` 和 `ZENTROLA_TEST_ADMIN_PASSWORD` 显式提供已有管理员的账号密码；脚本不读取后端 `.env`，也不使用默认账号。
 
-## 构建与运行
+## 构建发布包
 
-```powershell
-# web 目录
-npm.cmd run build
-# 回到仓库根目录，从根目录启动 Go 服务
-cd ..
-go run ./cmd/server
+Admin Web 与 Backend 独立构建和运行。Admin Web 发布包由静态资源、Web 启动程序和示例配置组成：
+
+```text
+zentrola-web/
+├── zentrola-web          # MacOS/Linux
+├── zentrola-web.exe      # Windows
+├── .env.example
+└── dist/
 ```
 
-浏览器访问后端根地址（默认 `http://127.0.0.1:8080/`）即可打开界面。Go 提供 `web/dist/index.html`、`/assets/*` 和 favicon；构建产物需随本地二进制一起保留，运行工作目录为仓库根目录。未构建时页面返回 404，API 仍可独立使用。页面使用 hash 路由，刷新 `/#/resources` 等地址不需要额外重写规则。
+构建静态资源：
 
-`docker compose up --build -d` 会在 Node 构建阶段生成页面并复制进 Go 镜像，仍只有 `app + postgres` 两个服务。生产镜像不包含 Node、源码、node_modules 或后端 `.env`。静态资源与 API 同源，页面启用 CSP、禁止嵌入和 MIME 嗅探。
+MacOS/Linux：
+
+```bash
+cd /path/to/zentrola/web
+npm ci
+npm run build
+```
+
+Windows PowerShell：
+
+```powershell
+Set-Location D:\Workspace\Private\zentrola\web
+npm.cmd ci
+npm.cmd run build
+```
+
+回到仓库根目录构建当前操作系统的 Web 启动程序：
+
+MacOS/Linux：
+
+```bash
+go build -o zentrola-web ./cmd/web
+```
+
+Windows PowerShell：
+
+```powershell
+go build -o zentrola-web.exe ./cmd/web
+```
+
+将可执行文件、`web/.env.example` 和完整的 `web/dist` 放入同一发布目录。发布包不需要携带 Node.js、npm、源代码或后端程序。
+
+## 运行发布包
+
+使用时把 `.env.example` 改名为 `.env`，然后配置浏览器可访问的 Backend 地址：
+
+```dotenv
+WEB_ADDR=:3000
+WEB_API_BASE_URL=http://127.0.0.1:9527
+```
+
+随后在发布目录直接运行：
+
+MacOS/Linux：
+
+```bash
+mv .env.example .env
+chmod +x zentrola-web
+./zentrola-web
+```
+
+Windows PowerShell：
+
+```powershell
+Rename-Item .env.example .env
+.\zentrola-web.exe
+```
+
+启动程序读取同目录的 `.env` 和 `dist`，默认在 `http://127.0.0.1:3000` 提供管理网页。修改 `WEB_API_BASE_URL` 后只需重启，不需要重新构建前端；该地址必须能从管理员的浏览器访问，不能填写仅服务器内部可见的主机名。
+
+Admin Web 与 Backend 跨域运行时，还要将 Admin Web 的实际 Origin 加入 Backend 的 `CORS_ALLOWED_ORIGINS`。Go Backend 不提供 Admin Web 的 `index.html`、`/assets/*` 或 favicon。
+
+如果用户已有 Nginx、Caddy 或对象存储，也可以单独发布 `dist`。这种自定义部署方式需要自行生成 `/config.js`，设置 `window.__ZENTROLA_CONFIG__.apiBaseUrl`，并配置同等的安全响应头。
 
 ## 目录
 
@@ -66,6 +148,17 @@ tests/
 
 ## 检查
 
+MacOS/Linux：
+
+```bash
+npm run build
+# 首次安装浏览器；保留本机其他版本的 Playwright 浏览器。
+PLAYWRIGHT_SKIP_BROWSER_GC=1 npx playwright install chromium
+npm test
+```
+
+Windows PowerShell：
+
 ```powershell
 npm.cmd run build
 # 首次安装浏览器；保留本机其他版本的 Playwright 浏览器。
@@ -76,12 +169,41 @@ npm.cmd test
 
 默认浏览器测试自动启动 Vite，并拦截管理 API，仅使用隔离的内存数据，不访问真实后端。截图只包含模拟数据，放在被忽略的 `test-results/visual`；不启用 trace、视频或失败截图，避免后续真实验收录下凭证。
 
-真实本地验收脚本需要独立测试实例（默认 `http://127.0.0.1:8081`）、已有 `DeepSeek 开发资源` 及 Flash 模型。通过 `ZENTROLA_TEST_ADMIN_USERNAME / ZENTROLA_TEST_ADMIN_PASSWORD` 提供已设置的管理员凭证；为兼容旧开发库，脚本也可从根目录 `.env` 读取遗留的初始账号配置，这仅是测试脚本的兼容行为。它会创建临时成员和分组、授予模型、签发 15 分钟 Key，然后撤销 Key、移除关联并停用成员，保留业务及审计历史；连接检查只查询模型列表，不发起模型推理或覆盖已有凭证。
+真实本地验收脚本需要独立的 Admin Web 和测试后端。测试后端默认为 `http://127.0.0.1:8081`，Admin Web 必须构建或代理到该地址；后端需已有 `DeepSeek 开发资源` 及 Flash 模型。通过 `ZENTROLA_TEST_ADMIN_USERNAME / ZENTROLA_TEST_ADMIN_PASSWORD` 提供已设置的管理员凭证；为兼容旧开发库，脚本也可从根目录 `.env` 读取遗留的初始账号配置，这仅是测试脚本的兼容行为。它会创建临时成员和分组、授予模型、签发 15 分钟 Key，然后撤销 Key、移除关联并停用成员，保留业务及审计历史；连接检查只查询模型列表，不发起模型推理或覆盖已有凭证。
+
+MacOS/Linux：
+
+```bash
+ZENTROLA_WEB_URL='http://127.0.0.1:3001' \
+ZENTROLA_API_URL='http://127.0.0.1:8081' \
+node tests/live.mjs
+```
+
+Windows PowerShell：
 
 ```powershell
 # 仅在需要真实验收时显式执行
-$env:ZENTROLA_WEB_URL = 'http://127.0.0.1:8081'
+$env:ZENTROLA_WEB_URL = 'http://127.0.0.1:3001'
+$env:ZENTROLA_API_URL = 'http://127.0.0.1:8081'
 node tests/live.mjs
 ```
 
 脱敏报告写入根目录 `.cache/web-live-results.json`；截图在 `.cache/web-visual`，不拍摄凭证录入和 Key 展示状态。普通 `npm test` 不执行此脚本。
+
+空库首次初始化验收同样分别指定 Web 和 API 地址：
+
+MacOS/Linux：
+
+```bash
+ZENTROLA_SETUP_WEB_URL='http://127.0.0.1:3001' \
+ZENTROLA_SETUP_API_URL='http://127.0.0.1:8081' \
+node tests/setup-live.mjs
+```
+
+Windows PowerShell：
+
+```powershell
+$env:ZENTROLA_SETUP_WEB_URL = 'http://127.0.0.1:3001'
+$env:ZENTROLA_SETUP_API_URL = 'http://127.0.0.1:8081'
+node tests/setup-live.mjs
+```
