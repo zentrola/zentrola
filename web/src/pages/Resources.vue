@@ -10,6 +10,7 @@ import Modal from '../components/Modal.vue'
 import PageHeader from '../components/PageHeader.vue'
 import ListFooter from '../components/ListFooter.vue'
 import ListSearch from '../components/ListSearch.vue'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 const { items, cursor, loading, error, load } = useCollection<Resource>(() => '/resources')
 const { busy, error: actionError, run } = useAction()
 const providers = ref<Provider[]>([]),
@@ -227,9 +228,7 @@ function resultMessage(result: ConnectionResult) {
           spellcheck="false"
       /></label>
       <p class="field-hint">{{ t('resources.credentialHint') }}</p>
-      <p v-if="validation || actionError" class="alert error" role="alert">
-        {{ validation || actionError }}
-      </p>
+      <p v-if="validation" class="alert error" role="alert">{{ validation }}</p>
       <footer class="form-footer">
         <button type="button" class="button" :disabled="busy" @click="closeEdit">
           {{ t('common.cancel') }}</button
@@ -239,34 +238,30 @@ function resultMessage(result: ConnectionResult) {
       </footer>
     </form></Modal
   >
-  <Modal v-if="statusTarget" :title="t('common.status')" :busy="busy" @close="statusTarget = null"
-    ><p>
-      {{
-        t('common.confirmStatus', {
-          name: statusTarget.name,
-          status: t(statusTarget.status === 'ACTIVE' ? 'common.disable' : 'common.enable'),
-        })
-      }}
-    </p>
-    <p class="muted">
-      {{ t(statusTarget.status === 'ACTIVE' ? 'common.disableHint' : 'resources.limit') }}
-    </p>
-    <p v-if="actionError" class="alert error" role="alert">{{ actionError }}</p>
-    <footer class="form-footer">
-      <button class="button" :disabled="busy" @click="statusTarget = null">
-        {{ t('common.cancel') }}</button
-      ><button class="button primary" :disabled="busy" @click="changeStatus">
-        {{ t('common.confirm') }}
-      </button>
-    </footer></Modal
-  >
+  <ConfirmDialog
+    v-if="statusTarget"
+    :title="t(statusTarget.status === 'ACTIVE' ? 'common.disableTitle' : 'common.enableTitle')"
+    :message="
+      t('common.confirmStatus', {
+        name: statusTarget.name,
+        status: t(statusTarget.status === 'ACTIVE' ? 'common.disable' : 'common.enable'),
+      })
+    "
+    :hint="t(statusTarget.status === 'ACTIVE' ? 'common.disableHint' : 'resources.limit')"
+    :confirm-label="
+      t(statusTarget.status === 'ACTIVE' ? 'common.disableAction' : 'common.enableAction')
+    "
+    :busy="busy"
+    :tone="statusTarget.status === 'ACTIVE' ? 'warning' : 'success'"
+    @close="statusTarget = null"
+    @confirm="changeStatus"
+  />
   <Modal
     v-if="testTarget"
     :title="`${testTarget.name} / ${t('resources.result')}`"
     :busy="busy"
     @close="testTarget = null"
     ><p v-if="busy" role="status">{{ t('resources.testing') }}</p>
-    <p v-if="actionError" class="alert error" role="alert">{{ actionError }}</p>
     <template v-if="testResult"
       ><div class="alert" :class="testResult.ok ? 'success' : 'error'" role="status">
         {{ resultMessage(testResult) }}

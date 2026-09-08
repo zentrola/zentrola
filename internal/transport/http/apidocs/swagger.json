@@ -2392,7 +2392,7 @@
                         "AdminBearer": []
                     }
                 ],
-                "description": "按 ID 倒序分页，最新签发的密钥在前；limit=1 获取最新一条，将 nextCursor 作为 after 查询更早的密钥。仅返回识别前缀，不返回完整密钥。",
+                "description": "按 ID 倒序分页，最新签发的密钥在前；limit=1 获取最新一条，将 nextCursor 作为 after 查询更早的密钥。仅返回脱敏密钥，不返回完整密钥。",
                 "produces": [
                     "application/json"
                 ],
@@ -3488,6 +3488,62 @@
                         }
                     }
                 }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "description": "逻辑删除服务商，并停用其模型映射和所有组织下的服务商密钥；历史用量和操作日志保留。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "模型与资源"
+                ],
+                "summary": "删除服务商",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "服务商 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
             }
         },
         "/api/v1/providers/{id}/status": {
@@ -4227,6 +4283,77 @@
                 }
             }
         },
+        "/api/v1/usage/dashboard": {
+            "get": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "description": "返回当前组织激活用户数、启用模型和服务商数量，以及指定时间范围内的 Token 汇总、用户 Token Top 10 与模型请求 Top 10。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "用量统计"
+                ],
+                "summary": "首页统计",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "起始时间 RFC3339",
+                        "name": "from",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "结束时间 RFC3339",
+                        "name": "to",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/usage.Dashboard"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/usage/writer": {
             "get": {
                 "security": [
@@ -4591,6 +4718,174 @@
                         "description": "Service Unavailable",
                         "schema": {
                             "$ref": "#/definitions/http.OpenAIErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/responses": {
+            "post": {
+                "security": [
+                    {
+                        "GatewayBearer": []
+                    }
+                ],
+                "description": "使用成员 Access Key 的 Bearer 认证。model 为平台逻辑模型编码，请求和响应按 OpenAI Responses 协议透传。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json",
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "OpenAI Gateway"
+                ],
+                "summary": "OpenAI Responses",
+                "parameters": [
+                    {
+                        "description": "OpenAI Responses 请求；至少包含 model、input",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "上游原生响应；stream=true 时为 SSE 事件流",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "平台请求追踪 ID"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.OpenAIErrorResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "平台请求追踪 ID"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/http.OpenAIErrorResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "平台请求追踪 ID"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/http.OpenAIErrorResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "平台请求追踪 ID"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/http.OpenAIErrorResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "平台请求追踪 ID"
+                            }
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "$ref": "#/definitions/http.OpenAIErrorResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "平台请求追踪 ID"
+                            }
+                        }
+                    },
+                    "415": {
+                        "description": "Unsupported Media Type",
+                        "schema": {
+                            "$ref": "#/definitions/http.OpenAIErrorResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "平台请求追踪 ID"
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/http.OpenAIErrorResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "平台请求追踪 ID"
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/http.OpenAIErrorResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "平台请求追踪 ID"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/http.OpenAIErrorResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "平台请求追踪 ID"
+                            }
+                        }
+                    },
+                    "504": {
+                        "description": "Gateway Timeout",
+                        "schema": {
+                            "$ref": "#/definitions/http.OpenAIErrorResponse"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "平台请求追踪 ID"
+                            }
                         }
                     }
                 }
@@ -5162,10 +5457,10 @@
                     "type": "string",
                     "example": "0"
                 },
-                "name": {
+                "maskedKey": {
                     "type": "string"
                 },
-                "prefix": {
+                "name": {
                     "type": "string"
                 },
                 "revokedAt": {
@@ -5323,23 +5618,23 @@
         "management.Provider": {
             "type": "object",
             "properties": {
-                "baseUrl": {
-                    "type": "string"
-                },
                 "code": {
                     "type": "string"
                 },
                 "createdAt": {
                     "type": "string"
                 },
+                "endpoints": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/management.ProviderEndpoint"
+                    }
+                },
                 "id": {
                     "type": "string",
                     "example": "0"
                 },
                 "name": {
-                    "type": "string"
-                },
-                "openaiBaseUrl": {
                     "type": "string"
                 },
                 "proxyEnabled": {
@@ -5371,14 +5666,17 @@
         "management.ProviderDetail": {
             "type": "object",
             "properties": {
-                "baseUrl": {
-                    "type": "string"
-                },
                 "code": {
                     "type": "string"
                 },
                 "createdAt": {
                     "type": "string"
+                },
+                "endpoints": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/management.ProviderEndpoint"
+                    }
                 },
                 "id": {
                     "type": "string",
@@ -5391,9 +5689,6 @@
                     }
                 },
                 "name": {
-                    "type": "string"
-                },
-                "openaiBaseUrl": {
                     "type": "string"
                 },
                 "proxyEnabled": {
@@ -5422,15 +5717,35 @@
                 }
             }
         },
+        "management.ProviderEndpoint": {
+            "type": "object",
+            "properties": {
+                "baseUrl": {
+                    "type": "string"
+                },
+                "protocolType": {
+                    "type": "string",
+                    "enum": [
+                        "OPENAI_CHAT",
+                        "OPENAI_RESPONSES",
+                        "ANTHROPIC_MESSAGES"
+                    ]
+                }
+            }
+        },
         "management.ProviderInput": {
             "type": "object",
             "required": [
+                "endpoints",
                 "mappings",
                 "name"
             ],
             "properties": {
-                "baseUrl": {
-                    "type": "string"
+                "endpoints": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/management.ProviderEndpoint"
+                    }
                 },
                 "mappings": {
                     "type": "array",
@@ -5439,9 +5754,6 @@
                     }
                 },
                 "name": {
-                    "type": "string"
-                },
-                "openaiBaseUrl": {
                     "type": "string"
                 },
                 "proxyEnabled": {
@@ -5475,15 +5787,12 @@
                     "type": "string",
                     "example": "0"
                 },
-                "protocolType": {
-                    "type": "string"
+                "priority": {
+                    "type": "integer"
                 },
                 "providerId": {
                     "type": "string",
                     "example": "0"
-                },
-                "status": {
-                    "type": "string"
                 },
                 "updatedAt": {
                     "type": "string"
@@ -5497,8 +5806,6 @@
             "type": "object",
             "required": [
                 "modelId",
-                "protocolType",
-                "status",
                 "upstreamModelCode"
             ],
             "properties": {
@@ -5506,19 +5813,8 @@
                     "type": "string",
                     "example": "0"
                 },
-                "protocolType": {
-                    "type": "string",
-                    "enum": [
-                        "ANTHROPIC",
-                        "OPENAI"
-                    ]
-                },
-                "status": {
-                    "type": "string",
-                    "enum": [
-                        "ACTIVE",
-                        "DISABLED"
-                    ]
+                "priority": {
+                    "type": "integer"
                 },
                 "upstreamModelCode": {
                     "type": "string"
@@ -5591,10 +5887,10 @@
                 "key": {
                     "type": "string"
                 },
-                "name": {
+                "maskedKey": {
                     "type": "string"
                 },
-                "prefix": {
+                "name": {
                     "type": "string"
                 }
             }
@@ -5621,6 +5917,35 @@
                 }
             }
         },
+        "usage.Dashboard": {
+            "type": "object",
+            "properties": {
+                "activeMemberCount": {
+                    "type": "integer"
+                },
+                "modelCount": {
+                    "type": "integer"
+                },
+                "modelRanking": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/usage.ModelRank"
+                    }
+                },
+                "providerCount": {
+                    "type": "integer"
+                },
+                "tokenRanking": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/usage.TokenRank"
+                    }
+                },
+                "totalTokens": {
+                    "type": "integer"
+                }
+            }
+        },
         "usage.Metrics": {
             "type": "object",
             "properties": {
@@ -5644,17 +5969,29 @@
                 }
             }
         },
+        "usage.ModelRank": {
+            "type": "object",
+            "properties": {
+                "modelId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "requests": {
+                    "type": "integer"
+                },
+                "tokens": {
+                    "type": "integer"
+                }
+            }
+        },
         "usage.Row": {
             "type": "object",
             "properties": {
-                "attemptErrorType": {
-                    "type": "string"
-                },
                 "attemptNo": {
                     "type": "integer"
-                },
-                "attemptStatus": {
-                    "type": "string"
                 },
                 "cachedInputTokens": {
                     "type": "integer"
@@ -5709,10 +6046,21 @@
                 },
                 "status": {
                     "type": "string"
+                }
+            }
+        },
+        "usage.TokenRank": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
                 },
-                "usageId": {
+                "principalId": {
                     "type": "string",
                     "example": "0"
+                },
+                "tokens": {
+                    "type": "integer"
                 }
             }
         }

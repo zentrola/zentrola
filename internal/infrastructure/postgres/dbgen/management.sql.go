@@ -85,7 +85,7 @@ func (q *Queries) ManageCreateGroup(ctx context.Context, arg ManageCreateGroupPa
 
 const manageCreateMember = `-- name: ManageCreateMember :exec
 INSERT INTO principal(id,organization_id,principal_type,name,remark,status,created_by,updated_by,created_at,updated_at)
-VALUES($1,$2,'MEMBER',$3,$4,'ACTIVE',$5,$5,$6,$6)
+VALUES($1,$2,'MEMBER',$3,$4,'DISABLED',$5,$5,$6,$6)
 `
 
 type ManageCreateMemberParams struct {
@@ -140,8 +140,8 @@ func (q *Queries) ManageCreateModel(ctx context.Context, arg ManageCreateModelPa
 }
 
 const manageCreateProvider = `-- name: ManageCreateProvider :exec
-INSERT INTO ai_provider(id,provider_code,provider_name,provider_type,official_website,anthropic_base_url,openai_base_url,proxy_enabled,proxy_url_display,proxy_url_ciphertext,proxy_url_nonce,proxy_url_key_version,proxy_header_names,proxy_headers_ciphertext,proxy_headers_nonce,proxy_headers_key_version,status,created_by,updated_by,created_at,updated_at)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$18,$19,$19)
+INSERT INTO ai_provider(id,provider_code,provider_name,provider_type,official_website,proxy_enabled,proxy_url_display,proxy_url_ciphertext,proxy_url_nonce,proxy_url_key_version,proxy_header_names,proxy_headers_ciphertext,proxy_headers_nonce,proxy_headers_key_version,status,created_by,updated_by,created_at,updated_at)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$16,$17,$17)
 `
 
 type ManageCreateProviderParams struct {
@@ -150,8 +150,6 @@ type ManageCreateProviderParams struct {
 	ProviderName           string
 	ProviderType           string
 	OfficialWebsite        *string
-	AnthropicBaseUrl       *string
-	OpenaiBaseUrl          *string
 	ProxyEnabled           bool
 	ProxyUrlDisplay        *string
 	ProxyUrlCiphertext     []byte
@@ -173,8 +171,6 @@ func (q *Queries) ManageCreateProvider(ctx context.Context, arg ManageCreateProv
 		arg.ProviderName,
 		arg.ProviderType,
 		arg.OfficialWebsite,
-		arg.AnthropicBaseUrl,
-		arg.OpenaiBaseUrl,
 		arg.ProxyEnabled,
 		arg.ProxyUrlDisplay,
 		arg.ProxyUrlCiphertext,
@@ -192,8 +188,8 @@ func (q *Queries) ManageCreateProvider(ctx context.Context, arg ManageCreateProv
 }
 
 const manageCreateProviderMapping = `-- name: ManageCreateProviderMapping :exec
-INSERT INTO provider_model(id,provider_id,model_id,upstream_model_code,protocol_type,status,created_by,updated_by,created_at,updated_at)
-VALUES($1,$2,$3,$4,$5,$6,$7,$7,$8,$8)
+INSERT INTO provider_model(id,provider_id,model_id,upstream_model_code,priority,created_by,updated_by,created_at,updated_at)
+VALUES($1,$2,$3,$4,$5,$6,$6,$7,$7)
 `
 
 type ManageCreateProviderMappingParams struct {
@@ -201,8 +197,7 @@ type ManageCreateProviderMappingParams struct {
 	ProviderID        int64
 	ModelID           int64
 	UpstreamModelCode string
-	ProtocolType      string
-	Status            string
+	Priority          int32
 	CreatedBy         string
 	CreatedAt         pgtype.Timestamptz
 }
@@ -213,8 +208,7 @@ func (q *Queries) ManageCreateProviderMapping(ctx context.Context, arg ManageCre
 		arg.ProviderID,
 		arg.ModelID,
 		arg.UpstreamModelCode,
-		arg.ProtocolType,
-		arg.Status,
+		arg.Priority,
 		arg.CreatedBy,
 		arg.CreatedAt,
 	)
@@ -385,9 +379,23 @@ func (q *Queries) ManageDeleteProvider(ctx context.Context, arg ManageDeleteProv
 	return err
 }
 
+const manageDeleteProviderEndpoint = `-- name: ManageDeleteProviderEndpoint :exec
+DELETE FROM provider_endpoint WHERE provider_id=$1 AND protocol_type=$2
+`
+
+type ManageDeleteProviderEndpointParams struct {
+	ProviderID   int64
+	ProtocolType string
+}
+
+func (q *Queries) ManageDeleteProviderEndpoint(ctx context.Context, arg ManageDeleteProviderEndpointParams) error {
+	_, err := q.db.Exec(ctx, manageDeleteProviderEndpoint, arg.ProviderID, arg.ProtocolType)
+	return err
+}
+
 const manageDeleteProviderMapping = `-- name: ManageDeleteProviderMapping :exec
 UPDATE provider_model
-SET status='DISABLED',is_deleted=true,updated_by=$3,updated_at=$4
+SET is_deleted=true,updated_by=$3,updated_at=$4
 WHERE id=$1 AND provider_id=$2 AND is_deleted=false
 `
 
@@ -410,7 +418,7 @@ func (q *Queries) ManageDeleteProviderMapping(ctx context.Context, arg ManageDel
 
 const manageDeleteProviderMappings = `-- name: ManageDeleteProviderMappings :exec
 UPDATE provider_model
-SET status='DISABLED',is_deleted=true,updated_by=$2,updated_at=$3
+SET is_deleted=true,updated_by=$2,updated_at=$3
 WHERE provider_id=$1 AND is_deleted=false
 `
 
@@ -674,7 +682,7 @@ func (q *Queries) ManageGroups(ctx context.Context, arg ManageGroupsParams) ([]A
 }
 
 const manageKeys = `-- name: ManageKeys :many
-SELECT id,name,key_prefix,status,expires_at,revoked_at,created_at FROM access_key
+SELECT id,name,masked_key,status,expires_at,revoked_at,created_at FROM access_key
 WHERE organization_id=$1 AND principal_id=$2 AND is_deleted=false AND (id<$3 OR $3=0) ORDER BY id DESC LIMIT $4
 `
 
@@ -688,7 +696,7 @@ type ManageKeysParams struct {
 type ManageKeysRow struct {
 	ID        int64
 	Name      string
-	KeyPrefix string
+	MaskedKey string
 	Status    string
 	ExpiresAt pgtype.Timestamptz
 	RevokedAt pgtype.Timestamptz
@@ -712,7 +720,7 @@ func (q *Queries) ManageKeys(ctx context.Context, arg ManageKeysParams) ([]Manag
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
-			&i.KeyPrefix,
+			&i.MaskedKey,
 			&i.Status,
 			&i.ExpiresAt,
 			&i.RevokedAt,
@@ -1055,7 +1063,7 @@ func (q *Queries) ManagePermissionExists(ctx context.Context, arg ManagePermissi
 }
 
 const manageProvider = `-- name: ManageProvider :one
-SELECT id, is_deleted, provider_code, provider_name, provider_type, anthropic_base_url, status, created_by, updated_by, created_at, updated_at, openai_base_url, official_website, proxy_enabled, proxy_url_display, proxy_url_ciphertext, proxy_url_nonce, proxy_url_key_version, proxy_header_names, proxy_headers_ciphertext, proxy_headers_nonce, proxy_headers_key_version FROM ai_provider WHERE id=$1 AND is_deleted=false
+SELECT id, is_deleted, provider_code, provider_name, provider_type, status, created_by, updated_by, created_at, updated_at, official_website, proxy_enabled, proxy_url_display, proxy_url_ciphertext, proxy_url_nonce, proxy_url_key_version, proxy_header_names, proxy_headers_ciphertext, proxy_headers_nonce, proxy_headers_key_version FROM ai_provider WHERE id=$1 AND is_deleted=false
 `
 
 func (q *Queries) ManageProvider(ctx context.Context, id int64) (AiProvider, error) {
@@ -1067,13 +1075,11 @@ func (q *Queries) ManageProvider(ctx context.Context, id int64) (AiProvider, err
 		&i.ProviderCode,
 		&i.ProviderName,
 		&i.ProviderType,
-		&i.AnthropicBaseUrl,
 		&i.Status,
 		&i.CreatedBy,
 		&i.UpdatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.OpenaiBaseUrl,
 		&i.OfficialWebsite,
 		&i.ProxyEnabled,
 		&i.ProxyUrlDisplay,
@@ -1088,10 +1094,42 @@ func (q *Queries) ManageProvider(ctx context.Context, id int64) (AiProvider, err
 	return i, err
 }
 
+const manageProviderEndpoints = `-- name: ManageProviderEndpoints :many
+SELECT provider_id, protocol_type, base_url, created_by, updated_by, created_at, updated_at FROM provider_endpoint WHERE provider_id=$1 ORDER BY protocol_type
+`
+
+func (q *Queries) ManageProviderEndpoints(ctx context.Context, providerID int64) ([]ProviderEndpoint, error) {
+	rows, err := q.db.Query(ctx, manageProviderEndpoints, providerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ProviderEndpoint{}
+	for rows.Next() {
+		var i ProviderEndpoint
+		if err := rows.Scan(
+			&i.ProviderID,
+			&i.ProtocolType,
+			&i.BaseUrl,
+			&i.CreatedBy,
+			&i.UpdatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const manageProviderMappings = `-- name: ManageProviderMappings :many
-SELECT id, is_deleted, provider_id, model_id, upstream_model_code, protocol_type, status, created_by, updated_by, created_at, updated_at FROM provider_model
+SELECT id, is_deleted, provider_id, model_id, upstream_model_code, created_by, updated_by, created_at, updated_at, priority FROM provider_model
 WHERE provider_id=$1 AND is_deleted=false
-ORDER BY id
+ORDER BY priority,id
 `
 
 func (q *Queries) ManageProviderMappings(ctx context.Context, providerID int64) ([]ProviderModel, error) {
@@ -1109,12 +1147,11 @@ func (q *Queries) ManageProviderMappings(ctx context.Context, providerID int64) 
 			&i.ProviderID,
 			&i.ModelID,
 			&i.UpstreamModelCode,
-			&i.ProtocolType,
-			&i.Status,
 			&i.CreatedBy,
 			&i.UpdatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Priority,
 		); err != nil {
 			return nil, err
 		}
@@ -1148,7 +1185,7 @@ func (q *Queries) ManageProviderStatus(ctx context.Context, arg ManageProviderSt
 }
 
 const manageProviders = `-- name: ManageProviders :many
-SELECT id, is_deleted, provider_code, provider_name, provider_type, anthropic_base_url, status, created_by, updated_by, created_at, updated_at, openai_base_url, official_website, proxy_enabled, proxy_url_display, proxy_url_ciphertext, proxy_url_nonce, proxy_url_key_version, proxy_header_names, proxy_headers_ciphertext, proxy_headers_nonce, proxy_headers_key_version FROM ai_provider WHERE is_deleted=false AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2
+SELECT id, is_deleted, provider_code, provider_name, provider_type, status, created_by, updated_by, created_at, updated_at, official_website, proxy_enabled, proxy_url_display, proxy_url_ciphertext, proxy_url_nonce, proxy_url_key_version, proxy_header_names, proxy_headers_ciphertext, proxy_headers_nonce, proxy_headers_key_version FROM ai_provider WHERE is_deleted=false AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2
 `
 
 type ManageProvidersParams struct {
@@ -1171,13 +1208,11 @@ func (q *Queries) ManageProviders(ctx context.Context, arg ManageProvidersParams
 			&i.ProviderCode,
 			&i.ProviderName,
 			&i.ProviderType,
-			&i.AnthropicBaseUrl,
 			&i.Status,
 			&i.CreatedBy,
 			&i.UpdatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.OpenaiBaseUrl,
 			&i.OfficialWebsite,
 			&i.ProxyEnabled,
 			&i.ProxyUrlDisplay,
@@ -1428,7 +1463,7 @@ func (q *Queries) ManageUpdateModel(ctx context.Context, arg ManageUpdateModelPa
 }
 
 const manageUpdateProvider = `-- name: ManageUpdateProvider :exec
-UPDATE ai_provider SET provider_name=$2,official_website=$3,anthropic_base_url=$4,openai_base_url=$5,proxy_enabled=$6,proxy_url_display=$7,proxy_url_ciphertext=$8,proxy_url_nonce=$9,proxy_url_key_version=$10,proxy_header_names=$11,proxy_headers_ciphertext=$12,proxy_headers_nonce=$13,proxy_headers_key_version=$14,updated_by=$15,updated_at=$16
+UPDATE ai_provider SET provider_name=$2,official_website=$3,proxy_enabled=$4,proxy_url_display=$5,proxy_url_ciphertext=$6,proxy_url_nonce=$7,proxy_url_key_version=$8,proxy_header_names=$9,proxy_headers_ciphertext=$10,proxy_headers_nonce=$11,proxy_headers_key_version=$12,updated_by=$13,updated_at=$14
 WHERE id=$1 AND is_deleted=false
 `
 
@@ -1436,8 +1471,6 @@ type ManageUpdateProviderParams struct {
 	ID                     int64
 	ProviderName           string
 	OfficialWebsite        *string
-	AnthropicBaseUrl       *string
-	OpenaiBaseUrl          *string
 	ProxyEnabled           bool
 	ProxyUrlDisplay        *string
 	ProxyUrlCiphertext     []byte
@@ -1456,8 +1489,6 @@ func (q *Queries) ManageUpdateProvider(ctx context.Context, arg ManageUpdateProv
 		arg.ID,
 		arg.ProviderName,
 		arg.OfficialWebsite,
-		arg.AnthropicBaseUrl,
-		arg.OpenaiBaseUrl,
 		arg.ProxyEnabled,
 		arg.ProxyUrlDisplay,
 		arg.ProxyUrlCiphertext,
@@ -1475,7 +1506,7 @@ func (q *Queries) ManageUpdateProvider(ctx context.Context, arg ManageUpdateProv
 
 const manageUpdateProviderMapping = `-- name: ManageUpdateProviderMapping :exec
 UPDATE provider_model
-SET upstream_model_code=$3,status=$4,updated_by=$5,updated_at=$6
+SET upstream_model_code=$3,priority=$4,updated_by=$5,updated_at=$6
 WHERE id=$1 AND provider_id=$2 AND is_deleted=false
 `
 
@@ -1483,7 +1514,7 @@ type ManageUpdateProviderMappingParams struct {
 	ID                int64
 	ProviderID        int64
 	UpstreamModelCode string
-	Status            string
+	Priority          int32
 	UpdatedBy         string
 	UpdatedAt         pgtype.Timestamptz
 }
@@ -1493,7 +1524,7 @@ func (q *Queries) ManageUpdateProviderMapping(ctx context.Context, arg ManageUpd
 		arg.ID,
 		arg.ProviderID,
 		arg.UpstreamModelCode,
-		arg.Status,
+		arg.Priority,
 		arg.UpdatedBy,
 		arg.UpdatedAt,
 	)
@@ -1528,6 +1559,32 @@ func (q *Queries) ManageUpdateResource(ctx context.Context, arg ManageUpdateReso
 		arg.Status,
 		arg.UpdatedBy,
 		arg.UpdatedAt,
+	)
+	return err
+}
+
+const manageUpsertProviderEndpoint = `-- name: ManageUpsertProviderEndpoint :exec
+INSERT INTO provider_endpoint(provider_id,protocol_type,base_url,created_by,updated_by,created_at,updated_at)
+VALUES($1,$2,$3,$4,$4,$5,$5)
+ON CONFLICT(provider_id,protocol_type) DO UPDATE
+SET base_url=excluded.base_url,updated_by=excluded.updated_by,updated_at=excluded.updated_at
+`
+
+type ManageUpsertProviderEndpointParams struct {
+	ProviderID   int64
+	ProtocolType string
+	BaseUrl      string
+	CreatedBy    string
+	CreatedAt    pgtype.Timestamptz
+}
+
+func (q *Queries) ManageUpsertProviderEndpoint(ctx context.Context, arg ManageUpsertProviderEndpointParams) error {
+	_, err := q.db.Exec(ctx, manageUpsertProviderEndpoint,
+		arg.ProviderID,
+		arg.ProtocolType,
+		arg.BaseUrl,
+		arg.CreatedBy,
+		arg.CreatedAt,
 	)
 	return err
 }

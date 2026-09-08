@@ -58,9 +58,14 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	protocol := gw.AnthropicProtocol
 	inferencePath := "/v1/messages"
 	if g.protocol == gw.OpenAIProtocol {
-		protocol = gw.OpenAIProtocol
 		path = r.URL.Path
-		inferencePath = "/v1/chat/completions"
+		if path == "/v1/responses" {
+			protocol = gw.OpenAIResponsesProtocol
+			inferencePath = "/v1/responses"
+		} else {
+			protocol = gw.OpenAIProtocol
+			inferencePath = "/v1/chat/completions"
+		}
 	}
 	identity, _ := r.Context().Value(principalIdentityKey{}).(appsec.PrincipalIdentity)
 	var trace *usage.Event
@@ -78,14 +83,16 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					a.InputTokens, a.OutputTokens, a.CachedInputTokens = observer.Tokens(trace.Status == usage.Success)
 				}
 			}
-			_ = g.writer.Submit(*trace)
+			if trace.Attempt != nil {
+				_ = g.writer.Submit(*trace)
+			}
 		}()
 	}
 	reject := func(failure *gw.Failure) {
 		if trace != nil {
 			trace.ErrorType = failure.Code
 		}
-		if protocol == gw.OpenAIProtocol {
+		if protocol == gw.OpenAIProtocol || protocol == gw.OpenAIResponsesProtocol {
 			writeOpenAIError(w, failure)
 		} else {
 			writeGatewayError(w, failure)
@@ -101,7 +108,7 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if protocol == gw.OpenAIProtocol && path == "/v1/models" {
+	if (protocol == gw.OpenAIProtocol || protocol == gw.OpenAIResponsesProtocol) && path == "/v1/models" {
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", "GET")
 			reject(&gw.Failure{Code: "METHOD_NOT_ALLOWED", Type: "invalid_request_error", Message: "Method not allowed.", Status: 405})
@@ -126,7 +133,8 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": models})
 		return
 	}
-	if (protocol == gw.AnthropicProtocol && path != "/v1/messages" && path != "/v1/messages/count_tokens") || (protocol == gw.OpenAIProtocol && path != inferencePath) {
+	if (protocol == gw.AnthropicProtocol && path != "/v1/messages" && path != "/v1/messages/count_tokens") ||
+		((protocol == gw.OpenAIProtocol || protocol == gw.OpenAIResponsesProtocol) && path != inferencePath) {
 		reject(&gw.Failure{Code: "NOT_FOUND", Type: "not_found_error", Message: "Route not found.", Status: 404})
 		return
 	}
@@ -179,7 +187,7 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), g.cfg.RequestTimeout)
 	defer cancel()
-	upstream, err := g.service.Forward(ctx, identity, gw.Request{Path: path, Version: version, Beta: beta, BetaQuery: query, Body: body, RequestID: logging.RequestID(r.Context()), ProtocolHeaders: nativeHeaders, Trace: trace, Protocol: protocol})
+	upstream, err := g.service.Forward(ctx, identity, gw.Request{Path: path, Version: version, Beta: beta, BetaQuery: query, Development: g.cfg.Development, Body: body, RequestID: logging.RequestID(r.Context()), ProtocolHeaders: nativeHeaders, Trace: trace, Protocol: protocol})
 	if err != nil {
 		failure := gw.ErrUnavailable
 		var known *gw.Failure
@@ -189,7 +197,28 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			failure = gw.ErrTimeout
 		}
-		g.logger.WarnContext(r.Context(), "gateway request rejected", "error_code", failure.Code)
+		attributes := []any{"error_code", failure.Code}
+		if g.cfg.Development {
+			parse := gw.Parse
+			if protocol == gw.OpenAIProtocol || protocol == gw.OpenAIResponsesProtocol {
+				parse = gw.ParseOpenAI
+			}
+			parsed, parseErr := parse(body)
+			attributes = append(attributes,
+				"protocol", protocol,
+				"path", path,
+				"organization_id", identity.OrganizationID,
+				"principal_id", identity.ID,
+				"access_key_id", identity.AccessKeyID,
+			)
+			if parseErr == nil {
+				attributes = append(attributes, "requested_model", parsed.Model)
+			}
+			if trace != nil && trace.ModelID > 0 {
+				attributes = append(attributes, "model_id", trace.ModelID)
+			}
+		}
+		g.logger.WarnContext(r.Context(), "gateway request rejected", attributes...)
 		reject(failure)
 		if trace != nil && errors.Is(r.Context().Err(), context.Canceled) {
 			trace.Status = usage.Cancelled
@@ -206,7 +235,7 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			encoding := http.Header(upstream.Headers).Get("Content-Encoding")
 			if encoding == "" || encoding == "identity" {
 				observer = gw.NewUsageObserver(media == "text/event-stream")
-				if protocol == gw.OpenAIProtocol {
+				if protocol == gw.OpenAIProtocol || protocol == gw.OpenAIResponsesProtocol {
 					observer = gw.NewOpenAIUsageObserver(media == "text/event-stream")
 				}
 			}

@@ -111,6 +111,9 @@ func TestStage4Integration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := management.SetMemberStatus(ctx, actor, member.ID, "ACTIVE", appsec.RequestMeta{}); err != nil {
+		t.Fatal(err)
+	}
 	var calls atomic.Int32
 	streamRelease := make(chan struct{})
 	defer close(streamRelease)
@@ -277,11 +280,11 @@ func TestStage4Integration(t *testing.T) {
 		if err := management.SetModelStatus(ctx, actor, modelID, "ACTIVE", appsec.RequestMeta{}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := pool.Exec(ctx, "UPDATE provider_model SET status='DISABLED' WHERE model_id=$1", modelID); err != nil {
+		if _, err := pool.Exec(ctx, "DELETE FROM provider_endpoint WHERE provider_id=$1 AND protocol_type='ANTHROPIC_MESSAGES'", providers[0].ID); err != nil {
 			t.Fatal(err)
 		}
 		checkFailure(503, "MODEL_ROUTE_UNAVAILABLE")
-		if _, err := pool.Exec(ctx, "UPDATE provider_model SET status='ACTIVE' WHERE model_id=$1", modelID); err != nil {
+		if _, err := pool.Exec(ctx, "INSERT INTO provider_endpoint(provider_id,protocol_type,base_url,created_by,updated_by,created_at,updated_at) VALUES($1,'ANTHROPIC_MESSAGES','https://api.anthropic.com','system','system',now(),now())", providers[0].ID); err != nil {
 			t.Fatal(err)
 		}
 	})

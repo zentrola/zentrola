@@ -57,26 +57,24 @@ func NewWriter(store Store, ids shared.IDGenerator, logger *slog.Logger, opts Op
 	return w, nil
 }
 func (w *Writer) Submit(event domain.Event) error {
-	// 防止调用方在入队后修改指针；生成一次 ID，所有写入尝试复用同一事实。
-	if event.Attempt != nil {
-		a := *event.Attempt
-		clone := func(v *int64) *int64 {
-			if v == nil {
-				return nil
-			}
-			n := *v
-			return &n
+	if event.Attempt == nil {
+		return nil
+	}
+	// 防止调用方在入队后修改指针；为上游调用生成一次 ID，所有写入尝试复用。
+	a := *event.Attempt
+	clone := func(v *int64) *int64 {
+		if v == nil {
+			return nil
 		}
-		a.InputTokens = clone(a.InputTokens)
-		a.OutputTokens = clone(a.OutputTokens)
-		a.CachedInputTokens = clone(a.CachedInputTokens)
-		event.Attempt = &a
+		n := *v
+		return &n
 	}
+	a.InputTokens = clone(a.InputTokens)
+	a.OutputTokens = clone(a.OutputTokens)
+	a.CachedInputTokens = clone(a.CachedInputTokens)
+	event.Attempt = &a
 	var err error
-	event.ID, err = w.ids.NextID()
-	if err == nil && event.Attempt != nil {
-		event.Attempt.ID, err = w.ids.NextID()
-	}
+	event.Attempt.ID, err = w.ids.NextID()
 	if err != nil {
 		w.failure(event, "USAGE_ID_FAILED")
 		return errors.New("usage ID generation failed")

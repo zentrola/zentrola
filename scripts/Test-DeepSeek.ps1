@@ -136,10 +136,10 @@ try {
         $pollUntil=[DateTime]::UtcNow.AddSeconds(5)
         do {
             $usageRows=Admin-Request GET "/usage?memberId=$($member.id)"
-            if ($usageRows.items.Count -ge 5) { break }
+            if ($usageRows.items.Count -ge 4) { break }
             Start-Sleep -Milliseconds 100
         } while ([DateTime]::UtcNow -lt $pollUntil)
-        Check 'usage_request_count' ($usageRows.items.Count -eq 5) @{requests=$usageRows.items.Count;expected=5}
+        Check 'usage_provider_call_count' ($usageRows.items.Count -eq 4) @{providerCalls=$usageRows.items.Count;expected=4}
         $providers=Admin-Request GET '/providers'
         $provider=@($providers.items|Where-Object code -eq 'deepseek-official')[0]
         $resources=Admin-Request GET '/resources'
@@ -152,8 +152,8 @@ try {
             }
             Check 'usage_attribution_and_tokens' $correct @{requestId=$expected.requestId;inputTokens=$record.inputTokens;outputTokens=$record.outputTokens;cachedInputTokens=$record.cachedInputTokens}
         }
-        $deniedRow=@($usageRows.items|Where-Object requestId -eq $denied.requestId)[0]
-        Check 'denied_without_attempt' ($deniedRow.status -eq 'FAILED' -and $null -eq $deniedRow.usageId) @{requestId=$denied.requestId}
+        $deniedRow=@($usageRows.items|Where-Object requestId -eq $denied.requestId)
+        Check 'denied_not_recorded_as_usage' ($deniedRow.Count -eq 0) @{requestId=$denied.requestId}
     }
 } finally {
     $cleanupFailed=$false

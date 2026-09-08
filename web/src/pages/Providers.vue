@@ -17,6 +17,7 @@ import ListSearch from '../components/ListSearch.vue'
 import Modal from '../components/Modal.vue'
 import PageHeader from '../components/PageHeader.vue'
 import StatusSwitch from '../components/StatusSwitch.vue'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 
 const { items, cursor, loading, error, load } = useCollection<Provider>(() => '/providers')
 const { busy, error: actionError, run } = useAction()
@@ -49,8 +50,9 @@ type ProxyHeaderDraft = {
 const form = reactive({
   name: '',
   website: '',
-  baseUrl: '',
-  openaiBaseUrl: '',
+  anthropicBaseUrl: '',
+  openaiChatBaseUrl: '',
+  openaiResponsesBaseUrl: '',
   proxyEnabled: false,
   proxyUrl: '',
   proxyHeaders: [] as ProxyHeaderDraft[],
@@ -67,7 +69,7 @@ const selectedMappingCount = computed(() => mappingRows.value.filter((row) => ro
 const { keyword, query, visible, search, reset } = useListSearch(
   items,
   (provider) =>
-    `${provider.name} ${provider.code} ${provider.website ?? ''} ${provider.baseUrl ?? ''} ${provider.openaiBaseUrl ?? ''}`,
+    `${provider.name} ${provider.code} ${provider.website ?? ''} ${provider.endpoints.map((endpoint) => endpoint.baseUrl).join(' ')}`,
   load,
 )
 
@@ -96,8 +98,15 @@ function assignForm(provider: Provider | null, mappings: MappingDraft[] = []) {
   Object.assign(form, {
     name: provider?.name ?? '',
     website: provider?.website ?? '',
-    baseUrl: provider?.baseUrl ?? '',
-    openaiBaseUrl: provider?.openaiBaseUrl ?? '',
+    anthropicBaseUrl:
+      provider?.endpoints.find((endpoint) => endpoint.protocolType === 'ANTHROPIC_MESSAGES')
+        ?.baseUrl ?? '',
+    openaiChatBaseUrl:
+      provider?.endpoints.find((endpoint) => endpoint.protocolType === 'OPENAI_CHAT')?.baseUrl ??
+      '',
+    openaiResponsesBaseUrl:
+      provider?.endpoints.find((endpoint) => endpoint.protocolType === 'OPENAI_RESPONSES')
+        ?.baseUrl ?? '',
     proxyEnabled: provider?.proxyEnabled ?? false,
     proxyUrl: provider?.proxyUrl ?? '',
     proxyHeaders: (provider?.proxyHeaders ?? []).map((header) => ({
@@ -225,6 +234,10 @@ function modelCode(modelId: string) {
   return models.value.find((model) => model.id === modelId)?.code ?? ''
 }
 
+function endpointURL(provider: Provider, protocolType: ProviderProtocol) {
+  return provider.endpoints.find((endpoint) => endpoint.protocolType === protocolType)?.baseUrl ?? ''
+}
+
 function resolvedUpstreamModelCode(mapping: MappingDraft) {
   return mapping.upstreamModelCode.trim() || modelCode(mapping.modelId)
 }
@@ -332,36 +345,32 @@ function resultMessage(result: ConnectionResult) {
 
 function save() {
   validation.value = ''
-  const protocols: ProviderProtocol[] = []
-  if (form.baseUrl) protocols.push('ANTHROPIC')
-  if (form.openaiBaseUrl) protocols.push('OPENAI')
+  const endpointDrafts: Array<{ protocolType: ProviderProtocol; baseUrl: string }> = [
+    { protocolType: 'OPENAI_CHAT', baseUrl: normalizeURL(form.openaiChatBaseUrl) },
+    { protocolType: 'OPENAI_RESPONSES', baseUrl: normalizeURL(form.openaiResponsesBaseUrl) },
+    { protocolType: 'ANTHROPIC_MESSAGES', baseUrl: normalizeURL(form.anthropicBaseUrl) },
+  ]
   const input = {
     name: form.name.trim(),
     website: normalizeURL(form.website),
-    baseUrl: normalizeURL(form.baseUrl),
-    openaiBaseUrl: normalizeURL(form.openaiBaseUrl),
+    endpoints: endpointDrafts.filter((endpoint) => endpoint.baseUrl),
     proxyEnabled: form.proxyEnabled,
     proxyUrl: form.proxyEnabled ? form.proxyUrl.trim() : '',
     proxyHeaders: form.proxyEnabled
       ? form.proxyHeaders.map((header) => ({ key: header.key.trim(), value: header.value }))
       : [],
-    mappings: form.mappings.flatMap((mapping) =>
-      protocols.map((protocolType) => ({
-        modelId: mapping.modelId,
-        upstreamModelCode: resolvedUpstreamModelCode(mapping),
-        protocolType,
-        status: 'ACTIVE',
-      })),
-    ),
+    mappings: form.mappings.map((mapping) => ({
+      modelId: mapping.modelId,
+      upstreamModelCode: resolvedUpstreamModelCode(mapping),
+    })),
   }
   if (!validText(input.name, 128)) validation.value = t('common.byteLimit')
   else if (
     !validURL(input.website) ||
-    !validURL(input.baseUrl, true) ||
-    !validURL(input.openaiBaseUrl, true)
+    input.endpoints.some((endpoint) => !validURL(endpoint.baseUrl, true))
   )
     validation.value = t('providers.urlInvalid')
-  else if (!input.baseUrl && !input.openaiBaseUrl)
+  else if (!input.endpoints.length)
     validation.value = t('providers.endpointRequired')
   else if (input.proxyEnabled && !validProxyURL(input.proxyUrl))
     validation.value = t('providers.proxyUrlInvalid')
@@ -435,8 +444,8 @@ onMounted(() => {
       @search="search"
       @reset="reset"
     />
-    <p v-if="error || resourceError || modelError || actionError" class="alert error" role="alert">
-      {{ error || resourceError || modelError || actionError
+    <p v-if="error || resourceError || modelError" class="alert error" role="alert">
+      {{ error || resourceError || modelError
       }}<button class="text-button" @click="reload">
         {{ t('common.retry') }}
       </button>
@@ -524,15 +533,26 @@ onMounted(() => {
             <td>
               <div class="endpoint-stack">
                 <span
-                  ><b>Anthropic</b
-                  ><code class="endpoint" :title="provider.baseUrl || undefined">{{
-                    provider.baseUrl || '-'
-                  }}</code></span
+                  ><b>OpenAI Chat</b
+                  ><code
+                    class="endpoint"
+                    :title="endpointURL(provider, 'OPENAI_CHAT') || undefined"
+                    >{{ endpointURL(provider, 'OPENAI_CHAT') || '-' }}</code
+                  ></span
                 ><span
-                  ><b>OpenAI</b
-                  ><code class="endpoint" :title="provider.openaiBaseUrl || undefined">{{
-                    provider.openaiBaseUrl || '-'
-                  }}</code></span
+                  ><b>OpenAI Responses</b
+                  ><code
+                    class="endpoint"
+                    :title="endpointURL(provider, 'OPENAI_RESPONSES') || undefined"
+                    >{{ endpointURL(provider, 'OPENAI_RESPONSES') || '-' }}</code
+                  ></span
+                ><span
+                  ><b>Anthropic Messages</b
+                  ><code
+                    class="endpoint"
+                    :title="endpointURL(provider, 'ANTHROPIC_MESSAGES') || undefined"
+                    >{{ endpointURL(provider, 'ANTHROPIC_MESSAGES') || '-' }}</code
+                  ></span
                 >
               </div>
             </td>
@@ -564,7 +584,7 @@ onMounted(() => {
     wide
     @close="editing = false"
   >
-    <form class="provider-form" @submit.prevent="save">
+    <form id="provider-form" class="provider-form" @submit.prevent="save">
       <section class="connection-editor" aria-labelledby="provider-connection-title">
         <header class="provider-section-head">
           <div>
@@ -586,20 +606,29 @@ onMounted(() => {
               :disabled="busy"
           /></label>
           <label
-            >{{ t('providers.anthropicEndpoint')
+            >{{ t('providers.openaiChatEndpoint')
             }}<input
-              v-model="form.baseUrl"
+              v-model="form.openaiChatBaseUrl"
               type="url"
-              placeholder="https://api.example.com/anthropic"
+              placeholder="https://api.example.com/v1"
               spellcheck="false"
               :disabled="busy"
           /></label>
           <label
-            >{{ t('providers.openaiEndpoint')
+            >{{ t('providers.openaiResponsesEndpoint')
             }}<input
-              v-model="form.openaiBaseUrl"
+              v-model="form.openaiResponsesBaseUrl"
               type="url"
               placeholder="https://api.example.com/v1"
+              spellcheck="false"
+              :disabled="busy"
+          /></label>
+          <label
+            >{{ t('providers.anthropicEndpoint')
+            }}<input
+              v-model="form.anthropicBaseUrl"
+              type="url"
+              placeholder="https://api.example.com/anthropic"
               spellcheck="false"
               :disabled="busy"
           /></label>
@@ -803,36 +832,28 @@ onMounted(() => {
           </div>
         </section>
       </section>
-      <p v-if="validation || actionError" class="alert error" role="alert">
-        {{ validation || actionError }}
-      </p>
-      <footer class="form-footer">
-        <button type="button" class="button" :disabled="busy" @click="editing = false">
-          {{ t('common.cancel') }}</button
-        ><button class="button primary" :disabled="busy">
-          {{ t(busy ? 'common.working' : 'common.save') }}
-        </button>
-      </footer>
+      <p v-if="validation" class="alert error" role="alert">{{ validation }}</p>
     </form>
+    <template #footer>
+      <button type="button" class="button" :disabled="busy" @click="editing = false">
+        {{ t('common.cancel') }}</button
+      ><button type="submit" form="provider-form" class="button primary" :disabled="busy">
+        {{ t(busy ? 'common.working' : 'common.save') }}
+      </button>
+    </template>
   </Modal>
 
-  <Modal
+  <ConfirmDialog
     v-if="deleteTarget"
     :title="t('providers.deleteTitle')"
+    :message="t('providers.deleteQuestion', { name: deleteTarget.name })"
+    :hint="t('providers.deleteConsequence')"
+    :confirm-label="t('providers.delete')"
     :busy="busy"
+    tone="danger"
     @close="deleteTarget = null"
-  >
-    <p>{{ t('providers.deleteHint', { name: deleteTarget.name }) }}</p>
-    <p v-if="actionError" class="alert error" role="alert">{{ actionError }}</p>
-    <footer class="form-footer">
-      <button class="button" :disabled="busy" @click="deleteTarget = null">
-        {{ t('common.cancel') }}
-      </button>
-      <button class="button danger-fill" :disabled="busy" @click="deleteProvider">
-        {{ t(busy ? 'common.working' : 'providers.delete') }}
-      </button>
-    </footer>
-  </Modal>
+    @confirm="deleteProvider"
+  />
 
   <Modal
     v-if="credentialTarget"
@@ -860,9 +881,7 @@ onMounted(() => {
           spellcheck="false"
       /></label>
       <p class="field-hint">{{ t('resources.credentialHint') }}</p>
-      <p v-if="validation || actionError" class="alert error" role="alert">
-        {{ validation || actionError }}
-      </p>
+      <p v-if="validation" class="alert error" role="alert">{{ validation }}</p>
       <footer class="form-footer">
         <button type="button" class="button" :disabled="busy" @click="closeCredential">
           {{ t('common.cancel') }}</button
@@ -880,7 +899,6 @@ onMounted(() => {
     @close="testTarget = null"
   >
     <p v-if="busy" role="status">{{ t('resources.testing') }}</p>
-    <p v-if="actionError" class="alert error" role="alert">{{ actionError }}</p>
     <template v-if="testResult">
       <div class="alert" :class="testResult.ok ? 'success' : 'error'" role="status">
         {{ resultMessage(testResult) }}
@@ -900,26 +918,24 @@ onMounted(() => {
     </footer>
   </Modal>
 
-  <Modal v-if="statusTarget" :title="t('common.status')" :busy="busy" @close="statusTarget = null">
-    <p>
-      {{
-        t('common.confirmStatus', {
-          name: statusTarget.name,
-          status: t(statusTarget.status === 'ACTIVE' ? 'common.disable' : 'common.enable'),
-        })
-      }}
-    </p>
-    <p v-if="statusTarget.status === 'ACTIVE'" class="muted">{{ t('providers.disableHint') }}</p>
-    <p v-if="actionError" class="alert error" role="alert">{{ actionError }}</p>
-    <footer class="form-footer">
-      <button class="button" :disabled="busy" @click="statusTarget = null">
-        {{ t('common.cancel') }}
-      </button>
-      <button class="button primary" :disabled="busy" @click="changeStatus">
-        {{ t('common.confirm') }}
-      </button>
-    </footer>
-  </Modal>
+  <ConfirmDialog
+    v-if="statusTarget"
+    :title="t(statusTarget.status === 'ACTIVE' ? 'common.disableTitle' : 'common.enableTitle')"
+    :message="
+      t('common.confirmStatus', {
+        name: statusTarget.name,
+        status: t(statusTarget.status === 'ACTIVE' ? 'common.disable' : 'common.enable'),
+      })
+    "
+    :hint="statusTarget.status === 'ACTIVE' ? t('providers.disableHint') : undefined"
+    :confirm-label="
+      t(statusTarget.status === 'ACTIVE' ? 'common.disableAction' : 'common.enableAction')
+    "
+    :busy="busy"
+    :tone="statusTarget.status === 'ACTIVE' ? 'warning' : 'success'"
+    @close="statusTarget = null"
+    @confirm="changeStatus"
+  />
 </template>
 
 <style scoped>
@@ -1055,8 +1071,7 @@ onMounted(() => {
   display: grid;
   gap: 20px;
 }
-.provider-form label,
-.provider-form .form-footer {
+.provider-form label {
   margin: 0;
 }
 .connection-editor,
@@ -1103,6 +1118,7 @@ onMounted(() => {
   display: flex;
   gap: 4px;
   overflow-x: auto;
+  overflow-y: hidden;
   border-bottom: 1px solid #d8e2ec;
 }
 .config-tab {

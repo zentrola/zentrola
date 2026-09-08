@@ -54,15 +54,24 @@ func (s *BootstrapStore) initialize(ctx context.Context, seed bootstrap.Seed) er
 	}
 	if err := queries.CreateBootstrapProvider(ctx, dbgen.CreateBootstrapProviderParams{
 		ID: seed.ProviderID, ProviderCode: catalog.AnthropicOfficialCode, ProviderName: "Anthropic Official",
-		AnthropicBaseUrl: &anthropicBaseURL, CreatedAt: at,
+		CreatedAt: at,
+	}); err != nil {
+		return err
+	}
+	if err := queries.CreateBootstrapProviderEndpoint(ctx, dbgen.CreateBootstrapProviderEndpointParams{
+		ProviderID: seed.ProviderID, ProtocolType: "ANTHROPIC_MESSAGES", BaseUrl: anthropicBaseURL, CreatedAt: at,
 	}); err != nil {
 		return err
 	}
 	for _, model := range seed.Models {
 		if err := queries.CreateBootstrapModel(ctx, dbgen.CreateBootstrapModelParams{
-			ID: model.ID, ModelCode: model.Code, DisplayName: model.Name, InputModalities: []byte(`["TEXT","IMAGE"]`), CreatedAt: at,
+			ID: model.ID, ModelCode: model.Code, DisplayName: model.Name,
+			InputModalities: []byte(model.InputModalities), CreatedAt: at,
 		}); err != nil {
 			return err
+		}
+		if model.ProviderModelID == 0 {
+			continue
 		}
 		if err := queries.CreateBootstrapProviderModel(ctx, dbgen.CreateBootstrapProviderModelParams{
 			ID: model.ProviderModelID, ProviderID: seed.ProviderID, ModelID: model.ID,

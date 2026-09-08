@@ -4,7 +4,7 @@ import { t, i18n } from './i18n'
 
 declare global {
   interface Window {
-    __ZENTROLA_CONFIG__?: { apiBaseUrl?: string }
+    __ZENTROLA_CONFIG__?: { apiBaseUrl?: string; gatewayBaseUrl?: string }
   }
 }
 
@@ -21,6 +21,14 @@ const apiBaseUrl = (
   window.__ZENTROLA_CONFIG__?.apiBaseUrl ||
   import.meta.env.VITE_API_BASE_URL ||
   ''
+)
+  .trim()
+  .replace(/\/+$/, '')
+export const gatewayBaseUrl = (
+  window.__ZENTROLA_CONFIG__?.gatewayBaseUrl ||
+  import.meta.env.VITE_GATEWAY_BASE_URL ||
+  apiBaseUrl ||
+  (import.meta.env.DEV ? 'http://127.0.0.1:9527' : window.location.origin)
 )
   .trim()
   .replace(/\/+$/, '')

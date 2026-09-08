@@ -47,7 +47,7 @@ test('首次按浏览器语言选择英文，手动切换后记住偏好并覆�
   await page.getByLabel('Administrator username').fill('admin')
   await page.getByLabel('Password', { exact: true }).fill('language-test-password')
   await page.getByRole('button', { name: 'Sign in to console' }).click()
-  await expect(page.getByRole('heading', { name: 'Users', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Home', exact: true })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Operation logs', exact: true })).toBeVisible()
 
   await context.close()

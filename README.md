@@ -340,6 +340,8 @@ Virtual Key 只负责识别 MEMBER Principal，实际权限来自成员所属 Gr
 
 两种认证方式不要同时发送。
 
+当逻辑模型路由到 DeepSeek 官方 Anthropic Endpoint 时，Gateway 会自动移除 DeepSeek 尚不支持的 `advisor_20260301` 服务端工具及其 `advisor-tool-2026-03-01` beta 标记；其他工具和原生 Anthropic Provider 请求保持透传。客户端不需要单独关闭 Claude Code Advisor。
+
 ### OpenAI Compatible
 
 | 配置 | 值 |
@@ -421,6 +423,27 @@ docker compose stop postgres
 - 正式环境应通过 HTTPS 暴露 Admin Web 和 Gateway。
 - CORS 只允许实际使用的 Admin Web Origin，不使用通配符。
 - 不在日志、Issue、截图或客户端配置示例中暴露任何 Credential。
+
+## 请求日志
+
+Backend 的控制台访问日志固定包含请求时间、HTTP 方法、请求追踪 ID、执行耗时、请求路径、状态码以及请求和响应字节数。
+
+`APP_ENV=dev` 时还会输出 `request_body` 和 `response_body` 调试摘要。JSON 中的密码、Token、Credential、Virtual Key、prompt、消息内容和模型输出会自动替换为 `[REDACTED]`；超过 8 KiB 的 JSON、SSE 和其他非 JSON 报文只记录类型及字节数。`APP_ENV=test` 或 `APP_ENV=prod` 时不采集请求和响应报文。
+
+控制台与日志文件由同一个结构化日志记录生成，因此消息、级别、`request_id` 和业务字段保持一致。控制台支持适合人工阅读的彩色 `pretty` 格式，日志文件固定使用一行一条记录的 JSON Lines：
+
+```dotenv
+LOG_LEVEL=info
+LOG_CONSOLE_FORMAT=pretty
+LOG_COLOR=auto
+LOG_FILE_PATH=data/logs/zentrola.jsonl
+LOG_FILE_MAX_SIZE_MB=100
+LOG_FILE_MAX_BACKUPS=10
+```
+
+`LOG_COLOR=auto` 只在真实终端启用 ANSI 颜色；也可设置为 `always` 或 `never`。`LOG_FILE_PATH` 为空时不创建日志文件。文件达到 `LOG_FILE_MAX_SIZE_MB` 后依次轮转为 `.1`、`.2`，最多保留 `LOG_FILE_MAX_BACKUPS` 份。
+
+容器部署建议设置 `LOG_CONSOLE_FORMAT=json`、`LOG_COLOR=never` 且不设置 `LOG_FILE_PATH`，由容器平台采集标准输出。单机部署可使用上述 `pretty` 控制台与 JSON 文件组合。旧的 `LOG_FORMAT=text|json|pretty` 仍兼容；未设置 `LOG_CONSOLE_FORMAT` 时会作为控制台格式使用。
 
 ## 接口文档
 

@@ -98,6 +98,7 @@ go build -o zentrola-web.exe ./cmd/web
 ```dotenv
 WEB_ADDR=:3000
 WEB_API_BASE_URL=http://127.0.0.1:9527
+WEB_GATEWAY_BASE_URL=http://127.0.0.1:9527
 ```
 
 随后在发布目录直接运行：
@@ -117,11 +118,11 @@ Rename-Item .env.example .env
 .\zentrola-web.exe
 ```
 
-启动程序读取同目录的 `.env` 和 `dist`，默认在 `http://127.0.0.1:3000` 提供管理网页。修改 `WEB_API_BASE_URL` 后只需重启，不需要重新构建前端；该地址必须能从管理员的浏览器访问，不能填写仅服务器内部可见的主机名。
+启动程序读取同目录的 `.env` 和 `dist`，默认在 `http://127.0.0.1:3000` 提供管理网页。修改 `WEB_API_BASE_URL` 或 `WEB_GATEWAY_BASE_URL` 后只需重启，不需要重新构建前端；两个地址都必须能从管理员或客户端所在网络访问，不能填写仅服务器内部可见的主机名。`WEB_GATEWAY_BASE_URL` 未配置时默认使用 `WEB_API_BASE_URL`。
 
 Admin Web 与 Backend 跨域运行时，还要将 Admin Web 的实际 Origin 加入 Backend 的 `CORS_ALLOWED_ORIGINS`。Go Backend 不提供 Admin Web 的 `index.html`、`/assets/*` 或 favicon。
 
-如果用户已有 Nginx、Caddy 或对象存储，也可以单独发布 `dist`。这种自定义部署方式需要自行生成 `/config.js`，设置 `window.__ZENTROLA_CONFIG__.apiBaseUrl`，并配置同等的安全响应头。
+如果用户已有 Nginx、Caddy 或对象存储，也可以单独发布 `dist`。这种自定义部署方式需要自行生成 `/config.js`，设置 `window.__ZENTROLA_CONFIG__.apiBaseUrl` 和 `gatewayBaseUrl`，并配置同等的安全响应头。
 
 ## 目录
 

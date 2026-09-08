@@ -37,26 +37,28 @@ export interface Provider {
   type: 'OFFICIAL' | 'PLATFORM' | 'PARTNER' | 'CUSTOM'
   status: string
   website: string | null
-  baseUrl: string | null
-  openaiBaseUrl: string | null
+  endpoints: ProviderEndpoint[]
   proxyEnabled: boolean
   proxyUrl: string | null
   proxyHeaders: ProviderProxyHeader[]
   createdAt: string
   updatedAt: string
 }
+export type ProviderProtocol = 'OPENAI_CHAT' | 'OPENAI_RESPONSES' | 'ANTHROPIC_MESSAGES'
+export interface ProviderEndpoint {
+  protocolType: ProviderProtocol
+  baseUrl: string
+}
 export interface ProviderProxyHeader {
   key: string
   configured: boolean
 }
-export type ProviderProtocol = 'ANTHROPIC' | 'OPENAI'
 export interface ProviderMapping {
   id: string
   providerId: string
   modelId: string
   upstreamModelCode: string
-  protocolType: ProviderProtocol
-  status: string
+  priority: number
   createdAt: string
   updatedAt: string
 }
@@ -75,7 +77,7 @@ export interface Resource {
 export interface AccessKey {
   id: string
   name: string
-  prefix: string
+  maskedKey: string
   status: string
   expiresAt: string | null
   revokedAt: string | null
@@ -84,7 +86,7 @@ export interface AccessKey {
 export interface CreatedKey {
   id: string
   key: string
-  prefix: string
+  maskedKey: string
   name: string
   expiresAt: string | null
 }
@@ -99,10 +101,10 @@ export interface Usage {
   requestId: string
   clientProtocol: string
   principalId: string
-  modelId: string | null
-  resourceId: string | null
-  providerId: string | null
-  providerModelId: string | null
+  modelId: string
+  resourceId: string
+  providerId: string
+  providerModelId: string
   requestAt: string
   completedAt: string
   status: string
@@ -111,10 +113,26 @@ export interface Usage {
   outputTokens: number | null
   cachedInputTokens: number | null
   latencyMs: number
-  usageId: string | null
-  attemptNo: number | null
-  attemptStatus: string | null
-  attemptErrorType: string | null
+  attemptNo: number
+}
+export interface TokenRank {
+  principalId: string
+  name: string
+  tokens: number
+}
+export interface ModelRank {
+  modelId: string
+  name: string
+  requests: number
+  tokens: number
+}
+export interface Dashboard {
+  activeMemberCount: number
+  modelCount: number
+  providerCount: number
+  totalTokens: number
+  tokenRanking: TokenRank[]
+  modelRanking: ModelRank[]
 }
 export interface Operation {
   id: string

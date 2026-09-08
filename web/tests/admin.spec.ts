@@ -55,8 +55,13 @@ async function fixture(page: Page) {
       type: 'OFFICIAL',
       status: 'ACTIVE',
       website: null,
-      baseUrl: 'https://api.deepseek.com/anthropic',
-      openaiBaseUrl: 'https://api.deepseek.com',
+      endpoints: [
+        { protocolType: 'OPENAI_CHAT', baseUrl: 'https://api.deepseek.com' },
+        {
+          protocolType: 'ANTHROPIC_MESSAGES',
+          baseUrl: 'https://api.deepseek.com/anthropic',
+        },
+      ],
       proxyEnabled: false,
       proxyUrl: null,
       proxyHeaders: [],
@@ -69,28 +74,58 @@ async function fixture(page: Page) {
       '81',
       [
         {
-          id: '91',
-          providerId: '81',
-          modelId: '71',
-          upstreamModelCode: 'deepseek-v4-flash',
-          protocolType: 'ANTHROPIC',
-          status: 'ACTIVE',
-          createdAt: stamp,
-          updatedAt: stamp,
-        },
-        {
           id: '92',
           providerId: '81',
           modelId: '71',
           upstreamModelCode: 'deepseek-v4-flash',
-          protocolType: 'OPENAI',
-          status: 'ACTIVE',
+          priority: 100,
           createdAt: stamp,
           updatedAt: stamp,
         },
       ],
     ],
   ])
+  const operations: any[] = [
+    {
+      id: '203',
+      operatorName: 'admin',
+      type: 'RESOURCE_CONNECTION_TEST',
+      targetType: 'RESOURCE',
+      targetId: '88',
+      requestId: 'req_connection_test',
+      result: 'SUCCESS',
+      errorCode: null,
+      before: null,
+      after: { test: { ok: true, code: 'OK', httpStatus: 200, latencyMs: 140 } },
+      createdAt: stamp,
+    },
+    {
+      id: '202',
+      operatorName: 'admin',
+      type: 'LOGIN_FAILED',
+      targetType: 'ADMIN_USER',
+      targetId: '1',
+      requestId: 'req_login_failed',
+      result: 'FAILED',
+      errorCode: 'UNAUTHENTICATED',
+      before: { lockedUntil: null, failedLoginCount: 0 },
+      after: { lockedUntil: null, failedLoginCount: 1 },
+      createdAt: stamp,
+    },
+    {
+      id: '201',
+      operatorName: 'admin',
+      type: 'PROVIDER_STATUS_CHANGE',
+      targetType: 'PROVIDER',
+      targetId: '81',
+      requestId: 'req_provider_status',
+      result: 'SUCCESS',
+      errorCode: null,
+      before: { status: 'ACTIVE' },
+      after: { status: 'DISABLED' },
+      createdAt: stamp,
+    },
+  ]
   const groups: any[] = [],
     resources: any[] = [],
     keys: any[] = [],
@@ -139,6 +174,21 @@ async function fixture(page: Page) {
     if (path === '/me')
       return reply({ id: '1', organizationId: '11', username: 'admin', displayName: '组织管理员' })
     if (path === '/auth/logout') return reply({ clearToken: true })
+    if (path === '/usage/dashboard')
+      return reply({
+        activeMemberCount: 2,
+        modelCount: 2,
+        providerCount: 1,
+        totalTokens: 12840,
+        tokenRanking: [
+          { principalId: longID, name: '林知远', tokens: 8200 },
+          { principalId: '90071992547409932', name: '陈清和', tokens: 4640 },
+        ],
+        modelRanking: [
+          { modelId: '71', name: 'DeepSeek V4 Flash', requests: 18, tokens: 9100 },
+          { modelId: '72', name: 'Claude Sonnet', requests: 7, tokens: 3740 },
+        ],
+      })
     const pageReply = (items: any[]) => reply({ items, nextCursor: null })
     if (segments.length === 1 && method === 'GET') {
       if (path === '/members')
@@ -156,7 +206,7 @@ async function fixture(page: Page) {
         return pageReply([...filtered].sort((a, b) => (BigInt(a.id) > BigInt(b.id) ? -1 : 1)))
       }
       if (path === '/resources') return pageReply(resources.map(({ credential: _, ...row }) => row))
-      if (path === '/operation-logs') return pageReply([])
+      if (path === '/operation-logs') return pageReply(operations)
       if (path === '/usage') {
         usageQueries.push(url.searchParams)
         return pageReply([
@@ -174,9 +224,7 @@ async function fixture(page: Page) {
             outputTokens: null,
             cachedInputTokens: 0,
             latencyMs: 218,
-            usageId: '101',
             attemptNo: 1,
-            attemptStatus: 'SUCCESS',
             errorType: null,
           },
         ])
@@ -195,7 +243,10 @@ async function fixture(page: Page) {
         ...fields,
         id,
         ...(path === '/groups' ? { code: body.code || `group-${id}` } : {}),
-        status: path === '/models' || path === '/providers' ? 'DISABLED' : 'ACTIVE',
+        status:
+          path === '/members' || path === '/models' || path === '/providers'
+            ? 'DISABLED'
+            : 'ACTIVE',
         createdAt: stamp,
         updatedAt: stamp,
         credentialConfigured: path === '/resources',
@@ -352,7 +403,7 @@ async function fixture(page: Page) {
         id: next(),
         memberID: segments[1],
         key: 'vk-fixture-key-shown-once',
-        prefix: 'vk-fixture1',
+        maskedKey: 'vk-fixture1********ture',
         status: 'ACTIVE',
         createdAt: stamp,
         revokedAt: null,
@@ -417,14 +468,169 @@ async function fixture(page: Page) {
     },
   }
 }
-async function signIn(page: Page) {
+async function signIn(page: Page, destination: 'home' | 'members' = 'members') {
   await page.goto('/')
   await page.getByLabel('管理员账号').fill('admin')
   await page.getByLabel('密码', { exact: true }).fill('fixture-password')
   await page.getByRole('button', { name: '登录控制台' }).click()
+  await expect(page.getByRole('heading', { name: '首页', exact: true })).toBeVisible()
+  if (destination === 'home') return
+  await page.getByRole('link', { name: '用户', exact: true }).click()
   await expect(page.getByRole('heading', { name: '用户', exact: true })).toBeVisible()
 }
 const modal = (page: Page) => page.locator('dialog').last()
+test('首页展示今日指标、应用接入、配置脚本和双排行榜', async ({ page }) => {
+  await fixture(page)
+  await signIn(page, 'home')
+
+  await expect(page.getByText('12,840', { exact: true })).toBeVisible()
+  await expect(
+    page.getByText('激活用户数').locator('..').getByText('2', { exact: true }),
+  ).toBeVisible()
+  await expect(
+    page.getByText('支持模型').locator('..').getByText('2', { exact: true }),
+  ).toBeVisible()
+  await expect(page.getByText('服务商').locator('..').getByText('1', { exact: true })).toBeVisible()
+  await expect(page.getByText('掌握今日模型服务状态、Token 消耗与团队使用趋势。')).toHaveCount(0)
+  await expect(page.getByText('当前已启用')).toHaveCount(0)
+  await expect(page.getByText('输入 + 输出')).toHaveCount(0)
+  expect(
+    await page
+      .locator('.metric-strip > div')
+      .evaluateAll((elements) =>
+        elements.every((element) => getComputedStyle(element).textAlign === 'center'),
+      ),
+  ).toBe(true)
+  expect(
+    await page
+      .locator('.metric-strip')
+      .evaluate(
+        (element) =>
+          getComputedStyle(element).gridTemplateColumns.split(' ').filter(Boolean).length,
+      ),
+  ).toBe(4)
+  await expect(page.getByText('Token 消耗排行')).toBeVisible()
+  await expect(page.getByText('模型使用排行')).toBeVisible()
+  await expect(page.getByText('OpenAI', { exact: true })).toBeVisible()
+  await expect(page.getByText('Anthropic', { exact: true })).toBeVisible()
+  await expect(page.getByText('适用于 Codex 等 OpenAI 兼容客户端')).toBeVisible()
+  await expect(page.getByText('适用于 Claude Code 等 Anthropic 兼容客户端')).toBeVisible()
+  await expect(page.getByText('林知远', { exact: true })).toBeVisible()
+  await expect(page.getByText('DeepSeek V4 Flash', { exact: true })).toBeVisible()
+  await expect(page.getByText(/\/v1$/, { exact: true })).toBeVisible()
+  await expect(page.getByText(/\/anthropic$/, { exact: true })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await mkdir('../.cache/web-visual', { recursive: true })
+  await page.screenshot({ path: '../.cache/web-visual/home.png', fullPage: true })
+
+  const accessPanel = page.getByRole('region', { name: '应用接入' })
+  const openaiRow = accessPanel.locator('.access-addresses > div').filter({ hasText: 'OpenAI' })
+  const openaiUrl = await openaiRow.locator('code').innerText()
+  await expect(accessPanel.getByRole('button', { name: '接入指南' })).toHaveCount(1)
+  await accessPanel.getByRole('button', { name: '接入指南' }).click()
+  await expect(modal(page).getByRole('heading', { name: '应用接入指南' })).toBeVisible()
+  await expect(modal(page).getByRole('radio', { name: 'OpenAI' })).toBeChecked()
+  await expect(modal(page).locator('.setup-script')).toContainText(
+    `export OPENAI_BASE_URL='${openaiUrl}'`,
+  )
+  await expect(modal(page).locator('.setup-script')).toContainText(
+    'export OPENAI_API_KEY="$ZENTROLA_KEY"',
+  )
+  await expect(modal(page)).toContainText('输入过程不会回显')
+  await modal(page).getByRole('tab', { name: 'Windows' }).click()
+  await expect(modal(page).locator('.setup-script')).toContainText(
+    `$env:OPENAI_BASE_URL = '${openaiUrl}'`,
+  )
+  await expect(modal(page).locator('.setup-script')).toContainText(
+    '$env:OPENAI_API_KEY = $zentrolaKey',
+  )
+  await expect(modal(page).getByRole('link', { name: '访问官网' })).toHaveAttribute(
+    'href',
+    'https://ccswitch.io/',
+  )
+  await expect(modal(page).getByText(/\.msi 安装包或 Portable \.zip/)).toBeVisible()
+  await page.screenshot({ path: '../.cache/web-visual/home-setup.png', fullPage: true })
+  await modal(page).getByRole('button', { name: '关闭' }).click()
+
+  const anthropicRow = accessPanel
+    .locator('.access-addresses > div')
+    .filter({ hasText: 'Anthropic' })
+  const anthropicUrl = await anthropicRow.locator('code').innerText()
+  await accessPanel.getByRole('button', { name: '接入指南' }).click()
+  await modal(page).getByRole('radio', { name: 'Anthropic' }).click()
+  await expect(modal(page).getByRole('radio', { name: 'Anthropic' })).toBeChecked()
+  await expect(modal(page).locator('.setup-script')).toContainText(
+    `export ANTHROPIC_BASE_URL='${anthropicUrl}'`,
+  )
+  await expect(modal(page).locator('.setup-script')).toContainText(
+    'export ANTHROPIC_API_KEY="$ZENTROLA_KEY"',
+  )
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(modal(page)).toBeVisible()
+  await page.screenshot({ path: '../.cache/web-visual/home-setup-mobile.png', fullPage: true })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+})
+
+test('操作日志详情展示原始 JSON、差异高亮和追踪信息', async ({ page }) => {
+  await fixture(page)
+  await signIn(page, 'home')
+  await page.getByRole('link', { name: '操作日志', exact: true }).click()
+
+  const operationRow = page.getByRole('row').filter({ hasText: '服务商状态变更' })
+  await expect(operationRow.locator('td').nth(3)).toContainText('服务商')
+  await expect(operationRow.locator('.operation-target-id')).toHaveText('81')
+  await operationRow.getByRole('button', { name: '详情', exact: true }).click()
+
+  const dialog = modal(page)
+  await expect(dialog.getByRole('heading', { name: '日志详情', exact: true })).toBeVisible()
+  const before = dialog.locator('section[aria-label="修改前"]')
+  const after = dialog.locator('section[aria-label="修改后"]')
+  await expect(before.locator('code')).toContainText('"status": "ACTIVE"')
+  await expect(after.locator('code')).toContainText('"status": "DISABLED"')
+  await expect(before.locator('.json-line.changed')).toContainText('"status": "ACTIVE"')
+  await expect(after.locator('.json-line.changed')).toContainText('"status": "DISABLED"')
+  await expect(before.getByRole('button', { name: '复制修改前', exact: true })).toBeVisible()
+  await expect(after.getByRole('button', { name: '复制修改后', exact: true })).toBeVisible()
+  await expect(dialog.getByText('req_provider_status', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('PROVIDER_STATUS_CHANGE', { exact: true })).toHaveCount(0)
+  await expect(dialog.getByText('admin', { exact: true })).toHaveCount(0)
+  await mkdir('../.cache/web-visual', { recursive: true })
+  await page.screenshot({ path: '../.cache/web-visual/operation-diff.png', fullPage: true })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect
+    .poll(async () => {
+      const beforeBox = await before.boundingBox()
+      const afterBox = await after.boundingBox()
+      return Boolean(beforeBox && afterBox && afterBox.y > beforeBox.y)
+    })
+    .toBe(true)
+  await page.screenshot({ path: '../.cache/web-visual/operation-diff-mobile.png', fullPage: true })
+})
+
+test('操作日志单侧快照显示为日志内容且登录失败隐藏内部状态快照', async ({ page }) => {
+  await fixture(page)
+  await signIn(page, 'home')
+  await page.getByRole('link', { name: '操作日志', exact: true }).click()
+
+  const connectionRow = page.getByRole('row').filter({ hasText: '测试服务商连接' })
+  await connectionRow.getByRole('button', { name: '详情', exact: true }).click()
+  await expect(modal(page).locator('section[aria-label="日志内容"]')).toBeVisible()
+  await expect(modal(page).getByRole('heading', { name: '修改后', exact: true })).toHaveCount(0)
+  await expect(modal(page).getByRole('button', { name: '复制日志内容', exact: true })).toBeVisible()
+  await mkdir('../.cache/web-visual', { recursive: true })
+  await page.screenshot({ path: '../.cache/web-visual/operation-log-content.png', fullPage: true })
+  await modal(page).getByRole('button', { name: '关闭', exact: true }).click()
+
+  const loginRow = page.getByRole('row').filter({ hasText: '登录失败' })
+  await loginRow.getByRole('button', { name: '详情', exact: true }).click()
+  await expect(modal(page).locator('.json-snapshot')).toHaveCount(0)
+  await expect(modal(page)).not.toContainText('failedLoginCount')
+  await expect(modal(page)).not.toContainText('lockedUntil')
+  await expect(modal(page)).toContainText('账号或密码错误')
+  await expect(modal(page).getByText('req_login_failed', { exact: true })).toBeVisible()
+  await page.screenshot({ path: '../.cache/web-visual/operation-login-failed.png', fullPage: true })
+})
+
 test('成员列表只展示最新 Key、分配后替换展示以及删除确认和失败恢复', async ({ page }) => {
   const state = await fixture(page)
   state.keys.push(
@@ -432,7 +638,7 @@ test('成员列表只展示最新 Key、分配后替换展示以及删除确认�
       id: '801',
       memberID: longID,
       name: '工作站',
-      prefix: 'vk-work1234',
+      maskedKey: 'vk-work1234********1234',
       status: 'ACTIVE',
       expiresAt: null,
       revokedAt: null,
@@ -442,7 +648,7 @@ test('成员列表只展示最新 Key、分配后替换展示以及删除确认�
       id: '802',
       memberID: longID,
       name: '临时测试',
-      prefix: 'zt_vk_temp',
+      maskedKey: 'zt_vk_temp********temp',
       status: 'ACTIVE',
       expiresAt: '2020-01-01T00:00:00Z',
       revokedAt: null,
@@ -452,7 +658,7 @@ test('成员列表只展示最新 Key、分配后替换展示以及删除确认�
   await signIn(page)
   const row = page.getByRole('row').filter({ hasText: '林知远' })
   await expect(page.getByRole('button', { name: '管理 Key' })).toHaveCount(0)
-  await expect(page.getByRole('columnheader', { name: 'Key 前缀', exact: true })).toBeVisible()
+  await expect(page.getByRole('columnheader', { name: '访问密钥', exact: true })).toBeVisible()
   await expect(row.locator('code')).toHaveCount(1)
   await expect(row).not.toContainText('vk-work1234')
   await expect(row).toContainText('zt_vk_temp')
@@ -468,12 +674,15 @@ test('成员列表只展示最新 Key、分配后替换展示以及删除确认�
   await expect(modal(page)).toContainText('完整 Key 仅在分配成功时展示一次')
   await expect(modal(page).getByRole('columnheader')).toHaveText([
     '显示名称',
-    'Key 前缀',
+    '访问密钥',
     '过期日期',
     '操作',
   ])
   await expect(modal(page).locator('tbody tr td:first-child')).toHaveText(['临时测试', '工作站'])
-  await expect(modal(page).locator('code')).toHaveText(['zt_vk_temp', 'vk-work1234'])
+  await expect(modal(page).locator('code')).toHaveText([
+    'zt_vk_temp********temp',
+    'vk-work1234********1234',
+  ])
   await expect(modal(page)).toContainText('长期有效')
   await expect(modal(page)).toContainText('2020年1月1日')
   await expect(modal(page).locator('tbody tr').first().locator('td').nth(2)).toHaveText(
@@ -497,7 +706,7 @@ test('成员列表只展示最新 Key、分配后替换展示以及删除确认�
   await historyRevoke.click()
   state.conflict(true)
   await modal(page).getByRole('button', { name: '撤销', exact: true }).click()
-  await expect(modal(page).getByRole('alert')).toContainText('操作冲突')
+  await expect(page.locator('.toast')).toContainText('操作冲突')
   expect(state.keys[0].status).toBe('ACTIVE')
   state.conflict(false)
   await modal(page).getByRole('button', { name: '撤销', exact: true }).click()
@@ -515,12 +724,17 @@ test('成员列表只展示最新 Key、分配后替换展示以及删除确认�
   await expect(page.locator('dialog')).toHaveCount(0)
   await expect(viewKeys).toBeFocused()
   await page.setViewportSize({ width: 1440, height: 1000 })
+  const memberTableScroll = page.locator('.table-scroll')
+  expect(
+    await memberTableScroll.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+  ).toBe(true)
   const disabledMemberRow = page.getByRole('row').filter({ hasText: '周予安' })
   const disabledMemberStatus = disabledMemberRow.getByRole('switch', {
-    name: '周予安的启用状态',
+    name: '周予安的激活状态',
   })
   await expect(disabledMemberStatus).toBeDisabled()
-  await expect(disabledMemberStatus).toHaveAttribute('title', '请先为该用户分配密钥，再启用用户。')
+  await expect(disabledMemberStatus).toHaveAttribute('title', '请先为该用户分配密钥，再激活用户。')
+  await expect(disabledMemberStatus).toContainText('未激活')
   await expect(disabledMemberRow.locator('td').nth(3)).toHaveText('-')
   await expect(disabledMemberRow.getByRole('button', { name: '分配密钥' })).toBeEnabled()
   const assignKey = row.getByRole('button', { name: '分配密钥' })
@@ -565,7 +779,7 @@ test('成员列表只展示最新 Key、分配后替换展示以及删除确认�
   await row.getByRole('button', { name: '删除', exact: true }).click()
   state.conflict(true)
   await modal(page).getByRole('button', { name: '删除', exact: true }).click()
-  await expect(modal(page).getByRole('alert')).toContainText('操作冲突')
+  await expect(page.locator('.toast')).toContainText('操作冲突')
   expect(state.members).toHaveLength(3)
   state.conflict(false)
   await modal(page).getByRole('button', { name: '删除', exact: true }).click()
@@ -574,11 +788,11 @@ test('成员列表只展示最新 Key、分配后替换展示以及删除确认�
   expect(state.members).toHaveLength(2)
 })
 
-test('无密钥用户分配密钥后才可启用', async ({ page }) => {
+test('无密钥用户分配密钥后才可激活', async ({ page }) => {
   const state = await fixture(page)
   await signIn(page)
   const row = page.getByRole('row').filter({ hasText: '周予安' })
-  const status = row.getByRole('switch', { name: '周予安的启用状态' })
+  const status = row.getByRole('switch', { name: '周予安的激活状态' })
 
   await expect(status).toBeDisabled()
   await row.getByRole('button', { name: '分配密钥' }).click()
@@ -588,8 +802,9 @@ test('无密钥用户分配密钥后才可启用', async ({ page }) => {
 
   await expect(status).toBeEnabled()
   await status.click()
-  await modal(page).getByRole('button', { name: '确认', exact: true }).click()
+  await modal(page).getByRole('button', { name: '激活', exact: true }).click()
   await expect(status).toBeChecked()
+  await expect(status).toContainText('已激活')
   expect(state.members.find((member) => member.name === '周予安')?.status).toBe('ACTIVE')
 })
 
@@ -620,7 +835,7 @@ test('主列表只请求最新密钥，弹层分页失败重试保留记录且�
       id: (90071992547409931n + BigInt(i)).toString(),
       memberID: longID,
       name: `设备 ${i}`,
-      prefix: `vk-${String(i).padStart(8, '0')}`,
+      maskedKey: `vk-${String(i).padStart(8, '0')}********${String(i).padStart(4, '0')}`,
       key: `secret-fixture-full-key-${i}`,
       status: 'ACTIVE',
       expiresAt: null,
@@ -639,7 +854,7 @@ test('主列表只请求最新密钥，弹层分页失败重试保留记录且�
   })
   await signIn(page)
   const row = page.getByRole('row').filter({ hasText: '林知远' })
-  await expect(row.locator('code')).toHaveText('vk-00000050')
+  await expect(row.locator('code')).toHaveText('vk-00000050********0050')
   expect(requests.map((query) => query.get('limit'))).toEqual(['1'])
   await row.getByRole('button', { name: '查看 Key 记录' }).click()
   const dialog = modal(page)
@@ -676,7 +891,7 @@ test('模型新增编辑、模态校验、冲突恢复和窄屏表单', async ({
   await dialog.getByLabel('备注', { exact: true }).fill('图文理解用途')
   state.conflict(true)
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
-  await expect(dialog.getByRole('alert')).toContainText('操作冲突')
+  await expect(page.locator('.toast')).toContainText('操作冲突')
   await expect(dialog.getByLabel('官方模型编码', { exact: true })).toHaveValue('official-test-v1')
   state.conflict(false)
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
@@ -750,15 +965,27 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
     modal(page).getByRole('checkbox', { name: '启用 Claude Sonnet 映射' }),
   ).not.toBeChecked()
   await expect(modal(page).getByLabel('Claude Sonnet 的服务商模型编码')).toBeDisabled()
+  const editDialog = modal(page)
+  const dialogBody = editDialog.locator('.modal-body')
+  const dialogHeader = editDialog.locator('.modal-head')
+  const dialogFooter = editDialog.locator('.modal-footer')
+  const configTabs = editDialog.locator('.config-tabs')
+  await expect(dialogFooter).toBeVisible()
+  expect(await configTabs.evaluate((element) => getComputedStyle(element).overflowY)).toBe('hidden')
+  await page.setViewportSize({ width: 1200, height: 600 })
+  expect(await dialogBody.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(
+    true,
+  )
+  const headerTop = (await dialogHeader.boundingBox())!.y
+  const footerTop = (await dialogFooter.boundingBox())!.y
+  await dialogBody.evaluate((element) => element.scrollTo(0, element.scrollHeight))
+  expect((await dialogHeader.boundingBox())!.y).toBe(headerTop)
+  expect((await dialogFooter.boundingBox())!.y).toBe(footerTop)
+  await page.setViewportSize({ width: 1200, height: 900 })
   await modal(page).getByLabel('网站').fill('https://www.deepseek.com/')
   await modal(page).getByRole('button', { name: '保存', exact: true }).click()
   expect(state.providers[0].website).toBe('https://www.deepseek.com')
-  expect(
-    state.providerMappings
-      .get('81')
-      ?.map((mapping) => `${mapping.protocolType}:${mapping.status}`)
-      .sort(),
-  ).toEqual(['ANTHROPIC:ACTIVE', 'OPENAI:ACTIVE'])
+  expect(state.providerMappings.get('81')).toHaveLength(1)
   await expect(page.getByRole('columnheader', { name: '网站', exact: true })).toHaveCount(0)
   const websiteLink = deepSeekRow.getByRole('link', {
     name: '在新页面打开 DeepSeek Official 官网',
@@ -794,12 +1021,12 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expect(dialog.getByRole('alert')).toContainText('至少填写一种协议接口地址')
   await dialog
-    .getByLabel('OpenAI 接口地址')
+    .getByLabel('OpenAI Chat Completions 接口地址')
     .fill('http://dashscope.aliyuncs.com/compatible-mode/v1')
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expect(dialog.getByRole('alert')).toContainText('有效的网站或 HTTPS 接口地址')
   await dialog
-    .getByLabel('OpenAI 接口地址')
+    .getByLabel('OpenAI Chat Completions 接口地址')
     .fill('https://dashscope.aliyuncs.com/compatible-mode/v1')
   await dialog.getByRole('tab', { name: '代理配置', exact: true }).click()
   await dialog.getByRole('switch', { name: '启用代理', exact: true }).check()
@@ -827,6 +1054,12 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   expect(created.status).toBe('DISABLED')
   expect(state.providerInputs.at(-1)).toEqual(
     expect.objectContaining({
+      endpoints: [
+        {
+          protocolType: 'OPENAI_CHAT',
+          baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+        },
+      ],
       proxyEnabled: true,
       proxyUrl: 'http://proxy-user:proxy-password@proxy.example.com:8080',
       proxyHeaders: [{ key: 'X-Proxy-Token', value: 'proxy-header-secret' }],
@@ -836,9 +1069,7 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   expect(state.providerMappings.get(created.id)).toEqual([
     expect.objectContaining({
       modelId: '71',
-      protocolType: 'OPENAI',
       upstreamModelCode: 'aliyun-deepseek-v4-flash',
-      status: 'ACTIVE',
     }),
   ])
   const row = page.getByRole('row').filter({ hasText: '阿里云百炼' })
@@ -872,13 +1103,32 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   )
   await dialog.screenshot({ path: '../.cache/web-visual/provider-proxy-config.png' })
   await dialog.getByLabel('服务商名称').fill('阿里云模型服务')
+  state.conflict(true)
+  await dialog.getByRole('button', { name: '保存', exact: true }).click()
+  const providerErrorToast = page.locator('.toast')
+  await expect(providerErrorToast).toContainText('操作冲突')
+  await expect(providerErrorToast).toBeVisible()
+  await expect(dialog.locator('.alert.error')).toHaveCount(0)
+  expect(
+    await providerErrorToast.evaluate((element) =>
+      element.closest('[popover]')?.matches(':popover-open'),
+    ),
+  ).toBe(true)
+  state.conflict(false)
+  await providerErrorToast.getByRole('button', { name: '关闭' }).click()
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expect(page.getByRole('row').filter({ hasText: '阿里云模型服务' })).toBeVisible()
 
   await page.getByRole('switch', { name: '阿里云模型服务的启用状态' }).click()
-  await modal(page).getByRole('button', { name: '确认', exact: true }).click()
+  const statusDialog = modal(page)
+  await expect(statusDialog.locator('.modal-head')).toHaveCSS('border-bottom-width', '0px')
+  await statusDialog.getByRole('button', { name: '启用', exact: true }).click()
   expect(created.status).toBe('ACTIVE')
   await mkdir('../.cache/web-visual', { recursive: true })
+  await page.getByRole('switch', { name: '阿里云模型服务的启用状态' }).click()
+  const disableDialog = modal(page)
+  await disableDialog.screenshot({ path: '../.cache/web-visual/status-confirm-dialog.png' })
+  await disableDialog.getByRole('button', { name: '取消', exact: true }).click()
   await page.screenshot({
     path: '../.cache/web-visual/provider-catalog-desktop.png',
     fullPage: true,
@@ -898,10 +1148,32 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
     .getByRole('button', { name: '删除', exact: true })
     .click()
   await expect(modal(page)).toContainText('确认删除服务商「阿里云模型服务」')
+  await modal(page).screenshot({ path: '../.cache/web-visual/delete-confirm-dialog.png' })
   await modal(page).getByRole('button', { name: '删除', exact: true }).click()
   await expect(page.getByRole('row').filter({ hasText: '阿里云模型服务' })).toHaveCount(0)
   expect(state.providerMappings.has(created.id)).toBe(false)
   expect(state.resources.some((resource) => resource.providerId === created.id)).toBe(false)
+})
+
+test('通用确认框适配英文长文案和危险操作语义', async ({ page }) => {
+  await fixture(page)
+  await signIn(page)
+  await page.getByRole('button', { name: 'EN', exact: true }).click()
+  await page.getByRole('link', { name: 'Providers', exact: true }).click()
+  await page.getByRole('switch', { name: 'Status for DeepSeek Official' }).click()
+
+  const dialog = modal(page)
+  await expect(dialog).toHaveAccessibleName('Disable access')
+  await expect(dialog).toContainText(
+    'Disabling a provider removes all of its model mappings and credentials from routing.',
+  )
+  await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeFocused()
+  await expect(dialog.getByRole('button', { name: 'Disable', exact: true })).toBeVisible()
+  expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(
+    true,
+  )
+  await mkdir('../.cache/web-visual', { recursive: true })
+  await dialog.screenshot({ path: '../.cache/web-visual/status-confirm-dialog-en.png' })
 })
 
 test('创建和编辑用户时可选择分组', async ({ page }) => {
@@ -963,6 +1235,10 @@ test('创建和编辑用户时可选择分组', async ({ page }) => {
   await createActive.check()
   await dialog.getByRole('button', { name: '创建', exact: true }).click()
   const created = state.members.find((member) => member.name === '新用户')
+  expect(created.status).toBe('DISABLED')
+  await expect(
+    page.getByRole('row').filter({ hasText: '新用户' }).getByText('未激活', { exact: true }),
+  ).toBeVisible()
   expect(state.relationships.get('groups/51/members')?.has(created.id)).toBe(true)
   expect(state.relationships.get('groups/52/members')?.has(created.id)).toBe(false)
 
@@ -977,7 +1253,7 @@ test('创建和编辑用户时可选择分组', async ({ page }) => {
   await dialog.getByLabel('备注', { exact: true }).fill('已调整分组')
   state.conflict(true)
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
-  await expect(dialog.getByRole('alert')).toContainText('操作冲突')
+  await expect(page.locator('.toast')).toContainText('操作冲突')
   expect(state.members.find((member) => member.id === longID)?.name).toBe('林知远')
   state.conflict(false)
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
@@ -1039,7 +1315,7 @@ test('分组编辑表单与创建一致、失败恢复及停用授权限制', as
   await active.check()
   state.conflict(true)
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
-  await expect(dialog.getByRole('alert')).toContainText('操作冲突')
+  await expect(page.locator('.toast')).toContainText('操作冲突')
   await expect(active).toBeChecked()
   expect(state.relationships.get('groups/51/models')?.has('71')).toBe(false)
   state.conflict(false)
@@ -1121,7 +1397,7 @@ test('分组列表按最新记录倒序显示并提示输入分组名称', async
   await modal(page).getByRole('button', { name: '取消', exact: true }).click()
   await expect(latestSwitch).toBeChecked()
   await latestSwitch.click()
-  await modal(page).getByRole('button', { name: '确认', exact: true }).click()
+  await modal(page).getByRole('button', { name: '停用', exact: true }).click()
   await expect(latestSwitch).not.toBeChecked()
   expect(state.groups.find((group) => group.id === '52')?.status).toBe('DISABLED')
 
@@ -1170,7 +1446,7 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
   await expect(modal(page).getByText('已选择 1 / 共 2 个模型')).toBeVisible()
   state.conflict(true)
   await modal(page).getByRole('button', { name: '创建', exact: true }).click()
-  await expect(modal(page).getByRole('alert')).toContainText('操作冲突')
+  await expect(page.locator('.toast')).toContainText('操作冲突')
   state.conflict(false)
   await modal(page).getByRole('button', { name: '创建', exact: true }).click()
   await expect(page.getByRole('button', { name: '用户', exact: true })).toHaveCount(0)
@@ -1196,10 +1472,10 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
   await modal(page).getByRole('button', { name: '取消', exact: true }).click()
   await expect(modelSwitch).toBeChecked()
   await modelSwitch.click()
-  await modal(page).getByRole('button', { name: '确认', exact: true }).click()
+  await modal(page).getByRole('button', { name: '停用', exact: true }).click()
   await expect(modelSwitch).not.toBeChecked()
   await modelSwitch.click()
-  await modal(page).getByRole('button', { name: '确认', exact: true }).click()
+  await modal(page).getByRole('button', { name: '启用', exact: true }).click()
   await expect(modelSwitch).toBeChecked()
   await expect(page.getByRole('button', { name: '授权', exact: true })).toHaveCount(0)
   await page.getByRole('link', { name: '分组', exact: true }).click()
@@ -1302,10 +1578,10 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
   await page
     .getByRole('row')
     .filter({ hasText: '林知远' })
-    .getByRole('switch', { name: '林知远的启用状态' })
+    .getByRole('switch', { name: '林知远的激活状态' })
     .click()
-  await modal(page).getByRole('button', { name: '确认', exact: true }).click()
-  await expect(page.getByRole('switch', { name: '林知远的启用状态' })).not.toBeChecked()
+  await modal(page).getByRole('button', { name: '取消激活', exact: true }).click()
+  await expect(page.getByRole('switch', { name: '林知远的激活状态' })).not.toBeChecked()
   expect(state.members[0].status).toBe('DISABLED')
 
   await page.getByRole('link', { name: '用量记录' }).click()
@@ -1320,7 +1596,7 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
   expect(state.usageQueries.at(-1)?.get('resourceId')).toBe(state.resources[0].id)
   const usageRow = page.getByRole('row').filter({ hasText: 'OpenAI' })
   await expect(usageRow.locator('td').nth(5)).toHaveText('0')
-  await expect(usageRow.locator('td').nth(6)).toHaveText('—')
+  await expect(usageRow.locator('td').nth(6)).toHaveText('-')
   await expect(usageRow.locator('td').nth(7)).toHaveText('0')
   await page.getByRole('button', { name: '详情', exact: true }).click()
   await expect(modal(page).getByText('req_live_compatible')).toBeVisible()
@@ -1339,7 +1615,7 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
 test('会话失效清理页面、移动端导航与刷新不恢复失效 JWT', async ({ page }) => {
   const state = await fixture(page)
   await page.setViewportSize({ width: 390, height: 844 })
-  await signIn(page)
+  await signIn(page, 'home')
   await expect(page.getByRole('button', { name: '打开导航' })).toBeVisible()
   await page.getByRole('button', { name: '打开导航' }).click()
   await page.getByRole('link', { name: '模型', exact: true }).click()
@@ -1457,7 +1733,7 @@ test('用户页面使用明确术语并在紧凑侧栏展示菜单提示', async
   await expect(page.getByRole('columnheader', { name: '用户', exact: true })).toBeVisible()
   await expect(page.locator('.workspace-square')).toHaveCount(0)
   await expect(page.locator('.workspace-label')).toHaveCount(0)
-  await expect(page.locator('.nav-section').first()).toHaveText('基础配置')
+  await expect(page.locator('.nav-section')).toHaveText(['概览', '基础配置', '使用记录'])
   await expect(page.getByRole('searchbox', { name: '请输入用户名称' })).toHaveAttribute(
     'placeholder',
     '请输入用户名称',

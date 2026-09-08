@@ -12,9 +12,9 @@ import (
 )
 
 const insertUsageAttempts = `-- name: InsertUsageAttempts :exec
-INSERT INTO usage_record(id,organization_id,request_id,attempt_no,principal_id,provider_id,provider_model_id,resource_id,model_id,usage_scene,input_tokens,output_tokens,cached_input_tokens,billing_unit,started_at,completed_at,latency_ms,status,error_type,created_at)
-SELECT id,organization_id,request_id,1,principal_id,provider_id,provider_model_id,resource_id,model_id,'MODEL_GATEWAY',input_tokens,output_tokens,cached_input_tokens,'TOKEN',started_at,completed_at,latency_ms,status,error_type,completed_at
-FROM jsonb_to_recordset($1::jsonb) AS x(id bigint,organization_id bigint,request_id text,principal_id bigint,provider_id bigint,provider_model_id bigint,resource_id bigint,model_id bigint,input_tokens bigint,output_tokens bigint,cached_input_tokens bigint,started_at timestamptz,completed_at timestamptz,latency_ms bigint,status text,error_type text)
+INSERT INTO usage_record(id,organization_id,request_id,attempt_no,principal_id,provider_id,provider_model_id,resource_id,model_id,usage_scene,client_protocol,input_tokens,output_tokens,cached_input_tokens,billing_unit,started_at,completed_at,latency_ms,status,error_type,created_at)
+SELECT id,organization_id,request_id,1,principal_id,provider_id,provider_model_id,resource_id,model_id,'MODEL_GATEWAY',client_protocol,input_tokens,output_tokens,cached_input_tokens,'TOKEN',started_at,completed_at,latency_ms,status,error_type,completed_at
+FROM jsonb_to_recordset($1::jsonb) AS x(id bigint,organization_id bigint,request_id text,client_protocol text,principal_id bigint,provider_id bigint,provider_model_id bigint,resource_id bigint,model_id bigint,input_tokens bigint,output_tokens bigint,cached_input_tokens bigint,started_at timestamptz,completed_at timestamptz,latency_ms bigint,status text,error_type text)
 ON CONFLICT(request_id,attempt_no) DO NOTHING
 `
 
@@ -23,29 +23,17 @@ func (q *Queries) InsertUsageAttempts(ctx context.Context, payload []byte) error
 	return err
 }
 
-const insertUsageRequests = `-- name: InsertUsageRequests :exec
-INSERT INTO ai_request(id,organization_id,request_id,principal_id,model_id,usage_scene,client_protocol,request_at,completed_at,latency_ms,status,error_type,created_at)
-SELECT id,organization_id,request_id,principal_id,model_id,'MODEL_GATEWAY',client_protocol,request_at,completed_at,latency_ms,status,error_type,completed_at
-FROM jsonb_to_recordset($1::jsonb) AS x(id bigint,organization_id bigint,request_id text,principal_id bigint,model_id bigint,client_protocol text,request_at timestamptz,completed_at timestamptz,latency_ms bigint,status text,error_type text)
-ON CONFLICT(request_id) DO NOTHING
-`
-
-func (q *Queries) InsertUsageRequests(ctx context.Context, payload []byte) error {
-	_, err := q.db.Exec(ctx, insertUsageRequests, payload)
-	return err
-}
-
 const queryUsage = `-- name: QueryUsage :many
-SELECT r.id,r.request_id,r.client_protocol,r.principal_id,r.model_id,r.request_at,r.completed_at,r.latency_ms,r.status,r.error_type,
-u.id AS usage_id,u.attempt_no,u.provider_id,u.provider_model_id,u.resource_id,u.input_tokens,u.output_tokens,u.cached_input_tokens,u.status AS attempt_status,u.error_type AS attempt_error_type
-FROM ai_request r LEFT JOIN usage_record u ON u.request_id=r.request_id AND u.organization_id=r.organization_id
-WHERE r.organization_id=$1
-AND (r.id<$2::bigint OR $2::bigint=0)
-AND r.request_at>=$3::timestamptz AND r.request_at<$4::timestamptz
-AND ($5::bigint IS NULL OR r.principal_id=$5)
-AND ($6::bigint IS NULL OR r.model_id=$6)
-AND ($7::bigint IS NULL OR u.resource_id=$7)
-ORDER BY r.id DESC LIMIT $8::int
+SELECT id,request_id,client_protocol,principal_id,model_id,started_at,completed_at,latency_ms,status,error_type,
+attempt_no,provider_id,provider_model_id,resource_id,input_tokens,output_tokens,cached_input_tokens
+FROM usage_record
+WHERE organization_id=$1
+AND (id<$2::bigint OR $2::bigint=0)
+AND started_at>=$3::timestamptz AND started_at<$4::timestamptz
+AND ($5::bigint IS NULL OR principal_id=$5)
+AND ($6::bigint IS NULL OR model_id=$6)
+AND ($7::bigint IS NULL OR resource_id=$7)
+ORDER BY id DESC LIMIT $8::int
 `
 
 type QueryUsageParams struct {
@@ -64,22 +52,19 @@ type QueryUsageRow struct {
 	RequestID         string
 	ClientProtocol    string
 	PrincipalID       int64
-	ModelID           *int64
-	RequestAt         pgtype.Timestamptz
+	ModelID           int64
+	StartedAt         pgtype.Timestamptz
 	CompletedAt       pgtype.Timestamptz
 	LatencyMs         int64
 	Status            string
 	ErrorType         *string
-	UsageID           *int64
-	AttemptNo         *int64
-	ProviderID        *int64
-	ProviderModelID   *int64
-	ResourceID        *int64
+	AttemptNo         int64
+	ProviderID        int64
+	ProviderModelID   int64
+	ResourceID        int64
 	InputTokens       *int64
 	OutputTokens      *int64
 	CachedInputTokens *int64
-	AttemptStatus     *string
-	AttemptErrorType  *string
 }
 
 func (q *Queries) QueryUsage(ctx context.Context, arg QueryUsageParams) ([]QueryUsageRow, error) {
@@ -106,12 +91,11 @@ func (q *Queries) QueryUsage(ctx context.Context, arg QueryUsageParams) ([]Query
 			&i.ClientProtocol,
 			&i.PrincipalID,
 			&i.ModelID,
-			&i.RequestAt,
+			&i.StartedAt,
 			&i.CompletedAt,
 			&i.LatencyMs,
 			&i.Status,
 			&i.ErrorType,
-			&i.UsageID,
 			&i.AttemptNo,
 			&i.ProviderID,
 			&i.ProviderModelID,
@@ -119,9 +103,146 @@ func (q *Queries) QueryUsage(ctx context.Context, arg QueryUsageParams) ([]Query
 			&i.InputTokens,
 			&i.OutputTokens,
 			&i.CachedInputTokens,
-			&i.AttemptStatus,
-			&i.AttemptErrorType,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const usageDashboardCounts = `-- name: UsageDashboardCounts :one
+SELECT
+    (SELECT COUNT(*)::bigint FROM principal p
+     WHERE p.organization_id=$1
+       AND p.principal_type='MEMBER' AND p.is_deleted=false AND p.status='ACTIVE') AS active_member_count,
+    (SELECT COUNT(*)::bigint FROM ai_model WHERE is_deleted=false AND status='ACTIVE') AS model_count,
+    (SELECT COUNT(*)::bigint FROM ai_provider WHERE is_deleted=false AND status='ACTIVE') AS provider_count,
+    COALESCE((
+        SELECT SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0))::bigint
+        FROM usage_record u
+        WHERE u.organization_id=$1
+          AND u.started_at>=$2::timestamptz
+          AND u.started_at<$3::timestamptz
+    ), 0)::bigint AS total_tokens
+`
+
+type UsageDashboardCountsParams struct {
+	OrganizationID int64
+	FromTime       pgtype.Timestamptz
+	ToTime         pgtype.Timestamptz
+}
+
+type UsageDashboardCountsRow struct {
+	ActiveMemberCount int64
+	ModelCount        int64
+	ProviderCount     int64
+	TotalTokens       int64
+}
+
+func (q *Queries) UsageDashboardCounts(ctx context.Context, arg UsageDashboardCountsParams) (UsageDashboardCountsRow, error) {
+	row := q.db.QueryRow(ctx, usageDashboardCounts, arg.OrganizationID, arg.FromTime, arg.ToTime)
+	var i UsageDashboardCountsRow
+	err := row.Scan(
+		&i.ActiveMemberCount,
+		&i.ModelCount,
+		&i.ProviderCount,
+		&i.TotalTokens,
+	)
+	return i, err
+}
+
+const usageModelRanking = `-- name: UsageModelRanking :many
+SELECT m.id AS model_id, m.display_name AS name,
+       COUNT(DISTINCT u.request_id)::bigint AS requests,
+       COALESCE(SUM(COALESCE(u.input_tokens, 0) + COALESCE(u.output_tokens, 0)), 0)::bigint AS tokens
+FROM usage_record u
+JOIN ai_model m ON m.id=u.model_id
+WHERE u.organization_id=$1
+  AND u.started_at>=$2::timestamptz
+  AND u.started_at<$3::timestamptz
+GROUP BY m.id, m.display_name
+ORDER BY requests DESC, tokens DESC, m.id DESC
+LIMIT 10
+`
+
+type UsageModelRankingParams struct {
+	OrganizationID int64
+	FromTime       pgtype.Timestamptz
+	ToTime         pgtype.Timestamptz
+}
+
+type UsageModelRankingRow struct {
+	ModelID  int64
+	Name     string
+	Requests int64
+	Tokens   int64
+}
+
+func (q *Queries) UsageModelRanking(ctx context.Context, arg UsageModelRankingParams) ([]UsageModelRankingRow, error) {
+	rows, err := q.db.Query(ctx, usageModelRanking, arg.OrganizationID, arg.FromTime, arg.ToTime)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []UsageModelRankingRow{}
+	for rows.Next() {
+		var i UsageModelRankingRow
+		if err := rows.Scan(
+			&i.ModelID,
+			&i.Name,
+			&i.Requests,
+			&i.Tokens,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const usageTokenRanking = `-- name: UsageTokenRanking :many
+SELECT u.principal_id, p.name,
+       SUM(COALESCE(u.input_tokens, 0) + COALESCE(u.output_tokens, 0))::bigint AS tokens
+FROM usage_record u
+JOIN principal p ON p.id=u.principal_id AND p.organization_id=u.organization_id
+WHERE u.organization_id=$1
+  AND u.started_at>=$2::timestamptz
+  AND u.started_at<$3::timestamptz
+GROUP BY u.principal_id, p.name
+HAVING SUM(COALESCE(u.input_tokens, 0) + COALESCE(u.output_tokens, 0)) > 0
+ORDER BY tokens DESC, u.principal_id DESC
+LIMIT 10
+`
+
+type UsageTokenRankingParams struct {
+	OrganizationID int64
+	FromTime       pgtype.Timestamptz
+	ToTime         pgtype.Timestamptz
+}
+
+type UsageTokenRankingRow struct {
+	PrincipalID int64
+	Name        string
+	Tokens      int64
+}
+
+func (q *Queries) UsageTokenRanking(ctx context.Context, arg UsageTokenRankingParams) ([]UsageTokenRankingRow, error) {
+	rows, err := q.db.Query(ctx, usageTokenRanking, arg.OrganizationID, arg.FromTime, arg.ToTime)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []UsageTokenRankingRow{}
+	for rows.Next() {
+		var i UsageTokenRankingRow
+		if err := rows.Scan(&i.PrincipalID, &i.Name, &i.Tokens); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

@@ -16,6 +16,10 @@ func TestConfigValidation(t *testing.T) {
 		{"invalid port", "HTTP_ADDR", ":99999", "HTTP_ADDR"},
 		{"missing password", "POSTGRES_PASSWORD", "", "POSTGRES_PASSWORD"},
 		{"unknown log format", "LOG_FORMAT", "xml", "LOG_FORMAT"},
+		{"unknown console log format", "LOG_CONSOLE_FORMAT", "xml", "LOG_CONSOLE_FORMAT"},
+		{"unknown log color", "LOG_COLOR", "sometimes", "LOG_COLOR"},
+		{"invalid log file size", "LOG_FILE_MAX_SIZE_MB", "0", "LOG_FILE_MAX_SIZE_MB"},
+		{"invalid log file backups", "LOG_FILE_MAX_BACKUPS", "0", "LOG_FILE_MAX_BACKUPS"},
 		{"invalid boolean", "CORS_ENABLED", "maybe", "CORS_ENABLED"},
 		{"invalid ID node", "ID_NODE", "0", "ID_NODE"},
 		{"empty upstream model", "BOOTSTRAP_SONNET_MODEL", "", "BOOTSTRAP_SONNET_MODEL"},
@@ -36,6 +40,44 @@ func TestConfigValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLogConfiguration(t *testing.T) {
+	t.Run("legacy format remains the console fallback", func(t *testing.T) {
+		cfg, err := parse(func(key string) (string, bool) {
+			values := map[string]string{"POSTGRES_PASSWORD": "test-only", "LOG_FORMAT": "json"}
+			value, ok := values[key]
+			return value, ok
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.LogConsoleFormat != "json" {
+			t.Fatalf("got console format %q, want json", cfg.LogConsoleFormat)
+		}
+	})
+
+	t.Run("independent console and file settings", func(t *testing.T) {
+		cfg, err := parse(func(key string) (string, bool) {
+			values := map[string]string{
+				"POSTGRES_PASSWORD":    "test-only",
+				"LOG_CONSOLE_FORMAT":   "pretty",
+				"LOG_COLOR":            "always",
+				"LOG_FILE_PATH":        " data/logs/zentrola.jsonl ",
+				"LOG_FILE_MAX_SIZE_MB": "25",
+				"LOG_FILE_MAX_BACKUPS": "7",
+			}
+			value, ok := values[key]
+			return value, ok
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.LogConsoleFormat != "pretty" || cfg.LogColor != "always" || cfg.LogFilePath != "data/logs/zentrola.jsonl" ||
+			cfg.LogFileMaxSizeMB != 25 || cfg.LogFileMaxBackups != 7 {
+			t.Fatalf("unexpected log configuration: %+v", cfg)
+		}
+	})
 }
 
 func TestLoadEnvironmentOverridesFile(t *testing.T) {
@@ -187,6 +229,9 @@ func TestLoadLayeredConfiguration(t *testing.T) {
 			}
 			if cfg.Environment != tt.environment || cfg.HTTPAddr != tt.addr {
 				t.Fatalf("got environment=%s address=%s, want %s %s", cfg.Environment, cfg.HTTPAddr, tt.environment, tt.addr)
+			}
+			if cfg.Gateway.Development != (tt.environment == "dev") {
+				t.Fatalf("gateway development logging mismatch for %s", tt.environment)
 			}
 			if tt.format != "" && cfg.LogFormat != tt.format {
 				t.Fatalf("got log format %s, want %s", cfg.LogFormat, tt.format)

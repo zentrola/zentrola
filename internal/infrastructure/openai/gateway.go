@@ -32,7 +32,8 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 	if !allowed {
 		return nil, gw.ErrRoute
 	}
-	if input.Protocol != gw.OpenAIProtocol || input.Path != "/v1/chat/completions" || input.BetaQuery {
+	if (input.Protocol != gw.OpenAIProtocol && input.Protocol != gw.OpenAIResponsesProtocol) ||
+		(input.Path != "/v1/chat/completions" && input.Path != "/v1/responses") || input.BetaQuery {
 		return nil, gw.ErrInvalid
 	}
 	if len(credential) == 0 || len(credential) > 4096 {
@@ -43,7 +44,11 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 			return nil, gw.ErrCredential
 		}
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/chat/completions", bytes.NewReader(input.Body))
+	upstreamPath := "/chat/completions"
+	if input.Protocol == gw.OpenAIResponsesProtocol {
+		upstreamPath = "/responses"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+upstreamPath, bytes.NewReader(input.Body))
 	if err != nil {
 		return nil, gw.ErrInvalid
 	}

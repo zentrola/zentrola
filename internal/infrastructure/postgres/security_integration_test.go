@@ -192,7 +192,7 @@ func TestStage2Integration(t *testing.T) {
 		issued = result.Data
 		digest := sha256.Sum256([]byte(issued.Key))
 		row, err := dbgen.New(pool).GetAccessKeyByHash(ctx, digest[:])
-		if err != nil || len(row.KeyHash) != 32 || row.KeyPrefix != issued.Prefix {
+		if err != nil || len(row.KeyHash) != 32 || row.MaskedKey != issued.MaskedKey {
 			t.Fatal("key digest storage incorrect", err)
 		}
 		identity, err := keys.Authenticate(ctx, issued.Key)

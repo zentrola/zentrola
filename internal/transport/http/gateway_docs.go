@@ -47,6 +47,18 @@ import gw "github.com/zentrola/zentrola/internal/application/gateway"
 // @Header all {string} X-Request-ID "平台请求追踪 ID"
 // @Router /v1/chat/completions [post]
 
+// @Summary OpenAI Responses
+// @Tags OpenAI Gateway
+// @Description 使用成员 Access Key 的 Bearer 认证。model 为平台逻辑模型编码，请求和响应按 OpenAI Responses 协议透传。
+// @Accept json
+// @Produce json,text/event-stream
+// @Security GatewayBearer
+// @Param body body map[string]interface{} true "OpenAI Responses 请求；至少包含 model、input"
+// @Success 200 {object} map[string]interface{} "上游原生响应；stream=true 时为 SSE 事件流"
+// @Failure 400,401,403,404,413,415,429,502,503,504 {object} OpenAIErrorResponse
+// @Header all {string} X-Request-ID "平台请求追踪 ID"
+// @Router /v1/responses [post]
+
 // @Summary 可用的 OpenAI 逻辑模型
 // @Tags OpenAI Gateway
 // @Description 返回当前成员被授权且有可用 OpenAI 资源的逻辑模型；不接受查询参数。

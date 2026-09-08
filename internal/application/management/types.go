@@ -63,8 +63,7 @@ type Provider struct {
 	Name               string                   `json:"name"`
 	Type               string                   `json:"type"`
 	Website            *string                  `json:"website"`
-	BaseURL            *string                  `json:"baseUrl"`
-	OpenAIBaseURL      *string                  `json:"openaiBaseUrl"`
+	Endpoints          []ProviderEndpoint       `json:"endpoints"`
 	ProxyEnabled       bool                     `json:"proxyEnabled"`
 	ProxyURL           *string                  `json:"proxyUrl"`
 	ProxyHeaders       []ProviderProxyHeader    `json:"proxyHeaders"`
@@ -73,6 +72,10 @@ type Provider struct {
 	UpdatedAt          time.Time                `json:"updatedAt"`
 	ProxyURLSealed     catalog.SealedCredential `json:"-"`
 	ProxyHeadersSealed catalog.SealedCredential `json:"-"`
+}
+type ProviderEndpoint struct {
+	ProtocolType string `json:"protocolType" enums:"OPENAI_CHAT,OPENAI_RESPONSES,ANTHROPIC_MESSAGES"`
+	BaseURL      string `json:"baseUrl"`
 }
 type ProviderProxyHeader struct {
 	Key        string `json:"key"`
@@ -83,28 +86,25 @@ type ProviderProxyHeaderInput struct {
 	Value string `json:"value"`
 }
 type ProviderInput struct {
-	Name          string                     `json:"name" binding:"required"`
-	Website       string                     `json:"website"`
-	BaseURL       string                     `json:"baseUrl"`
-	OpenAIBaseURL string                     `json:"openaiBaseUrl"`
-	ProxyEnabled  bool                       `json:"proxyEnabled"`
-	ProxyURL      string                     `json:"proxyUrl"`
-	ProxyHeaders  []ProviderProxyHeaderInput `json:"proxyHeaders"`
-	Mappings      []ProviderMappingInput     `json:"mappings" binding:"required"`
+	Name         string                     `json:"name" binding:"required"`
+	Website      string                     `json:"website"`
+	Endpoints    []ProviderEndpoint         `json:"endpoints" binding:"required"`
+	ProxyEnabled bool                       `json:"proxyEnabled"`
+	ProxyURL     string                     `json:"proxyUrl"`
+	ProxyHeaders []ProviderProxyHeaderInput `json:"proxyHeaders"`
+	Mappings     []ProviderMappingInput     `json:"mappings" binding:"required"`
 }
 type ProviderMappingInput struct {
 	ModelID           int64  `json:"modelId,string" binding:"required"`
 	UpstreamModelCode string `json:"upstreamModelCode" binding:"required"`
-	ProtocolType      string `json:"protocolType" binding:"required" enums:"ANTHROPIC,OPENAI"`
-	Status            string `json:"status" binding:"required" enums:"ACTIVE,DISABLED"`
+	Priority          int32  `json:"priority,omitempty"`
 }
 type ProviderMapping struct {
 	ID                int64     `json:"id,string"`
 	ProviderID        int64     `json:"providerId,string"`
 	ModelID           int64     `json:"modelId,string"`
 	UpstreamModelCode string    `json:"upstreamModelCode"`
-	ProtocolType      string    `json:"protocolType"`
-	Status            string    `json:"status"`
+	Priority          int32     `json:"priority"`
 	CreatedAt         time.Time `json:"createdAt"`
 	UpdatedAt         time.Time `json:"updatedAt"`
 }
@@ -128,7 +128,7 @@ type ResourceRecord struct {
 type Key struct {
 	ID        int64      `json:"id,string"`
 	Name      string     `json:"name"`
-	Prefix    string     `json:"prefix"`
+	MaskedKey string     `json:"maskedKey"`
 	Status    string     `json:"status"`
 	ExpiresAt *time.Time `json:"expiresAt"`
 	RevokedAt *time.Time `json:"revokedAt"`

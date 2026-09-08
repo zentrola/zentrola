@@ -70,16 +70,15 @@ func (q *Queries) CreateBootstrapOrganization(ctx context.Context, arg CreateBoo
 }
 
 const createBootstrapProvider = `-- name: CreateBootstrapProvider :exec
-INSERT INTO ai_provider (id, provider_code, provider_name, provider_type, anthropic_base_url, status, created_by, updated_by, created_at, updated_at)
-VALUES ($1, $2, $3, 'OFFICIAL', $4, 'ACTIVE', 'system', 'system', $5, $5)
+INSERT INTO ai_provider (id, provider_code, provider_name, provider_type, status, created_by, updated_by, created_at, updated_at)
+VALUES ($1, $2, $3, 'OFFICIAL', 'ACTIVE', 'system', 'system', $4, $4)
 `
 
 type CreateBootstrapProviderParams struct {
-	ID               int64
-	ProviderCode     string
-	ProviderName     string
-	AnthropicBaseUrl *string
-	CreatedAt        pgtype.Timestamptz
+	ID           int64
+	ProviderCode string
+	ProviderName string
+	CreatedAt    pgtype.Timestamptz
 }
 
 func (q *Queries) CreateBootstrapProvider(ctx context.Context, arg CreateBootstrapProviderParams) error {
@@ -87,15 +86,36 @@ func (q *Queries) CreateBootstrapProvider(ctx context.Context, arg CreateBootstr
 		arg.ID,
 		arg.ProviderCode,
 		arg.ProviderName,
-		arg.AnthropicBaseUrl,
+		arg.CreatedAt,
+	)
+	return err
+}
+
+const createBootstrapProviderEndpoint = `-- name: CreateBootstrapProviderEndpoint :exec
+INSERT INTO provider_endpoint(provider_id, protocol_type, base_url, created_by, updated_by, created_at, updated_at)
+VALUES($1, $2, $3, 'system', 'system', $4, $4)
+`
+
+type CreateBootstrapProviderEndpointParams struct {
+	ProviderID   int64
+	ProtocolType string
+	BaseUrl      string
+	CreatedAt    pgtype.Timestamptz
+}
+
+func (q *Queries) CreateBootstrapProviderEndpoint(ctx context.Context, arg CreateBootstrapProviderEndpointParams) error {
+	_, err := q.db.Exec(ctx, createBootstrapProviderEndpoint,
+		arg.ProviderID,
+		arg.ProtocolType,
+		arg.BaseUrl,
 		arg.CreatedAt,
 	)
 	return err
 }
 
 const createBootstrapProviderModel = `-- name: CreateBootstrapProviderModel :exec
-INSERT INTO provider_model (id, provider_id, model_id, upstream_model_code, protocol_type, status, created_by, updated_by, created_at, updated_at)
-VALUES ($1, $2, $3, $4, 'ANTHROPIC', 'ACTIVE', 'system', 'system', $5, $5)
+INSERT INTO provider_model (id, provider_id, model_id, upstream_model_code, priority, created_by, updated_by, created_at, updated_at)
+VALUES ($1, $2, $3, $4, 100, 'system', 'system', $5, $5)
 `
 
 type CreateBootstrapProviderModelParams struct {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -34,6 +35,21 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 	}
 	if input.Path != "/v1/messages" && input.Path != "/v1/messages/count_tokens" {
 		return nil, gw.ErrInvalid
+	}
+	if baseURL == "https://api.deepseek.com/anthropic" {
+		adapted, removedTools, removedBeta, err := adaptDeepSeekRequest(input)
+		if err != nil {
+			return nil, err
+		}
+		input = adapted
+		if input.Development && (removedTools > 0 || removedBeta) {
+			slog.InfoContext(ctx, "gateway compatibility applied",
+				"provider", "deepseek-official",
+				"removed_tool_type", "advisor_20260301",
+				"removed_tool_count", removedTools,
+				"removed_beta", removedBeta,
+			)
+		}
 	}
 	if len(credential) == 0 || len(credential) > 4096 {
 		return nil, gw.ErrCredential

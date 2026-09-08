@@ -15,6 +15,8 @@ const (
 	keyMarker       = "vk-"
 	legacyKeyMarker = "zt_vk_"
 	keyPrefixChars  = 8
+	keySuffixChars  = 4
+	keyMask         = "********"
 )
 
 type Keys struct {
@@ -24,7 +26,7 @@ type Keys struct {
 type CreatedKey struct {
 	ID        int64      `json:"id,string"`
 	Key       string     `json:"key"`
-	Prefix    string     `json:"prefix"`
+	MaskedKey string     `json:"maskedKey"`
 	Name      string     `json:"name"`
 	ExpiresAt *time.Time `json:"expiresAt"`
 }
@@ -44,12 +46,13 @@ func (s *Keys) Create(ctx context.Context, actor admin.Identity, principalID int
 	if err != nil {
 		return CreatedKey{}, ErrUnavailable
 	}
-	row := KeyRecord{ID: id, OrganizationID: actor.OrganizationID, PrincipalID: principalID, Hash: digest[:], Prefix: full[:len(keyMarker)+keyPrefixChars], Name: name, ExpiresAt: expires, CreatedAt: now}
+	maskedKey := full[:len(keyMarker)+keyPrefixChars] + keyMask + full[len(full)-keySuffixChars:]
+	row := KeyRecord{ID: id, OrganizationID: actor.OrganizationID, PrincipalID: principalID, Hash: digest[:], MaskedKey: maskedKey, Name: name, ExpiresAt: expires, CreatedAt: now}
 	if err := s.store.Create(ctx, actor, row, meta); err != nil {
 		return CreatedKey{}, err
 	}
 	// 完整值仅存在于本次创建返回值，不传给 Repository 或操作日志。
-	return CreatedKey{ID: id, Key: full, Prefix: row.Prefix, Name: name, ExpiresAt: expires}, nil
+	return CreatedKey{ID: id, Key: full, MaskedKey: row.MaskedKey, Name: name, ExpiresAt: expires}, nil
 }
 func (s *Keys) Revoke(ctx context.Context, actor admin.Identity, keyID int64, meta RequestMeta) error {
 	if keyID <= 0 {

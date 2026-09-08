@@ -20,6 +20,9 @@ func (i *testIDs) NextID() (int64, error) { return i.n.Add(1), nil }
 type storeFunc func(context.Context, []domain.Event) error
 
 func (f storeFunc) WriteBatch(c context.Context, e []domain.Event) error { return f(c, e) }
+func attemptEvent(requestID string) domain.Event {
+	return domain.Event{RequestID: requestID, Attempt: &domain.Attempt{}}
+}
 func writerFor(t *testing.T, s Store, q, b int) *Writer {
 	t.Helper()
 	w, err := NewWriter(s, &testIDs{}, slog.New(slog.NewTextHandler(io.Discard, nil)), Options{QueueSize: q, BatchSize: b, FlushInterval: 10 * time.Millisecond, WriteTimeout: time.Second})
@@ -48,14 +51,14 @@ func TestQueueFullSynchronousFallback(t *testing.T) {
 		}
 		return nil
 	}), 1, 1)
-	if err := w.Submit(domain.Event{RequestID: "one"}); err != nil {
+	if err := w.Submit(attemptEvent("one")); err != nil {
 		t.Fatal(err)
 	}
 	<-started
-	if err := w.Submit(domain.Event{RequestID: "two"}); err != nil {
+	if err := w.Submit(attemptEvent("two")); err != nil {
 		t.Fatal(err)
 	}
-	if err := w.Submit(domain.Event{RequestID: "three"}); err != nil {
+	if err := w.Submit(attemptEvent("three")); err != nil {
 		t.Fatal(err)
 	}
 	if calls.Load() != 2 || w.Metrics().Fallback != 1 || w.Metrics().Persisted != 1 {
@@ -86,10 +89,10 @@ func TestSynchronousFailureIsReported(t *testing.T) {
 		}
 		return nil
 	}), 1, 1)
-	_ = w.Submit(domain.Event{RequestID: "worker"})
+	_ = w.Submit(attemptEvent("worker"))
 	<-started
-	_ = w.Submit(domain.Event{RequestID: "queued"})
-	if w.Submit(domain.Event{RequestID: "fail-sync"}) == nil {
+	_ = w.Submit(attemptEvent("queued"))
+	if w.Submit(attemptEvent("fail-sync")) == nil {
 		t.Fatal("synchronous failure hidden")
 	}
 	if m := w.Metrics(); m.Fallback != 1 || m.Failed != 1 || m.Persisted != 0 {
@@ -108,8 +111,8 @@ func TestBatchFailureIsolationAndFailedMetric(t *testing.T) {
 		}
 		return nil
 	}), 10, 10)
-	_ = w.Submit(domain.Event{RequestID: "good"})
-	_ = w.Submit(domain.Event{RequestID: "bad"})
+	_ = w.Submit(attemptEvent("good"))
+	_ = w.Submit(attemptEvent("bad"))
 	if w.Close(context.Background()) == nil {
 		t.Fatal("failed persistence reported success")
 	}
@@ -150,7 +153,7 @@ func TestConcurrentCloseAndTimeout(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := 0; i < 30; i++ {
 		wg.Add(1)
-		go func() { defer wg.Done(); _ = w.Submit(domain.Event{RequestID: "concurrent"}) }()
+		go func() { defer wg.Done(); _ = w.Submit(attemptEvent("concurrent")) }()
 	}
 	_ = w.Close(context.Background())
 	wg.Wait()
@@ -158,7 +161,7 @@ func TestConcurrentCloseAndTimeout(t *testing.T) {
 		t.Fatal("events left pending")
 	}
 	blocked := writerFor(t, storeFunc(func(ctx context.Context, e []domain.Event) error { <-ctx.Done(); return ctx.Err() }), 10, 1)
-	_ = blocked.Submit(domain.Event{RequestID: "blocked"})
+	_ = blocked.Submit(attemptEvent("blocked"))
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 	if blocked.Close(ctx) == nil || blocked.Metrics().Failed != 1 || blocked.Metrics().Pending != 0 {

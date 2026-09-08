@@ -1,1 +1,1 @@
-window.__ZENTROLA_CONFIG__ = { apiBaseUrl: '' }
+window.__ZENTROLA_CONFIG__ = { apiBaseUrl: '', gatewayBaseUrl: '' }

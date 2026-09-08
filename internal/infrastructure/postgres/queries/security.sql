@@ -35,10 +35,10 @@ WHERE organization_id=$1 AND id=$2 AND is_deleted=false AND status='ACTIVE';
 -- name: GetMemberForKey :one
 SELECT p.* FROM principal p JOIN organization o ON o.id=p.organization_id
 WHERE p.organization_id=$1 AND p.id=$2 AND p.principal_type='MEMBER' AND p.is_deleted=false
-AND p.status='ACTIVE' AND o.status='ACTIVE' AND o.is_deleted=false FOR UPDATE OF p;
+AND o.status='ACTIVE' AND o.is_deleted=false FOR UPDATE OF p;
 
 -- name: CreateAccessKey :exec
-INSERT INTO access_key (id,organization_id,principal_id,key_hash,key_prefix,name,status,expires_at,created_by,updated_by,created_at,updated_at)
+INSERT INTO access_key (id,organization_id,principal_id,key_hash,masked_key,name,status,expires_at,created_by,updated_by,created_at,updated_at)
 VALUES ($1,$2,$3,$4,$5,$6,'ACTIVE',$7,$8,$8,$9,$9);
 
 -- name: GetKeyForRevoke :one

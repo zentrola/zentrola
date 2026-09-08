@@ -16,7 +16,7 @@ import (
 
 func NewRouter(logger *slog.Logger, readiness *health.Service, corsConfig config.CORS, healthTimeout time.Duration, environment string, security ...*SecurityHandlers) http.Handler {
 	r := chi.NewRouter()
-	r.Use(requestID, accessLog(logger), recoverPanic(logger))
+	r.Use(requestID, accessLog(logger, environment), recoverPanic(logger))
 	if corsConfig.Enabled {
 		r.Use(cors.New(cors.Options{
 			AllowedOrigins: corsConfig.Origins,
@@ -27,6 +27,11 @@ func NewRouter(logger *slog.Logger, readiness *health.Service, corsConfig config
 		}).Handler)
 	}
 	mountSwagger(r, environment)
+	r.Get("/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("Zentrola is ready"))
+	})
 	// @Summary 进程存活检查
 	// @Tags 健康检查
 	// @Produce json

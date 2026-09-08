@@ -11,12 +11,12 @@ import (
 )
 
 type Model struct {
-	ID                    int64
-	ProviderModelID       int64
-	OpenAIProviderModelID int64
-	Code                  string
-	Name                  string
-	UpstreamCode          string
+	ID              int64
+	ProviderModelID int64
+	Code            string
+	Name            string
+	UpstreamCode    string
+	InputModalities string
 }
 
 type Seed struct {
@@ -44,7 +44,7 @@ func New(store Store, ids shared.IDGenerator, sonnet, opus string) *Service {
 }
 
 func (s *Service) Initialize(ctx context.Context) error {
-	ids := make([]int64, 6)
+	ids := make([]int64, 8)
 	for i := range ids {
 		id, err := s.ids.NextID()
 		if err != nil {
@@ -55,8 +55,10 @@ func (s *Service) Initialize(ctx context.Context) error {
 	return s.store.InitializeOnce(ctx, Seed{
 		OrganizationID: ids[0], ProviderID: ids[1], CreatedAt: time.Now().UTC(),
 		Models: []Model{
-			{ID: ids[2], ProviderModelID: ids[3], Code: catalog.SonnetCode, Name: "Claude Sonnet", UpstreamCode: s.sonnet},
-			{ID: ids[4], ProviderModelID: ids[5], Code: catalog.OpusCode, Name: "Claude Opus", UpstreamCode: s.opus},
+			{ID: ids[2], ProviderModelID: ids[3], Code: catalog.SonnetCode, Name: "Claude Sonnet 5", UpstreamCode: s.sonnet, InputModalities: `["TEXT","IMAGE"]`},
+			{ID: ids[4], ProviderModelID: ids[5], Code: catalog.OpusCode, Name: "Claude Opus 5", UpstreamCode: s.opus, InputModalities: `["TEXT","IMAGE"]`},
+			{ID: ids[6], Code: "deepseek-v4-flash", Name: "DeepSeek V4 Flash", UpstreamCode: "deepseek-v4-flash", InputModalities: `["TEXT"]`},
+			{ID: ids[7], Code: "deepseek-v4-pro", Name: "DeepSeek V4 Pro", UpstreamCode: "deepseek-v4-pro", InputModalities: `["TEXT"]`},
 		},
 	})
 }

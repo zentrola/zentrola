@@ -20,7 +20,7 @@ func (s *GatewayStore) Resolve(ctx context.Context, identity appsec.PrincipalIde
 	if len(protocols) > 0 {
 		protocol = protocols[0]
 	}
-	if protocol != gw.AnthropicProtocol && protocol != gw.OpenAIProtocol {
+	if protocol != gw.AnthropicProtocol && protocol != gw.OpenAIProtocol && protocol != gw.OpenAIResponsesProtocol {
 		return gw.Route{}, gw.ErrInvalid
 	}
 	// 使用每次请求的一致性快照，不缓存身份、授权或路由，也不在网络转发期间占用连接。
@@ -58,20 +58,10 @@ func (s *GatewayStore) Resolve(ctx context.Context, identity appsec.PrincipalIde
 	if err != nil {
 		return gw.Route{ModelID: m.ID}, gw.ErrUnavailable
 	}
-	if len(mappings) != 1 {
+	if len(mappings) == 0 {
 		return gw.Route{ModelID: m.ID}, gw.ErrRoute
 	}
 	mapping := mappings[0]
-	baseURL := mapping.AnthropicBaseUrl
-	if protocol == gw.OpenAIProtocol {
-		if mapping.OpenaiBaseUrl == nil {
-			return gw.Route{ModelID: m.ID}, gw.ErrRoute
-		}
-		baseURL = mapping.OpenaiBaseUrl
-	}
-	if baseURL == nil {
-		return gw.Route{ModelID: m.ID}, gw.ErrRoute
-	}
 	resources, err := q.GatewayResources(ctx, dbgen.GatewayResourcesParams{OrganizationID: identity.OrganizationID, ProviderID: mapping.ProviderID})
 	if err != nil {
 		return gw.Route{ModelID: m.ID}, gw.ErrUnavailable
@@ -85,7 +75,7 @@ func (s *GatewayStore) Resolve(ctx context.Context, identity appsec.PrincipalIde
 	}
 	route := gw.Route{
 		ModelID: m.ID, ProviderID: mapping.ProviderID, ProviderModelID: mapping.ID, ResourceID: r.ID,
-		UpstreamModel: mapping.UpstreamModelCode, BaseURL: *baseURL,
+		UpstreamModel: mapping.UpstreamModelCode, BaseURL: mapping.BaseUrl,
 		Credential:   catalog.SealedCredential{Ciphertext: r.CredentialCiphertext, Nonce: r.CredentialNonce, KeyVersion: r.KeyVersion},
 		ProxyEnabled: mapping.ProxyEnabled,
 	}

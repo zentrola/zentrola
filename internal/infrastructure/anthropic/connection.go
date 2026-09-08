@@ -46,10 +46,10 @@ func (t *ConnectionTester) Test(ctx context.Context, protocol, baseURL string, c
 	}
 	probeURL := base + "/v1/models?limit=1"
 	bearer := false
-	if protocol == "OPENAI" {
+	if protocol == "OPENAI_CHAT" || protocol == "OPENAI_RESPONSES" {
 		probeURL = strings.TrimSuffix(base, "/") + "/models"
 		bearer = true
-	} else if protocol != "ANTHROPIC" {
+	} else if protocol != "ANTHROPIC_MESSAGES" {
 		result.Code = "UPSTREAM_URL_REJECTED"
 		return
 	} else if base == "https://api.deepseek.com/anthropic" {

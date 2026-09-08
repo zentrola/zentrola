@@ -25,6 +25,11 @@ type Config struct {
 	HealthTimeout     time.Duration
 	LogLevel          slog.Level
 	LogFormat         string
+	LogConsoleFormat  string
+	LogColor          string
+	LogFilePath       string
+	LogFileMaxSizeMB  int
+	LogFileMaxBackups int
 	Postgres          Postgres
 	AutoMigrate       bool
 	IDNode            int
@@ -44,6 +49,7 @@ type Usage struct {
 type Gateway struct {
 	MaxBodyBytes                                                 int64
 	RequestTimeout, HeaderTimeout, BodyReadTimeout, WriteTimeout time.Duration
+	Development                                                  bool
 }
 
 type Security struct {
@@ -216,6 +222,8 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 		}
 		return value
 	}
+	// LOG_FORMAT 是旧配置项，继续作为控制台格式的回退值，避免已有部署升级后改变行为。
+	legacyLogFormat := get("LOG_FORMAT", "text")
 	cfg := Config{
 		Environment:       get("APP_ENV", "dev"),
 		HTTPAddr:          get("HTTP_ADDR", ":9527"),
@@ -224,7 +232,12 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 		ShutdownTimeout:   duration("SHUTDOWN_TIMEOUT", "20s"),
 		StartupTimeout:    duration("STARTUP_TIMEOUT", "30s"),
 		HealthTimeout:     duration("HEALTH_CHECK_TIMEOUT", "2s"),
-		LogFormat:         get("LOG_FORMAT", "text"),
+		LogFormat:         legacyLogFormat,
+		LogConsoleFormat:  get("LOG_CONSOLE_FORMAT", legacyLogFormat),
+		LogColor:          get("LOG_COLOR", "auto"),
+		LogFilePath:       strings.TrimSpace(get("LOG_FILE_PATH", "")),
+		LogFileMaxSizeMB:  integer("LOG_FILE_MAX_SIZE_MB", "100", 10240),
+		LogFileMaxBackups: integer("LOG_FILE_MAX_BACKUPS", "10", 1000),
 		AutoMigrate:       boolean("MIGRATIONS_AUTO_APPLY", "true"),
 		IDNode:            integer("ID_NODE", "1", 65535),
 		BootstrapSonnet:   get("BOOTSTRAP_SONNET_MODEL", "claude-sonnet-5"),
@@ -259,13 +272,22 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 	if err := cfg.LogLevel.UnmarshalText([]byte(get("LOG_LEVEL", "info"))); err != nil {
 		problems = append(problems, errors.New("LOG_LEVEL is invalid"))
 	}
-	if cfg.LogFormat != "text" && cfg.LogFormat != "json" {
-		problems = append(problems, errors.New("LOG_FORMAT must be text or json"))
+	if cfg.LogFormat != "text" && cfg.LogFormat != "json" && cfg.LogFormat != "pretty" {
+		problems = append(problems, errors.New("LOG_FORMAT must be text, pretty or json"))
+	}
+	if cfg.LogConsoleFormat != "text" && cfg.LogConsoleFormat != "json" && cfg.LogConsoleFormat != "pretty" {
+		problems = append(problems, errors.New("LOG_CONSOLE_FORMAT must be text, pretty or json"))
+	}
+	switch cfg.LogColor {
+	case "auto", "always", "never", "true", "false":
+	default:
+		problems = append(problems, errors.New("LOG_COLOR must be auto, always, never, true or false"))
 	}
 	if environment, err := normalizeEnvironment(cfg.Environment); err != nil {
 		problems = append(problems, err)
 	} else {
 		cfg.Environment = environment
+		cfg.Gateway.Development = environment == "dev"
 	}
 	_, port, err := net.SplitHostPort(cfg.HTTPAddr)
 	if err != nil {

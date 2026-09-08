@@ -139,7 +139,28 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 		}
 		defer os.Chdir(previous)
 	}
-	logger := logging.New(os.Stdout, cfg.LogFormat, cfg.LogLevel)
+	var logFile *logging.RotatingFile
+	if cfg.LogFilePath != "" {
+		opened, openErr := logging.OpenRotatingFile(cfg.LogFilePath, cfg.LogFileMaxSizeMB, cfg.LogFileMaxBackups)
+		if openErr != nil {
+			return errors.New("cannot open log file")
+		}
+		logFile = opened
+		defer func() {
+			if err := logFile.Close(); err != nil {
+				runErr = errors.Join(runErr, errors.New("cannot close log file"))
+			}
+		}()
+	}
+	logger := logging.NewWithOptions(logging.Options{
+		Console:       os.Stdout,
+		ConsoleFormat: cfg.LogConsoleFormat,
+		Color:         cfg.LogColor,
+		File:          logFile,
+		ErrorOutput:   os.Stderr,
+		Level:         cfg.LogLevel,
+		AddSource:     true,
+	})
 	slog.SetDefault(logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

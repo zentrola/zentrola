@@ -10,6 +10,7 @@ import Modal from '../components/Modal.vue'
 import PageHeader from '../components/PageHeader.vue'
 import ListFooter from '../components/ListFooter.vue'
 import ListSearch from '../components/ListSearch.vue'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 const { items, cursor, loading, error, load } = useCollection<Group>(() => '/groups')
 const { busy, error: actionError, run } = useAction()
 const creating = ref(false),
@@ -296,15 +297,9 @@ function deleteGroup() {
           </p>
         </div>
       </section>
-      <p v-if="validation || actionError" class="alert error" role="alert">
-        {{ validation || actionError
-        }}<button
-          v-if="actionError && !createModelsReady"
-          type="button"
-          class="text-button"
-          :disabled="busy"
-          @click="run(loadCreateModels)"
-        >
+      <p v-if="validation" class="alert error" role="alert">{{ validation }}</p>
+      <p v-if="actionError && !createModelsReady" class="form-retry">
+        <button type="button" class="text-button" :disabled="busy" @click="run(loadCreateModels)">
           {{ t('common.retry') }}
         </button>
       </p>
@@ -420,15 +415,9 @@ function deleteGroup() {
           </p>
         </div>
       </section>
-      <p v-if="validation || actionError" class="alert error" role="alert">
-        {{ validation || actionError
-        }}<button
-          v-if="actionError && !relationReady"
-          type="button"
-          class="text-button"
-          :disabled="busy"
-          @click="run(refreshModels)"
-        >
+      <p v-if="validation" class="alert error" role="alert">{{ validation }}</p>
+      <p v-if="actionError && !relationReady" class="form-retry">
+        <button type="button" class="text-button" :disabled="busy" @click="run(refreshModels)">
           {{ t('common.retry') }}
         </button>
       </p>
@@ -441,42 +430,35 @@ function deleteGroup() {
       </footer>
     </form>
   </Modal>
-  <Modal v-if="statusTarget" :title="t('common.status')" :busy="busy" @close="statusTarget = null">
-    <p>
-      {{
-        t('common.confirmStatus', {
-          name: statusTarget.name,
-          status: t(statusTarget.status === 'ACTIVE' ? 'common.disable' : 'common.enable'),
-        })
-      }}
-    </p>
-    <p v-if="statusTarget.status === 'ACTIVE'" class="muted">{{ t('common.disableHint') }}</p>
-    <p v-if="actionError" class="alert error" role="alert">{{ actionError }}</p>
-    <footer class="form-footer">
-      <button class="button" :disabled="busy" @click="statusTarget = null">
-        {{ t('common.cancel') }}
-      </button>
-      <button class="button primary" :disabled="busy" @click="changeStatus">
-        {{ t('common.confirm') }}
-      </button>
-    </footer>
-  </Modal>
-  <Modal
+  <ConfirmDialog
+    v-if="statusTarget"
+    :title="t(statusTarget.status === 'ACTIVE' ? 'common.disableTitle' : 'common.enableTitle')"
+    :message="
+      t('common.confirmStatus', {
+        name: statusTarget.name,
+        status: t(statusTarget.status === 'ACTIVE' ? 'common.disable' : 'common.enable'),
+      })
+    "
+    :hint="statusTarget.status === 'ACTIVE' ? t('common.disableHint') : undefined"
+    :confirm-label="
+      t(statusTarget.status === 'ACTIVE' ? 'common.disableAction' : 'common.enableAction')
+    "
+    :busy="busy"
+    :tone="statusTarget.status === 'ACTIVE' ? 'warning' : 'success'"
+    @close="statusTarget = null"
+    @confirm="changeStatus"
+  />
+  <ConfirmDialog
     v-if="deleteTarget"
     :title="t('groups.deleteTitle')"
+    :message="t('groups.deleteQuestion', { name: deleteTarget.name })"
+    :hint="t('groups.deleteConsequence')"
+    :confirm-label="t('groups.delete')"
     :busy="busy"
+    tone="danger"
     @close="deleteTarget = null"
-  >
-    <p>{{ t('groups.deleteHint', { name: deleteTarget.name }) }}</p>
-    <p v-if="actionError" class="alert error" role="alert">{{ actionError }}</p>
-    <footer class="form-footer">
-      <button class="button" :disabled="busy" @click="deleteTarget = null">
-        {{ t('common.cancel') }}</button
-      ><button class="button danger-fill" :disabled="busy" @click="deleteGroup">
-        {{ t(busy ? 'common.working' : 'groups.delete') }}
-      </button>
-    </footer>
-  </Modal>
+    @confirm="deleteGroup"
+  />
 </template>
 <style scoped>
 .group-model-field {

@@ -92,16 +92,16 @@ try {
     $revoked=GatewayCall -Path '/v1/models'
     Check 'revoked_key' ($revoked.status -eq 401 -and $revoked.data.error.code -eq 'UNAUTHENTICATED') @{status=$revoked.status}
     $until=[DateTime]::UtcNow.AddSeconds(5)
-    do {$rows=AdminCall GET "/usage?memberId=$($member.id)";if ($rows.items.Count -ge 5){break};Start-Sleep -Milliseconds 100} while ([DateTime]::UtcNow -lt $until)
-    Check 'usage_count' ($rows.items.Count -eq 5) @{requests=$rows.items.Count}
+    do {$rows=AdminCall GET "/usage?memberId=$($member.id)";if ($rows.items.Count -ge 4){break};Start-Sleep -Milliseconds 100} while ([DateTime]::UtcNow -lt $until)
+    Check 'usage_count' ($rows.items.Count -eq 4) @{providerCalls=$rows.items.Count}
     foreach ($result in $expected){
         $record=@($rows.items|Where-Object requestId -eq $result.requestId)[0]
         $cached=$result.usage.prompt_cache_hit_tokens;if ($null -eq $cached){$cached=$result.usage.prompt_tokens_details.cached_tokens}
-        $ok=$record.clientProtocol -eq 'OPENAI' -and $record.status -eq 'SUCCESS' -and $record.principalId -eq $member.id -and $record.modelId -eq $model.id -and $record.providerId -eq $provider.id -and $record.resourceId -eq $resource.id -and $record.attemptNo -eq 1 -and $record.inputTokens -eq $result.usage.prompt_tokens -and $record.outputTokens -eq $result.usage.completion_tokens -and $record.cachedInputTokens -eq $cached
+        $ok=$record.clientProtocol -eq 'OPENAI_CHAT' -and $record.status -eq 'SUCCESS' -and $record.principalId -eq $member.id -and $record.modelId -eq $model.id -and $record.providerId -eq $provider.id -and $record.resourceId -eq $resource.id -and $record.attemptNo -eq 1 -and $record.inputTokens -eq $result.usage.prompt_tokens -and $record.outputTokens -eq $result.usage.completion_tokens -and $record.cachedInputTokens -eq $cached
         Check 'usage_attribution' $ok @{requestId=$result.requestId;inputTokens=$record.inputTokens;outputTokens=$record.outputTokens;cachedInputTokens=$record.cachedInputTokens}
     }
-    $rejection=@($rows.items|Where-Object requestId -eq $denied.requestId)[0]
-    Check 'denied_without_attempt' ($rejection.clientProtocol -eq 'OPENAI' -and $rejection.status -eq 'FAILED' -and $null -eq $rejection.usageId) @{requestId=$denied.requestId}
+    $rejection=@($rows.items|Where-Object requestId -eq $denied.requestId)
+    Check 'denied_not_recorded_as_usage' ($rejection.Count -eq 0) @{requestId=$denied.requestId}
 } finally {
     $cleanupFailed=$false
     foreach ($action in @(

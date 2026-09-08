@@ -11,6 +11,7 @@ import PageHeader from '../components/PageHeader.vue'
 import ListFooter from '../components/ListFooter.vue'
 import ListSearch from '../components/ListSearch.vue'
 import MemberKeys from '../components/MemberKeys.vue'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 const { items, cursor, loading, error, load } = useCollection<Member>(() => '/members')
 const { busy, error: actionError, run } = useAction()
 const notice = ref(''),
@@ -255,6 +256,9 @@ async function copyKey() {
               <StatusSwitch
                 :value="member.status"
                 :name="member.name"
+                :aria-label="t('members.statusFor', { name: member.name })"
+                :active-label="t('members.active')"
+                :inactive-label="t('members.inactive')"
                 :disabled="statusDisabled(member)"
                 :busy="busy && statusTarget?.id === member.id"
                 :title="statusTitle(member)"
@@ -278,8 +282,9 @@ async function copyKey() {
               <template v-else>
                 <div v-for="key in memberKeys[member.id]" :key="key.id" class="member-key">
                   <div class="key-details">
-                    <code :title="key.name">{{ key.prefix }}</code>
+                    <code :title="key.name">{{ key.maskedKey }}</code>
                     <button
+                      type="button"
                       class="icon-button view-keys"
                       :aria-label="t('members.viewKeys')"
                       :title="t('members.viewKeys')"
@@ -393,15 +398,9 @@ async function copyKey() {
           </p>
         </div>
       </section>
-      <div v-if="validation || actionError" class="alert error" role="alert">
-        {{ validation || actionError
-        }}<button
-          v-if="actionError && !groupsReady"
-          type="button"
-          class="text-button"
-          :disabled="busy"
-          @click="run(loadMemberGroups)"
-        >
+      <div v-if="validation" class="alert error" role="alert">{{ validation }}</div>
+      <div v-if="actionError && !groupsReady" class="form-retry">
+        <button type="button" class="text-button" :disabled="busy" @click="run(loadMemberGroups)">
           {{ t('common.retry') }}
         </button>
       </div>
@@ -414,42 +413,35 @@ async function copyKey() {
       </footer>
     </form></Modal
   >
-  <Modal v-if="statusTarget" :title="t('common.status')" :busy="busy" @close="statusTarget = null"
-    ><p>
-      {{
-        t('common.confirmStatus', {
-          name: statusTarget.name,
-          status: t(statusTarget.status === 'ACTIVE' ? 'common.disable' : 'common.enable'),
-        })
-      }}
-    </p>
-    <p v-if="statusTarget.status === 'ACTIVE'" class="muted">{{ t('common.disableHint') }}</p>
-    <p v-if="actionError" class="alert error" role="alert">{{ actionError }}</p>
-    <footer class="form-footer">
-      <button class="button" :disabled="busy" @click="statusTarget = null">
-        {{ t('common.cancel') }}</button
-      ><button class="button primary" :disabled="busy" @click="changeStatus">
-        {{ t('common.confirm') }}
-      </button>
-    </footer></Modal
-  >
-  <Modal
+  <ConfirmDialog
+    v-if="statusTarget"
+    :title="
+      t(statusTarget.status === 'ACTIVE' ? 'members.deactivateTitle' : 'members.activateTitle')
+    "
+    :message="
+      t('common.confirmStatus', {
+        name: statusTarget.name,
+        status: t(statusTarget.status === 'ACTIVE' ? 'members.deactivate' : 'members.activate'),
+      })
+    "
+    :hint="statusTarget.status === 'ACTIVE' ? t('members.deactivateHint') : undefined"
+    :confirm-label="t(statusTarget.status === 'ACTIVE' ? 'members.deactivate' : 'members.activate')"
+    :busy="busy"
+    :tone="statusTarget.status === 'ACTIVE' ? 'warning' : 'success'"
+    @close="statusTarget = null"
+    @confirm="changeStatus"
+  />
+  <ConfirmDialog
     v-if="deleteTarget"
     :title="t('members.deleteTitle')"
+    :message="t('members.deleteQuestion', { name: deleteTarget.name })"
+    :hint="t('members.deleteConsequence')"
+    :confirm-label="t('members.delete')"
     :busy="busy"
+    tone="danger"
     @close="deleteTarget = null"
-  >
-    <p>{{ t('members.deleteHint', { name: deleteTarget.name }) }}</p>
-    <p v-if="actionError" class="alert error" role="alert">{{ actionError }}</p>
-    <footer class="form-footer">
-      <button class="button" :disabled="busy" @click="deleteTarget = null">
-        {{ t('common.cancel') }}
-      </button>
-      <button class="button danger-fill" :disabled="busy" @click="deleteMember">
-        {{ t(busy ? 'common.working' : 'members.delete') }}
-      </button>
-    </footer>
-  </Modal>
+    @confirm="deleteMember"
+  />
   <Modal
     v-if="selected"
     :title="t('members.keyTitle', { name: selected.name })"
@@ -465,9 +457,7 @@ async function copyKey() {
         >{{ t('members.expires') }}<input v-model="expires" type="date" :disabled="busy"
       /></label>
       <p class="muted">{{ t('members.expiresHint') }}</p>
-      <p v-if="validation || actionError" class="alert error" role="alert">
-        {{ validation || actionError }}
-      </p>
+      <p v-if="validation" class="alert error" role="alert">{{ validation }}</p>
       <footer class="form-footer">
         <button type="button" class="button" :disabled="busy" @click="selected = null">
           {{ t('common.cancel') }}
@@ -501,11 +491,41 @@ async function copyKey() {
 <style scoped>
 .members-table {
   min-width: 1080px;
+  table-layout: fixed;
+}
+.members-table th:nth-child(1) {
+  width: 240px;
+}
+.members-table th:nth-child(2) {
+  width: 100px;
+}
+.members-table th:nth-child(3) {
+  width: 150px;
+}
+.members-table th:nth-child(4) {
+  width: 110px;
+}
+.members-table th:nth-child(5) {
+  width: 164px;
+}
+.members-table th:nth-child(6) {
+  width: 140px;
+}
+.members-table th:nth-child(7) {
+  width: 176px;
 }
 .members-table th,
 .members-table td {
   padding-left: 12px;
   padding-right: 12px;
+}
+.members-table .person > div {
+  min-width: 0;
+}
+.members-table .person strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .member-key {
   height: 64px;
@@ -521,12 +541,19 @@ async function copyKey() {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
   font-size: 12px;
+}
+.key-details code {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .key-expiry {
   align-items: flex-start;
 }
 .view-keys {
+  flex: 0 0 28px;
   width: 28px;
   height: 28px;
   color: var(--blue);

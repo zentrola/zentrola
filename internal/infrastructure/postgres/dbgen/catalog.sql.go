@@ -10,7 +10,7 @@ import (
 )
 
 const getAccessKeyByHash = `-- name: GetAccessKeyByHash :one
-SELECT id, is_deleted, organization_id, principal_id, key_hash, key_prefix, name, status, expires_at, last_used_at, revoked_at, created_by, updated_by, created_at, updated_at FROM access_key WHERE key_hash = $1 AND is_deleted = false
+SELECT id, is_deleted, organization_id, principal_id, key_hash, masked_key, name, status, expires_at, last_used_at, revoked_at, created_by, updated_by, created_at, updated_at FROM access_key WHERE key_hash = $1 AND is_deleted = false
 `
 
 // 这里只定位凭证；完整认证和撤销/过期判断在阶段 2/4 实现。
@@ -23,7 +23,7 @@ func (q *Queries) GetAccessKeyByHash(ctx context.Context, keyHash []byte) (Acces
 		&i.OrganizationID,
 		&i.PrincipalID,
 		&i.KeyHash,
-		&i.KeyPrefix,
+		&i.MaskedKey,
 		&i.Name,
 		&i.Status,
 		&i.ExpiresAt,
@@ -120,7 +120,7 @@ func (q *Queries) GetPrincipal(ctx context.Context, arg GetPrincipalParams) (Pri
 }
 
 const getProvider = `-- name: GetProvider :one
-SELECT id, is_deleted, provider_code, provider_name, provider_type, anthropic_base_url, status, created_by, updated_by, created_at, updated_at, openai_base_url, official_website, proxy_enabled, proxy_url_display, proxy_url_ciphertext, proxy_url_nonce, proxy_url_key_version, proxy_header_names, proxy_headers_ciphertext, proxy_headers_nonce, proxy_headers_key_version FROM ai_provider WHERE id = $1 AND is_deleted = false
+SELECT id, is_deleted, provider_code, provider_name, provider_type, status, created_by, updated_by, created_at, updated_at, official_website, proxy_enabled, proxy_url_display, proxy_url_ciphertext, proxy_url_nonce, proxy_url_key_version, proxy_header_names, proxy_headers_ciphertext, proxy_headers_nonce, proxy_headers_key_version FROM ai_provider WHERE id = $1 AND is_deleted = false
 `
 
 func (q *Queries) GetProvider(ctx context.Context, id int64) (AiProvider, error) {
@@ -132,13 +132,11 @@ func (q *Queries) GetProvider(ctx context.Context, id int64) (AiProvider, error)
 		&i.ProviderCode,
 		&i.ProviderName,
 		&i.ProviderType,
-		&i.AnthropicBaseUrl,
 		&i.Status,
 		&i.CreatedBy,
 		&i.UpdatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.OpenaiBaseUrl,
 		&i.OfficialWebsite,
 		&i.ProxyEnabled,
 		&i.ProxyUrlDisplay,
@@ -154,7 +152,7 @@ func (q *Queries) GetProvider(ctx context.Context, id int64) (AiProvider, error)
 }
 
 const getProviderModel = `-- name: GetProviderModel :one
-SELECT id, is_deleted, provider_id, model_id, upstream_model_code, protocol_type, status, created_by, updated_by, created_at, updated_at FROM provider_model WHERE id = $1 AND is_deleted = false
+SELECT id, is_deleted, provider_id, model_id, upstream_model_code, created_by, updated_by, created_at, updated_at, priority FROM provider_model WHERE id = $1 AND is_deleted = false
 `
 
 func (q *Queries) GetProviderModel(ctx context.Context, id int64) (ProviderModel, error) {
@@ -166,12 +164,11 @@ func (q *Queries) GetProviderModel(ctx context.Context, id int64) (ProviderModel
 		&i.ProviderID,
 		&i.ModelID,
 		&i.UpstreamModelCode,
-		&i.ProtocolType,
-		&i.Status,
 		&i.CreatedBy,
 		&i.UpdatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Priority,
 	)
 	return i, err
 }

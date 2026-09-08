@@ -12,6 +12,7 @@ type Parsed struct {
 	Model                string
 	Stream               bool
 	modelStart, modelEnd int
+	toolsStart, toolsEnd int
 }
 
 func validModel(model string) bool {
@@ -63,6 +64,9 @@ func parse(body []byte, nullableStream bool) (Parsed, error) {
 				return result, ErrInvalid
 			}
 			result.Stream = bytes.Equal(raw, []byte("true"))
+		case "tools":
+			result.toolsEnd = int(d.InputOffset())
+			result.toolsStart = result.toolsEnd - len(raw)
 		}
 	}
 	if _, err := d.Token(); err != nil {
@@ -83,4 +87,45 @@ func (p Parsed) Rewrite(body []byte, model string) []byte {
 	out = append(out, body[:p.modelStart]...)
 	out = append(out, encoded...)
 	return append(out, body[p.modelEnd:]...)
+}
+
+// RemoveToolTypes 删除上游明确不支持的服务端工具类型，同时保留请求中其他 JSON 原文。
+func (p Parsed) RemoveToolTypes(body []byte, deniedTypes ...string) ([]byte, int, error) {
+	if p.toolsEnd == 0 || len(deniedTypes) == 0 {
+		return body, 0, nil
+	}
+	denied := make(map[string]struct{}, len(deniedTypes))
+	for _, toolType := range deniedTypes {
+		denied[toolType] = struct{}{}
+	}
+	var tools []json.RawMessage
+	if err := json.Unmarshal(body[p.toolsStart:p.toolsEnd], &tools); err != nil {
+		return nil, 0, ErrInvalid
+	}
+	kept := make([]json.RawMessage, 0, len(tools))
+	removed := 0
+	for _, raw := range tools {
+		var tool struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(raw, &tool); err != nil {
+			return nil, 0, ErrInvalid
+		}
+		if _, blocked := denied[tool.Type]; blocked {
+			removed++
+			continue
+		}
+		kept = append(kept, raw)
+	}
+	if removed == 0 {
+		return body, 0, nil
+	}
+	encoded, err := json.Marshal(kept)
+	if err != nil {
+		return nil, 0, ErrInvalid
+	}
+	out := make([]byte, 0, len(body)-p.toolsEnd+p.toolsStart+len(encoded))
+	out = append(out, body[:p.toolsStart]...)
+	out = append(out, encoded...)
+	return append(out, body[p.toolsEnd:]...), removed, nil
 }

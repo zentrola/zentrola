@@ -11,6 +11,14 @@ export default defineConfig({
         target: process.env.ZENTROLA_API_TARGET || 'http://127.0.0.1:9527',
         changeOrigin: false,
       },
+      '/v1': {
+        target: process.env.ZENTROLA_API_TARGET || 'http://127.0.0.1:9527',
+        changeOrigin: false,
+      },
+      '/anthropic': {
+        target: process.env.ZENTROLA_API_TARGET || 'http://127.0.0.1:9527',
+        changeOrigin: false,
+      },
     },
   },
   preview: { port: 4173, strictPort: true },

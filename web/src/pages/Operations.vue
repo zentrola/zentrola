@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useCollection, useListSearch, date } from '../composables'
-import { t } from '../i18n'
+import { i18n, t } from '../i18n'
 import type { Operation } from '../types'
 import Icon from '../components/Icon.vue'
 import Status from '../components/Status.vue'
@@ -9,12 +9,28 @@ import Modal from '../components/Modal.vue'
 import PageHeader from '../components/PageHeader.vue'
 import ListFooter from '../components/ListFooter.vue'
 import ListSearch from '../components/ListSearch.vue'
+import OperationDiff from '../components/OperationDiff.vue'
 const { items, cursor, loading, error, load } = useCollection<Operation>(() => '/operation-logs')
 const selected = ref<Operation | null>(null)
+function operationLabel(value: string) {
+  const key = `operations.types.${value}`
+  return i18n.global.te(key) ? t(key) : value
+}
+function targetLabel(value: string) {
+  const key = `operations.targets.${value}`
+  return i18n.global.te(key) ? t(key) : value
+}
+function errorLabel(value: string) {
+  const key = `errors.${value}`
+  return i18n.global.te(key) ? t(key) : value
+}
+function showSnapshot(row: Operation) {
+  return row.type !== 'LOGIN_SUCCESS' && row.type !== 'LOGIN_FAILED'
+}
 const { keyword, query, visible, search, reset } = useListSearch(
   items,
   (row) =>
-    `${row.operatorName} ${row.type} ${row.targetType} ${row.targetId} ${row.requestId || ''} ${row.result} ${t(`state.${row.result}`)}`,
+    `${row.operatorName} ${row.type} ${operationLabel(row.type)} ${row.targetType} ${targetLabel(row.targetType)} ${row.targetId} ${row.requestId || ''} ${row.result} ${t(`state.${row.result}`)}`,
   load,
 )
 onMounted(() => load())
@@ -42,11 +58,12 @@ onMounted(() => load())
           <tr v-for="row in visible" :key="row.id">
             <td>{{ date(row.createdAt) }}</td>
             <td>{{ row.operatorName }}</td>
-            <td>
-              <code>{{ row.type }}</code>
-            </td>
-            <td>
-              {{ row.targetType }}<small class="subline">{{ row.targetId }}</small>
+            <td>{{ operationLabel(row.type) }}</td>
+            <td class="operation-target">
+              {{ targetLabel(row.targetType)
+              }}<span class="operation-target-id">{{
+                row.targetId ?? t('operations.emptyValue')
+              }}</span>
             </td>
             <td><Status :value="row.result" /></td>
             <td class="align-right">
@@ -62,20 +79,54 @@ onMounted(() => load())
     </div>
     <ListFooter :count="items.length" :cursor="cursor" :loading="loading" @more="load(true)" />
   </section>
-  <Modal v-if="selected" :title="t('common.details')" @close="selected = null"
-    ><dl class="detail-grid">
-      <dt>{{ t('common.id') }}</dt>
-      <dd>{{ selected.id }}</dd>
-      <dt>{{ t('operations.type') }}</dt>
-      <dd>{{ selected.type }}</dd>
-      <dt>{{ t('operations.operator') }}</dt>
-      <dd>{{ selected.operatorName }}</dd>
-      <dt>{{ t('operations.result') }}</dt>
-      <dd><Status :value="selected.result" /></dd>
-      <dt>{{ t('usage.errorType') }}</dt>
-      <dd>{{ selected.errorCode || t('common.none') }}</dd>
-      <dt>{{ t('common.requestId') }}</dt>
-      <dd>{{ selected.requestId || t('common.none') }}</dd>
-    </dl></Modal
+  <Modal
+    v-if="selected"
+    :title="t('operations.logDetails')"
+    :wide="showSnapshot(selected)"
+    @close="selected = null"
   >
+    <OperationDiff
+      v-if="showSnapshot(selected)"
+      :before="selected.before"
+      :after="selected.after"
+    />
+    <dl
+      v-if="selected.errorCode || selected.requestId"
+      class="operation-trace"
+      :class="{ 'operation-trace-only': !showSnapshot(selected) }"
+    >
+      <template v-if="selected.errorCode">
+        <dt>{{ t('usage.errorType') }}</dt>
+        <dd>{{ errorLabel(selected.errorCode) }}</dd>
+      </template>
+      <template v-if="selected.requestId">
+        <dt>{{ t('common.requestId') }}</dt>
+        <dd>{{ selected.requestId }}</dd>
+      </template>
+    </dl>
+  </Modal>
 </template>
+
+<style scoped>
+.operation-trace {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 10px 16px;
+  margin: 20px 0 0;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+.operation-trace dt {
+  color: var(--muted);
+}
+.operation-trace dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.operation-trace-only {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+</style>

@@ -17,8 +17,9 @@ func TestHandlerServesRuntimeConfigAndOnlyPublicFiles(t *testing.T) {
 		"private/config.json": {Data: []byte("secret")},
 	}
 	server := httptest.NewServer(handler(webConfig{
-		APIBaseURL: "https://api.example.com/base",
-		APIOrigin:  "https://api.example.com",
+		APIBaseURL:     "https://api.example.com/base",
+		APIOrigin:      "https://api.example.com",
+		GatewayBaseURL: "https://gateway.example.com",
 	}, files))
 	defer server.Close()
 
@@ -28,6 +29,7 @@ func TestHandlerServesRuntimeConfigAndOnlyPublicFiles(t *testing.T) {
 	}{
 		{"/", "zentrola", "no-cache", 200},
 		{"/config.js", `"apiBaseUrl":"https://api.example.com/base"`, "no-store", 200},
+		{"/config.js", `"gatewayBaseUrl":"https://gateway.example.com"`, "no-store", 200},
 		{"/assets/app-123.js", "ready", "immutable", 200},
 		{"/private/config.json", "", "", 404},
 		{"/assets/../private/config.json", "", "", 404},

@@ -95,7 +95,7 @@ func TestSwaggerCoversRoutesAndResolvesSchemas(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Gateway 在通配路由内部按协议分发，显式列出支持的接口。
-	for _, route := range []string{"post /anthropic/v1/messages", "post /anthropic/v1/messages/count_tokens", "post /v1/chat/completions", "get /v1/models"} {
+	for _, route := range []string{"post /anthropic/v1/messages", "post /anthropic/v1/messages/count_tokens", "post /v1/chat/completions", "post /v1/responses", "get /v1/models"} {
 		expected[route] = true
 	}
 	for path, operations := range doc.Paths {

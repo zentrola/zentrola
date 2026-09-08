@@ -45,8 +45,9 @@ type Route struct {
 	Proxy                                            *catalog.OutboundProxy
 }
 
-const AnthropicProtocol = "ANTHROPIC"
-const OpenAIProtocol = "OPENAI"
+const AnthropicProtocol = "ANTHROPIC_MESSAGES"
+const OpenAIProtocol = "OPENAI_CHAT"
+const OpenAIResponsesProtocol = "OPENAI_RESPONSES"
 
 type Model struct {
 	ID      string `json:"id"`
@@ -94,7 +95,7 @@ type Request struct {
 	Trace                          *usage.Event
 	Path, Version, Beta, RequestID string
 	Protocol                       string
-	BetaQuery                      bool
+	BetaQuery, Development         bool
 	Body                           []byte
 	ProtocolHeaders                map[string][]string
 }
@@ -123,11 +124,14 @@ func (s *Service) Forward(ctx context.Context, identity appsec.PrincipalIdentity
 	if request.Protocol == "" {
 		request.Protocol = AnthropicProtocol
 	}
-	if (request.Protocol == AnthropicProtocol && request.Path != "/v1/messages" && request.Path != "/v1/messages/count_tokens") || (request.Protocol == OpenAIProtocol && request.Path != "/v1/chat/completions") || (request.Protocol != AnthropicProtocol && request.Protocol != OpenAIProtocol) {
+	if (request.Protocol == AnthropicProtocol && request.Path != "/v1/messages" && request.Path != "/v1/messages/count_tokens") ||
+		(request.Protocol == OpenAIProtocol && request.Path != "/v1/chat/completions") ||
+		(request.Protocol == OpenAIResponsesProtocol && request.Path != "/v1/responses") ||
+		(request.Protocol != AnthropicProtocol && request.Protocol != OpenAIProtocol && request.Protocol != OpenAIResponsesProtocol) {
 		return nil, ErrInvalid
 	}
 	parseRequest := Parse
-	if request.Protocol == OpenAIProtocol {
+	if request.Protocol == OpenAIProtocol || request.Protocol == OpenAIResponsesProtocol {
 		parseRequest = ParseOpenAI
 	}
 	parsed, err := parseRequest(request.Body)

@@ -9,7 +9,7 @@ SELECT * FROM principal WHERE organization_id=$1 AND is_deleted=false AND princi
 SELECT * FROM principal WHERE organization_id=$1 AND id=$2 AND is_deleted=false AND principal_type='MEMBER';
 -- name: ManageCreateMember :exec
 INSERT INTO principal(id,organization_id,principal_type,name,remark,status,created_by,updated_by,created_at,updated_at)
-VALUES($1,$2,'MEMBER',$3,$4,'ACTIVE',$5,$5,$6,$6);
+VALUES($1,$2,'MEMBER',$3,$4,'DISABLED',$5,$5,$6,$6);
 -- name: ManageUpdateMember :exec
 UPDATE principal SET name=$3,remark=$4,updated_by=$5,updated_at=$6
 WHERE organization_id=$1 AND id=$2 AND is_deleted=false AND principal_type='MEMBER';
@@ -99,12 +99,21 @@ WHERE id=$1 AND is_deleted=false;
 SELECT * FROM ai_provider WHERE is_deleted=false AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2;
 -- name: ManageProvider :one
 SELECT * FROM ai_provider WHERE id=$1 AND is_deleted=false;
+-- name: ManageProviderEndpoints :many
+SELECT * FROM provider_endpoint WHERE provider_id=$1 ORDER BY protocol_type;
 -- name: ManageCreateProvider :exec
-INSERT INTO ai_provider(id,provider_code,provider_name,provider_type,official_website,anthropic_base_url,openai_base_url,proxy_enabled,proxy_url_display,proxy_url_ciphertext,proxy_url_nonce,proxy_url_key_version,proxy_header_names,proxy_headers_ciphertext,proxy_headers_nonce,proxy_headers_key_version,status,created_by,updated_by,created_at,updated_at)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$18,$19,$19);
+INSERT INTO ai_provider(id,provider_code,provider_name,provider_type,official_website,proxy_enabled,proxy_url_display,proxy_url_ciphertext,proxy_url_nonce,proxy_url_key_version,proxy_header_names,proxy_headers_ciphertext,proxy_headers_nonce,proxy_headers_key_version,status,created_by,updated_by,created_at,updated_at)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$16,$17,$17);
 -- name: ManageUpdateProvider :exec
-UPDATE ai_provider SET provider_name=$2,official_website=$3,anthropic_base_url=$4,openai_base_url=$5,proxy_enabled=$6,proxy_url_display=$7,proxy_url_ciphertext=$8,proxy_url_nonce=$9,proxy_url_key_version=$10,proxy_header_names=$11,proxy_headers_ciphertext=$12,proxy_headers_nonce=$13,proxy_headers_key_version=$14,updated_by=$15,updated_at=$16
+UPDATE ai_provider SET provider_name=$2,official_website=$3,proxy_enabled=$4,proxy_url_display=$5,proxy_url_ciphertext=$6,proxy_url_nonce=$7,proxy_url_key_version=$8,proxy_header_names=$9,proxy_headers_ciphertext=$10,proxy_headers_nonce=$11,proxy_headers_key_version=$12,updated_by=$13,updated_at=$14
 WHERE id=$1 AND is_deleted=false;
+-- name: ManageUpsertProviderEndpoint :exec
+INSERT INTO provider_endpoint(provider_id,protocol_type,base_url,created_by,updated_by,created_at,updated_at)
+VALUES($1,$2,$3,$4,$4,$5,$5)
+ON CONFLICT(provider_id,protocol_type) DO UPDATE
+SET base_url=excluded.base_url,updated_by=excluded.updated_by,updated_at=excluded.updated_at;
+-- name: ManageDeleteProviderEndpoint :exec
+DELETE FROM provider_endpoint WHERE provider_id=$1 AND protocol_type=$2;
 -- name: ManageDeleteProvider :exec
 UPDATE ai_provider
 SET status='DISABLED',is_deleted=true,proxy_enabled=false,proxy_url_display=NULL,
@@ -114,7 +123,7 @@ SET status='DISABLED',is_deleted=true,proxy_enabled=false,proxy_url_display=NULL
 WHERE id=$1 AND is_deleted=false;
 -- name: ManageDeleteProviderMappings :exec
 UPDATE provider_model
-SET status='DISABLED',is_deleted=true,updated_by=$2,updated_at=$3
+SET is_deleted=true,updated_by=$2,updated_at=$3
 WHERE provider_id=$1 AND is_deleted=false;
 -- name: ManageDeleteProviderResources :exec
 UPDATE ai_resource
@@ -126,20 +135,20 @@ UPDATE ai_provider SET status=$2,updated_by=$3,updated_at=$4 WHERE id=$1 AND is_
 -- name: ManageProviderMappings :many
 SELECT * FROM provider_model
 WHERE provider_id=$1 AND is_deleted=false
-ORDER BY id;
+ORDER BY priority,id;
 
 -- name: ManageCreateProviderMapping :exec
-INSERT INTO provider_model(id,provider_id,model_id,upstream_model_code,protocol_type,status,created_by,updated_by,created_at,updated_at)
-VALUES($1,$2,$3,$4,$5,$6,$7,$7,$8,$8);
+INSERT INTO provider_model(id,provider_id,model_id,upstream_model_code,priority,created_by,updated_by,created_at,updated_at)
+VALUES($1,$2,$3,$4,$5,$6,$6,$7,$7);
 
 -- name: ManageUpdateProviderMapping :exec
 UPDATE provider_model
-SET upstream_model_code=$3,status=$4,updated_by=$5,updated_at=$6
+SET upstream_model_code=$3,priority=$4,updated_by=$5,updated_at=$6
 WHERE id=$1 AND provider_id=$2 AND is_deleted=false;
 
 -- name: ManageDeleteProviderMapping :exec
 UPDATE provider_model
-SET status='DISABLED',is_deleted=true,updated_by=$3,updated_at=$4
+SET is_deleted=true,updated_by=$3,updated_at=$4
 WHERE id=$1 AND provider_id=$2 AND is_deleted=false;
 
 -- name: ManageResources :many
@@ -155,7 +164,7 @@ UPDATE ai_resource SET resource_name=$3,credential_ciphertext=$4,credential_nonc
 WHERE organization_id=$1 AND id=$2 AND is_deleted=false;
 
 -- name: ManageKeys :many
-SELECT id,name,key_prefix,status,expires_at,revoked_at,created_at FROM access_key
+SELECT id,name,masked_key,status,expires_at,revoked_at,created_at FROM access_key
 WHERE organization_id=$1 AND principal_id=$2 AND is_deleted=false AND (id<$3 OR $3=0) ORDER BY id DESC LIMIT $4;
 -- name: ManageOperations :many
 SELECT id,operator_name,operation_type,target_type,target_id,request_id,result,error_code,before_data,after_data,created_at

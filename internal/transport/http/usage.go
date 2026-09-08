@@ -11,6 +11,31 @@ import (
 )
 
 func (s *SecurityHandlers) mountUsage(r chi.Router) {
+	// @Summary 首页统计
+	// @Tags 用量统计
+	// @Description 返回当前组织激活用户数、启用模型和服务商数量，以及指定时间范围内的 Token 汇总、用户 Token Top 10 与模型请求 Top 10。
+	// @Produce json
+	// @Security AdminBearer
+	// @Param from query string true "起始时间 RFC3339"
+	// @Param to query string true "结束时间 RFC3339"
+	// @Success 200 {object} response{data=app.Dashboard}
+	// @Failure 400,401,503 {object} response
+	// @Router /api/v1/usage/dashboard [get]
+	r.Get("/usage/dashboard", func(w http.ResponseWriter, req *http.Request) {
+		values := req.URL.Query()
+		if len(values) != 2 || len(values["from"]) != 1 || len(values["to"]) != 1 {
+			securityError(w, req, appsec.ErrInvalidArgument)
+			return
+		}
+		from, fromErr := time.Parse(time.RFC3339Nano, values.Get("from"))
+		to, toErr := time.Parse(time.RFC3339Nano, values.Get("to"))
+		if fromErr != nil || toErr != nil {
+			securityError(w, req, appsec.ErrInvalidArgument)
+			return
+		}
+		result, err := s.Usage.Dashboard(req.Context(), adminFrom(req), from, to)
+		adminResult(w, req, http.StatusOK, result, err)
+	})
 	// @Summary 用量记录
 	// @Tags 用量统计
 	// @Description 只查询当前组织；按 ID 倒序分页，最新记录在前；时间区间最长 366 天。

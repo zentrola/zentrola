@@ -67,7 +67,7 @@ func (s *Service) CreateMemberWithGroups(ctx context.Context, actor admin.Identi
 	if err != nil {
 		return Member{}, err
 	}
-	m := Member{ID: id, Name: name, Remark: remark(note), Status: "ACTIVE", CreatedAt: time.Now().UTC()}
+	m := Member{ID: id, Name: name, Remark: remark(note), Status: "DISABLED", CreatedAt: time.Now().UTC()}
 	err = s.store.Write(ctx, actor, func(w Writer) error {
 		groups := make(map[int64]Group, len(groupIDs))
 		for _, groupID := range groupIDs {
@@ -127,7 +127,7 @@ func (s *Service) UpdateMemberWithGroups(ctx context.Context, actor admin.Identi
 			if err != nil {
 				return err
 			}
-			if _, alreadyIncluded := currentIDs[groupID]; !alreadyIncluded && (group.Status != "ACTIVE" || current.Status != "ACTIVE") {
+			if _, alreadyIncluded := currentIDs[groupID]; !alreadyIncluded && group.Status != "ACTIVE" {
 				return ErrConflict
 			}
 			selectedGroups[groupID] = group
@@ -392,11 +392,10 @@ func (s *Service) SetGroupMember(ctx context.Context, actor admin.Identity, grou
 		if err != nil {
 			return err
 		}
-		m, err := w.Member(ctx, memberID)
-		if err != nil {
+		if _, err := w.Member(ctx, memberID); err != nil {
 			return err
 		}
-		if add && (g.Status != "ACTIVE" || m.Status != "ACTIVE") {
+		if add && g.Status != "ACTIVE" {
 			return ErrConflict
 		}
 		changed, err := w.SetGroupMember(ctx, groupID, memberID, add)
@@ -588,10 +587,16 @@ func (s *Service) TestResource(ctx context.Context, actor admin.Identity, id int
 	}
 	result := ConnectionResult{Code: "PROVIDER_UNAVAILABLE"}
 	protocol, baseURL := "", ""
-	if provider.BaseURL != nil {
-		protocol, baseURL = "ANTHROPIC", *provider.BaseURL
-	} else if provider.OpenAIBaseURL != nil {
-		protocol, baseURL = "OPENAI", *provider.OpenAIBaseURL
+	for _, preferred := range providerProtocols {
+		for _, endpoint := range provider.Endpoints {
+			if endpoint.ProtocolType == preferred {
+				protocol, baseURL = endpoint.ProtocolType, endpoint.BaseURL
+				break
+			}
+		}
+		if baseURL != "" {
+			break
+		}
 	}
 	if baseURL != "" {
 		plain, err := s.cipher.Decrypt(resource.Sealed, owner(actor, resource.Resource))

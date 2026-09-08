@@ -40,7 +40,7 @@ func TestConnectionProtocol(t *testing.T) {
 				}
 				return &http.Response{StatusCode: tt.status, Body: io.NopCloser(strings.NewReader(tt.body)), Header: make(http.Header)}, nil
 			})
-			result := tester.Test(context.Background(), "ANTHROPIC", "https://api.anthropic.com", []byte("test-secret"), nil)
+			result := tester.Test(context.Background(), "ANTHROPIC_MESSAGES", "https://api.anthropic.com", []byte("test-secret"), nil)
 			if result.Code != tt.code || result.OK != (tt.code == "OK") || result.HTTPStatus != tt.status {
 				t.Fatalf("unexpected result: %+v", result)
 			}
@@ -56,7 +56,7 @@ func TestOpenAIConnectionProtocol(t *testing.T) {
 		}
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"data":[{"id":"model"}]}`)), Header: make(http.Header)}, nil
 	})
-	if result := tester.Test(context.Background(), "OPENAI", "https://gateway.example.com/v1", []byte("test-secret"), nil); !result.OK {
+	if result := tester.Test(context.Background(), "OPENAI_CHAT", "https://gateway.example.com/v1", []byte("test-secret"), nil); !result.OK {
 		t.Fatalf("unexpected result: %+v", result)
 	}
 }
@@ -68,11 +68,11 @@ func TestConnectionRejectsURLAndHeaderInjection(t *testing.T) {
 		return nil, nil
 	})
 	for _, base := range []string{"http://api.anthropic.com", "http://127.0.0.1", "https://127.0.0.1", "https://localhost", "https://api.anthropic.com@evil.test", "https://api.anthropic.com?target=evil", "https://api.anthropic.com#fragment", "https://api.anthropic.com/path/../escape"} {
-		if result := tester.Test(context.Background(), "ANTHROPIC", base, []byte("test-key"), nil); result.Code != "UPSTREAM_URL_REJECTED" {
+		if result := tester.Test(context.Background(), "ANTHROPIC_MESSAGES", base, []byte("test-key"), nil); result.Code != "UPSTREAM_URL_REJECTED" {
 			t.Fatal("invalid URL accepted")
 		}
 	}
-	if result := tester.Test(context.Background(), "ANTHROPIC", "https://api.anthropic.com", []byte("key\r\nInjected: value"), nil); result.Code != "CREDENTIAL_INVALID" {
+	if result := tester.Test(context.Background(), "ANTHROPIC_MESSAGES", "https://api.anthropic.com", []byte("key\r\nInjected: value"), nil); result.Code != "CREDENTIAL_INVALID" {
 		t.Fatal("invalid credential accepted")
 	}
 }
@@ -106,17 +106,17 @@ func TestConnectionTimeoutCancellationAndRedirect(t *testing.T) {
 		}
 		return original.RoundTrip(copy)
 	})
-	if result := tester.Test(context.Background(), "ANTHROPIC", "https://api.anthropic.com", []byte("test-key"), nil); result.OK || result.HTTPStatus != 302 || redirectHits.Load() != 0 {
+	if result := tester.Test(context.Background(), "ANTHROPIC_MESSAGES", "https://api.anthropic.com", []byte("test-key"), nil); result.OK || result.HTTPStatus != 302 || redirectHits.Load() != 0 {
 		t.Fatal("credential redirect was followed")
 	}
 	slowMode = true
 	tester.client.Timeout = 30 * time.Millisecond
-	if result := tester.Test(context.Background(), "ANTHROPIC", "https://api.anthropic.com", []byte("test-key"), nil); result.Code != "UPSTREAM_TIMEOUT" {
+	if result := tester.Test(context.Background(), "ANTHROPIC_MESSAGES", "https://api.anthropic.com", []byte("test-key"), nil); result.Code != "UPSTREAM_TIMEOUT" {
 		t.Fatalf("expected timeout: %+v", result)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if result := tester.Test(ctx, "ANTHROPIC", "https://api.anthropic.com", []byte("test-key"), nil); result.Code != "REQUEST_CANCELLED" {
+	if result := tester.Test(ctx, "ANTHROPIC_MESSAGES", "https://api.anthropic.com", []byte("test-key"), nil); result.Code != "REQUEST_CANCELLED" {
 		t.Fatal("cancellation lost")
 	}
 }

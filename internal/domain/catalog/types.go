@@ -6,8 +6,9 @@ type Protocol string
 
 const (
 	Official  ProviderType = "OFFICIAL"
-	Anthropic Protocol     = "ANTHROPIC"
-	OpenAI    Protocol     = "OPENAI"
+	Anthropic Protocol     = "ANTHROPIC_MESSAGES"
+	OpenAI    Protocol     = "OPENAI_CHAT"
+	Responses Protocol     = "OPENAI_RESPONSES"
 )
 
 const (

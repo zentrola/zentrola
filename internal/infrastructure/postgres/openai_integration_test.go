@@ -96,15 +96,18 @@ func TestOpenAIIntegration(t *testing.T) {
 	if err := management.SetResourceStatus(ctx, actor, resource.ID, "ACTIVE", appsec.RequestMeta{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := management.SetGroupMember(ctx, actor, group.ID, member.ID, true, appsec.RequestMeta{}); err != nil {
-		t.Fatal(err)
-	}
 	if err := management.SetGroupModel(ctx, actor, group.ID, modelID, true, appsec.RequestMeta{}); err != nil {
 		t.Fatal(err)
 	}
 	keys := appsec.NewKeys(securityStore, ids)
 	key, err := keys.Create(ctx, actor, member.ID, "openai-key", nil, appsec.RequestMeta{})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := management.SetMemberStatus(ctx, actor, member.ID, "ACTIVE", appsec.RequestMeta{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := management.SetGroupMember(ctx, actor, group.ID, member.ID, true, appsec.RequestMeta{}); err != nil {
 		t.Fatal(err)
 	}
 	usageStore := NewUsageStore(pool)
@@ -217,7 +220,7 @@ func TestOpenAIIntegration(t *testing.T) {
 	call("no_key", "POST", "/v1/chat/completions", `{}`, "", 401)
 	call("admin_key", "POST", "/v1/chat/completions", `{}`, login.Token, 401)
 	call("method", "GET", "/v1/chat/completions", "", key.Key, 405)
-	call("responses", "POST", "/v1/responses", `{}`, key.Key, 404)
+	call("responses", "POST", "/v1/responses", `{}`, key.Key, 400)
 	call("query", "GET", "/v1/models?bad=1", "", key.Key, 400)
 	if calls.Load() != before {
 		t.Fatal("invalid request reached upstream")
@@ -277,16 +280,16 @@ func TestOpenAIIntegration(t *testing.T) {
 	}
 	for _, name := range []string{"normal", "stream", "tool", "tool_result"} {
 		r := byID[requestIDs[name]]
-		if r.ClientProtocol != "OPENAI" || r.Status != "SUCCESS" || r.InputTokens == nil || *r.InputTokens != 12 || r.OutputTokens == nil || *r.OutputTokens != 7 || r.ResourceID == nil || *r.ResourceID != resource.ID {
+		if r.ClientProtocol != "OPENAI_CHAT" || r.Status != "SUCCESS" || r.InputTokens == nil || *r.InputTokens != 12 || r.OutputTokens == nil || *r.OutputTokens != 7 || r.ResourceID != resource.ID {
 			t.Fatalf("OpenAI usage invalid: %+v", r)
 		}
 	}
-	if r := byID[requestIDs["anthropic"]]; r.ClientProtocol != "ANTHROPIC" || r.Status != "SUCCESS" || *r.ProviderModelID == *byID[requestIDs["normal"]].ProviderModelID {
-		t.Fatal("protocol-specific attribution lost")
+	if r := byID[requestIDs["anthropic"]]; r.ClientProtocol != "ANTHROPIC_MESSAGES" || r.Status != "SUCCESS" || r.ProviderModelID != byID[requestIDs["normal"]].ProviderModelID {
+		t.Fatal("shared provider-model attribution lost")
 	}
 	for _, name := range []string{"wrong_protocol", "denied", "disabled", "bad"} {
-		if r := byID[requestIDs[name]]; r.Status != "FAILED" || r.UsageID != nil {
-			t.Fatal("local failure fabricated attempt")
+		if _, ok := byID[requestIDs[name]]; ok {
+			t.Fatal("local failure was recorded as upstream usage")
 		}
 	}
 	if r := byID[requestIDs["cancel"]]; r.Status != "CANCELLED" || r.OutputTokens != nil {

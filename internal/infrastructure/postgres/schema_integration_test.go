@@ -68,7 +68,7 @@ func integrationDatabase(t *testing.T) (context.Context, *pgxpool.Pool, string) 
 			return
 		}
 		// 仅清理本测试创建的随机隔离 schema，允许回滚拒绝有 OpenAI 历史的迁移。
-		if _, err := pool.Exec(cleanup, "TRUNCATE ai_request,usage_record,provider_model"); err != nil {
+		if _, err := pool.Exec(cleanup, "TRUNCATE usage_record,provider_model"); err != nil {
 			t.Error(err)
 			return
 		}
@@ -113,9 +113,10 @@ VALUES (70,1,'admin','test-hash','Admin','ACTIVE','system','system',now(),now())
 			mustExec(t, ctx, tx, `UPDATE principal_group SET is_deleted=true WHERE id=80`)
 			mustExec(t, ctx, tx, `INSERT INTO principal_group (id,organization_id,principal_id,group_id,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 82,organization_id,principal_id,group_id,false,created_by,updated_by,created_at,updated_at FROM principal_group WHERE id=80`)
 			mustReject(t, ctx, tx, "23505", `INSERT INTO organization (id,organization_code,organization_name,status,created_by,updated_by,created_at,updated_at) VALUES (2,'second','Second','ACTIVE','system','system',now(),now())`)
-			mustExec(t, ctx, tx, `INSERT INTO ai_provider (id,provider_code,provider_name,provider_type,anthropic_base_url,status,is_deleted,created_by,updated_by,created_at,updated_at,openai_base_url) SELECT 41,'second-provider',provider_name,provider_type,anthropic_base_url,status,false,created_by,updated_by,created_at,updated_at,NULL FROM ai_provider WHERE id=40`)
-			mustReject(t, ctx, tx, "23505", `INSERT INTO provider_model (id,provider_id,model_id,upstream_model_code,protocol_type,status,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 52,41,model_id,upstream_model_code,protocol_type,'ACTIVE',false,created_by,updated_by,created_at,updated_at FROM provider_model WHERE id=50`)
-			mustExec(t, ctx, tx, `INSERT INTO provider_model (id,provider_id,model_id,upstream_model_code,protocol_type,status,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 52,41,model_id,upstream_model_code,protocol_type,'DISABLED',false,created_by,updated_by,created_at,updated_at FROM provider_model WHERE id=50`)
+			mustExec(t, ctx, tx, `INSERT INTO ai_provider (id,provider_code,provider_name,provider_type,status,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 41,'second-provider',provider_name,provider_type,status,false,created_by,updated_by,created_at,updated_at FROM ai_provider WHERE id=40`)
+			mustExec(t, ctx, tx, `INSERT INTO provider_endpoint(provider_id,protocol_type,base_url,created_by,updated_by,created_at,updated_at) VALUES(41,'ANTHROPIC_MESSAGES','https://second.example.com','system','system',now(),now())`)
+			mustExec(t, ctx, tx, `INSERT INTO provider_model (id,provider_id,model_id,upstream_model_code,priority,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 52,41,model_id,upstream_model_code,100,false,created_by,updated_by,created_at,updated_at FROM provider_model WHERE id=50`)
+			mustReject(t, ctx, tx, "23505", `INSERT INTO provider_model (id,provider_id,model_id,upstream_model_code,priority,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 53,41,model_id,upstream_model_code,100,false,created_by,updated_by,created_at,updated_at FROM provider_model WHERE id=50`)
 			mustExec(t, ctx, tx, `INSERT INTO ai_resource (id,organization_id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,created_by,updated_by,created_at,updated_at)
 VALUES (60,1,40,'Resource',decode(repeat('11',32),'hex'),decode(repeat('22',12),'hex'),1,'ACTIVE','system','system',now(),now())`)
 			mustReject(t, ctx, tx, "23505", `INSERT INTO ai_resource (id,organization_id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,last_active_at,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 61,organization_id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,last_active_at,false,created_by,updated_by,created_at,updated_at FROM ai_resource WHERE id=60`)
@@ -167,15 +168,14 @@ VALUES (60,1,40,'Resource',decode(repeat('11',32),'hex'),decode(repeat('22',12),
 			mustReject(t, ctx, tx, "23514", `UPDATE ai_resource SET credential_nonce=decode('00','hex') WHERE id=60`)
 		})
 	})
-	t.Run("request facts and append only audit", func(t *testing.T) {
+	t.Run("usage facts and append only audit", func(t *testing.T) {
 		withFixture(t, ctx, pool, func(tx pgx.Tx) {
-			mustExec(t, ctx, tx, `INSERT INTO ai_request (id,organization_id,request_id,principal_id,model_id,usage_scene,client_protocol,request_at,completed_at,latency_ms,status,created_at) VALUES (100,1,'req_test',10,30,'MODEL_GATEWAY','ANTHROPIC',now(),now(),0,'SUCCESS',now())`)
-			mustExec(t, ctx, tx, `INSERT INTO usage_record (id,organization_id,request_id,attempt_no,principal_id,provider_id,provider_model_id,resource_id,model_id,usage_scene,billing_unit,started_at,completed_at,latency_ms,status,created_at) VALUES (101,1,'req_test',1,10,40,50,60,30,'MODEL_GATEWAY','TOKEN',now(),now(),0,'SUCCESS',now())`)
+			mustExec(t, ctx, tx, `INSERT INTO usage_record (id,organization_id,request_id,attempt_no,principal_id,provider_id,provider_model_id,resource_id,model_id,usage_scene,client_protocol,billing_unit,started_at,completed_at,latency_ms,status,created_at) VALUES (101,1,'req_test',1,10,40,50,60,30,'MODEL_GATEWAY','ANTHROPIC_MESSAGES','TOKEN',now(),now(),0,'SUCCESS',now())`)
 			var unknown bool
 			if err := tx.QueryRow(ctx, `SELECT input_tokens IS NULL AND cost_amount IS NULL AND cost_currency IS NULL FROM usage_record WHERE id=101`).Scan(&unknown); err != nil || !unknown {
 				t.Fatal("unknown usage/cost was falsified")
 			}
-			mustReject(t, ctx, tx, "23505", `INSERT INTO usage_record SELECT 102,organization_id,request_id,attempt_no,principal_id,provider_id,provider_model_id,resource_id,model_id,usage_scene,input_tokens,output_tokens,cached_input_tokens,billing_unit,billing_quantity,cost_amount,cost_currency,started_at,completed_at,latency_ms,status,error_type,created_at FROM usage_record WHERE id=101`)
+			mustReject(t, ctx, tx, "23505", `INSERT INTO usage_record SELECT 102,organization_id,request_id,attempt_no,principal_id,provider_id,provider_model_id,resource_id,model_id,usage_scene,input_tokens,output_tokens,cached_input_tokens,billing_unit,billing_quantity,cost_amount,cost_currency,started_at,completed_at,latency_ms,status,error_type,created_at,client_protocol FROM usage_record WHERE id=101`)
 			mustReject(t, ctx, tx, "23514", `UPDATE usage_record SET attempt_no=2 WHERE id=101`)
 			mustExec(t, ctx, tx, `INSERT INTO operation_log (id,organization_id,operator_type,operator_id,operator_name,module,operation_type,target_type,target_id,result,created_at) VALUES (200,1,'ADMIN',70,'Admin','MEMBER','MEMBER_CREATE','PRINCIPAL',10,'SUCCESS',now())`)
 			for _, sql := range []string{`UPDATE operation_log SET operator_name='changed'`, `DELETE FROM operation_log`, `TRUNCATE operation_log`} {
@@ -196,9 +196,9 @@ WHERE n.nspname=$1 AND c.relkind='r' AND c.relname<>'goose_db_version' AND a.att
 	}
 	defer rows.Close()
 	nullable := map[string]string{
-		"ai_provider":  "anthropic_base_url,openai_base_url,official_website",
+		"ai_provider":  "official_website,proxy_url_display,proxy_url_ciphertext,proxy_url_nonce,proxy_url_key_version,proxy_headers_ciphertext,proxy_headers_nonce,proxy_headers_key_version",
 		"organization": "remark", "admin_user": "locked_until,last_login_at", "principal": "remark", "access_key": "expires_at,last_used_at,revoked_at",
-		"ai_group": "remark", "ai_resource": "last_active_at", "ai_request": "model_id,error_type",
+		"ai_group": "remark", "ai_resource": "last_active_at",
 		"usage_record":  "input_tokens,output_tokens,cached_input_tokens,billing_quantity,cost_amount,cost_currency,error_type",
 		"operation_log": "operator_id,target_id,target_name,request_id,request_method,request_path,ip_address,user_agent,error_code,before_data,after_data,remark",
 	}
@@ -232,7 +232,7 @@ WHERE n.nspname=$1 AND c.relkind='r' AND c.relname<>'goose_db_version' AND a.att
 		if table == "operation_log" && (col == "is_deleted" || col == "created_by" || col == "updated_by" || col == "updated_at") {
 			t.Errorf("audit inherited mutable field: %s", col)
 		}
-		if (table == "ai_request" || table == "usage_record") && col == "is_deleted" {
+		if table == "usage_record" && col == "is_deleted" {
 			t.Errorf("fact table is soft deletable: %s", table)
 		}
 		if table == "ai_resource" && col == "provider_model_id" {
@@ -252,7 +252,7 @@ WHERE n.nspname=$1 AND c.relkind='r' AND c.relname<>'goose_db_version' AND a.att
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.columns WHERE table_schema=$1 AND table_name<>'goose_db_version' AND column_name='id' AND (column_default IS NOT NULL OR is_identity='YES')`, schema).Scan(&count); err != nil || count != 0 {
 		t.Fatal("IDs must be generated by application", err)
 	}
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM pg_index i JOIN pg_class c ON c.oid=i.indrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1 AND c.relname NOT IN ('goose_db_version','ai_request','usage_record','operation_log') AND i.indisunique AND NOT i.indisprimary AND i.indpred IS NULL`, schema).Scan(&count); err != nil || count != 0 {
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM pg_index i JOIN pg_class c ON c.oid=i.indrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1 AND c.relname NOT IN ('goose_db_version','usage_record','operation_log') AND i.indisunique AND NOT i.indisprimary AND i.indpred IS NULL`, schema).Scan(&count); err != nil || count != 0 {
 		t.Fatal("mutable business uniqueness must be partial", err)
 	}
 }
@@ -268,8 +268,9 @@ func withFixture(t *testing.T, ctx context.Context, pool *pgxpool.Pool, run func
 INSERT INTO principal (id,organization_id,principal_type,name,status,created_by,updated_by,created_at,updated_at) VALUES (10,1,'MEMBER','Member','ACTIVE','system','system',now(),now());
 INSERT INTO ai_group (id,organization_id,group_code,group_name,status,created_by,updated_by,created_at,updated_at) VALUES (20,1,'first','First','ACTIVE','system','system',now(),now()),(21,1,'second','Second','ACTIVE','system','system',now(),now());
 INSERT INTO ai_model (id,model_code,display_name,input_modalities,output_modalities,status,created_by,updated_by,created_at,updated_at) VALUES (30,'sonnet','Sonnet','["TEXT","IMAGE"]','["TEXT"]','ACTIVE','system','system',now(),now()),(31,'opus','Opus','["TEXT","IMAGE"]','["TEXT"]','ACTIVE','system','system',now(),now());
-INSERT INTO ai_provider (id,provider_code,provider_name,provider_type,anthropic_base_url,status,created_by,updated_by,created_at,updated_at) VALUES (40,'anthropic','Anthropic','OFFICIAL','https://api.anthropic.com','ACTIVE','system','system',now(),now());
-INSERT INTO provider_model (id,provider_id,model_id,upstream_model_code,protocol_type,status,created_by,updated_by,created_at,updated_at) VALUES (50,40,30,'sonnet-upstream','ANTHROPIC','ACTIVE','system','system',now(),now()),(51,40,31,'opus-upstream','ANTHROPIC','ACTIVE','system','system',now(),now());`)
+INSERT INTO ai_provider (id,provider_code,provider_name,provider_type,status,created_by,updated_by,created_at,updated_at) VALUES (40,'anthropic','Anthropic','OFFICIAL','ACTIVE','system','system',now(),now());
+INSERT INTO provider_endpoint(provider_id,protocol_type,base_url,created_by,updated_by,created_at,updated_at) VALUES(40,'ANTHROPIC_MESSAGES','https://api.anthropic.com','system','system',now(),now());
+INSERT INTO provider_model (id,provider_id,model_id,upstream_model_code,priority,created_by,updated_by,created_at,updated_at) VALUES (50,40,30,'sonnet-upstream',100,'system','system',now(),now()),(51,40,31,'opus-upstream',100,'system','system',now(),now());`)
 	run(tx)
 }
 
@@ -323,7 +324,7 @@ func checkBootstrap(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	if err := service.Check(ctx); err != nil {
 		t.Fatal(err)
 	}
-	for table, want := range map[string]int{"organization": 1, "ai_provider": 1, "ai_model": 2, "provider_model": 2, "ai_resource": 0, "admin_user": 0} {
+	for table, want := range map[string]int{"organization": 1, "ai_provider": 1, "ai_model": 4, "provider_model": 2, "ai_resource": 0, "admin_user": 0} {
 		if err := pool.QueryRow(ctx, "SELECT count(*) FROM "+pgx.Identifier{table}.Sanitize()).Scan(&count); err != nil || count != want {
 			t.Fatalf("%s count=%d want=%d err=%v", table, count, want, err)
 		}

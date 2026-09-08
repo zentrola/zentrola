@@ -18,6 +18,7 @@ import Icon from './components/Icon.vue'
 import ChangePassword from './components/ChangePassword.vue'
 import AccountMenu from './components/AccountMenu.vue'
 import LanguageSwitch from './components/LanguageSwitch.vue'
+import ToastHost from './components/ToastHost.vue'
 const changingPassword = ref(false)
 async function passwordChanged() {
   changingPassword.value = false
@@ -179,7 +180,7 @@ watch(identity, (value) => {
     void loadSetup()
   }
 })
-const navigation = ['members', 'groups', 'models', 'providers', 'usage', 'operations']
+const navigation = ['home', 'members', 'groups', 'models', 'providers', 'usage', 'operations']
 watch(
   () => route.path,
   () => {
@@ -380,7 +381,7 @@ async function signOut() {
       @click="mobile = false"
     ></button>
     <aside class="sidebar" :class="{ open: mobile, collapsed: sidebarCollapsed }">
-      <RouterLink to="/members" class="brand" :aria-label="t('console')" :title="t('console')"
+      <RouterLink to="/" class="brand" :aria-label="t('console')" :title="t('console')"
         ><span class="brand-mark">Z</span><span>{{ t('brand') }}</span></RouterLink
       >
       <button
@@ -396,8 +397,8 @@ async function signOut() {
       </button>
       <nav id="primary-navigation" :aria-label="t('console')">
         <template v-for="item in navigation" :key="item"
-          ><p v-if="item === 'members' || item === 'usage'" class="nav-section">
-            {{ t(item === 'members' ? 'governance' : 'records') }}
+          ><p v-if="item === 'home' || item === 'members' || item === 'usage'" class="nav-section">
+            {{ t(item === 'home' ? 'overview' : item === 'members' ? 'governance' : 'records') }}
           </p>
           <RouterLink :to="`/${item}`" :aria-label="t(`nav.${item}`)" :data-label="t(`nav.${item}`)"
             ><Icon :name="item" /><span>{{ t(`nav.${item}`) }}</span></RouterLink
@@ -413,7 +414,7 @@ async function signOut() {
         <div class="breadcrumb">
           <span>{{ t('console') }}</span
           ><Icon name="arrow" :size="13" /><strong>{{
-            t(`nav.${String(route.name || 'members')}`)
+            t(`nav.${String(route.name || 'home')}`)
           }}</strong>
         </div>
         <div class="topbar-actions">
@@ -435,4 +436,5 @@ async function signOut() {
       @changed="passwordChanged"
     />
   </div>
+  <ToastHost />
 </template>

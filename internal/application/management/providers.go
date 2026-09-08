@@ -20,6 +20,10 @@ import (
 
 var errInvalidProviderProxy = errors.New("invalid provider proxy")
 
+const defaultProviderMappingPriority int32 = 100
+
+var providerProtocols = [...]string{"OPENAI_CHAT", "OPENAI_RESPONSES", "ANTHROPIC_MESSAGES"}
+
 func optionalURL(raw string, website bool) (*string, bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -48,16 +52,36 @@ func providerFromInput(current Provider, input ProviderInput) (Provider, bool) {
 		return Provider{}, false
 	}
 	website, websiteOK := optionalURL(input.Website, true)
-	baseURL, baseOK := optionalURL(input.BaseURL, false)
-	openAIBaseURL, openAIOK := optionalURL(input.OpenAIBaseURL, false)
-	if !websiteOK || !baseOK || !openAIOK || (baseURL == nil && openAIBaseURL == nil) {
+	if !websiteOK || len(input.Endpoints) == 0 || len(input.Endpoints) > len(providerProtocols) {
 		return Provider{}, false
 	}
+	seen := make(map[string]struct{}, len(input.Endpoints))
+	endpoints := make([]ProviderEndpoint, 0, len(input.Endpoints))
+	for _, endpoint := range input.Endpoints {
+		baseURL, ok := optionalURL(endpoint.BaseURL, false)
+		if !ok || baseURL == nil || !validProviderProtocol(endpoint.ProtocolType) {
+			return Provider{}, false
+		}
+		if _, duplicate := seen[endpoint.ProtocolType]; duplicate {
+			return Provider{}, false
+		}
+		seen[endpoint.ProtocolType] = struct{}{}
+		endpoints = append(endpoints, ProviderEndpoint{ProtocolType: endpoint.ProtocolType, BaseURL: *baseURL})
+	}
+	sort.Slice(endpoints, func(i, j int) bool { return endpoints[i].ProtocolType < endpoints[j].ProtocolType })
 	current.Name = input.Name
 	current.Website = website
-	current.BaseURL = baseURL
-	current.OpenAIBaseURL = openAIBaseURL
+	current.Endpoints = endpoints
 	return current, true
+}
+
+func validProviderProtocol(protocol string) bool {
+	for _, candidate := range providerProtocols {
+		if protocol == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 func validHeaderName(name string) bool {
@@ -215,32 +239,19 @@ func (s *Service) applyProviderProxy(current Provider, input ProviderInput) (Pro
 	return current, nil
 }
 
-type providerMappingKey struct {
-	modelID  int64
-	protocol string
-}
-
-func validProviderMappings(provider Provider, mappings []ProviderMappingInput) bool {
+func validProviderMappings(_ Provider, mappings []ProviderMappingInput) bool {
 	if len(mappings) == 0 {
 		return false
 	}
-	seen := make(map[providerMappingKey]struct{}, len(mappings))
+	seen := make(map[int64]struct{}, len(mappings))
 	for _, mapping := range mappings {
-		key := providerMappingKey{modelID: mapping.ModelID, protocol: mapping.ProtocolType}
-		if mapping.ModelID <= 0 || !validText(mapping.UpstreamModelCode, 128) || !validStatus(mapping.Status) {
+		if mapping.ModelID <= 0 || !validText(mapping.UpstreamModelCode, 128) || mapping.Priority < 0 || mapping.Priority > 10000 {
 			return false
 		}
-		if (mapping.ProtocolType == "ANTHROPIC" && provider.BaseURL == nil) ||
-			(mapping.ProtocolType == "OPENAI" && provider.OpenAIBaseURL == nil) {
+		if _, duplicate := seen[mapping.ModelID]; duplicate {
 			return false
 		}
-		if mapping.ProtocolType != "ANTHROPIC" && mapping.ProtocolType != "OPENAI" {
-			return false
-		}
-		if _, duplicate := seen[key]; duplicate {
-			return false
-		}
-		seen[key] = struct{}{}
+		seen[mapping.ModelID] = struct{}{}
 	}
 	return true
 }
@@ -250,9 +261,9 @@ func (s *Service) replaceProviderMappings(ctx context.Context, w Writer, provide
 	if err != nil {
 		return nil, err
 	}
-	currentByKey := make(map[providerMappingKey]ProviderMapping, len(current))
+	currentByModel := make(map[int64]ProviderMapping, len(current))
 	for _, mapping := range current {
-		currentByKey[providerMappingKey{modelID: mapping.ModelID, protocol: mapping.ProtocolType}] = mapping
+		currentByModel[mapping.ModelID] = mapping
 	}
 
 	now := time.Now().UTC().Truncate(time.Microsecond)
@@ -266,17 +277,19 @@ func (s *Service) replaceProviderMappings(ctx context.Context, w Writer, provide
 			}
 			validatedModels[input.ModelID] = struct{}{}
 		}
-		key := providerMappingKey{modelID: input.ModelID, protocol: input.ProtocolType}
-		mapping, exists := currentByKey[key]
+		mapping, exists := currentByModel[input.ModelID]
 		if !exists {
 			id, err := s.next()
 			if err != nil {
 				return nil, err
 			}
-			mapping = ProviderMapping{ID: id, ProviderID: provider.ID, ModelID: input.ModelID, ProtocolType: input.ProtocolType, CreatedAt: now}
+			mapping = ProviderMapping{ID: id, ProviderID: provider.ID, ModelID: input.ModelID, CreatedAt: now}
 		}
 		mapping.UpstreamModelCode = input.UpstreamModelCode
-		mapping.Status = input.Status
+		mapping.Priority = input.Priority
+		if mapping.Priority == 0 {
+			mapping.Priority = defaultProviderMappingPriority
+		}
 		mapping.UpdatedAt = now
 		desired = append(desired, mapping)
 		retained[mapping.ID] = struct{}{}
@@ -291,7 +304,7 @@ func (s *Service) replaceProviderMappings(ctx context.Context, w Writer, provide
 		}
 	}
 	for _, mapping := range desired {
-		if _, exists := currentByKey[providerMappingKey{modelID: mapping.ModelID, protocol: mapping.ProtocolType}]; exists {
+		if _, exists := currentByModel[mapping.ModelID]; exists {
 			if err := w.UpdateProviderMapping(ctx, mapping); err != nil {
 				return nil, err
 			}

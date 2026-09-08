@@ -1,13 +1,37 @@
 package management
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zentrola/zentrola/internal/domain/catalog"
 )
+
+type mappingWriter struct {
+	Writer
+	mappings []ProviderMapping
+	updated  []ProviderMapping
+	deleted  []int64
+}
+
+func (w *mappingWriter) ProviderMappings(context.Context, int64) ([]ProviderMapping, error) {
+	return append([]ProviderMapping(nil), w.mappings...), nil
+}
+func (w *mappingWriter) Model(_ context.Context, id int64) (Model, error) {
+	return Model{ID: id}, nil
+}
+func (w *mappingWriter) UpdateProviderMapping(_ context.Context, mapping ProviderMapping) error {
+	w.updated = append(w.updated, mapping)
+	return nil
+}
+func (w *mappingWriter) DeleteProviderMapping(_ context.Context, _ int64, mappingID int64, _ time.Time) error {
+	w.deleted = append(w.deleted, mappingID)
+	return nil
+}
 
 type providerTestCipher struct{}
 
@@ -27,19 +51,24 @@ func (providerTestCipher) DecryptProviderProxy(sealed catalog.SealedCredential, 
 func TestProviderFromInput(t *testing.T) {
 	current := Provider{ID: 1, Code: "provider-1", Type: "CUSTOM", Status: "DISABLED"}
 	got, ok := providerFromInput(current, ProviderInput{
-		Name:          "阿里云百炼",
-		Website:       "  https://www.deepseek.com/  ",
-		OpenAIBaseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1/",
+		Name:    "阿里云百炼",
+		Website: "  https://www.deepseek.com/  ",
+		Endpoints: []ProviderEndpoint{{
+			ProtocolType: "OPENAI_CHAT",
+			BaseURL:      "https://dashscope.aliyuncs.com/compatible-mode/v1/",
+		}},
 	})
-	if !ok || got.Website == nil || *got.Website != "https://www.deepseek.com" || got.BaseURL != nil || got.OpenAIBaseURL == nil || *got.OpenAIBaseURL != "https://dashscope.aliyuncs.com/compatible-mode/v1" {
+	if !ok || got.Website == nil || *got.Website != "https://www.deepseek.com" || len(got.Endpoints) != 1 || got.Endpoints[0].BaseURL != "https://dashscope.aliyuncs.com/compatible-mode/v1" {
 		t.Fatalf("unexpected provider: %+v", got)
 	}
 
 	for _, input := range []ProviderInput{
 		{Name: "没有接口"},
-		{Name: "不安全协议", BaseURL: "http://api.example.com"},
-		{Name: "包含凭证", BaseURL: "https://key@api.example.com"},
-		{Name: "包含查询参数", OpenAIBaseURL: "https://api.example.com/v1?token=secret"},
+		{Name: "不安全协议", Endpoints: []ProviderEndpoint{{ProtocolType: "OPENAI_CHAT", BaseURL: "http://api.example.com"}}},
+		{Name: "包含凭证", Endpoints: []ProviderEndpoint{{ProtocolType: "OPENAI_CHAT", BaseURL: "https://key@api.example.com"}}},
+		{Name: "包含查询参数", Endpoints: []ProviderEndpoint{{ProtocolType: "OPENAI_CHAT", BaseURL: "https://api.example.com/v1?token=secret"}}},
+		{Name: "未知协议", Endpoints: []ProviderEndpoint{{ProtocolType: "GEMINI_NATIVE", BaseURL: "https://api.example.com"}}},
+		{Name: "重复协议", Endpoints: []ProviderEndpoint{{ProtocolType: "OPENAI_CHAT", BaseURL: "https://one.example.com"}, {ProtocolType: "OPENAI_CHAT", BaseURL: "https://two.example.com"}}},
 	} {
 		if _, ok := providerFromInput(current, input); ok {
 			t.Fatalf("invalid provider accepted: %+v", input)
@@ -48,12 +77,10 @@ func TestProviderFromInput(t *testing.T) {
 }
 
 func TestProviderMappingValidation(t *testing.T) {
-	anthropicURL := "https://api.example.com/anthropic"
-	openAIURL := "https://api.example.com/v1"
-	provider := Provider{BaseURL: &anthropicURL, OpenAIBaseURL: &openAIURL}
+	provider := Provider{}
 	valid := []ProviderMappingInput{
-		{ModelID: 1, UpstreamModelCode: "vendor-model-pro", ProtocolType: "ANTHROPIC", Status: "ACTIVE"},
-		{ModelID: 1, UpstreamModelCode: "vendor-model-pro", ProtocolType: "OPENAI", Status: "DISABLED"},
+		{ModelID: 1, UpstreamModelCode: "vendor-model-pro"},
+		{ModelID: 2, UpstreamModelCode: "vendor-model-flash", Priority: 200},
 	}
 	if !validProviderMappings(provider, valid) {
 		t.Fatal("valid mappings rejected")
@@ -61,10 +88,9 @@ func TestProviderMappingValidation(t *testing.T) {
 
 	invalid := [][]ProviderMappingInput{
 		nil,
-		{{ModelID: 0, UpstreamModelCode: "vendor-model", ProtocolType: "ANTHROPIC", Status: "ACTIVE"}},
-		{{ModelID: 1, UpstreamModelCode: " vendor-model ", ProtocolType: "ANTHROPIC", Status: "ACTIVE"}},
-		{{ModelID: 1, UpstreamModelCode: "vendor-model", ProtocolType: "UNKNOWN", Status: "ACTIVE"}},
-		{{ModelID: 1, UpstreamModelCode: "vendor-model", ProtocolType: "ANTHROPIC", Status: "UNKNOWN"}},
+		{{ModelID: 0, UpstreamModelCode: "vendor-model"}},
+		{{ModelID: 1, UpstreamModelCode: " vendor-model "}},
+		{{ModelID: 1, UpstreamModelCode: "vendor-model", Priority: 10001}},
 		{valid[0], valid[0]},
 	}
 	for _, mappings := range invalid {
@@ -72,12 +98,28 @@ func TestProviderMappingValidation(t *testing.T) {
 			t.Fatalf("invalid mappings accepted: %+v", mappings)
 		}
 	}
+}
 
-	if validProviderMappings(Provider{OpenAIBaseURL: &openAIURL}, valid[:1]) {
-		t.Fatal("Anthropic mapping accepted without Anthropic endpoint")
+func TestReplaceProviderMappingsLogicallyDeletesUncheckedModels(t *testing.T) {
+	writer := &mappingWriter{mappings: []ProviderMapping{
+		{ID: 10, ProviderID: 8, ModelID: 1, UpstreamModelCode: "old-one", Priority: 100},
+		{ID: 11, ProviderID: 8, ModelID: 2, UpstreamModelCode: "old-two", Priority: 100},
+	}}
+	service := &Service{}
+	result, err := service.replaceProviderMappings(context.Background(), writer, Provider{ID: 8}, []ProviderMappingInput{{
+		ModelID: 1, UpstreamModelCode: "new-one",
+	}})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if validProviderMappings(Provider{BaseURL: &anthropicURL}, valid[1:]) {
-		t.Fatal("OpenAI mapping accepted without OpenAI endpoint")
+	if len(result) != 1 || result[0].ID != 10 || result[0].Priority != defaultProviderMappingPriority {
+		t.Fatalf("unexpected retained mappings: %+v", result)
+	}
+	if len(writer.updated) != 1 || writer.updated[0].UpstreamModelCode != "new-one" {
+		t.Fatalf("checked mapping was not updated: %+v", writer.updated)
+	}
+	if len(writer.deleted) != 1 || writer.deleted[0] != 11 {
+		t.Fatalf("unchecked mapping was not logically deleted: %+v", writer.deleted)
 	}
 }
 

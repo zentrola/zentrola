@@ -85,7 +85,7 @@ async function loadMetrics() {
   }
 }
 function label(list: { id: string; name: string }[], id: string | null) {
-  return id === null ? t('common.none') : list.find((x) => x.id === id)?.name || id
+  return id === null ? '-' : list.find((x) => x.id === id)?.name || id
 }
 onMounted(() => {
   void lookups()
@@ -232,13 +232,8 @@ onMounted(() => {
       <dd>{{ selected.clientProtocol }}</dd>
       <dt>{{ t('common.status') }}</dt>
       <dd><Status :value="selected.status" /></dd>
-      <dt>{{ t('usage.attempt') }}</dt>
-      <dd>
-        {{ selected.attemptNo === null ? t('usage.noAttempt') : selected.attemptNo
-        }}<small class="subline">{{ selected.attemptStatus }}</small>
-      </dd>
       <dt>{{ t('usage.errorType') }}</dt>
-      <dd>{{ selected.errorType || selected.attemptErrorType || t('common.none') }}</dd>
+      <dd>{{ selected.errorType || '-' }}</dd>
       <dt>{{ t('usage.time') }}</dt>
       <dd>{{ date(selected.requestAt) }}</dd>
       <dt>{{ t('usage.latency') }}</dt>

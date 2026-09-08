@@ -10,6 +10,7 @@ import Modal from '../components/Modal.vue'
 import PageHeader from '../components/PageHeader.vue'
 import ListFooter from '../components/ListFooter.vue'
 import ListSearch from '../components/ListSearch.vue'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 const { items, cursor, loading, error, load } = useCollection<Model>(() => '/models')
 const { busy, error: actionError, run } = useAction()
 const editing = ref(false),
@@ -222,9 +223,7 @@ function changeStatus() {
           rows="3"
         />
       </label>
-      <p v-if="validation || actionError" class="alert error" role="alert">
-        {{ validation || actionError }}
-      </p>
+      <p v-if="validation" class="alert error" role="alert">{{ validation }}</p>
       <footer class="form-footer">
         <button type="button" class="button" :disabled="busy" @click="editing = false">
           {{ t('common.cancel') }}</button
@@ -234,25 +233,24 @@ function changeStatus() {
       </footer>
     </form>
   </Modal>
-  <Modal v-if="statusTarget" :title="t('common.status')" :busy="busy" @close="statusTarget = null"
-    ><p>
-      {{
-        t('common.confirmStatus', {
-          name: statusTarget.name,
-          status: t(statusTarget.status === 'ACTIVE' ? 'common.disable' : 'common.enable'),
-        })
-      }}
-    </p>
-    <p v-if="statusTarget.status === 'ACTIVE'" class="muted">{{ t('common.disableHint') }}</p>
-    <p v-if="actionError" class="alert error" role="alert">{{ actionError }}</p>
-    <footer class="form-footer">
-      <button class="button" :disabled="busy" @click="statusTarget = null">
-        {{ t('common.cancel') }}</button
-      ><button class="button primary" :disabled="busy" @click="changeStatus">
-        {{ t('common.confirm') }}
-      </button>
-    </footer></Modal
-  >
+  <ConfirmDialog
+    v-if="statusTarget"
+    :title="t(statusTarget.status === 'ACTIVE' ? 'common.disableTitle' : 'common.enableTitle')"
+    :message="
+      t('common.confirmStatus', {
+        name: statusTarget.name,
+        status: t(statusTarget.status === 'ACTIVE' ? 'common.disable' : 'common.enable'),
+      })
+    "
+    :hint="statusTarget.status === 'ACTIVE' ? t('common.disableHint') : undefined"
+    :confirm-label="
+      t(statusTarget.status === 'ACTIVE' ? 'common.disableAction' : 'common.enableAction')
+    "
+    :busy="busy"
+    :tone="statusTarget.status === 'ACTIVE' ? 'warning' : 'success'"
+    @close="statusTarget = null"
+    @confirm="changeStatus"
+  />
 </template>
 <style scoped>
 .model-form {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 withDefaults(defineProps<{ name: string; size?: number }>(), { size: 20 })
 const paths: Record<string, string> = {
+  home: 'M3 11.5 12 4l9 7.5V21h-6v-6H9v6H3v-9.5Z',
   members:
     'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M16 3a4 4 0 0 1 0 8M22 21v-2a4 4 0 0 0-3-3.87M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0',
   groups: 'M3 7h7l2 2h9v11H3zM3 7V4h6l2 3',
@@ -18,11 +19,13 @@ const paths: Record<string, string> = {
   close: 'm6 6 12 12M18 6 6 18',
   trash: 'M3 6h18M8 6V4h8v2m-10 0 1 15h10l1-15M10 11v6m4-6v6',
   refresh: 'M20 7a9 9 0 1 0 1 9M20 2v6h-6',
+  copy: 'M9 8h10v12H9zM5 16H4V4h10v1',
   key: 'M11 11a4 4 0 1 1-8 0 4 4 0 0 1 8 0Zm0 0h11M18 11v3M21 11v2',
   eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Zm13 0a3 3 0 1 1-6 0 3 3 0 0 1 6 0',
   logout: 'M9 4H3v16h6M13 8l4 4-4 4m-5-4h13',
   menu: 'M3 6h18M3 12h18M3 18h18',
   check: 'm5 12 4 4L19 6',
+  alert: 'M12 3 2.8 20h18.4L12 3Zm0 6v4m0 3.5v.5',
   arrow: 'm9 5 7 7-7 7',
   shield: 'm12 2 9 4v6c0 5-9 10-9 10S3 17 3 12V6l9-4Zm-4 10 3 3 5-6',
 }

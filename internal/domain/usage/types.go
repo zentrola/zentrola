@@ -1,4 +1,4 @@
-// Package usage 定义请求事实与上游 Attempt 的业务语义。
+// Package usage 定义真实上游调用 Attempt 的业务语义。
 package usage
 
 type Status string

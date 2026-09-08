@@ -40,7 +40,7 @@ func TestDeepSeekCatalogIntegration(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		mappings, err := q.GatewayMappings(ctx, dbgen.GatewayMappingsParams{ModelID: m.ID, ProtocolType: "ANTHROPIC"})
+		mappings, err := q.GatewayMappings(ctx, dbgen.GatewayMappingsParams{ModelID: m.ID, ProtocolType: "ANTHROPIC_MESSAGES"})
 		if err != nil || len(mappings) != 1 {
 			t.Fatal("model missing unique route")
 		}
@@ -85,14 +85,21 @@ func TestDeepSeekCatalogConflictRollsBack(t *testing.T) {
 	if err := bootstrap.New(store, ids, "sonnet", "opus").Initialize(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE ai_model SET model_code='deepseek-v4-pro' WHERE model_code='claude-opus'`); err != nil {
+	providerID, err := ids.NextID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO ai_provider(id,provider_code,provider_name,provider_type,status,created_by,updated_by,created_at,updated_at) VALUES($1,'deepseek-official','冲突服务商','OFFICIAL','DISABLED','system','system',now(),now())`, providerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO provider_endpoint(provider_id,protocol_type,base_url,created_by,updated_by,created_at,updated_at) VALUES($1,'ANTHROPIC_MESSAGES','https://wrong.example.com','system','system',now(),now())`, providerID); err != nil {
 		t.Fatal(err)
 	}
 	if err := bootstrap.SetupDeepSeek(ctx, store, ids); err == nil {
 		t.Fatal("conflicting model accepted")
 	}
 	var count int
-	if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM ai_provider WHERE provider_code='deepseek-official')+(SELECT count(*) FROM ai_model WHERE model_code='deepseek-v4-flash')`).Scan(&count); err != nil || count != 0 {
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM provider_model pm JOIN ai_model m ON m.id=pm.model_id WHERE m.model_code IN ('deepseek-v4-flash','deepseek-v4-pro')`).Scan(&count); err != nil || count != 0 {
 		t.Fatal("partial catalog committed")
 	}
 }

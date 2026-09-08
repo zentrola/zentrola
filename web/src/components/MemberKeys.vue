@@ -7,6 +7,7 @@ import { t } from '../i18n'
 import Modal from './Modal.vue'
 import ListFooter from './ListFooter.vue'
 import Icon from './Icon.vue'
+import ConfirmDialog from './ConfirmDialog.vue'
 
 const props = defineProps<{ member: Member }>()
 defineEmits<{ close: [] }>()
@@ -62,8 +63,8 @@ function revoke() {
     medium
     @close="$emit('close')"
   >
-    <div class="context-note key-prefix-note" role="note">
-      <Icon name="shield" :size="18" /><span>{{ t('members.prefixHint') }}</span>
+    <div class="context-note masked-key-note" role="note">
+      <Icon name="shield" :size="18" /><span>{{ t('members.maskedKeyHint') }}</span>
     </div>
     <p v-if="notice" class="notice" role="status">{{ notice }}</p>
     <div v-if="error" class="alert error" role="alert">
@@ -87,7 +88,7 @@ function revoke() {
           <tr v-for="key in items" :key="key.id">
             <td class="key-display-name">{{ key.name }}</td>
             <td>
-              <code>{{ key.prefix }}</code>
+              <code>{{ key.maskedKey }}</code>
             </td>
             <td>{{ key.expiresAt ? dateOnly(key.expiresAt) : t('members.noExpiry') }}</td>
             <td class="align-right">
@@ -113,23 +114,17 @@ function revoke() {
       @more="load(true)"
     />
   </Modal>
-  <Modal
+  <ConfirmDialog
     v-if="revokeTarget"
     :title="t('members.revokeTitle')"
+    :message="t('members.revokeQuestion', { name: revokeTarget.name })"
+    :hint="t('members.revokeConsequence')"
+    :confirm-label="t('members.revoke')"
     :busy="busy"
+    tone="danger"
     @close="revokeTarget = null"
-  >
-    <p>{{ t('members.revokeHint', { name: revokeTarget.name }) }}</p>
-    <p v-if="actionError" class="alert error" role="alert">{{ actionError }}</p>
-    <footer class="form-footer">
-      <button class="button" :disabled="busy" @click="revokeTarget = null">
-        {{ t('common.cancel') }}
-      </button>
-      <button class="button danger-fill" :disabled="busy" @click="revoke">
-        {{ t('members.revoke') }}
-      </button>
-    </footer>
-  </Modal>
+    @confirm="revoke"
+  />
 </template>
 
 <style scoped>
@@ -141,7 +136,7 @@ function revoke() {
   overflow-wrap: anywhere;
   max-width: 240px;
 }
-.key-prefix-note {
+.masked-key-note {
   margin-bottom: 16px;
 }
 </style>

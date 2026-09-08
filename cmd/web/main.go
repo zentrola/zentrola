@@ -22,9 +22,10 @@ import (
 )
 
 type webConfig struct {
-	Address    string
-	APIBaseURL string
-	APIOrigin  string
+	Address        string
+	APIBaseURL     string
+	APIOrigin      string
+	GatewayBaseURL string
 }
 
 func displayURL(address string) string {
@@ -62,10 +63,17 @@ func loadConfig(file string) (webConfig, error) {
 		parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return webConfig{}, errors.New("WEB_API_BASE_URL 必须是有效的 HTTP(S) 地址，且不能包含账号、查询参数或 Fragment")
 	}
+	rawGateway := strings.TrimRight(get("WEB_GATEWAY_BASE_URL", rawBase), "/")
+	gateway, err := url.Parse(rawGateway)
+	if err != nil || (gateway.Scheme != "http" && gateway.Scheme != "https") || gateway.Host == "" ||
+		gateway.User != nil || gateway.RawQuery != "" || gateway.Fragment != "" {
+		return webConfig{}, errors.New("WEB_GATEWAY_BASE_URL 必须是有效的 HTTP(S) 地址，且不能包含账号、查询参数或 Fragment")
+	}
 	return webConfig{
-		Address:    address,
-		APIBaseURL: rawBase,
-		APIOrigin:  parsed.Scheme + "://" + parsed.Host,
+		Address:        address,
+		APIBaseURL:     rawBase,
+		APIOrigin:      parsed.Scheme + "://" + parsed.Host,
+		GatewayBaseURL: rawGateway,
 	}, nil
 }
 
@@ -112,7 +120,10 @@ func handler(config webConfig, root fs.FS) http.Handler {
 		staticFile(root, name, true)(w, r)
 	})
 	mux.HandleFunc("GET /config.js", func(w http.ResponseWriter, _ *http.Request) {
-		data, _ := json.Marshal(map[string]string{"apiBaseUrl": config.APIBaseURL})
+		data, _ := json.Marshal(map[string]string{
+			"apiBaseUrl":     config.APIBaseURL,
+			"gatewayBaseUrl": config.GatewayBaseURL,
+		})
 		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
 		_, _ = fmt.Fprintf(w, "window.__ZENTROLA_CONFIG__ = %s;\n", data)

@@ -34,14 +34,15 @@ func (q *Queries) GatewayIdentityActive(ctx context.Context, arg GatewayIdentity
 }
 
 const gatewayMappings = `-- name: GatewayMappings :many
-SELECT pm.id,pm.provider_id,pm.upstream_model_code,p.anthropic_base_url,p.openai_base_url,
+SELECT pm.id,pm.provider_id,pm.upstream_model_code,pe.base_url,
        p.proxy_enabled,p.proxy_url_ciphertext,p.proxy_url_nonce,p.proxy_url_key_version,
        p.proxy_headers_ciphertext,p.proxy_headers_nonce,p.proxy_headers_key_version
 FROM provider_model pm
 JOIN ai_provider p ON p.id=pm.provider_id
-WHERE pm.model_id=$1 AND NOT pm.is_deleted AND pm.status='ACTIVE' AND pm.protocol_type=$2
-AND NOT p.is_deleted AND p.status='ACTIVE'
-ORDER BY pm.id LIMIT 2
+JOIN provider_endpoint pe ON pe.provider_id=p.id AND pe.protocol_type=$2
+WHERE pm.model_id=$1 AND NOT pm.is_deleted
+  AND NOT p.is_deleted AND p.status='ACTIVE'
+ORDER BY pm.priority,pm.id LIMIT 1
 `
 
 type GatewayMappingsParams struct {
@@ -53,8 +54,7 @@ type GatewayMappingsRow struct {
 	ID                     int64
 	ProviderID             int64
 	UpstreamModelCode      string
-	AnthropicBaseUrl       *string
-	OpenaiBaseUrl          *string
+	BaseUrl                string
 	ProxyEnabled           bool
 	ProxyUrlCiphertext     []byte
 	ProxyUrlNonce          []byte
@@ -77,8 +77,7 @@ func (q *Queries) GatewayMappings(ctx context.Context, arg GatewayMappingsParams
 			&i.ID,
 			&i.ProviderID,
 			&i.UpstreamModelCode,
-			&i.AnthropicBaseUrl,
-			&i.OpenaiBaseUrl,
+			&i.BaseUrl,
 			&i.ProxyEnabled,
 			&i.ProxyUrlCiphertext,
 			&i.ProxyUrlNonce,
@@ -158,16 +157,17 @@ func (q *Queries) GatewayResources(ctx context.Context, arg GatewayResourcesPara
 }
 
 const openAIModels = `-- name: OpenAIModels :many
-SELECT m.model_code,m.created_at,p.provider_code FROM ai_model m
-JOIN provider_model pm ON pm.model_id=m.id AND NOT pm.is_deleted AND pm.status='ACTIVE' AND pm.protocol_type='OPENAI'
-JOIN ai_provider p ON p.id=pm.provider_id AND NOT p.is_deleted AND p.status='ACTIVE' AND p.openai_base_url IS NOT NULL
+SELECT DISTINCT ON (m.model_code) m.model_code,m.created_at,p.provider_code FROM ai_model m
+JOIN provider_model pm ON pm.model_id=m.id AND NOT pm.is_deleted
+JOIN ai_provider p ON p.id=pm.provider_id AND NOT p.is_deleted AND p.status='ACTIVE'
+JOIN provider_endpoint pe ON pe.provider_id=p.id AND pe.protocol_type IN ('OPENAI_CHAT','OPENAI_RESPONSES')
 WHERE NOT m.is_deleted AND m.status='ACTIVE'
 AND EXISTS(SELECT 1 FROM ai_resource r WHERE r.provider_id=p.id AND r.organization_id=$1 AND NOT r.is_deleted AND r.status='ACTIVE')
 AND EXISTS(SELECT 1 FROM principal_group pg JOIN ai_group g ON g.id=pg.group_id AND g.organization_id=pg.organization_id
 JOIN group_model_permission gp ON gp.group_id=g.id AND gp.organization_id=g.organization_id
 WHERE pg.principal_id=$2 AND pg.organization_id=$1
 AND NOT pg.is_deleted AND NOT g.is_deleted AND g.status='ACTIVE' AND NOT gp.is_deleted AND gp.model_id=m.id)
-ORDER BY m.model_code
+ORDER BY m.model_code,pm.priority,pm.id
 `
 
 type OpenAIModelsParams struct {

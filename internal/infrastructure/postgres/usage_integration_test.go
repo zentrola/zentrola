@@ -102,15 +102,18 @@ func TestStage5Integration(t *testing.T) {
 	if err := management.SetResourceStatus(ctx, actor, resource.ID, "ACTIVE", appsec.RequestMeta{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := management.SetGroupMember(ctx, actor, group.ID, member.ID, true, appsec.RequestMeta{}); err != nil {
-		t.Fatal(err)
-	}
 	if err := management.SetGroupModel(ctx, actor, group.ID, modelID, true, appsec.RequestMeta{}); err != nil {
 		t.Fatal(err)
 	}
 	keys := appsec.NewKeys(securityStore, ids)
 	key, err := keys.Create(ctx, actor, member.ID, "usage-test", nil, appsec.RequestMeta{})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := management.SetMemberStatus(ctx, actor, member.ID, "ACTIVE", appsec.RequestMeta{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := management.SetGroupMember(ctx, actor, group.ID, member.ID, true, appsec.RequestMeta{}); err != nil {
 		t.Fatal(err)
 	}
 	store := NewUsageStore(pool)
@@ -203,21 +206,21 @@ func TestStage5Integration(t *testing.T) {
 	cancel()
 	resp.Body.Close()
 	deadline := time.Now().Add(2 * time.Second)
-	for writer.Metrics().Queued < 9 && time.Now().Before(deadline) {
+	for writer.Metrics().Queued < 7 && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
-	if writer.Metrics().Queued != 9 {
+	if writer.Metrics().Queued != 7 {
 		t.Fatal("cancelled handler did not submit usage")
 	}
 	var before int
-	if err := pool.QueryRow(ctx, "SELECT count(*) FROM ai_request").Scan(&before); err != nil || before != 0 {
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM usage_record").Scan(&before); err != nil || before != 0 {
 		t.Fatal("batch was prematurely persisted")
 	}
 	if err := writer.Close(ctx); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := app.NewQuery(store).Query(ctx, actor, app.Filter{From: time.Now().Add(-time.Hour), To: time.Now().Add(time.Hour), Limit: 100})
-	if err != nil || len(rows) != 9 {
+	if err != nil || len(rows) != 7 {
 		t.Fatalf("query: rows=%d err=%v", len(rows), err)
 	}
 	byID := map[string]app.Row{}
@@ -229,7 +232,7 @@ func TestStage5Integration(t *testing.T) {
 	}
 	for _, name := range []string{"normal", "stream"} {
 		r := byID[requestIDs[name]]
-		if r.Status != "SUCCESS" || r.ModelID == nil || *r.ModelID != modelID || r.ResourceID == nil || *r.ResourceID != resource.ID || r.ProviderID == nil || *r.ProviderID != providers[0].ID || r.AttemptNo == nil || *r.AttemptNo != 1 || r.InputTokens == nil || *r.InputTokens != 11 || r.OutputTokens == nil || *r.OutputTokens != 7 || r.CachedInputTokens == nil || *r.CachedInputTokens != 4 {
+		if r.Status != "SUCCESS" || r.ModelID != modelID || r.ResourceID != resource.ID || r.ProviderID != providers[0].ID || r.AttemptNo != 1 || r.InputTokens == nil || *r.InputTokens != 11 || r.OutputTokens == nil || *r.OutputTokens != 7 || r.CachedInputTokens == nil || *r.CachedInputTokens != 4 {
 			t.Fatalf("wrong usage attribution: %+v", r)
 		}
 	}
@@ -238,14 +241,13 @@ func TestStage5Integration(t *testing.T) {
 	}
 	for _, name := range []string{"truncate", "rate", "timeout"} {
 		r := byID[requestIDs[name]]
-		if r.Status != "FAILED" || r.UsageID == nil || r.OutputTokens != nil {
+		if r.Status != "FAILED" || r.OutputTokens != nil {
 			t.Fatalf("failed attempt %s incorrect", name)
 		}
 	}
 	for _, name := range []string{"denied", "invalid"} {
-		r := byID[requestIDs[name]]
-		if r.Status != "FAILED" || r.UsageID != nil {
-			t.Fatal("local rejection fabricated attempt")
+		if _, ok := byID[requestIDs[name]]; ok {
+			t.Fatal("local rejection was recorded as upstream usage")
 		}
 	}
 	if r := byID[requestIDs["missing"]]; r.Status != "SUCCESS" || r.InputTokens != nil || r.OutputTokens != nil {
@@ -254,13 +256,20 @@ func TestStage5Integration(t *testing.T) {
 	if _, ok := byID[requestIDs["count"]]; ok {
 		t.Fatal("count_tokens recorded as inference")
 	}
+	dashboard, err := app.NewQuery(store).Dashboard(ctx, actor, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+	if err != nil || dashboard.ActiveMemberCount < 1 || dashboard.ModelCount < 1 || dashboard.ProviderCount < 1 || dashboard.TotalTokens != 58 || len(dashboard.TokenRanking) != 1 || dashboard.TokenRanking[0].PrincipalID != member.ID || len(dashboard.ModelRanking) != 1 || dashboard.ModelRanking[0].ModelID != modelID || dashboard.ModelRanking[0].Requests != 7 {
+		t.Fatalf("dashboard aggregation incorrect: result=%+v err=%v", dashboard, err)
+	}
 	// 查询 API：组合过滤、分页、时间、认证、非法参数和组织边界。
+	dashboardRange := "?from=" + time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano) + "&to=" + time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)
 	for _, tc := range []struct {
 		path          string
 		authenticated bool
 		status        int
 	}{
 		{"/api/v1/usage?memberId=" + fmt.Sprint(member.ID) + "&modelId=" + fmt.Sprint(modelID) + "&resourceId=" + fmt.Sprint(resource.ID) + "&limit=2", true, 200},
+		{"/api/v1/usage/dashboard" + dashboardRange, true, 200},
+		{"/api/v1/usage/dashboard", true, 400},
 		{"/api/v1/usage/writer", true, 200}, {"/api/v1/usage", false, 401}, {"/api/v1/usage?limit=101", true, 400}, {"/api/v1/usage?resourceId=-1", true, 400}, {"/api/v1/usage?from=invalid", true, 400}, {"/api/v1/usage?limit=1&limit=2", true, 400},
 	} {
 		req, _ := http.NewRequest("GET", server.URL+tc.path, nil)
@@ -309,12 +318,11 @@ func TestStage5Integration(t *testing.T) {
 	if _, err := store.Query(ctx, forged, app.Filter{From: time.Now().Add(-time.Hour), To: time.Now().Add(time.Hour), Limit: 10}); err == nil {
 		t.Fatal("cross organization query accepted")
 	}
-	// 同事务回滚和幂等：第二张表约束失败时第一张表也不得保留。
+	// 约束失败不得留下记录，重复提交不得重复记账。
 	makeEvent := func(label string) domain.Event {
-		rid, _ := ids.NextID()
 		aid, _ := ids.NextID()
 		now := time.Now().UTC()
-		return domain.Event{ID: rid, OrganizationID: actor.OrganizationID, RequestID: label, PrincipalID: member.ID, ModelID: modelID, RequestAt: now, CompletedAt: now, Status: domain.Success, Attempt: &domain.Attempt{ID: aid, ProviderID: providers[0].ID, ProviderModelID: 1, ResourceID: resource.ID, ModelID: modelID, StartedAt: now, CompletedAt: now, Status: domain.Success}}
+		return domain.Event{OrganizationID: actor.OrganizationID, RequestID: label, ClientProtocol: gw.AnthropicProtocol, PrincipalID: member.ID, ModelID: modelID, RequestAt: now, CompletedAt: now, Status: domain.Success, Attempt: &domain.Attempt{ID: aid, ProviderID: providers[0].ID, ProviderModelID: 1, ResourceID: resource.ID, ModelID: modelID, StartedAt: now, CompletedAt: now, Status: domain.Success}}
 	}
 	bad := makeEvent("usage-atomic-test")
 	negative := int64(-1)
@@ -323,7 +331,7 @@ func TestStage5Integration(t *testing.T) {
 		t.Fatal("invalid attempt accepted")
 	}
 	var count int
-	_ = pool.QueryRow(ctx, "SELECT count(*) FROM ai_request WHERE request_id=$1", bad.RequestID).Scan(&count)
+	_ = pool.QueryRow(ctx, "SELECT count(*) FROM usage_record WHERE request_id=$1", bad.RequestID).Scan(&count)
 	if count != 0 {
 		t.Fatal("partial fact committed")
 	}

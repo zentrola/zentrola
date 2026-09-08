@@ -136,7 +136,7 @@ func providerView(r dbgen.AiProvider) mgmt.Provider {
 	}
 	provider := mgmt.Provider{
 		ID: r.ID, Code: r.ProviderCode, Name: r.ProviderName, Type: r.ProviderType,
-		Website: r.OfficialWebsite, BaseURL: r.AnthropicBaseUrl, OpenAIBaseURL: r.OpenaiBaseUrl,
+		Website: r.OfficialWebsite, Endpoints: []mgmt.ProviderEndpoint{},
 		ProxyEnabled: r.ProxyEnabled, ProxyURL: r.ProxyUrlDisplay, ProxyHeaders: headers,
 		Status: r.Status, CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time,
 	}
@@ -165,13 +165,29 @@ func sealedVersion(sealed catalog.SealedCredential) *int32 {
 	return &version
 }
 func providerMappingView(r dbgen.ProviderModel) mgmt.ProviderMapping {
-	return mgmt.ProviderMapping{ID: r.ID, ProviderID: r.ProviderID, ModelID: r.ModelID, UpstreamModelCode: r.UpstreamModelCode, ProtocolType: r.ProtocolType, Status: r.Status, CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time}
+	return mgmt.ProviderMapping{ID: r.ID, ProviderID: r.ProviderID, ModelID: r.ModelID, UpstreamModelCode: r.UpstreamModelCode, Priority: r.Priority, CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time}
+}
+
+func endpointView(r dbgen.ProviderEndpoint) mgmt.ProviderEndpoint {
+	return mgmt.ProviderEndpoint{ProtocolType: r.ProtocolType, BaseURL: r.BaseUrl}
+}
+
+func (s *managementSession) providerEndpoints(ctx context.Context, providerID int64) ([]mgmt.ProviderEndpoint, error) {
+	rows, err := s.q.ManageProviderEndpoints(ctx, providerID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]mgmt.ProviderEndpoint, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, endpointView(row))
+	}
+	return result, nil
 }
 func resourceView(r dbgen.ManageResourcesRow) mgmt.Resource {
 	return mgmt.Resource{ID: r.ID, ProviderID: r.ProviderID, Name: r.ResourceName, Status: r.Status, CredentialConfigured: true, CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time}
 }
 func keyView(r dbgen.ManageKeysRow) mgmt.Key {
-	return mgmt.Key{ID: r.ID, Name: r.Name, Prefix: r.KeyPrefix, Status: r.Status, ExpiresAt: timePointer(r.ExpiresAt), RevokedAt: timePointer(r.RevokedAt), CreatedAt: r.CreatedAt.Time}
+	return mgmt.Key{ID: r.ID, Name: r.Name, MaskedKey: r.MaskedKey, Status: r.Status, ExpiresAt: timePointer(r.ExpiresAt), RevokedAt: timePointer(r.RevokedAt), CreatedAt: r.CreatedAt.Time}
 }
 func operationView(r dbgen.ManageOperationsRow) mgmt.Operation {
 	return mgmt.Operation{ID: r.ID, OperatorName: r.OperatorName, Type: r.OperationType, TargetType: r.TargetType, TargetID: r.TargetID, RequestID: r.RequestID, Result: r.Result, ErrorCode: r.ErrorCode, Before: r.BeforeData, After: r.AfterData, CreatedAt: r.CreatedAt.Time}
@@ -216,7 +232,12 @@ func (s *managementSession) Providers(ctx context.Context, p mgmt.Page) ([]mgmt.
 	}
 	result := make([]mgmt.Provider, 0, len(rows))
 	for _, row := range rows {
-		result = append(result, providerView(row))
+		provider := providerView(row)
+		provider.Endpoints, err = s.providerEndpoints(ctx, provider.ID)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, provider)
 	}
 	return result, nil
 }
@@ -311,7 +332,12 @@ func (s *managementSession) Model(ctx context.Context, id int64) (mgmt.Model, er
 }
 func (s *managementSession) Provider(ctx context.Context, id int64) (mgmt.Provider, error) {
 	row, err := s.q.ManageProvider(ctx, id)
-	return providerView(row), err
+	if err != nil {
+		return mgmt.Provider{}, err
+	}
+	provider := providerView(row)
+	provider.Endpoints, err = s.providerEndpoints(ctx, id)
+	return provider, err
 }
 
 func (s *managementSession) Resource(ctx context.Context, id int64) (mgmt.ResourceRecord, error) {
@@ -398,29 +424,59 @@ func (s *managementSession) CreateProvider(ctx context.Context, p mgmt.Provider)
 	if err != nil {
 		return err
 	}
-	return s.q.ManageCreateProvider(ctx, dbgen.ManageCreateProviderParams{
+	err = s.q.ManageCreateProvider(ctx, dbgen.ManageCreateProviderParams{
 		ID: p.ID, ProviderCode: p.Code, ProviderName: p.Name, ProviderType: p.Type,
-		OfficialWebsite: p.Website, AnthropicBaseUrl: p.BaseURL, OpenaiBaseUrl: p.OpenAIBaseURL,
-		ProxyEnabled: p.ProxyEnabled, ProxyUrlDisplay: p.ProxyURL,
+		OfficialWebsite: p.Website,
+		ProxyEnabled:    p.ProxyEnabled, ProxyUrlDisplay: p.ProxyURL,
 		ProxyUrlCiphertext: p.ProxyURLSealed.Ciphertext, ProxyUrlNonce: p.ProxyURLSealed.Nonce, ProxyUrlKeyVersion: sealedVersion(p.ProxyURLSealed),
 		ProxyHeaderNames: headerNames, ProxyHeadersCiphertext: p.ProxyHeadersSealed.Ciphertext,
 		ProxyHeadersNonce: p.ProxyHeadersSealed.Nonce, ProxyHeadersKeyVersion: sealedVersion(p.ProxyHeadersSealed),
 		Status: p.Status, CreatedBy: actorRef(s.actor.ID), CreatedAt: pgTime(p.CreatedAt),
 	})
+	if err != nil {
+		return err
+	}
+	return s.syncProviderEndpoints(ctx, p)
 }
 func (s *managementSession) UpdateProvider(ctx context.Context, p mgmt.Provider) error {
 	headerNames, err := providerHeaderNames(p)
 	if err != nil {
 		return err
 	}
-	return s.q.ManageUpdateProvider(ctx, dbgen.ManageUpdateProviderParams{
-		ID: p.ID, ProviderName: p.Name, OfficialWebsite: p.Website, AnthropicBaseUrl: p.BaseURL, OpenaiBaseUrl: p.OpenAIBaseURL,
+	err = s.q.ManageUpdateProvider(ctx, dbgen.ManageUpdateProviderParams{
+		ID: p.ID, ProviderName: p.Name, OfficialWebsite: p.Website,
 		ProxyEnabled: p.ProxyEnabled, ProxyUrlDisplay: p.ProxyURL,
 		ProxyUrlCiphertext: p.ProxyURLSealed.Ciphertext, ProxyUrlNonce: p.ProxyURLSealed.Nonce, ProxyUrlKeyVersion: sealedVersion(p.ProxyURLSealed),
 		ProxyHeaderNames: headerNames, ProxyHeadersCiphertext: p.ProxyHeadersSealed.Ciphertext,
 		ProxyHeadersNonce: p.ProxyHeadersSealed.Nonce, ProxyHeadersKeyVersion: sealedVersion(p.ProxyHeadersSealed),
 		UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(p.UpdatedAt),
 	})
+	if err != nil {
+		return err
+	}
+	return s.syncProviderEndpoints(ctx, p)
+}
+
+func (s *managementSession) syncProviderEndpoints(ctx context.Context, p mgmt.Provider) error {
+	desired := make(map[string]struct{}, len(p.Endpoints))
+	for _, endpoint := range p.Endpoints {
+		desired[endpoint.ProtocolType] = struct{}{}
+		if err := s.q.ManageUpsertProviderEndpoint(ctx, dbgen.ManageUpsertProviderEndpointParams{
+			ProviderID: p.ID, ProtocolType: endpoint.ProtocolType, BaseUrl: endpoint.BaseURL,
+			CreatedBy: actorRef(s.actor.ID), CreatedAt: pgTime(p.UpdatedAt),
+		}); err != nil {
+			return err
+		}
+	}
+	for _, protocol := range []string{"OPENAI_CHAT", "OPENAI_RESPONSES", "ANTHROPIC_MESSAGES"} {
+		if _, keep := desired[protocol]; keep {
+			continue
+		}
+		if err := s.q.ManageDeleteProviderEndpoint(ctx, dbgen.ManageDeleteProviderEndpointParams{ProviderID: p.ID, ProtocolType: protocol}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 func (s *managementSession) DeleteProvider(ctx context.Context, id int64, at time.Time) error {
 	actor, updatedAt := actorRef(s.actor.ID), pgTime(at)
@@ -436,10 +492,10 @@ func (s *managementSession) SetProviderStatus(ctx context.Context, id int64, sta
 	return s.q.ManageProviderStatus(ctx, dbgen.ManageProviderStatusParams{ID: id, Status: status, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(time.Now())})
 }
 func (s *managementSession) CreateProviderMapping(ctx context.Context, mapping mgmt.ProviderMapping) error {
-	return s.q.ManageCreateProviderMapping(ctx, dbgen.ManageCreateProviderMappingParams{ID: mapping.ID, ProviderID: mapping.ProviderID, ModelID: mapping.ModelID, UpstreamModelCode: mapping.UpstreamModelCode, ProtocolType: mapping.ProtocolType, Status: mapping.Status, CreatedBy: actorRef(s.actor.ID), CreatedAt: pgTime(mapping.CreatedAt)})
+	return s.q.ManageCreateProviderMapping(ctx, dbgen.ManageCreateProviderMappingParams{ID: mapping.ID, ProviderID: mapping.ProviderID, ModelID: mapping.ModelID, UpstreamModelCode: mapping.UpstreamModelCode, Priority: mapping.Priority, CreatedBy: actorRef(s.actor.ID), CreatedAt: pgTime(mapping.CreatedAt)})
 }
 func (s *managementSession) UpdateProviderMapping(ctx context.Context, mapping mgmt.ProviderMapping) error {
-	return s.q.ManageUpdateProviderMapping(ctx, dbgen.ManageUpdateProviderMappingParams{ID: mapping.ID, ProviderID: mapping.ProviderID, UpstreamModelCode: mapping.UpstreamModelCode, Status: mapping.Status, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(mapping.UpdatedAt)})
+	return s.q.ManageUpdateProviderMapping(ctx, dbgen.ManageUpdateProviderMappingParams{ID: mapping.ID, ProviderID: mapping.ProviderID, UpstreamModelCode: mapping.UpstreamModelCode, Priority: mapping.Priority, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(mapping.UpdatedAt)})
 }
 func (s *managementSession) DeleteProviderMapping(ctx context.Context, providerID, mappingID int64, at time.Time) error {
 	return s.q.ManageDeleteProviderMapping(ctx, dbgen.ManageDeleteProviderMappingParams{ID: mappingID, ProviderID: providerID, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(at)})

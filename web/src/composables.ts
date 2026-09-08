@@ -2,6 +2,7 @@ import { computed, ref, onBeforeUnmount, type Ref } from 'vue'
 import { api, errorText } from './api'
 import type { Page } from './types'
 import { activeLocale, t } from './i18n'
+import { showErrorToast } from './toast'
 
 export function useListSearch<T>(
   items: Ref<T[]>,
@@ -68,6 +69,7 @@ export function useAction() {
       await work()
     } catch (e) {
       error.value = errorText(e)
+      showErrorToast(error.value)
     } finally {
       busy.value = false
     }
@@ -89,7 +91,7 @@ export function dateOnly(value: string | null | undefined) {
     : t('common.none')
 }
 export function count(value: number | null) {
-  return value === null ? '—' : new Intl.NumberFormat(activeLocale.value).format(value)
+  return value === null ? '-' : new Intl.NumberFormat(activeLocale.value).format(value)
 }
 export function validText(value: string, bytes: number, required = true) {
   return (

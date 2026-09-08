@@ -166,10 +166,10 @@ func (s *SecurityStore) Create(ctx context.Context, actor admin.Identity, key ap
 	} else if err != nil {
 		return appsec.ErrUnavailable
 	}
-	if err := q.CreateAccessKey(ctx, dbgen.CreateAccessKeyParams{ID: key.ID, OrganizationID: key.OrganizationID, PrincipalID: key.PrincipalID, KeyHash: key.Hash, KeyPrefix: key.Prefix, Name: key.Name, ExpiresAt: nullableTime(key.ExpiresAt), CreatedBy: actorRef(actor.ID), CreatedAt: pgTime(key.CreatedAt)}); err != nil {
+	if err := q.CreateAccessKey(ctx, dbgen.CreateAccessKeyParams{ID: key.ID, OrganizationID: key.OrganizationID, PrincipalID: key.PrincipalID, KeyHash: key.Hash, MaskedKey: key.MaskedKey, Name: key.Name, ExpiresAt: nullableTime(key.ExpiresAt), CreatedBy: actorRef(actor.ID), CreatedAt: pgTime(key.CreatedAt)}); err != nil {
 		return appsec.ErrUnavailable
 	}
-	after, _ := json.Marshal(map[string]any{"status": "ACTIVE", "principalId": strconv.FormatInt(key.PrincipalID, 10), "keyPrefix": key.Prefix})
+	after, _ := json.Marshal(map[string]any{"status": "ACTIVE", "principalId": strconv.FormatInt(key.PrincipalID, 10), "maskedKey": key.MaskedKey})
 	if err := s.appendLog(ctx, q, actor, "ACCESS_KEY", operation.AccessKeyCreate, "ACCESS_KEY", key.ID, key.Name, "SUCCESS", "", meta, nil, after, ""); err != nil {
 		return appsec.ErrUnavailable
 	}

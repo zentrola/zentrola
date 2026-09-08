@@ -22,8 +22,8 @@ type AccessKey struct {
 	PrincipalID int64
 	// 完整 Access Key 的 SHA-256 摘要，32 bytes
 	KeyHash []byte
-	// 仅用于识别的 Key 前缀，不能用于认证
-	KeyPrefix string
+	// 脱敏后的 Access Key，仅用于识别和展示，不能用于认证
+	MaskedKey string
 	// 凭证名称
 	Name string
 	// 凭证状态：ACTIVE=启用；DISABLED=停用；REVOKED=已撤销
@@ -144,8 +144,6 @@ type AiProvider struct {
 	ProviderName string
 	// 供应方类型：OFFICIAL=官方供应方
 	ProviderType string
-	// Anthropic 兼容协议上游基础地址；NULL=未配置
-	AnthropicBaseUrl *string
 	// 状态：ACTIVE=启用；DISABLED=停用
 	Status string
 	// 创建者引用：system、admin:<id> 或 principal:<id>
@@ -156,8 +154,6 @@ type AiProvider struct {
 	CreatedAt pgtype.Timestamptz
 	// 更新时间，UTC
 	UpdatedAt pgtype.Timestamptz
-	// OpenAI 兼容协议上游基础地址；NULL=未配置
-	OpenaiBaseUrl *string
 	// 服务商官方网站；NULL=未填写
 	OfficialWebsite *string
 	// 是否通过服务商专属出站代理访问上游
@@ -178,36 +174,6 @@ type AiProvider struct {
 	ProxyHeadersNonce []byte
 	// 代理 Header 密文的根密钥版本
 	ProxyHeadersKeyVersion *int32
-}
-
-// 主体视角的一次 AI 请求事实；无逻辑删除
-type AiRequest struct {
-	// 主键，由应用侧生成的正数 64-bit ID
-	ID int64
-	// 所属组织 ID
-	OrganizationID int64
-	// 全链路请求标识
-	RequestID string
-	// 已识别的治理主体 ID
-	PrincipalID int64
-	// 已识别的逻辑模型 ID；NULL=模型未识别
-	ModelID *int64
-	// 使用场景：MODEL_GATEWAY=模型网关调用
-	UsageScene string
-	// 客户端协议：ANTHROPIC=Messages；OPENAI=Chat Completions
-	ClientProtocol string
-	// 请求开始时间，UTC
-	RequestAt pgtype.Timestamptz
-	// 请求结束时间，UTC
-	CompletedAt pgtype.Timestamptz
-	// 请求耗时，毫秒
-	LatencyMs int64
-	// 调用最终状态：SUCCESS=成功；FAILED=失败；CANCELLED=客户端取消
-	Status string
-	// 稳定大写错误码；NULL=无错误
-	ErrorType *string
-	// 事实记录创建时间，UTC
-	CreatedAt pgtype.Timestamptz
 }
 
 // 组织持有的供应方调用资源；归属于 Provider
@@ -382,6 +348,24 @@ type PrincipalGroup struct {
 	UpdatedAt pgtype.Timestamptz
 }
 
+// 服务商支持的协议及对应上游基础地址
+type ProviderEndpoint struct {
+	// 所属服务商 ID
+	ProviderID int64
+	// 协议类型：OPENAI_CHAT=Chat Completions；OPENAI_RESPONSES=Responses；ANTHROPIC_MESSAGES=Messages
+	ProtocolType string
+	// 该协议对应的上游基础地址
+	BaseUrl string
+	// 创建者引用：system、admin:<id> 或 principal:<id>
+	CreatedBy string
+	// 更新者引用：system、admin:<id> 或 principal:<id>
+	UpdatedBy string
+	// 创建时间，UTC
+	CreatedAt pgtype.Timestamptz
+	// 更新时间，UTC
+	UpdatedAt pgtype.Timestamptz
+}
+
 // 供应方与逻辑模型的多对多映射
 type ProviderModel struct {
 	// 主键，由应用侧生成的正数 64-bit ID
@@ -394,10 +378,6 @@ type ProviderModel struct {
 	ModelID int64
 	// 实际发送到上游的模型编码
 	UpstreamModelCode string
-	// 上游协议：ANTHROPIC=Messages；OPENAI=Chat Completions
-	ProtocolType string
-	// 状态：ACTIVE=启用；DISABLED=停用
-	Status string
 	// 创建者引用：system、admin:<id> 或 principal:<id>
 	CreatedBy string
 	// 更新者引用：system、admin:<id> 或 principal:<id>
@@ -406,6 +386,8 @@ type ProviderModel struct {
 	CreatedAt pgtype.Timestamptz
 	// 更新时间，UTC
 	UpdatedAt pgtype.Timestamptz
+	// 路由优先级，数值越小越优先
+	Priority int32
 }
 
 // 一次真实上游调用 Attempt 的用量事实；无逻辑删除
@@ -456,4 +438,6 @@ type UsageRecord struct {
 	ErrorType *string
 	// 事实记录创建时间，UTC
 	CreatedAt pgtype.Timestamptz
+	// 客户端协议：OPENAI_CHAT=Chat Completions；OPENAI_RESPONSES=Responses；ANTHROPIC_MESSAGES=Messages
+	ClientProtocol string
 }

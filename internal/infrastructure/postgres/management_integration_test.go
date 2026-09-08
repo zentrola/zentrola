@@ -139,6 +139,9 @@ func TestStage3Integration(t *testing.T) {
 	}
 	sid := func(id int64) string { return strconv.FormatInt(id, 10) }
 	member := stage3Data[mgmt.Member](t, request("POST", "/api/v1/members", map[string]string{"name": "开发者", "remark": "测试成员"}, 201))
+	if member.Status != "DISABLED" {
+		t.Fatalf("new member status=%s, want DISABLED", member.Status)
+	}
 	group := stage3Data[mgmt.Group](t, request("POST", "/api/v1/groups", map[string]string{"code": "engineering", "name": "研发"}, 201))
 	models := stage3Data[struct {
 		Items []mgmt.Model `json:"items"`
@@ -146,7 +149,7 @@ func TestStage3Integration(t *testing.T) {
 	providers := stage3Data[struct {
 		Items []mgmt.Provider `json:"items"`
 	}](t, request("GET", "/api/v1/providers", nil, 200)).Items
-	if len(models) != 2 || len(providers) != 1 {
+	if len(models) != 4 || len(providers) != 1 {
 		t.Fatal("bootstrap catalogs unavailable")
 	}
 	model := models[0]
@@ -155,8 +158,12 @@ func TestStage3Integration(t *testing.T) {
 		Code: "management-mapped-model", Name: "管理端映射模型", InputModalities: []string{"TEXT"}, OutputModalities: []string{"TEXT"},
 	}, 201))
 	customProviderInput := mgmt.ProviderInput{
-		Name: "管理端服务商", OpenAIBaseURL: "https://provider.example.com/v1",
-		Mappings: []mgmt.ProviderMappingInput{{ModelID: mappedModel.ID, UpstreamModelCode: "vendor-model-v1", ProtocolType: "OPENAI", Status: "ACTIVE"}},
+		Name:      "管理端服务商",
+		Endpoints: []mgmt.ProviderEndpoint{{ProtocolType: "OPENAI_CHAT", BaseURL: "https://provider.example.com/v1"}},
+		Mappings: []mgmt.ProviderMappingInput{
+			{ModelID: mappedModel.ID, UpstreamModelCode: "vendor-model-v1"},
+			{ModelID: model.ID, UpstreamModelCode: "vendor-model-v2"},
+		},
 	}
 	customProvider := stage3Data[mgmt.Provider](t, request("POST", "/api/v1/providers", customProviderInput, 201))
 	t.Cleanup(func() {
@@ -165,24 +172,34 @@ func TestStage3Integration(t *testing.T) {
 		if _, err := pool.Exec(cleanup, "DELETE FROM provider_model WHERE provider_id=$1", customProvider.ID); err != nil {
 			t.Error(err)
 		}
+		if _, err := pool.Exec(cleanup, "DELETE FROM provider_endpoint WHERE provider_id=$1", customProvider.ID); err != nil {
+			t.Error(err)
+		}
 		if _, err := pool.Exec(cleanup, "DELETE FROM ai_provider WHERE id=$1", customProvider.ID); err != nil {
 			t.Error(err)
 		}
 	})
 	customProviderPath := "/api/v1/providers/" + sid(customProvider.ID)
 	providerDetail := stage3Data[mgmt.ProviderDetail](t, request("GET", customProviderPath, nil, 200))
-	if len(providerDetail.Mappings) != 1 || providerDetail.Mappings[0].ModelID != mappedModel.ID || providerDetail.Mappings[0].UpstreamModelCode != "vendor-model-v1" || providerDetail.Mappings[0].ProtocolType != "OPENAI" || providerDetail.Mappings[0].Status != "ACTIVE" {
+	if len(providerDetail.Mappings) != 2 || providerDetail.Mappings[0].ModelID != mappedModel.ID || providerDetail.Mappings[0].UpstreamModelCode != "vendor-model-v1" || providerDetail.Mappings[0].Priority != 100 {
 		t.Fatalf("unexpected provider mappings: %+v", providerDetail.Mappings)
 	}
 	mappingID := providerDetail.Mappings[0].ID
 	customProviderInput.Mappings[0].UpstreamModelCode = "vendor-model-v2"
-	customProviderInput.Mappings[0].Status = "DISABLED"
+	customProviderInput.Mappings = customProviderInput.Mappings[:1]
 	stage3Data[mgmt.Provider](t, request("PUT", customProviderPath, customProviderInput, 200))
 	providerDetail = stage3Data[mgmt.ProviderDetail](t, request("GET", customProviderPath, nil, 200))
-	if len(providerDetail.Mappings) != 1 || providerDetail.Mappings[0].ID != mappingID || providerDetail.Mappings[0].UpstreamModelCode != "vendor-model-v2" || providerDetail.Mappings[0].Status != "DISABLED" {
+	if len(providerDetail.Mappings) != 1 || providerDetail.Mappings[0].ID != mappingID || providerDetail.Mappings[0].UpstreamModelCode != "vendor-model-v2" {
 		t.Fatalf("provider mapping update not preserved: %+v", providerDetail.Mappings)
 	}
+	var deletedMappings int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM provider_model WHERE provider_id=$1 AND is_deleted", customProvider.ID).Scan(&deletedMappings); err != nil || deletedMappings != 1 {
+		t.Fatalf("unchecked mapping was not logically deleted: count=%d err=%v", deletedMappings, err)
+	}
 	memberPath := "/api/v1/members/" + sid(member.ID)
+	createdKey := stage3Data[appsec.CreatedKey](t, request("POST", memberPath+"/keys", map[string]string{"name": "Claude Code"}, 201))
+	virtualKey := createdKey.Key
+	request("PATCH", memberPath+"/status", map[string]string{"status": "ACTIVE"}, 200)
 	groupPath := "/api/v1/groups/" + sid(group.ID)
 	memberLink := groupPath + "/members/" + sid(member.ID)
 	modelLink := groupPath + "/models/" + sid(model.ID)
@@ -219,10 +236,7 @@ func TestStage3Integration(t *testing.T) {
 		}
 	})
 
-	var virtualKey string
 	t.Run("key issuance and member model status", func(t *testing.T) {
-		created := stage3Data[appsec.CreatedKey](t, request("POST", memberPath+"/keys", map[string]string{"name": "Claude Code"}, 201))
-		virtualKey = created.Key
 		if _, err := keys.Authenticate(ctx, virtualKey); err != nil {
 			t.Fatal(err)
 		}
@@ -253,7 +267,7 @@ func TestStage3Integration(t *testing.T) {
 		}
 		request("PATCH", groupPath+"/status", map[string]string{"status": "ACTIVE"}, 200)
 		allowed(true)
-		request("POST", "/api/v1/access-keys/"+sid(created.ID)+"/revoke", nil, 200)
+		request("POST", "/api/v1/access-keys/"+sid(createdKey.ID)+"/revoke", nil, 200)
 		if _, err := keys.Authenticate(ctx, virtualKey); !errors.Is(err, appsec.ErrUnauthenticated) {
 			t.Fatal("revoked key accepted")
 		}
@@ -268,7 +282,7 @@ func TestStage3Integration(t *testing.T) {
 		}
 		olderResponse := request("GET", memberPath+"/keys?after="+*first.Next, nil, 200)
 		older := stage3Data[keyPage](t, olderResponse)
-		if len(older.Items) != 1 || older.Items[0].ID != created.ID || older.Next != nil {
+		if len(older.Items) != 1 || older.Items[0].ID != createdKey.ID || older.Next != nil {
 			t.Fatal("key pagination must return older keys without duplicates")
 		}
 		allResponse := request("GET", memberPath+"/keys", nil, 200)
@@ -457,8 +471,9 @@ func TestStage3Integration(t *testing.T) {
 		path := "/api/v1/members/" + sid(m.ID)
 		g := stage3Data[mgmt.Group](t, request("POST", "/api/v1/groups", map[string]string{"code": "delete-member", "name": "删除测试组"}, 201))
 		groupMembers := "/api/v1/groups/" + sid(g.ID) + "/members"
-		request("PUT", groupMembers+"/"+sid(m.ID), nil, 200)
 		created := stage3Data[appsec.CreatedKey](t, request("POST", path+"/keys", map[string]string{"name": "删除测试 Key"}, 201))
+		request("PATCH", path+"/status", map[string]string{"status": "ACTIVE"}, 200)
+		request("PUT", groupMembers+"/"+sid(m.ID), nil, 200)
 		broken := mgmt.New(NewManagementStore(pool, failedAuditIDs{}), ids, cipher, tester)
 		if err := broken.DeleteMember(ctx, actor, m.ID, appsec.RequestMeta{}); !errors.Is(err, appsec.ErrUnavailable) {
 			t.Fatalf("audit failure ignored: %v", err)
@@ -621,6 +636,9 @@ func TestStage3Integration(t *testing.T) {
 		}
 
 		linkedMember := stage3Data[mgmt.Member](t, request("POST", "/api/v1/members", map[string]string{"name": "分组删除校验用户"}, 201))
+		linkedMemberPath := "/api/v1/members/" + sid(linkedMember.ID)
+		request("POST", linkedMemberPath+"/keys", map[string]string{"name": "分组权限测试 Key"}, 201)
+		request("PATCH", linkedMemberPath+"/status", map[string]string{"status": "ACTIVE"}, 200)
 		request("PUT", path+"/members/"+sid(linkedMember.ID), nil, 200)
 		permission := func(want bool) {
 			t.Helper()

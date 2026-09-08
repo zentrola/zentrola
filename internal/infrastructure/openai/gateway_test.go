@@ -54,6 +54,26 @@ func TestNativeOpenAIForwarding(t *testing.T) {
 		t.Fatal("rejected URL reached transport")
 	}
 }
+
+func TestResponsesForwarding(t *testing.T) {
+	c := NewGatewayClient(time.Second)
+	c.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.String() != "https://api.example.com/v1/responses" {
+			t.Fatalf("unexpected Responses URL: %s", r.URL)
+		}
+		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"id":"resp_1"}`))}, nil
+	})
+	response, err := c.Open(context.Background(), gw.Route{BaseURL: "https://api.example.com/v1"}, gw.Request{
+		Protocol: gw.OpenAIResponsesProtocol,
+		Path:     "/v1/responses",
+		Body:     []byte(`{"model":"system-model","input":"hello"}`),
+	}, []byte("upstream-only"))
+	if err != nil || response.Status != 200 {
+		t.Fatalf("Responses forwarding failed: response=%+v err=%v", response, err)
+	}
+	response.Body.Close()
+}
+
 func TestRedirectAndTimeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		data, _ := io.ReadAll(r.Body)

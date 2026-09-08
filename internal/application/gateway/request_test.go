@@ -27,3 +27,28 @@ func TestRejectAmbiguousGatewayJSON(t *testing.T) {
 		}
 	}
 }
+
+func TestRemoveUnsupportedToolTypesPreservesOtherJSON(t *testing.T) {
+	body := []byte(`{"model":"claude-sonnet-5","future":9007199254740993,"tools":[{"name":"read","description":"advisor_20260301","input_schema":{"type":"object"}},{"type":"advisor_20260301","name":"advisor","model":"claude-opus-5"},{"type":"web_search_20260209","name":"web_search"}],"messages":[{"role":"user","content":"keep verbatim"}]}`)
+	parsed, err := Parse(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	filtered, removed, err := parsed.RemoveToolTypes(body, "advisor_20260301")
+	if err != nil || removed != 1 {
+		t.Fatalf("removed=%d err=%v", removed, err)
+	}
+	got := string(filtered)
+	for _, preserved := range []string{"9007199254740993", `"description":"advisor_20260301"`, `"type":"web_search_20260209"`, `"content":"keep verbatim"`} {
+		if !strings.Contains(got, preserved) {
+			t.Fatalf("filtered request lost %s: %s", preserved, got)
+		}
+	}
+	if strings.Contains(got, `"type":"advisor_20260301"`) {
+		t.Fatalf("advisor tool was not removed: %s", got)
+	}
+	unchanged, removed, err := parsed.RemoveToolTypes(body, "unsupported_elsewhere")
+	if err != nil || removed != 0 || string(unchanged) != string(body) {
+		t.Fatal("unmatched tool filtering changed request")
+	}
+}

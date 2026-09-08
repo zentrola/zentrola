@@ -12,24 +12,17 @@ import (
 )
 
 const catalogMappingHistory = `-- name: CatalogMappingHistory :many
-SELECT provider_id, upstream_model_code, protocol_type,status,is_deleted FROM provider_model WHERE model_id=$1 AND protocol_type=$2
+SELECT provider_id,upstream_model_code,is_deleted FROM provider_model WHERE model_id=$1
 `
-
-type CatalogMappingHistoryParams struct {
-	ModelID      int64
-	ProtocolType string
-}
 
 type CatalogMappingHistoryRow struct {
 	ProviderID        int64
 	UpstreamModelCode string
-	ProtocolType      string
-	Status            string
 	IsDeleted         bool
 }
 
-func (q *Queries) CatalogMappingHistory(ctx context.Context, arg CatalogMappingHistoryParams) ([]CatalogMappingHistoryRow, error) {
-	rows, err := q.db.Query(ctx, catalogMappingHistory, arg.ModelID, arg.ProtocolType)
+func (q *Queries) CatalogMappingHistory(ctx context.Context, modelID int64) ([]CatalogMappingHistoryRow, error) {
+	rows, err := q.db.Query(ctx, catalogMappingHistory, modelID)
 	if err != nil {
 		return nil, err
 	}
@@ -37,13 +30,7 @@ func (q *Queries) CatalogMappingHistory(ctx context.Context, arg CatalogMappingH
 	items := []CatalogMappingHistoryRow{}
 	for rows.Next() {
 		var i CatalogMappingHistoryRow
-		if err := rows.Scan(
-			&i.ProviderID,
-			&i.UpstreamModelCode,
-			&i.ProtocolType,
-			&i.Status,
-			&i.IsDeleted,
-		); err != nil {
+		if err := rows.Scan(&i.ProviderID, &i.UpstreamModelCode, &i.IsDeleted); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -78,41 +65,18 @@ func (q *Queries) CatalogModelHistory(ctx context.Context, modelCode string) ([]
 	return items, nil
 }
 
-const createDeepSeekOpenAIModel = `-- name: CreateDeepSeekOpenAIModel :exec
-INSERT INTO provider_model(id,provider_id,model_id,upstream_model_code,protocol_type,status,created_by,updated_by,created_at,updated_at)
-VALUES($1,$2,$3,$4,'OPENAI',$5,'system','system',$6,$6)
-`
-
-type CreateDeepSeekOpenAIModelParams struct {
-	ID                int64
-	ProviderID        int64
-	ModelID           int64
-	UpstreamModelCode string
-	Status            string
-	CreatedAt         pgtype.Timestamptz
-}
-
-func (q *Queries) CreateDeepSeekOpenAIModel(ctx context.Context, arg CreateDeepSeekOpenAIModelParams) error {
-	_, err := q.db.Exec(ctx, createDeepSeekOpenAIModel,
-		arg.ID,
-		arg.ProviderID,
-		arg.ModelID,
-		arg.UpstreamModelCode,
-		arg.Status,
-		arg.CreatedAt,
-	)
-	return err
-}
-
 const deepSeekProviderHistory = `-- name: DeepSeekProviderHistory :many
-SELECT id, provider_type, anthropic_base_url,openai_base_url FROM ai_provider WHERE provider_code='deepseek-official'
+SELECT p.id,p.provider_type,
+       coalesce((SELECT base_url FROM provider_endpoint WHERE provider_id=p.id AND protocol_type='ANTHROPIC_MESSAGES'), ''::varchar(2048))::text AS anthropic_base_url,
+       coalesce((SELECT base_url FROM provider_endpoint WHERE provider_id=p.id AND protocol_type='OPENAI_CHAT'), ''::varchar(2048))::text AS openai_base_url
+FROM ai_provider p WHERE p.provider_code='deepseek-official'
 `
 
 type DeepSeekProviderHistoryRow struct {
 	ID               int64
 	ProviderType     string
-	AnthropicBaseUrl *string
-	OpenaiBaseUrl    *string
+	AnthropicBaseUrl string
+	OpenaiBaseUrl    string
 }
 
 // 包括软删除历史，防止 setup 命令恢复或覆盖管理员的配置。
@@ -141,11 +105,18 @@ func (q *Queries) DeepSeekProviderHistory(ctx context.Context) ([]DeepSeekProvid
 	return items, nil
 }
 
-const setupDeepSeekOpenAIURL = `-- name: SetupDeepSeekOpenAIURL :exec
-UPDATE ai_provider SET openai_base_url='https://api.deepseek.com' WHERE id=$1 AND openai_base_url IS NULL
+const setupDeepSeekOpenAIEndpoint = `-- name: SetupDeepSeekOpenAIEndpoint :exec
+INSERT INTO provider_endpoint(provider_id,protocol_type,base_url,created_by,updated_by,created_at,updated_at)
+VALUES($1,'OPENAI_CHAT','https://api.deepseek.com','system','system',$2,$2)
+ON CONFLICT(provider_id,protocol_type) DO NOTHING
 `
 
-func (q *Queries) SetupDeepSeekOpenAIURL(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, setupDeepSeekOpenAIURL, id)
+type SetupDeepSeekOpenAIEndpointParams struct {
+	ProviderID int64
+	CreatedAt  pgtype.Timestamptz
+}
+
+func (q *Queries) SetupDeepSeekOpenAIEndpoint(ctx context.Context, arg SetupDeepSeekOpenAIEndpointParams) error {
+	_, err := q.db.Exec(ctx, setupDeepSeekOpenAIEndpoint, arg.ProviderID, arg.CreatedAt)
 	return err
 }

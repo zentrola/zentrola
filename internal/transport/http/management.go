@@ -287,7 +287,7 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 	}, func(v mgmt.Operation) int64 { return v.ID }))
 	// @Summary 成员 Access Key 列表
 	// @Tags 访问密钥
-	// @Description 按 ID 倒序分页，最新签发的密钥在前；limit=1 获取最新一条，将 nextCursor 作为 after 查询更早的密钥。仅返回识别前缀，不返回完整密钥。
+	// @Description 按 ID 倒序分页，最新签发的密钥在前；limit=1 获取最新一条，将 nextCursor 作为 after 查询更早的密钥。仅返回脱敏密钥，不返回完整密钥。
 	// @Produce json
 	// @Security AdminBearer
 	// @Param id path string true "业务 ID（正整数字符串）"

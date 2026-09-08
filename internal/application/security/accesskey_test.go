@@ -50,8 +50,9 @@ func TestCreateVirtualKeyFormatAndAuthentication(t *testing.T) {
 	if err != nil || len(entropy) != 32 {
 		t.Fatal("virtual key must retain 32 random bytes")
 	}
-	if created.Prefix != created.Key[:11] || store.row.Prefix != created.Prefix {
-		t.Fatal("unexpected display prefix")
+	wantMaskedKey := created.Key[:11] + "********" + created.Key[len(created.Key)-4:]
+	if created.MaskedKey != wantMaskedKey || store.row.MaskedKey != created.MaskedKey {
+		t.Fatal("unexpected masked key")
 	}
 	digest := sha256.Sum256([]byte(created.Key))
 	if !bytes.Equal(store.row.Hash, digest[:]) {
@@ -61,8 +62,8 @@ func TestCreateVirtualKeyFormatAndAuthentication(t *testing.T) {
 	if err != nil || identity != store.identity {
 		t.Fatal("issued key did not authenticate")
 	}
-	if _, err := keys.Authenticate(context.Background(), created.Prefix); !errors.Is(err, ErrUnauthenticated) {
-		t.Fatal("display prefix must not authenticate")
+	if _, err := keys.Authenticate(context.Background(), created.MaskedKey); !errors.Is(err, ErrUnauthenticated) {
+		t.Fatal("masked key must not authenticate")
 	}
 }
 

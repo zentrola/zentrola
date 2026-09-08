@@ -50,7 +50,7 @@ type AdminStore interface {
 type KeyRecord struct {
 	ID, OrganizationID, PrincipalID int64
 	Hash                            []byte
-	Prefix, Name                    string
+	MaskedKey, Name                 string
 	ExpiresAt                       *time.Time
 	CreatedAt                       time.Time
 }

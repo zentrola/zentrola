@@ -26,7 +26,7 @@ func TestHealthAndRequestCorrelation(t *testing.T) {
 	)
 	router := NewRouter(logging.New(&logs, "json", slog.LevelInfo), service, config.CORS{}, time.Second, "prod")
 	seen := map[string]bool{}
-	for path, want := range map[string]int{"/health/live": 200, "/health/ready": 503, "/": 404, "/missing": 404} {
+	for path, want := range map[string]int{"/health/live": 200, "/health/ready": 503, "/missing": 404} {
 		req := httptest.NewRequest("GET", path+"?token=query-secret", nil)
 		req.Header.Set("X-Request-ID", "untrusted-client-id")
 		req.Header.Set("Authorization", "Bearer header-secret")
@@ -55,6 +55,25 @@ func TestHealthAndRequestCorrelation(t *testing.T) {
 		if strings.Contains(logs.String(), secret) {
 			t.Fatalf("secret leaked: %s", secret)
 		}
+	}
+}
+
+func TestRootReturnsReadyMessage(t *testing.T) {
+	router := NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), health.New(), config.CORS{}, time.Second, "prod")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got status %d, want %d", rec.Code, http.StatusOK)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
+		t.Fatalf("got Content-Type %q", got)
+	}
+	if got := rec.Body.String(); got != "Zentrola is ready" {
+		t.Fatalf("got body %q", got)
+	}
+	if got := rec.Header().Get("X-Request-ID"); !strings.HasPrefix(got, "req_") {
+		t.Fatalf("bad request ID: %q", got)
 	}
 }
 
@@ -119,6 +138,51 @@ func TestMiddlewarePreservesStreamingAndCancellation(t *testing.T) {
 	handler.ServeHTTP(rec, httptest.NewRequest("GET", "/stream", nil).WithContext(ctx))
 	if !rec.Flushed || rec.Body.String() != "data: test\n\n" {
 		t.Fatal("stream was altered or not flushed")
+	}
+}
+
+func TestDevelopmentAccessLogCapturesRedactedBodies(t *testing.T) {
+	var logs bytes.Buffer
+	logger := logging.New(&logs, "json", slog.LevelInfo)
+	handler := requestID(accessLog(logger, "dev")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = io.WriteString(w, `{"error":{"code":"MODEL_PERMISSION_DENIED","message":"Model permission denied."},"accessToken":"response-secret"}`)
+	})))
+	req := httptest.NewRequest(http.MethodPost, "/anthropic/v1/messages?token=query-secret", strings.NewReader(`{"model":"claude-sonnet","messages":[{"role":"user","content":"private-prompt"}],"password":"request-secret"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	output := logs.String()
+	for _, required := range []string{"request_time", "method", "request_id", "duration_ms", "path", "status", "request_bytes", "response_bytes", "request_body", "response_body", "claude-sonnet", "MODEL_PERMISSION_DENIED"} {
+		if !strings.Contains(output, required) {
+			t.Fatalf("development access log missing %s: %s", required, output)
+		}
+	}
+	if strings.Count(output, `"request_id"`) != 1 {
+		t.Fatalf("request ID must appear once: %s", output)
+	}
+	for _, secret := range []string{"query-secret", "private-prompt", "request-secret", "response-secret"} {
+		if strings.Contains(output, secret) {
+			t.Fatalf("development access log leaked %s", secret)
+		}
+	}
+}
+
+func TestProductionAccessLogOmitsBodies(t *testing.T) {
+	var logs bytes.Buffer
+	logger := logging.New(&logs, "json", slog.LevelInfo)
+	handler := requestID(accessLog(logger, "prod")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		_, _ = io.WriteString(w, `{"value":"response-value"}`)
+	})))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/test", strings.NewReader(`{"value":"request-value"}`)))
+	output := logs.String()
+	if strings.Contains(output, "request_body") || strings.Contains(output, "response_body") || strings.Contains(output, "request-value") || strings.Contains(output, "response-value") {
+		t.Fatalf("production access log captured bodies: %s", output)
 	}
 }
 

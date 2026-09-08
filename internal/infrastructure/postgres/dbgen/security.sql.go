@@ -98,7 +98,7 @@ func (q *Queries) AuthenticateAccessKey(ctx context.Context, arg AuthenticateAcc
 }
 
 const createAccessKey = `-- name: CreateAccessKey :exec
-INSERT INTO access_key (id,organization_id,principal_id,key_hash,key_prefix,name,status,expires_at,created_by,updated_by,created_at,updated_at)
+INSERT INTO access_key (id,organization_id,principal_id,key_hash,masked_key,name,status,expires_at,created_by,updated_by,created_at,updated_at)
 VALUES ($1,$2,$3,$4,$5,$6,'ACTIVE',$7,$8,$8,$9,$9)
 `
 
@@ -107,7 +107,7 @@ type CreateAccessKeyParams struct {
 	OrganizationID int64
 	PrincipalID    int64
 	KeyHash        []byte
-	KeyPrefix      string
+	MaskedKey      string
 	Name           string
 	ExpiresAt      pgtype.Timestamptz
 	CreatedBy      string
@@ -120,7 +120,7 @@ func (q *Queries) CreateAccessKey(ctx context.Context, arg CreateAccessKeyParams
 		arg.OrganizationID,
 		arg.PrincipalID,
 		arg.KeyHash,
-		arg.KeyPrefix,
+		arg.MaskedKey,
 		arg.Name,
 		arg.ExpiresAt,
 		arg.CreatedBy,
@@ -272,7 +272,7 @@ func (q *Queries) GetAdminForLogin(ctx context.Context, username string) (GetAdm
 }
 
 const getKeyForRevoke = `-- name: GetKeyForRevoke :one
-SELECT id, is_deleted, organization_id, principal_id, key_hash, key_prefix, name, status, expires_at, last_used_at, revoked_at, created_by, updated_by, created_at, updated_at FROM access_key WHERE organization_id=$1 AND id=$2 AND is_deleted=false FOR UPDATE
+SELECT id, is_deleted, organization_id, principal_id, key_hash, masked_key, name, status, expires_at, last_used_at, revoked_at, created_by, updated_by, created_at, updated_at FROM access_key WHERE organization_id=$1 AND id=$2 AND is_deleted=false FOR UPDATE
 `
 
 type GetKeyForRevokeParams struct {
@@ -289,7 +289,7 @@ func (q *Queries) GetKeyForRevoke(ctx context.Context, arg GetKeyForRevokeParams
 		&i.OrganizationID,
 		&i.PrincipalID,
 		&i.KeyHash,
-		&i.KeyPrefix,
+		&i.MaskedKey,
 		&i.Name,
 		&i.Status,
 		&i.ExpiresAt,
@@ -306,7 +306,7 @@ func (q *Queries) GetKeyForRevoke(ctx context.Context, arg GetKeyForRevokeParams
 const getMemberForKey = `-- name: GetMemberForKey :one
 SELECT p.id, p.is_deleted, p.organization_id, p.principal_type, p.name, p.remark, p.status, p.created_by, p.updated_by, p.created_at, p.updated_at FROM principal p JOIN organization o ON o.id=p.organization_id
 WHERE p.organization_id=$1 AND p.id=$2 AND p.principal_type='MEMBER' AND p.is_deleted=false
-AND p.status='ACTIVE' AND o.status='ACTIVE' AND o.is_deleted=false FOR UPDATE OF p
+AND o.status='ACTIVE' AND o.is_deleted=false FOR UPDATE OF p
 `
 
 type GetMemberForKeyParams struct {
