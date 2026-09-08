@@ -8,6 +8,8 @@ import (
 	"sync"
 )
 
+var ErrFileInUse = errors.New("log file already in use")
+
 // RotatingFile 按大小轮转 JSON Lines 日志。每次 Write 对应一整条日志，不会拆分记录。
 type RotatingFile struct {
 	path       string
@@ -15,6 +17,7 @@ type RotatingFile struct {
 	maxBackups int
 	mu         sync.Mutex
 	file       *os.File
+	lock       *os.File
 	size       int64
 }
 
@@ -22,8 +25,13 @@ func OpenRotatingFile(path string, maxSizeMB, maxBackups int) (*RotatingFile, er
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return nil, err
 	}
-	writer := &RotatingFile{path: path, maxBytes: int64(maxSizeMB) << 20, maxBackups: maxBackups}
+	lock, err := acquireFileLock(path + ".lock")
+	if err != nil {
+		return nil, err
+	}
+	writer := &RotatingFile{path: path, maxBytes: int64(maxSizeMB) << 20, maxBackups: maxBackups, lock: lock}
 	if err := writer.open(); err != nil {
+		_ = lock.Close()
 		return nil, err
 	}
 	return writer, nil
@@ -48,12 +56,16 @@ func (w *RotatingFile) Write(data []byte) (int, error) {
 func (w *RotatingFile) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.file == nil {
-		return nil
+	var result error
+	if w.file != nil {
+		result = w.file.Close()
+		w.file = nil
 	}
-	err := w.file.Close()
-	w.file = nil
-	return err
+	if w.lock != nil {
+		result = errors.Join(result, w.lock.Close())
+		w.lock = nil
+	}
+	return result
 }
 
 func (w *RotatingFile) open() error {

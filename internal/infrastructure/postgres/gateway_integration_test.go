@@ -302,6 +302,11 @@ func TestStage4Integration(t *testing.T) {
 		if resp.Header.Get("Request-Id") != "upstream-request-id" || resp.Header.Get("Anthropic-Ratelimit-Requests-Remaining") != "10" {
 			t.Fatal("protocol response headers lost")
 		}
+		for _, field := range []string{"upstream_request_id", "upstream-request-id", "upstream_headers_ms", "first_byte_ms", "provider_id", "resource_id", "model_id"} {
+			if !strings.Contains(logs.String(), field) {
+				t.Fatalf("gateway access log missing %s: %s", field, logs.String())
+			}
+		}
 		resultBody := `{"model":"claude-sonnet","test_scenario":"tool_result","messages":[{"role":"assistant","content":[{"type":"tool_use","id":"toolu_123","name":"read_file","input":{"path":"sample.txt"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_123","content":"file contents","future":9007199254740993}]}]}`
 		if data := read(request("POST", path, key.Key, resultBody, 200)); !strings.Contains(data, "Tool result received.") {
 			t.Fatal("tool loop failed")

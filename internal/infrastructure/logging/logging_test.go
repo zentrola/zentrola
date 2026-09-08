@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 func TestPrettyConsoleAndJSONFileShareRecord(t *testing.T) {
@@ -23,12 +25,17 @@ func TestPrettyConsoleAndJSONFileShareRecord(t *testing.T) {
 		Level:         slog.LevelInfo,
 		AddSource:     true,
 	})
-	ctx := WithRequestID(context.Background(), "request-123")
+	provider := sdktrace.NewTracerProvider()
+	defer func() { _ = provider.Shutdown(context.Background()) }()
+	ctx, span := provider.Tracer("logging-test").Start(context.Background(), "request")
+	defer span.End()
+	traceID := span.SpanContext().TraceID().String()
+	spanID := span.SpanContext().SpanID().String()
 	logger.InfoContext(ctx, "service started", "status", 200, "detail", "two words")
 
 	pretty := console.String()
 	for _, expected := range []string{
-		" INFO  ", "[request_id=request-123]", "[logging_test.go:",
+		" INFO  ", "[" + traceID + " " + spanID + "]", "[logging_test.go:",
 		" - service started", "status=200", `detail="two words"`,
 	} {
 		if !strings.Contains(pretty, expected) {
@@ -43,7 +50,7 @@ func TestPrettyConsoleAndJSONFileShareRecord(t *testing.T) {
 	if err := json.Unmarshal(file.Bytes(), &entry); err != nil {
 		t.Fatalf("invalid JSON log %q: %v", file.String(), err)
 	}
-	if entry["msg"] != "service started" || entry["request_id"] != "request-123" || entry["status"] != float64(200) || entry["detail"] != "two words" {
+	if entry["msg"] != "service started" || entry["trace_id"] != traceID || entry["span_id"] != spanID || entry["status"] != float64(200) || entry["detail"] != "two words" {
 		t.Fatalf("JSON file did not receive the same record: %#v", entry)
 	}
 	if _, ok := entry["source"]; !ok {
@@ -73,6 +80,24 @@ func TestPrettyColorAlways(t *testing.T) {
 	logger.Warn("attention")
 	if !strings.Contains(output.String(), "\x1b[33mWARN ") {
 		t.Fatalf("warning level is not colored: %q", output.String())
+	}
+	if !strings.Contains(output.String(), "[]") {
+		t.Fatalf("missing trace context should be empty: %q", output.String())
+	}
+	if strings.Contains(output.String(), "trace_id=") || strings.Contains(output.String(), "span_id=") {
+		t.Fatalf("pretty trace context should contain values only: %q", output.String())
+	}
+}
+
+func TestPrettyDoesNotPadComponent(t *testing.T) {
+	var output bytes.Buffer
+	logger := NewWithOptions(Options{Console: &output, ConsoleFormat: "pretty", Color: "never", Level: slog.LevelInfo})
+	logger.Info("compact")
+	if strings.Contains(output.String(), "logging.TestPrettyDoesNotPadComponent        [") {
+		t.Fatalf("component contains fixed-width padding: %q", output.String())
+	}
+	if !strings.Contains(output.String(), "TestPrettyDoesNotPadComponent [logging_test.go:") {
+		t.Fatalf("source should follow component with one space: %q", output.String())
 	}
 }
 
@@ -135,6 +160,30 @@ func TestRotatingFileKeepsWholeRecordsAndBackups(t *testing.T) {
 	assertFileContent(t, path, "record-three\n")
 	assertFileContent(t, path+".1", "record-two\n")
 	assertFileContent(t, path+".2", "record-one\n")
+}
+
+func TestRotatingFileRejectsConcurrentProcessesAndReleasesLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "service.jsonl")
+	first, err := OpenRotatingFile(path, 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenRotatingFile(path, 1, 1); !errors.Is(err, ErrFileInUse) {
+		if err == nil {
+			t.Fatal("second writer unexpectedly acquired the same log path")
+		}
+		t.Fatalf("second writer returned the wrong error: %v", err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	second, err := OpenRotatingFile(path, 1, 1)
+	if err != nil {
+		t.Fatalf("lock was not released: %v", err)
+	}
+	if err := second.Close(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func assertFileContent(t *testing.T, path, expected string) {

@@ -16,9 +16,12 @@ import (
 	"github.com/zentrola/zentrola/internal/application/health"
 	"github.com/zentrola/zentrola/internal/infrastructure/config"
 	"github.com/zentrola/zentrola/internal/infrastructure/logging"
+	"github.com/zentrola/zentrola/internal/infrastructure/telemetry"
 )
 
 func TestHealthAndRequestCorrelation(t *testing.T) {
+	provider := telemetry.Setup()
+	t.Cleanup(func() { _ = telemetry.Shutdown(context.Background(), provider) })
 	var logs bytes.Buffer
 	service := health.New(
 		health.Check{Name: "postgres", Run: func(context.Context) error { return errors.New("database-secret") }},
@@ -44,8 +47,9 @@ func TestHealthAndRequestCorrelation(t *testing.T) {
 			t.Fatalf("bad request ID: %q", id)
 		}
 		seen[id] = true
-		if !strings.Contains(logs.String(), id) {
-			t.Fatal("request ID missing in log")
+		traceID, spanID := rec.Header().Get("X-Trace-ID"), rec.Header().Get("X-Span-ID")
+		if traceID == "" || spanID == "" || !strings.Contains(logs.String(), traceID) || !strings.Contains(logs.String(), spanID) {
+			t.Fatal("OpenTelemetry trace context missing in response or log")
 		}
 		if strings.Contains(rec.Body.String(), "database-secret") {
 			t.Fatal("dependency secret leaked in response")
@@ -74,6 +78,24 @@ func TestRootReturnsReadyMessage(t *testing.T) {
 	}
 	if got := rec.Header().Get("X-Request-ID"); !strings.HasPrefix(got, "req_") {
 		t.Fatalf("bad request ID: %q", got)
+	}
+}
+
+func TestIncomingTraceparentContinuesTraceWithNewServerSpan(t *testing.T) {
+	provider := telemetry.Setup()
+	t.Cleanup(func() { _ = telemetry.Shutdown(context.Background(), provider) })
+	const traceID = "4bf92f3577b34da6a3ce929d0e0e4736"
+	const parentSpanID = "00f067aa0ba902b7"
+	router := NewRouter(slog.New(slog.NewJSONHandler(io.Discard, nil)), health.New(), config.CORS{}, time.Second, "prod")
+	req := httptest.NewRequest(http.MethodGet, "/health/live", nil)
+	req.Header.Set("traceparent", "00-"+traceID+"-"+parentSpanID+"-01")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Header().Get("X-Trace-ID") != traceID {
+		t.Fatalf("trace was not continued: %q", rec.Header().Get("X-Trace-ID"))
+	}
+	if spanID := rec.Header().Get("X-Span-ID"); spanID == "" || spanID == parentSpanID {
+		t.Fatalf("server span ID was not generated: %q", spanID)
 	}
 }
 
@@ -142,6 +164,8 @@ func TestMiddlewarePreservesStreamingAndCancellation(t *testing.T) {
 }
 
 func TestDevelopmentAccessLogCapturesRedactedBodies(t *testing.T) {
+	provider := telemetry.Setup()
+	t.Cleanup(func() { _ = telemetry.Shutdown(context.Background(), provider) })
 	var logs bytes.Buffer
 	logger := logging.New(&logs, "json", slog.LevelInfo)
 	handler := requestID(accessLog(logger, "dev")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -150,21 +174,21 @@ func TestDevelopmentAccessLogCapturesRedactedBodies(t *testing.T) {
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = io.WriteString(w, `{"error":{"code":"MODEL_PERMISSION_DENIED","message":"Model permission denied."},"accessToken":"response-secret"}`)
 	})))
-	req := httptest.NewRequest(http.MethodPost, "/anthropic/v1/messages?token=query-secret", strings.NewReader(`{"model":"claude-sonnet","messages":[{"role":"user","content":"private-prompt"}],"password":"request-secret"}`))
+	req := httptest.NewRequest(http.MethodPost, "/anthropic/v1/messages?token=query-secret", strings.NewReader(`{"model":"claude-sonnet","messages":[{"role":"user","content":"private-prompt"}],"password":"request-secret","input_text":"future-schema-secret","conversation":"unknown-content-secret"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
 	output := logs.String()
-	for _, required := range []string{"request_time", "method", "request_id", "duration_ms", "path", "status", "request_bytes", "response_bytes", "request_body", "response_body", "claude-sonnet", "MODEL_PERMISSION_DENIED"} {
+	for _, required := range []string{"request_time", "method", "trace_id", "span_id", "duration_ms", "path", "status", "request_bytes", "response_bytes", "request_body", "response_body", "claude-sonnet", "MODEL_PERMISSION_DENIED"} {
 		if !strings.Contains(output, required) {
 			t.Fatalf("development access log missing %s: %s", required, output)
 		}
 	}
-	if strings.Count(output, `"request_id"`) != 1 {
-		t.Fatalf("request ID must appear once: %s", output)
+	if strings.Count(output, `"trace_id"`) != 1 || strings.Count(output, `"span_id"`) != 1 {
+		t.Fatalf("trace and span IDs must each appear once: %s", output)
 	}
-	for _, secret := range []string{"query-secret", "private-prompt", "request-secret", "response-secret"} {
+	for _, secret := range []string{"query-secret", "private-prompt", "request-secret", "response-secret", "future-schema-secret", "unknown-content-secret"} {
 		if strings.Contains(output, secret) {
 			t.Fatalf("development access log leaked %s", secret)
 		}
@@ -183,6 +207,29 @@ func TestProductionAccessLogOmitsBodies(t *testing.T) {
 	output := logs.String()
 	if strings.Contains(output, "request_body") || strings.Contains(output, "response_body") || strings.Contains(output, "request-value") || strings.Contains(output, "response-value") {
 		t.Fatalf("production access log captured bodies: %s", output)
+	}
+}
+
+func TestAccessLogAcceptsOnlySafeUpstreamRequestID(t *testing.T) {
+	for _, test := range []struct {
+		name, value, expected string
+	}{
+		{"request id", "upstream-123", "upstream-123"},
+		{"fallback x request id", "fallback-456", "fallback-456"},
+		{"control character", "unsafe\nvalue", ""},
+		{"too long", strings.Repeat("x", 257), ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			headers := make(http.Header)
+			if test.name == "fallback x request id" {
+				headers.Set("X-Request-Id", test.value)
+			} else {
+				headers.Set("Request-Id", test.value)
+			}
+			if got := safeUpstreamRequestID(headers); got != test.expected {
+				t.Fatalf("got %q, want %q", got, test.expected)
+			}
+		})
 	}
 }
 

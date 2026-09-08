@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"log"
+	"log/slog"
 	"mime"
 	"net"
 	"net/http"
@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+	"github.com/zentrola/zentrola/internal/infrastructure/logging"
 )
 
 type webConfig struct {
@@ -26,6 +27,8 @@ type webConfig struct {
 	APIBaseURL     string
 	APIOrigin      string
 	GatewayBaseURL string
+	LogFormat      string
+	LogColor       string
 }
 
 func displayURL(address string) string {
@@ -69,11 +72,20 @@ func loadConfig(file string) (webConfig, error) {
 		gateway.User != nil || gateway.RawQuery != "" || gateway.Fragment != "" {
 		return webConfig{}, errors.New("WEB_GATEWAY_BASE_URL 必须是有效的 HTTP(S) 地址，且不能包含账号、查询参数或 Fragment")
 	}
+	logFormat, logColor := get("LOG_CONSOLE_FORMAT", "pretty"), get("LOG_COLOR", "auto")
+	if logFormat != "pretty" && logFormat != "text" && logFormat != "json" {
+		return webConfig{}, errors.New("LOG_CONSOLE_FORMAT must be text, pretty or json")
+	}
+	if logColor != "auto" && logColor != "always" && logColor != "never" && logColor != "true" && logColor != "false" {
+		return webConfig{}, errors.New("LOG_COLOR must be auto, always, never, true or false")
+	}
 	return webConfig{
 		Address:        address,
 		APIBaseURL:     rawBase,
 		APIOrigin:      parsed.Scheme + "://" + parsed.Host,
 		GatewayBaseURL: rawGateway,
+		LogFormat:      logFormat,
+		LogColor:       logColor,
 	}, nil
 }
 
@@ -144,17 +156,20 @@ func run() error {
 	if _, err := fs.Stat(os.DirFS("dist"), "index.html"); err != nil {
 		return errors.New("未找到 dist/index.html，请确认前端发布包完整且从发布目录运行")
 	}
+	logger := logging.NewWithOptions(logging.Options{Console: os.Stdout, ConsoleFormat: config.LogFormat, Color: config.LogColor, Level: slog.LevelInfo, AddSource: true})
+	slog.SetDefault(logger)
 	server := &http.Server{
 		Addr:              config.Address,
 		Handler:           handler(config, os.DirFS("dist")),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       120 * time.Second,
+		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	done := make(chan error, 1)
 	go func() {
-		log.Printf("Zentrola Admin Web 已启动：%s", displayURL(config.Address))
+		logger.Info("Zentrola Admin Web 已启动", "address", displayURL(config.Address))
 		err := server.ListenAndServe()
 		if errors.Is(err, http.ErrServerClosed) {
 			err = nil
@@ -176,7 +191,7 @@ func run() error {
 
 func main() {
 	if err := run(); err != nil {
-		log.Print(err)
+		slog.Error("zentrola web stopped", "error", err.Error())
 		os.Exit(1)
 	}
 }

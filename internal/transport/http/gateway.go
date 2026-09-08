@@ -71,7 +71,8 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var trace *usage.Event
 	var observer *gw.UsageObserver
 	if path == inferencePath && r.Method == http.MethodPost && identity.ID > 0 && g.writer != nil {
-		trace = &usage.Event{OrganizationID: identity.OrganizationID, PrincipalID: identity.ID, RequestID: logging.RequestID(r.Context()), RequestAt: time.Now().UTC(), Status: usage.Failed, ErrorType: "INVALID_REQUEST"}
+		traceID, spanID := logging.TraceIDs(r.Context())
+		trace = &usage.Event{OrganizationID: identity.OrganizationID, PrincipalID: identity.ID, RequestID: logging.RequestID(r.Context()), TraceID: traceID, SpanID: spanID, RequestAt: time.Now().UTC(), Status: usage.Failed, ErrorType: "INVALID_REQUEST"}
 		trace.ClientProtocol = protocol
 		defer func() {
 			trace.CompletedAt = time.Now().UTC()
@@ -187,7 +188,11 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), g.cfg.RequestTimeout)
 	defer cancel()
+	addAccessLogFields(r.Context(), "protocol", protocol)
+	upstreamStarted := time.Now()
 	upstream, err := g.service.Forward(ctx, identity, gw.Request{Path: path, Version: version, Beta: beta, BetaQuery: query, Development: g.cfg.Development, Body: body, RequestID: logging.RequestID(r.Context()), ProtocolHeaders: nativeHeaders, Trace: trace, Protocol: protocol})
+	addAccessLogFields(r.Context(), "upstream_headers_ms", time.Since(upstreamStarted).Milliseconds())
+	addUsageRouteFields(r.Context(), trace)
 	if err != nil {
 		failure := gw.ErrUnavailable
 		var known *gw.Failure
@@ -227,6 +232,10 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer upstream.Body.Close()
+	addAccessLogFields(r.Context(), "upstream_status", upstream.Status)
+	if upstreamRequestID := safeUpstreamRequestID(upstream.Headers); upstreamRequestID != "" {
+		addAccessLogFields(r.Context(), "upstream_request_id", upstreamRequestID)
+	}
 	if trace != nil {
 		trace.ErrorType = "UPSTREAM_HTTP_" + strconv.Itoa(upstream.Status)
 		if upstream.Status >= 200 && upstream.Status < 300 {
@@ -254,9 +263,14 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	// 固定缓冲区逐块转发，包括 SSE 未知事件、工具 JSON 增量和非流式原生错误。
 	buffer := make([]byte, 32<<10)
+	firstByteObserved := false
 	for {
 		n, readErr := upstream.Body.Read(buffer)
 		if n > 0 {
+			if !firstByteObserved {
+				firstByteObserved = true
+				addAccessLogFields(r.Context(), "first_byte_ms", accessLogElapsed(r.Context(), time.Now()))
+			}
 			if observer != nil {
 				observer.Feed(buffer[:n])
 			}
@@ -290,6 +304,7 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				} else {
 					interrupted(observer.ErrorCode())
 				}
+				addUsageTokenFields(r.Context(), trace, observer)
 			}
 			if trace != nil && observer == nil && upstream.Status >= 200 && upstream.Status < 300 {
 				trace.Status = usage.Success
@@ -298,6 +313,52 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+func addUsageRouteFields(ctx context.Context, event *usage.Event) {
+	if event == nil || event.Attempt == nil {
+		return
+	}
+	attempt := event.Attempt
+	addAccessLogFields(ctx,
+		"model_id", attempt.ModelID,
+		"provider_id", attempt.ProviderID,
+		"provider_model_id", attempt.ProviderModelID,
+		"resource_id", attempt.ResourceID,
+	)
+}
+
+func addUsageTokenFields(ctx context.Context, event *usage.Event, observer *gw.UsageObserver) {
+	if event == nil || observer == nil {
+		return
+	}
+	input, output, cached := observer.Tokens(event.Status == usage.Success)
+	if input != nil {
+		addAccessLogFields(ctx, "input_tokens", *input)
+	}
+	if output != nil {
+		addAccessLogFields(ctx, "output_tokens", *output)
+	}
+	if cached != nil {
+		addAccessLogFields(ctx, "cached_input_tokens", *cached)
+	}
+}
+
+func safeUpstreamRequestID(headers map[string][]string) string {
+	value := http.Header(headers).Get("Request-Id")
+	if value == "" {
+		value = http.Header(headers).Get("X-Request-Id")
+	}
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 256 {
+		return ""
+	}
+	for _, character := range value {
+		if character < 33 || character > 126 {
+			return ""
+		}
+	}
+	return value
 }
 
 func protocolHeaders(r *http.Request) (string, string, error) {

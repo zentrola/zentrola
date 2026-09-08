@@ -65,8 +65,10 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 	if err != nil {
 		return nil, gw.ErrProxy
 	}
-	resp, err := client.Do(req)
+	instrumented, sentHeaders := provider.TracedClient(client)
+	resp, err := instrumented.Do(req)
 	if err != nil {
+		sentHeaders.Delete("Authorization")
 		cleanup()
 		if errors.Is(ctx.Err(), context.Canceled) {
 			return nil, gw.ErrCancelled
@@ -82,21 +84,21 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 		cleanup()
 		return nil, gw.ErrUpstream
 	}
-	return &gw.Response{Status: resp.StatusCode, Headers: resp.Header, Body: &responseBody{ReadCloser: resp.Body, headers: req.Header, cleanup: cleanup}}, nil
+	return &gw.Response{Status: resp.StatusCode, Headers: resp.Header, Body: &responseBody{ReadCloser: resp.Body, sentHeaders: sentHeaders, cleanup: cleanup}}, nil
 }
 
 type responseBody struct {
 	io.ReadCloser
-	headers http.Header
-	once    sync.Once
-	err     error
-	cleanup func()
+	sentHeaders *provider.SentHeaders
+	once        sync.Once
+	err         error
+	cleanup     func()
 }
 
 func (b *responseBody) Close() error {
 	b.once.Do(func() {
 		b.err = b.ReadCloser.Close()
-		b.headers.Del("Authorization")
+		b.sentHeaders.Delete("Authorization")
 		if b.cleanup != nil {
 			b.cleanup()
 		}

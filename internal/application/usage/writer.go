@@ -96,7 +96,7 @@ func (w *Writer) Submit(event domain.Event) error {
 		w.mu.RUnlock()
 		defer w.synchronous.Done()
 		w.fallback.Add(1)
-		w.logger.Warn("usage queue full; writing synchronously", "error_code", "USAGE_QUEUE_FULL", "request_id", event.RequestID)
+		w.logger.Warn("usage queue full; writing synchronously", "error_code", "USAGE_QUEUE_FULL", "trace_id", event.TraceID, "span_id", event.SpanID)
 		defer w.pending.Add(-1)
 		if err := w.write([]domain.Event{event}); err != nil {
 			w.failure(event, "USAGE_SYNC_WRITE_FAILED")
@@ -119,7 +119,7 @@ func (w *Writer) write(events []domain.Event) error {
 }
 func (w *Writer) failure(e domain.Event, code string) {
 	w.failed.Add(1)
-	w.logger.Error("usage event not persisted", "error_code", code, "request_id", e.RequestID)
+	w.logger.Error("usage event not persisted", "error_code", code, "trace_id", e.TraceID, "span_id", e.SpanID)
 }
 func (w *Writer) run() {
 	defer close(w.done)

@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
 type requestIDKey struct{}
@@ -27,6 +29,14 @@ func WithRequestID(ctx context.Context, id string) context.Context {
 func RequestID(ctx context.Context) string {
 	id, _ := ctx.Value(requestIDKey{}).(string)
 	return id
+}
+
+func TraceIDs(ctx context.Context) (traceID, spanID string) {
+	spanContext := trace.SpanContextFromContext(ctx)
+	if !spanContext.IsValid() {
+		return "", ""
+	}
+	return spanContext.TraceID().String(), spanContext.SpanID().String()
 }
 
 func New(out io.Writer, format string, level slog.Level) *slog.Logger {
@@ -91,18 +101,23 @@ func writerConfigured(writer io.Writer) bool {
 type contextHandler struct{ slog.Handler }
 
 func (h contextHandler) Handle(ctx context.Context, record slog.Record) error {
-	hasRequestID := false
+	hasTraceID, hasSpanID := false, false
 	record.Attrs(func(attr slog.Attr) bool {
-		if attr.Key == "request_id" {
-			hasRequestID = true
-			return false
+		switch attr.Key {
+		case "trace_id":
+			hasTraceID = true
+		case "span_id":
+			hasSpanID = true
 		}
 		return true
 	})
-	if id := RequestID(ctx); id != "" && !hasRequestID {
-		record.AddAttrs(slog.String("request_id", id))
+	traceID, spanID := TraceIDs(ctx)
+	if !hasTraceID {
+		record.AddAttrs(slog.String("trace_id", traceID))
 	}
-	// 接入 OpenTelemetry 时在此从 context 提取 trace_id。
+	if !hasSpanID {
+		record.AddAttrs(slog.String("span_id", spanID))
+	}
 	return h.Handler.Handle(ctx, record)
 }
 
@@ -175,11 +190,16 @@ func (h *prettyHandler) Handle(_ context.Context, record slog.Record) error {
 		attributes = append(attributes, attr)
 		return true
 	})
-	requestID := "-"
+	traceID, spanID := "", ""
 	for _, attr := range attributes {
-		if attr.Key == "request_id" && attr.Value.Resolve().Kind() == slog.KindString {
-			requestID = attr.Value.String()
-			break
+		if attr.Value.Resolve().Kind() != slog.KindString {
+			continue
+		}
+		switch attr.Key {
+		case "trace_id":
+			traceID = attr.Value.String()
+		case "span_id":
+			spanID = attr.Value.String()
 		}
 	}
 
@@ -196,9 +216,10 @@ func (h *prettyHandler) Handle(_ context.Context, record slog.Record) error {
 	line.WriteByte(' ')
 	line.WriteString(paint(h.color, levelColor(record.Level), levelText))
 	line.WriteByte(' ')
-	line.WriteString(paint(h.color, "35", "[request_id="+singleLine(requestID)+"]"))
+	traceContext := strings.TrimSpace(singleLine(traceID) + " " + singleLine(spanID))
+	line.WriteString(paint(h.color, "35", "["+traceContext+"]"))
 	line.WriteByte(' ')
-	line.WriteString(paint(h.color, "33", fmt.Sprintf("%-36s", component)))
+	line.WriteString(paint(h.color, "33", component))
 	line.WriteByte(' ')
 	line.WriteString(paint(h.color, "32", "["+source+"]"))
 	line.WriteString(" - ")
@@ -245,7 +266,7 @@ func appendAttr(line *bytes.Buffer, groups []string, attr slog.Attr) {
 		}
 		return
 	}
-	if attr.Key == "" || (len(groups) == 0 && attr.Key == "request_id") {
+	if attr.Key == "" || (len(groups) == 0 && (attr.Key == "trace_id" || attr.Key == "span_id")) {
 		return
 	}
 	key := strings.Join(append(append([]string(nil), groups...), attr.Key), ".")

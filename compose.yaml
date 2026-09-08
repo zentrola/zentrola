@@ -2,6 +2,12 @@ name: zentrola
 
 # 可选的 PostgreSQL 快速安装示例；Backend 和 Admin Web 均直接运行发布包中的可执行文件。
 
+x-logging: &default-logging
+  driver: local
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -13,6 +19,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       TZ: UTC
       PGTZ: UTC
+    logging: *default-logging
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:

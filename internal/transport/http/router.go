@@ -2,7 +2,6 @@ package http
 
 import (
 	"context"
-	gw "github.com/zentrola/zentrola/internal/application/gateway"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -10,19 +9,21 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/cors"
+	gw "github.com/zentrola/zentrola/internal/application/gateway"
 	"github.com/zentrola/zentrola/internal/application/health"
 	"github.com/zentrola/zentrola/internal/infrastructure/config"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 func NewRouter(logger *slog.Logger, readiness *health.Service, corsConfig config.CORS, healthTimeout time.Duration, environment string, security ...*SecurityHandlers) http.Handler {
 	r := chi.NewRouter()
-	r.Use(requestID, accessLog(logger, environment), recoverPanic(logger))
+	r.Use(otelhttp.NewMiddleware("zentrola.http.server"), requestID, accessLog(logger, environment), recoverPanic(logger))
 	if corsConfig.Enabled {
 		r.Use(cors.New(cors.Options{
 			AllowedOrigins: corsConfig.Origins,
 			AllowedMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-			AllowedHeaders: []string{"Authorization", "Content-Type", "X-Request-ID"},
-			ExposedHeaders: []string{"X-Request-ID"},
+			AllowedHeaders: []string{"Authorization", "Content-Type", "X-Request-ID", "traceparent", "tracestate"},
+			ExposedHeaders: []string{"X-Request-ID", "X-Trace-ID", "X-Span-ID"},
 			MaxAge:         300,
 		}).Handler)
 	}

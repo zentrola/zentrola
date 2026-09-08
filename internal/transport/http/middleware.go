@@ -2,6 +2,7 @@ package http
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -11,12 +12,15 @@ import (
 	"mime"
 	"net/http"
 	"regexp"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	gw "github.com/zentrola/zentrola/internal/application/gateway"
 	"github.com/zentrola/zentrola/internal/infrastructure/logging"
+	"go.opentelemetry.io/otel/trace"
 )
 
 func requestID(next http.Handler) http.Handler {
@@ -26,11 +30,68 @@ func requestID(next http.Handler) http.Handler {
 		_, _ = rand.Read(entropy[:])
 		id := "req_" + hex.EncodeToString(entropy[:])
 		w.Header().Set("X-Request-ID", id)
+		if spanContext := trace.SpanContextFromContext(r.Context()); spanContext.IsValid() {
+			w.Header().Set("X-Trace-ID", spanContext.TraceID().String())
+			w.Header().Set("X-Span-ID", spanContext.SpanID().String())
+		}
 		next.ServeHTTP(w, r.WithContext(logging.WithRequestID(r.Context(), id)))
 	})
 }
 
 const accessLogBodyLimit = 8 << 10
+
+type accessLogDetailsKey struct{}
+
+type accessLogDetails struct {
+	started time.Time
+	mu      sync.Mutex
+	fields  map[string]any
+}
+
+func withAccessLogDetails(ctx context.Context, started time.Time) context.Context {
+	return context.WithValue(ctx, accessLogDetailsKey{}, &accessLogDetails{started: started, fields: make(map[string]any)})
+}
+
+func addAccessLogFields(ctx context.Context, fields ...any) {
+	details, _ := ctx.Value(accessLogDetailsKey{}).(*accessLogDetails)
+	if details == nil {
+		return
+	}
+	details.mu.Lock()
+	defer details.mu.Unlock()
+	for index := 0; index+1 < len(fields); index += 2 {
+		key, ok := fields[index].(string)
+		if ok && key != "" {
+			details.fields[key] = fields[index+1]
+		}
+	}
+}
+
+func accessLogElapsed(ctx context.Context, since time.Time) int64 {
+	if details, _ := ctx.Value(accessLogDetailsKey{}).(*accessLogDetails); details != nil && !details.started.IsZero() {
+		return since.Sub(details.started).Milliseconds()
+	}
+	return 0
+}
+
+func accessLogExtraFields(ctx context.Context) []any {
+	details, _ := ctx.Value(accessLogDetailsKey{}).(*accessLogDetails)
+	if details == nil {
+		return nil
+	}
+	details.mu.Lock()
+	defer details.mu.Unlock()
+	keys := make([]string, 0, len(details.fields))
+	for key := range details.fields {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	result := make([]any, 0, len(keys)*2)
+	for _, key := range keys {
+		result = append(result, key, details.fields[key])
+	}
+	return result
+}
 
 type bodyCapture struct {
 	data      bytes.Buffer
@@ -70,17 +131,28 @@ func (r *captureReadCloser) Read(p []byte) (int, error) {
 var nonAlphaNumeric = regexp.MustCompile(`[^a-z0-9]+`)
 
 func sensitiveJSONField(name string) bool {
-	name = nonAlphaNumeric.ReplaceAllString(strings.ToLower(name), "")
-	if strings.HasSuffix(name, "id") || strings.HasSuffix(name, "preview") {
+	if safeJSONField(name) {
 		return false
 	}
-	for _, marker := range []string{"password", "secret", "token", "credential", "authorization", "apikey", "virtualkey", "jwt"} {
+	name = nonAlphaNumeric.ReplaceAllString(strings.ToLower(name), "")
+	for _, marker := range []string{
+		"password", "secret", "token", "credential", "authorization", "apikey", "virtualkey", "jwt",
+		"content", "message", "prompt", "input", "output", "system", "instruction", "thinking", "conversation", "context", "query", "response", "text",
+	} {
 		if strings.Contains(name, marker) {
 			return true
 		}
 	}
+	return name == "key"
+}
+
+func safeJSONField(name string) bool {
+	name = nonAlphaNumeric.ReplaceAllString(strings.ToLower(name), "")
 	switch name {
-	case "key", "content", "messages", "prompt", "input", "output", "system", "instructions", "thinking":
+	case "id", "requestid", "modelid", "providerid", "providermodelid", "resourceid", "organizationid", "principalid", "accesskeyid",
+		"model", "stream", "maxtokens", "temperature", "topp", "type", "role", "code", "status", "object", "stopreason", "finishreason",
+		"usage", "inputtokens", "outputtokens", "cachedinputtokens", "prompttokens", "completiontokens", "totaltokens",
+		"preview", "keypreview", "credentialconfigured", "enabled":
 		return true
 	default:
 		return false
@@ -95,12 +167,26 @@ func redactJSON(value any) any {
 				value[key] = "[REDACTED]"
 				continue
 			}
-			value[key] = redactJSON(child)
+			switch child.(type) {
+			case map[string]any, []any:
+				value[key] = redactJSON(child)
+			default:
+				if !safeJSONField(key) {
+					value[key] = "[REDACTED]"
+				}
+			}
 		}
 	case []any:
 		for i := range value {
-			value[i] = redactJSON(value[i])
+			switch value[i].(type) {
+			case map[string]any, []any:
+				value[i] = redactJSON(value[i])
+			default:
+				value[i] = "[REDACTED]"
+			}
 		}
+	default:
+		return "[REDACTED]"
 	}
 	return value
 }
@@ -134,6 +220,7 @@ func accessLog(logger *slog.Logger, environments ...string) func(http.Handler) h
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
+			r = r.WithContext(withAccessLogDetails(r.Context(), start))
 			// chi 包装器保留 Flusher 等接口，避免影响后续 SSE。
 			wrapped := chimiddleware.NewWrapResponseWriter(w, r.ProtoMajor)
 			var requestBody, responseBody *bodyCapture
@@ -153,7 +240,6 @@ func accessLog(logger *slog.Logger, environments ...string) func(http.Handler) h
 				attributes := []any{
 					"request_time", start.UTC().Format(time.RFC3339Nano),
 					"method", r.Method,
-					"request_id", logging.RequestID(r.Context()),
 					"duration_ms", time.Since(start).Milliseconds(),
 					"path", r.URL.Path,
 					"status", status,
@@ -171,6 +257,7 @@ func accessLog(logger *slog.Logger, environments ...string) func(http.Handler) h
 						"response_body", bodyLogValue(responseBody, wrapped.Header().Get("Content-Type")),
 					)
 				}
+				attributes = append(attributes, accessLogExtraFields(r.Context())...)
 				logger.InfoContext(r.Context(), "http request", attributes...)
 			}()
 			next.ServeHTTP(wrapped, r)

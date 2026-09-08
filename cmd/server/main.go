@@ -29,6 +29,7 @@ import (
 	"github.com/zentrola/zentrola/internal/infrastructure/openai"
 	"github.com/zentrola/zentrola/internal/infrastructure/postgres"
 	cryptosec "github.com/zentrola/zentrola/internal/infrastructure/security"
+	"github.com/zentrola/zentrola/internal/infrastructure/telemetry"
 	httptransport "github.com/zentrola/zentrola/internal/transport/http"
 )
 
@@ -52,6 +53,12 @@ func main() {
 	if err := run(os.Args[1:], os.Stdout); err != nil {
 		// run 的错误只包含安全诊断，不输出原始数据库错误或配置对象。
 		slog.Error("zentrola stopped", "error", err.Error())
+		// 后台子进程会关闭控制台日志，并把常规日志写入 JSON 文件。
+		// run 返回时文件 writer 已经 flush/close，因此最终错误额外写到 stderr，
+		// 由进程管理器保存到 run/server.log，避免致命错误丢失。
+		if os.Getenv("ZENTROLA_BACKGROUND_CHILD") == "1" {
+			_, _ = fmt.Fprintln(os.Stderr, "zentrola stopped:", err)
+		}
 		os.Exit(1)
 	}
 }
@@ -139,21 +146,32 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 		}
 		defer os.Chdir(previous)
 	}
-	var logFile *logging.RotatingFile
+	var logFile *logging.AsyncWriter
 	if cfg.LogFilePath != "" {
 		opened, openErr := logging.OpenRotatingFile(cfg.LogFilePath, cfg.LogFileMaxSizeMB, cfg.LogFileMaxBackups)
 		if openErr != nil {
+			if errors.Is(openErr, logging.ErrFileInUse) {
+				return errors.New("log file is already in use by another process")
+			}
 			return errors.New("cannot open log file")
 		}
-		logFile = opened
+		logFile = logging.NewAsyncWriter(opened, os.Stderr, 4096)
 		defer func() {
-			if err := logFile.Close(); err != nil {
-				runErr = errors.Join(runErr, errors.New("cannot close log file"))
+			flush, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := logFile.Close(flush); err != nil {
+				runErr = errors.Join(runErr, errors.New("cannot flush log file"))
 			}
 		}()
 	}
+	var console io.Writer = os.Stdout
+	// 内置后台模式已经把 stdout/stderr 重定向到 run/server.log；启用应用 JSON 文件时
+	// 关闭常规控制台副本，避免同一条日志写入两个文件。
+	if managed != nil && logFile != nil {
+		console = nil
+	}
 	logger := logging.NewWithOptions(logging.Options{
-		Console:       os.Stdout,
+		Console:       console,
 		ConsoleFormat: cfg.LogConsoleFormat,
 		Color:         cfg.LogColor,
 		File:          logFile,
@@ -165,6 +183,14 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	tracerProvider := telemetry.Setup()
+	defer func() {
+		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := telemetry.Shutdown(shutdown, tracerProvider); err != nil {
+			runErr = errors.Join(runErr, errors.New("cannot shut down telemetry"))
+		}
+	}()
 	if managed != nil {
 		cancelWatch := context.AfterFunc(managed.ctx, stop)
 		defer cancelWatch()

@@ -430,7 +430,7 @@ Backend 的控制台访问日志固定包含请求时间、HTTP 方法、请求�
 
 `APP_ENV=dev` 时还会输出 `request_body` 和 `response_body` 调试摘要。JSON 中的密码、Token、Credential、Virtual Key、prompt、消息内容和模型输出会自动替换为 `[REDACTED]`；超过 8 KiB 的 JSON、SSE 和其他非 JSON 报文只记录类型及字节数。`APP_ENV=test` 或 `APP_ENV=prod` 时不采集请求和响应报文。
 
-控制台与日志文件由同一个结构化日志记录生成，因此消息、级别、`request_id` 和业务字段保持一致。控制台支持适合人工阅读的彩色 `pretty` 格式，日志文件固定使用一行一条记录的 JSON Lines：
+控制台与日志文件由同一个结构化日志记录生成，因此消息、级别、OpenTelemetry `trace_id` / `span_id` 和业务字段保持一致。控制台支持适合人工阅读的彩色 `pretty` 格式，日志文件固定使用一行一条记录的 JSON Lines：
 
 ```dotenv
 LOG_LEVEL=info
@@ -441,9 +441,20 @@ LOG_FILE_MAX_SIZE_MB=100
 LOG_FILE_MAX_BACKUPS=10
 ```
 
-`LOG_COLOR=auto` 只在真实终端启用 ANSI 颜色；也可设置为 `always` 或 `never`。`LOG_FILE_PATH` 为空时不创建日志文件。文件达到 `LOG_FILE_MAX_SIZE_MB` 后依次轮转为 `.1`、`.2`，最多保留 `LOG_FILE_MAX_BACKUPS` 份。
+`LOG_COLOR=auto` 只在真实终端启用 ANSI 颜色；也可设置为 `always` 或 `never`。`LOG_FILE_PATH` 为空时不创建日志文件。文件达到 `LOG_FILE_MAX_SIZE_MB` 后依次轮转为 `.1`、`.2`，最多保留 `LOG_FILE_MAX_BACKUPS` 份。同一日志路径由进程独占；第二个进程配置相同路径时会拒绝启动，避免并发轮转破坏文件。多实例部署应使用不同路径，或统一输出 stdout JSON。
 
-容器部署建议设置 `LOG_CONSOLE_FORMAT=json`、`LOG_COLOR=never` 且不设置 `LOG_FILE_PATH`，由容器平台采集标准输出。单机部署可使用上述 `pretty` 控制台与 JSON 文件组合。旧的 `LOG_FORMAT=text|json|pretty` 仍兼容；未设置 `LOG_CONSOLE_FORMAT` 时会作为控制台格式使用。
+Backend 使用 OpenTelemetry 为每个入站 HTTP 请求创建 Server Span，并通过 W3C `traceparent` 延续客户端 Trace；调用 Anthropic、OpenAI 或 DeepSeek 时自动创建子 Client Span并向上游传播。响应头 `X-Trace-ID` 和 `X-Span-ID` 便于直接排障。原有 `X-Request-ID` 与响应体 `requestId` 作为客户端和数据库兼容字段继续保留，但不再作为日志主关联字段。
+
+JSON 文件通过有界异步队列写入，请求 goroutine 不直接等待磁盘；关闭服务时会先 flush。队列满时保留同步控制台日志、丢弃对应文件副本，并向 `stderr` 输出一次明确告警。
+
+推荐按部署环境选择日志出口：
+
+- 本地开发：`LOG_CONSOLE_FORMAT=pretty`、`LOG_COLOR=auto`、`LOG_FILE_PATH=`，由终端或 IDE 保存 stdout。
+- 单机生产：没有 journald 或日志 Agent 时启用 `LOG_FILE_PATH=data/logs/zentrola.jsonl`，使用应用内异步轮转文件；通过内置 `start` 命令后台运行时会关闭常规控制台副本，`run/server.log` 只保留启动和致命错误，避免双写。
+- Docker：Backend 设置 `LOG_CONSOLE_FORMAT=json`、`LOG_COLOR=never`、`LOG_FILE_PATH=`。仓库当前的 PostgreSQL Compose 示例已定义带大小和份数限制的 `local` logging driver；以后把 Backend 加入 Compose 时复用同一个 `default-logging` anchor，日志通过 `docker logs` 查看。
+- Kubernetes：使用与 Docker 相同的 stdout JSON 配置，由 kubelet 轮转，并通过节点日志 Agent 发送到 Loki、OpenSearch 或云日志平台；不要让多个 Pod 写共享日志文件。
+
+stdout 是日志传输通道而不是“不保留日志”：容器运行时负责短期保存和轮转，集中日志系统负责长期保留、按 `trace_id` 检索和告警。旧的 `LOG_FORMAT=text|json|pretty` 仍兼容；未设置 `LOG_CONSOLE_FORMAT` 时会作为控制台格式使用。
 
 ## 接口文档
 

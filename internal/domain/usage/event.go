@@ -6,6 +6,7 @@ import "time"
 type Event struct {
 	OrganizationID         int64
 	RequestID              string
+	TraceID, SpanID        string
 	ClientProtocol         string
 	PrincipalID            int64
 	ModelID                int64

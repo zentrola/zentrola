@@ -98,8 +98,10 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 	if err != nil {
 		return nil, gw.ErrProxy
 	}
-	resp, err := client.Do(req)
+	instrumented, sentHeaders := provider.TracedClient(client)
+	resp, err := instrumented.Do(req)
 	if err != nil {
+		sentHeaders.Delete("x-api-key")
 		cleanup()
 		if errors.Is(ctx.Err(), context.Canceled) {
 			return nil, gw.ErrCancelled
@@ -115,22 +117,22 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 		cleanup()
 		return nil, gw.ErrUpstream
 	}
-	return &gw.Response{Status: resp.StatusCode, Headers: resp.Header, Body: &gatewayBody{ReadCloser: resp.Body, headers: req.Header, cleanup: cleanup}}, nil
+	return &gw.Response{Status: resp.StatusCode, Headers: resp.Header, Body: &gatewayBody{ReadCloser: resp.Body, sentHeaders: sentHeaders, cleanup: cleanup}}, nil
 }
 
 // 请求 Header 仅保留到 HTTP 事务结束；Body 关闭后再修改，避免与 transport 并发使用。
 type gatewayBody struct {
 	io.ReadCloser
-	headers http.Header
-	once    sync.Once
-	err     error
-	cleanup func()
+	sentHeaders *provider.SentHeaders
+	once        sync.Once
+	err         error
+	cleanup     func()
 }
 
 func (b *gatewayBody) Close() error {
 	b.once.Do(func() {
 		b.err = b.ReadCloser.Close()
-		b.headers.Del("x-api-key")
+		b.sentHeaders.Delete("x-api-key")
 		if b.cleanup != nil {
 			b.cleanup()
 		}
