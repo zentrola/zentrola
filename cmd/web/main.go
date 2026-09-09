@@ -48,20 +48,21 @@ func parseWebOptions(args []string) (webOptions, error) {
 	flags.BoolVar(&options.Help, "help", false, "show help")
 	flags.BoolVar(&options.Help, "h", false, "show help")
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
-		return webOptions{}, errors.New("参数无效，请执行 zentrola-web --help 查看用法")
+		return webOptions{}, errors.New("invalid arguments; run 'zentrola-web --help'")
 	}
 	return options, nil
 }
 
 func writeHelp(output io.Writer) {
-	_, _ = fmt.Fprintln(output, `用法：zentrola-web [--api <地址>] [--gateway <地址>]
+	_, _ = fmt.Fprintln(output, `Usage: zentrola-web [--api <url>] [--gateway <url>]
 
-选项：
-  --api <地址>       覆盖管理 API 地址；未指定 --gateway 时也作为 Gateway 地址
-  --gateway <地址>   单独覆盖首页展示给客户端的 Gateway 公网地址
-  -h, --help         查看帮助
+Options:
+  --api <url>       Set the management API URL and default Gateway URL
+  --gateway <url>   Set the public Gateway URL
+  -h, --help        Show help
 
-命令行参数优先于同目录 .env；只传 --api 时，即使没有 .env 也可使用默认端口 9528 启动。`)
+Command-line options override .env. With --api, the server can start on the default
+port 9528 without an .env file.`)
 }
 
 func displayURL(address string) string {
@@ -79,7 +80,7 @@ func loadConfig(file string, options webOptions) (webConfig, error) {
 	values, err := godotenv.Read(file)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) || strings.TrimSpace(options.APIBaseURL) == "" {
-			return webConfig{}, fmt.Errorf("无法读取配置文件 %s", file)
+			return webConfig{}, fmt.Errorf("cannot read config file %s", file)
 		}
 		values = map[string]string{}
 	}
@@ -94,7 +95,7 @@ func loadConfig(file string, options webOptions) (webConfig, error) {
 	}
 	address := get("WEB_ADDR", ":9528")
 	if _, _, err := net.SplitHostPort(address); err != nil {
-		return webConfig{}, errors.New("WEB_ADDR 必须是有效的监听地址，例如 :9528")
+		return webConfig{}, errors.New("WEB_ADDR must be a valid listen address, such as :9528")
 	}
 	rawBase := strings.TrimRight(get("WEB_API_BASE_URL", ""), "/")
 	if strings.TrimSpace(options.APIBaseURL) != "" {
@@ -103,7 +104,7 @@ func loadConfig(file string, options webOptions) (webConfig, error) {
 	parsed, err := url.Parse(rawBase)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" ||
 		parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return webConfig{}, errors.New("WEB_API_BASE_URL 必须是有效的 HTTP(S) 地址，且不能包含账号、查询参数或 Fragment")
+		return webConfig{}, errors.New("WEB_API_BASE_URL must be a valid HTTP(S) URL without credentials, query parameters, or a fragment")
 	}
 	rawGateway := strings.TrimRight(get("WEB_GATEWAY_BASE_URL", rawBase), "/")
 	if strings.TrimSpace(options.GatewayBaseURL) != "" {
@@ -114,7 +115,7 @@ func loadConfig(file string, options webOptions) (webConfig, error) {
 	gateway, err := url.Parse(rawGateway)
 	if err != nil || (gateway.Scheme != "http" && gateway.Scheme != "https") || gateway.Host == "" ||
 		gateway.User != nil || gateway.RawQuery != "" || gateway.Fragment != "" {
-		return webConfig{}, errors.New("WEB_GATEWAY_BASE_URL 必须是有效的 HTTP(S) 地址，且不能包含账号、查询参数或 Fragment")
+		return webConfig{}, errors.New("WEB_GATEWAY_BASE_URL must be a valid HTTP(S) URL without credentials, query parameters, or a fragment")
 	}
 	logFormat, logColor := get("LOG_CONSOLE_FORMAT", "pretty"), get("LOG_COLOR", "auto")
 	if logFormat != "pretty" && logFormat != "text" && logFormat != "json" {
@@ -198,7 +199,7 @@ func run(options webOptions) error {
 		return err
 	}
 	if _, err := fs.Stat(os.DirFS("dist"), "index.html"); err != nil {
-		return errors.New("未找到 dist/index.html，请确认前端发布包完整且从发布目录运行")
+		return errors.New("dist/index.html not found; check the release package and run from its directory")
 	}
 	logger := logging.NewWithOptions(logging.Options{Console: os.Stdout, ConsoleFormat: config.LogFormat, Color: config.LogColor, Level: slog.LevelInfo, AddSource: true})
 	slog.SetDefault(logger)
@@ -213,7 +214,7 @@ func run(options webOptions) error {
 	defer stop()
 	done := make(chan error, 1)
 	go func() {
-		logger.Info("Zentrola Admin Web 已启动", "address", displayURL(config.Address))
+		logger.Info("Zentrola Admin Web started", "address", displayURL(config.Address))
 		err := server.ListenAndServe()
 		if errors.Is(err, http.ErrServerClosed) {
 			err = nil
@@ -227,7 +228,7 @@ func run(options webOptions) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := server.Shutdown(shutdownCtx); err != nil {
-			return errors.New("Admin Web 停止超时")
+			return errors.New("Admin Web shutdown timed out")
 		}
 		return <-done
 	}

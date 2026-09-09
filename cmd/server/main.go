@@ -94,7 +94,7 @@ func run(args []string, output io.Writer) (runErr error) {
 	if child {
 		selection = configSelection{path: os.Getenv("ZENTROLA_CHILD_CONFIG"), pinned: os.Getenv("ZENTROLA_CHILD_PINNED") == "1"}
 		if !filepath.IsAbs(selection.path) {
-			return errors.New("后台启动配置路径无效")
+			return errors.New("invalid background server config path")
 		}
 		if selection.pinned {
 			err = requireConfigFile(selection.path)
@@ -117,7 +117,7 @@ func run(args []string, output io.Writer) (runErr error) {
 			}
 		}
 		if err := healthcheck(addr, output); err != nil {
-			return fmt.Errorf("健康检查失败：%w", err)
+			return fmt.Errorf("health check failed: %w", err)
 		}
 		return nil
 	}
@@ -137,10 +137,10 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 	if selection.pinned {
 		previous, err := os.Getwd()
 		if err != nil {
-			return errors.New("无法读取当前工作目录")
+			return errors.New("cannot read the current working directory")
 		}
 		if err := os.Chdir(filepath.Dir(selection.path)); err != nil {
-			return errors.New("无法进入配置文件目录")
+			return errors.New("cannot enter the config file directory")
 		}
 		defer os.Chdir(previous)
 	}
@@ -380,7 +380,7 @@ func healthcheck(addr string, output io.Writer) error {
 	}
 	defer resp.Body.Close()
 	if _, err := io.Copy(output, resp.Body); err != nil {
-		return fmt.Errorf("读取或输出健康检查响应失败：%w", err)
+		return fmt.Errorf("cannot read or print the health check response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("health check returned %d", resp.StatusCode)

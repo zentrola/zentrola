@@ -66,10 +66,10 @@ func applyPort(cfg *config.Config, port int) error {
 
 func prepareRuntime(dir string) error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
-		return errors.New("无法创建 run 目录；请确认程序目录可写")
+		return errors.New("cannot create the run directory; check that the application directory is writable")
 	}
 	if err := protectRuntime(dir); err != nil {
-		return errors.New("无法保护运行状态目录权限")
+		return errors.New("cannot secure the run directory")
 	}
 	return nil
 }
@@ -81,7 +81,7 @@ func readProcessState(dir string) (processState, error) {
 		return state, nil
 	}
 	if err != nil || json.Unmarshal(data, &state) != nil || state.PID <= 0 || !filepath.IsAbs(state.Executable) || state.Instance == "" || state.Token == "" {
-		return state, errors.New("无法读取有效的后台服务记录；不会操作未确认的进程")
+		return state, errors.New("cannot read a valid background server record; no unverified process was changed")
 	}
 	return state, nil
 }
@@ -89,25 +89,25 @@ func readProcessState(dir string) (processState, error) {
 func writeProcessState(dir string, state processState) error {
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
-		return errors.New("无法编码后台服务状态")
+		return errors.New("cannot encode the background server state")
 	}
 	file, err := os.CreateTemp(dir, ".state-*")
 	if err != nil {
-		return errors.New("无法创建后台服务状态文件")
+		return errors.New("cannot create the background server state file")
 	}
 	defer os.Remove(file.Name())
 	defer file.Close()
 	if _, err := file.Write(data); err != nil {
-		return errors.New("无法写入后台服务状态")
+		return errors.New("cannot write the background server state")
 	}
 	if err := file.Sync(); err != nil {
-		return errors.New("无法保存后台服务状态")
+		return errors.New("cannot save the background server state")
 	}
 	if err := file.Close(); err != nil {
-		return errors.New("无法关闭后台服务状态文件")
+		return errors.New("cannot close the background server state file")
 	}
 	if err := os.Rename(file.Name(), filepath.Join(dir, "server.json")); err != nil {
-		return errors.New("无法更新后台服务状态")
+		return errors.New("cannot update the background server state")
 	}
 	return nil
 }
@@ -118,7 +118,7 @@ func processRunning(dir string) (bool, error) {
 		return true, nil
 	}
 	if err != nil {
-		return false, errors.New("无法检查后台服务锁")
+		return false, errors.New("cannot check the background server lock")
 	}
 	file.Close()
 	return false, nil
@@ -128,7 +128,7 @@ func controlCall(state processState, stop bool) (processState, error) {
 	var result processState
 	host, port, err := net.SplitHostPort(state.Control)
 	if err != nil || host != "127.0.0.1" || port == "" {
-		return result, errors.New("后台服务控制地址无效")
+		return result, errors.New("invalid background server control address")
 	}
 	method, path := "GET", "/status"
 	if stop {
@@ -136,18 +136,18 @@ func controlCall(state processState, stop bool) (processState, error) {
 	}
 	req, err := http.NewRequest(method, "http://"+state.Control+path, nil)
 	if err != nil {
-		return result, errors.New("无法构造本机控制请求")
+		return result, errors.New("cannot create the local control request")
 	}
 	req.Header.Set("Authorization", "Bearer "+state.Token)
 	client := &http.Client{Timeout: 2 * time.Second, Transport: &http.Transport{Proxy: nil}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	defer client.CloseIdleConnections()
 	resp, err := client.Do(req)
 	if err != nil {
-		return result, errors.New("无法联系已记录的后台服务；不会按 PID 强制结束进程")
+		return result, errors.New("cannot contact the recorded background server; the process was not forced to stop")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 || json.NewDecoder(io.LimitReader(resp.Body, 16384)).Decode(&result) != nil || result.PID != state.PID || result.Executable != state.Executable || result.Instance != state.Instance {
-		return result, errors.New("后台服务身份校验失败；拒绝操作")
+		return result, errors.New("background server identity check failed")
 	}
 	return result, nil
 }
@@ -155,19 +155,19 @@ func controlCall(state processState, stop bool) (processState, error) {
 func newManagedProcess(dir string, state processState) (*managedProcess, error) {
 	lock, err := acquireProcessLock(filepath.Join(dir, "server.lock"))
 	if err != nil {
-		return nil, errors.New("已有后台服务或无法取得运行锁")
+		return nil, errors.New("a background server is already running or the server lock is unavailable")
 	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		lock.Close()
-		return nil, errors.New("无法建立本机控制通道")
+		return nil, errors.New("cannot create the local control channel")
 	}
 	state.PID = os.Getpid()
 	state.Executable, err = os.Executable()
 	if err != nil {
 		listener.Close()
 		lock.Close()
-		return nil, errors.New("无法读取程序路径")
+		return nil, errors.New("cannot determine the executable path")
 	}
 	state.Instance, state.Token = rand.Text(), rand.Text()
 	state.Control, state.Phase, state.StartedAt = listener.Addr().String(), "starting", time.Now().UTC()
@@ -241,7 +241,7 @@ func managedChild(command commandOptions, selection configSelection, dir string,
 	}
 	workdir, err := os.Getwd()
 	if err != nil {
-		return errors.New("无法读取工作目录")
+		return errors.New("cannot read the working directory")
 	}
 	if selection.pinned {
 		workdir = filepath.Dir(selection.path)
@@ -261,7 +261,7 @@ func stopManaged(dir string, state processState, output io.Writer) error {
 		return err
 	}
 	if !running {
-		_, err := fmt.Fprintln(output, "后台服务已停止。")
+		_, err := fmt.Fprintln(output, "Server is stopped.")
 		return err
 	}
 	if _, err := controlCall(state, false); err != nil {
@@ -286,17 +286,17 @@ func stopManaged(dir string, state processState, output io.Writer) error {
 				return err
 			}
 			if final.Phase == "failed" {
-				return fmt.Errorf("服务已退出，但关闭时发生错误：%s；日志：%s", final.Failure, final.LogFile)
+				return fmt.Errorf("server exited with an error: %s; log: %s", final.Failure, final.LogFile)
 			}
 			if final.Instance != state.Instance || final.Phase != "stopped" {
-				return errors.New("服务已退出，但未确认正常关闭；请检查日志")
+				return errors.New("server exited without a confirmed clean shutdown; check the log")
 			}
-			_, err = fmt.Fprintln(output, "后台服务已优雅停止。")
+			_, err = fmt.Fprintln(output, "Server stopped gracefully.")
 			return err
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	return errors.New("服务仍在停止中；请查看 status 和日志，本次未强制终止进程")
+	return errors.New("server is still stopping; check status and the log")
 }
 
 func showManaged(dir string, state processState, output io.Writer) error {
@@ -305,9 +305,9 @@ func showManaged(dir string, state processState, output io.Writer) error {
 		return err
 	}
 	if !running {
-		_, err := fmt.Fprintln(output, "状态：已停止")
+		_, err := fmt.Fprintln(output, "Status: stopped")
 		if state.PID != 0 {
-			_, _ = fmt.Fprintf(output, "上次配置：%s\n上次地址：%s\n日志：%s\n", state.ConfigFile, accessURL(state.Address), state.LogFile)
+			_, _ = fmt.Fprintf(output, "Last config: %s\nLast address: %s\nLog: %s\n", state.ConfigFile, accessURL(state.Address), state.LogFile)
 		}
 		return err
 	}
@@ -315,7 +315,7 @@ func showManaged(dir string, state processState, output io.Writer) error {
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(output, "状态：%s\nPID：%d\n地址：%s\n配置：%s\n日志：%s\n", view.Phase, view.PID, accessURL(view.Address), view.ConfigFile, view.LogFile)
+	_, err = fmt.Fprintf(output, "Status: %s\nPID: %d\nAddress: %s\nConfig: %s\nLog: %s\n", view.Phase, view.PID, accessURL(view.Address), view.ConfigFile, view.LogFile)
 	if err != nil {
 		return err
 	}
@@ -342,7 +342,7 @@ func manageProcess(command commandOptions, dir string, output io.Writer) error {
 	}
 	commandLock, err := acquireProcessLock(filepath.Join(dir, "command.lock"))
 	if err != nil {
-		return errors.New("另一个进程管理命令正在执行，请稍后重试")
+		return errors.New("another process management command is running; try again later")
 	}
 	defer commandLock.Close()
 	state, err := readProcessState(dir)
@@ -360,7 +360,7 @@ func manageProcess(command commandOptions, dir string, output io.Writer) error {
 		return err
 	}
 	if running && command.name == "start" {
-		if _, err := fmt.Fprintln(output, "服务已经运行，未重复启动。"); err != nil {
+		if _, err := fmt.Fprintln(output, "Server is already running."); err != nil {
 			return err
 		}
 		return showManaged(dir, state, output)
@@ -368,7 +368,7 @@ func manageProcess(command commandOptions, dir string, output io.Writer) error {
 	var selection configSelection
 	workdir, err := os.Getwd()
 	if err != nil {
-		return errors.New("无法读取工作目录")
+		return errors.New("cannot read the working directory")
 	}
 	if command.name == "restart" && state.PID != 0 && !command.configProvided {
 		selection = configSelection{path: state.ConfigFile, pinned: state.ConfigPinned}
@@ -390,11 +390,11 @@ func manageProcess(command commandOptions, dir string, output io.Writer) error {
 	if command.name == "restart" && command.port == 0 && state.PID != 0 {
 		_, port, err := net.SplitHostPort(state.Address)
 		if err != nil {
-			return errors.New("上次运行端口无效")
+			return errors.New("the previous server port is invalid")
 		}
 		command.port, err = strconv.Atoi(port)
 		if err != nil {
-			return errors.New("上次运行端口无效")
+			return errors.New("the previous server port is invalid")
 		}
 	}
 	var cfg config.Config
@@ -420,11 +420,11 @@ func manageProcess(command commandOptions, dir string, output io.Writer) error {
 func launchManaged(dir string, selection configSelection, workdir string, cfg config.Config, output io.Writer) error {
 	executable, err := os.Executable()
 	if err != nil {
-		return errors.New("无法确定可执行文件")
+		return errors.New("cannot determine the executable path")
 	}
 	_, port, err := net.SplitHostPort(cfg.HTTPAddr)
 	if err != nil {
-		return errors.New("启动端口无效")
+		return errors.New("invalid server port")
 	}
 	args := []string{"serve", "--port", port}
 	if selection.pinned {
@@ -433,12 +433,12 @@ func launchManaged(dir string, selection configSelection, workdir string, cfg co
 	logPath := filepath.Join(dir, "server.log")
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
-		return errors.New("无法打开后台服务日志")
+		return errors.New("cannot open the background server log")
 	}
 	defer logFile.Close()
 	info, err := logFile.Stat()
 	if err != nil {
-		return errors.New("无法读取后台服务日志位置")
+		return errors.New("cannot read the background server log position")
 	}
 	cmd := exec.Command(executable, args...)
 	cmd.Dir, cmd.Stdout, cmd.Stderr = workdir, logFile, logFile
@@ -453,7 +453,7 @@ func launchManaged(dir string, selection configSelection, workdir string, cfg co
 	cmd.Env = append(cmd.Env, "ZENTROLA_BACKGROUND_CHILD=1", "ZENTROLA_CHILD_CONFIG="+selection.path, "ZENTROLA_CHILD_PINNED="+pinned, "APP_ENV="+cfg.Environment)
 	detachProcess(cmd)
 	if err := cmd.Start(); err != nil {
-		return errors.New("无法创建后台服务进程")
+		return errors.New("cannot start the background server process")
 	}
 	childPID := cmd.Process.Pid
 	exited := make(chan error, 1)
@@ -462,7 +462,7 @@ func launchManaged(dir string, selection configSelection, workdir string, cfg co
 	for time.Now().Before(deadline) {
 		select {
 		case <-exited:
-			return fmt.Errorf("后台服务启动失败；日志：%s\n%s", logPath, startupLog(logPath, info.Size()))
+			return fmt.Errorf("background server failed to start; log: %s\n%s", logPath, startupLog(logPath, info.Size()))
 		default:
 		}
 		state, err := readProcessState(dir)
@@ -471,20 +471,20 @@ func launchManaged(dir string, selection configSelection, workdir string, cfg co
 			if err == nil && view.Phase == "running" {
 				var response bytes.Buffer
 				if healthcheck(view.Address, &response) == nil {
-					_, err := fmt.Fprintf(output, "后台服务启动成功。\nPID：%d\n地址：%s\n日志：%s\n", view.PID, accessURL(view.Address), logPath)
+					_, err := fmt.Fprintf(output, "Server started.\nPID: %d\nAddress: %s\nLog: %s\n", view.PID, accessURL(view.Address), logPath)
 					return err
 				}
 			}
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	return fmt.Errorf("启动尚未确认完成；请执行 status 检查，日志：%s", logPath)
+	return fmt.Errorf("server startup was not confirmed; run 'zentrola status'; log: %s", logPath)
 }
 
 func startupLog(path string, offset int64) string {
 	file, err := os.Open(path)
 	if err != nil {
-		return "无法读取本次启动日志"
+		return "cannot read the startup log"
 	}
 	defer file.Close()
 	_, _ = file.Seek(offset, io.SeekStart)
@@ -507,7 +507,7 @@ func currentManagedAddress(dir string) (string, bool, error) {
 	if _, err := os.Stat(filepath.Join(dir, "server.lock")); errors.Is(err, os.ErrNotExist) {
 		return "", false, nil
 	} else if err != nil {
-		return "", false, errors.New("无法读取后台服务状态")
+		return "", false, errors.New("cannot read the background server state")
 	}
 	running, err := processRunning(dir)
 	if err != nil || !running {

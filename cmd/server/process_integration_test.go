@@ -163,7 +163,7 @@ func TestProcessLifecycleIntegration(t *testing.T) {
 	}
 	mustRun("stop")
 	mustRun("stop")
-	if out := mustRun("status"); !strings.Contains(out, "已停止") {
+	if out := mustRun("status"); !strings.Contains(out, "stopped") {
 		t.Fatal("status still running after stop")
 	}
 	after, _ := os.ReadFile(file)

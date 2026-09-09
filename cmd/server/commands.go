@@ -31,7 +31,7 @@ func knownCommand(name string) bool {
 
 func parseCommand(args []string) (commandOptions, error) {
 	result := commandOptions{name: "serve", configPath: ".env"}
-	invalid := errors.New("命令或参数无效，请执行 zentrola help 查看用法")
+	invalid := errors.New("invalid command or arguments; run 'zentrola help'")
 	if len(args) == 0 {
 		return result, nil
 	}
@@ -59,7 +59,7 @@ func parseCommand(args []string) (commandOptions, error) {
 	flags.SetOutput(io.Discard)
 	configSeen := false
 	if result.name != "stop" && result.name != "status" {
-		flags.Func("config", "通用配置文件路径（默认当前目录的 .env）", func(value string) error {
+		flags.Func("config", "config file (default: .env)", func(value string) error {
 			if configSeen || strings.TrimSpace(value) == "" {
 				return invalid
 			}
@@ -70,7 +70,7 @@ func parseCommand(args []string) (commandOptions, error) {
 		})
 	}
 	if result.name == "start" || result.name == "restart" || result.name == "serve" {
-		flags.Func("port", "本次运行端口（1～65535）", func(value string) error {
+		flags.Func("port", "port for this run (1-65535)", func(value string) error {
 			n, err := strconv.Atoi(value)
 			if err != nil || n < 1 || n > 65535 || result.port != 0 {
 				return invalid
@@ -81,7 +81,7 @@ func parseCommand(args []string) (commandOptions, error) {
 	}
 	if result.name == "password" {
 		seen := false
-		flags.Func("username", "管理员账号", func(value string) error {
+		flags.Func("username", "administrator username", func(value string) error {
 			if seen {
 				return invalid
 			}
@@ -97,7 +97,7 @@ func parseCommand(args []string) (commandOptions, error) {
 		return result, invalid
 	}
 	if result.name == "password" && !appsec.ValidAdminUsername(result.username) {
-		return result, errors.New("用法：zentrola password --username <账号>；账号必填，须为 1～64 bytes，不能含控制字符或首尾空白")
+		return result, errors.New("usage: zentrola password --username <name>; name must be 1-64 bytes with no control characters or surrounding whitespace")
 	}
 	return result, nil
 }
@@ -109,78 +109,64 @@ func loadCommandConfig(path string) (config.Config, error) {
 		if pathErr != nil {
 			resolved = path
 		}
-		return config.Config{}, fmt.Errorf("加载配置 %q 失败：%w；可用 --config <路径> 指定配置文件", resolved, err)
+		return config.Config{}, fmt.Errorf("cannot load config %q: %w; use --config <path> to select a file", resolved, err)
 	}
 	return cfg, nil
 }
 
 func writeHelp(output io.Writer, name string) error {
 	if name == "start" || name == "restart" || name == "stop" || name == "status" || name == "serve" {
-		_, err := fmt.Fprintln(output, `用法：zentrola start [--port <端口>] [--config <路径>]
-      zentrola restart [--port <端口>] [--config <路径>]
-      zentrola stop
-      zentrola status
+		_, err := fmt.Fprintln(output, `Usage: zentrola start [--port <port>] [--config <path>]
+       zentrola restart [--port <port>] [--config <path>]
+       zentrola stop
+       zentrola status
 
-start 默认后台启动，成功后显示访问地址、PID 和日志文件；--port 只覆盖本次运行。
-restart 沿用上次配置和端口，允许显式覆盖；stop 等待请求和 Usage 写入结束。
-status 显示后台进程状态、PID、端口和健康检查结果。
-状态和日志保存在程序旁的 run 目录；每个程序目录管理一个后台实例。
-serve 前台运行，通过 Ctrl+C 或容器信号停止，不纳入后台进程管理。
-不带命令时仍前台运行，兼容现有容器。`)
+start runs in the background. restart reuses the last config and port.
+stop shuts down gracefully. status shows the current state.
+serve runs in the foreground and is the default when no command is given.`)
 		return err
 	}
 	if name == "healthcheck" {
-		_, err := fmt.Fprintln(output, `用法：zentrola healthcheck [--config <路径>]
+		_, err := fmt.Fprintln(output, `Usage: zentrola healthcheck [--config <path>]
 
-检查服务的 /health/live，原样输出接口响应体；HTTP 200 退出码为 0，失败为非 0。
-优先检查当前受管理后台服务的实际端口；--config 可临时指定其他配置。
-没有后台服务且传入 --config 时，只读取其中的 HTTP_ADDR，不连接数据库。
-未传 --config 时沿用系统 HTTP_ADDR（默认 :9527）。`)
+Checks /health/live and prints the response. Uses the managed server when available,
+otherwise HTTP_ADDR (default: :9527) or the address from --config.`)
 		return err
 	}
 	if name == "password" {
-		_, err := fmt.Fprintln(output, `用法：zentrola password --username <账号> [--config <路径>]
+		_, err := fmt.Fprintln(output, `Usage: zentrola password --username <name> [--config <path>]
 
-为已有且启用的管理员生成安全随机密码，解除登录锁定，并使旧登录 Token 失效。
-重置成功后仅显示一次新密码，请保存到密码管理器；不会强制再次改密。
-使用当前环境的数据库配置。
-请在可信终端执行，不要将输出收集到共享日志。
-可用 --config 临时指定配置文件；未指定时读取当前目录的 .env。
-示例：zentrola password --username admin
-在 Windows 的 bin 目录中：.\zentrola.exe password --username admin --config ..\.env`)
+Generates a new password, clears the login lock, and invalidates old tokens.
+The password is shown once. Run this command in a trusted terminal.`)
 		return err
 	}
-	_, err := fmt.Fprintln(output, `用法：zentrola [命令]
+	_, err := fmt.Fprintln(output, `Usage: zentrola [command]
 
-命令：
-  start [--port <端口>]         后台启动
-  restart [--port <端口>]       沿用上次配置与端口重启
-  stop                          优雅停止后台服务
-  status                        查看后台服务状态与健康状态
-  serve                         前台启动（兼容命令，也是默认行为）
-  migrate                       执行数据库 Schema 迁移后退出
-  healthcheck                   检查服务存活状态，用于容器健康检查
-  password --username <账号>    随机重置指定管理员密码
-  help [命令]                   查看命令帮助
+Commands:
+  start [--port <port>]          Start in the background
+  restart [--port <port>]        Restart with the last settings
+  stop                           Stop gracefully
+  status                         Show server status
+  serve                          Run in the foreground (default)
+  migrate                        Run database migrations
+  healthcheck                    Check server health
+  password --username <name>     Reset an administrator password
+  help [command]                 Show help
 
-支持 zentrola --help、zentrola -h 及 <命令> --help。
-运行命令支持 --config <路径> 临时指定配置文件，未指定时默认读取当前目录 .env。
-healthcheck 未指定配置时沿用系统 HTTP_ADDR（默认 :9527）。
-除帮助外，命令按既有配置规则运行；help 无需配置文件或数据库连接。
-所有实例共用 PostgreSQL 全局 sequence 生成业务 ID。`)
+Use --config <path> to select a config file. The default is .env.`)
 	return err
 }
 
 func resetPassword(ctx context.Context, output io.Writer, username string, reset func(context.Context, string) (string, error)) error {
 	password, err := reset(ctx, username)
 	if errors.Is(err, appsec.ErrNotFound) {
-		return errors.New("未找到可重置的启用管理员；请检查账号及所属组织状态")
+		return errors.New("active administrator not found; check the username and organization status")
 	}
 	if err != nil {
-		return errors.New("密码重置未确认成功；请检查数据库、迁移及审计写入后重试")
+		return errors.New("password reset failed; check the database, migrations, and audit log")
 	}
-	if _, err := fmt.Fprintf(output, "管理员 %s 的密码已重置，登录锁定已清除，旧 Token 已失效。\n新密码（仅显示一次）：%s\n请保存到密码管理器。\n", username, password); err != nil {
-		return errors.New("密码已重置，但输出失败；请在可用终端重新执行密码重置命令")
+	if _, err := fmt.Fprintf(output, "Password reset for %s. Login lock cleared and old tokens invalidated.\nNew password (shown once): %s\nSave it in a password manager.\n", username, password); err != nil {
+		return errors.New("password was reset, but the result could not be displayed; run the reset again in a working terminal")
 	}
 	return nil
 }

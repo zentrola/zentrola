@@ -91,7 +91,7 @@ func TestHealthcheckConfigAndContainerCompatibility(t *testing.T) {
 	}
 	t.Setenv("HTTP_ADDR", strings.TrimPrefix(unhealthy.URL, "http://"))
 	var output bytes.Buffer
-	if err := run([]string{"healthcheck"}, &output); err == nil || !strings.Contains(err.Error(), "健康检查失败") || output.String() != failedBody {
+	if err := run([]string{"healthcheck"}, &output); err == nil || !strings.Contains(err.Error(), "health check failed") || output.String() != failedBody {
 		t.Fatal("failed healthcheck must preserve response body and report failure")
 	}
 }

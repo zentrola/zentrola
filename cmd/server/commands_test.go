@@ -96,7 +96,7 @@ func TestPasswordOutputOnlyAfterSuccess(t *testing.T) {
 	if err != nil || strings.Count(output.String(), "random-test-password") != 1 {
 		t.Fatal("successful password must be shown exactly once")
 	}
-	if err := resetPassword(context.Background(), brokenOutput{}, "admin", func(context.Context, string) (string, error) { return "secret", nil }); err == nil || !strings.Contains(err.Error(), "密码已重置") {
+	if err := resetPassword(context.Background(), brokenOutput{}, "admin", func(context.Context, string) (string, error) { return "secret", nil }); err == nil || !strings.Contains(err.Error(), "password was reset") {
 		t.Fatal("output failure must explain committed state")
 	}
 }

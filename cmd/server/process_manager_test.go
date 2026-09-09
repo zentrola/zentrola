@@ -118,7 +118,7 @@ func TestManagedStopAuthenticatesAndWaitsForFlush(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("stop did not observe released lifetime lock")
 	}
-	if !strings.Contains(output.String(), "优雅停止") || strings.Contains(output.String(), state.Token) {
+	if !strings.Contains(output.String(), "stopped gracefully") || strings.Contains(output.String(), state.Token) {
 		t.Fatal("invalid stop output")
 	}
 	if err := stopManaged(dir, state, io.Discard); err != nil {
