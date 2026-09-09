@@ -47,14 +47,22 @@ npm.cmd run dev
 
 ## 构建发布包
 
-Admin Web 与 Backend 独立构建和运行。Admin Web 发布包由静态资源、Web 启动程序和示例配置组成：
+Admin Web 与 Backend 独立运行，但官方发布工具将它们输出到同一个系统与架构目录：
 
 ```text
-zentrola-web/
-├── zentrola-web          # MacOS/Linux
-├── zentrola-web.exe      # Windows
+dist/<系统>/<架构>/
+├── zentrola              # macOS/Linux Backend
+├── zentrola.exe          # Windows Backend
+├── zentrola-web          # macOS/Linux Admin Web
+├── zentrola-web.exe      # Windows Admin Web
 ├── .env.example
 └── dist/
+```
+
+在仓库根目录运行统一发布工具；只构建 Admin Web 时不会删除同目录下已有的 Backend：
+
+```powershell
+go run ./cmd/release -component web
 ```
 
 构建静态资源：
@@ -89,14 +97,14 @@ Windows PowerShell：
 go build -o zentrola-web.exe ./cmd/web
 ```
 
-将可执行文件、`web/.env.example` 和完整的 `web/dist` 放入同一发布目录。发布包不需要携带 Node.js、npm、源代码或后端程序。
+手动构建时，将两个可执行文件、仓库根目录的 `.env.example` 和完整的 `web/dist` 放入同一发布目录。发布包不需要携带 Node.js、npm 或源代码。
 
 ## 运行发布包
 
 使用时把 `.env.example` 改名为 `.env`，然后配置浏览器可访问的 Backend 地址：
 
 ```dotenv
-WEB_ADDR=:3000
+WEB_ADDR=:9528
 WEB_API_BASE_URL=http://127.0.0.1:9527
 WEB_GATEWAY_BASE_URL=http://127.0.0.1:9527
 ```
@@ -118,7 +126,15 @@ Rename-Item .env.example .env
 .\zentrola-web.exe
 ```
 
-启动程序读取同目录的 `.env` 和 `dist`，默认在 `http://127.0.0.1:3000` 提供管理网页。修改 `WEB_API_BASE_URL` 或 `WEB_GATEWAY_BASE_URL` 后只需重启，不需要重新构建前端；两个地址都必须能从管理员或客户端所在网络访问，不能填写仅服务器内部可见的主机名。`WEB_GATEWAY_BASE_URL` 未配置时默认使用 `WEB_API_BASE_URL`。
+也可以通过命令行临时覆盖地址。只传 `--api` 时同时作为 Gateway 地址，并且即使没有
+`.env` 也会使用默认端口 `9528` 启动：
+
+```powershell
+.\zentrola-web.exe --api https://api.example.com
+.\zentrola-web.exe --api https://api.example.com --gateway https://gateway.example.com
+```
+
+启动程序读取同目录的 `.env` 和 `dist`，默认在 `http://127.0.0.1:9528` 提供管理网页。修改 `WEB_API_BASE_URL` 或 `WEB_GATEWAY_BASE_URL` 后只需重启，不需要重新构建前端；两个地址都必须能从管理员或客户端所在网络访问，不能填写仅服务器内部可见的主机名。`WEB_GATEWAY_BASE_URL` 未配置时默认使用 `WEB_API_BASE_URL`。
 
 Admin Web 与 Backend 跨域运行时，还要将 Admin Web 的实际 Origin 加入 Backend 的 `CORS_ALLOWED_ORIGINS`。Go Backend 不提供 Admin Web 的 `index.html`、`/assets/*` 或 favicon。
 

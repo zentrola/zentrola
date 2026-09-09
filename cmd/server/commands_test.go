@@ -38,7 +38,7 @@ func TestConfigArgument(t *testing.T) {
 			t.Fatalf("configuration argument rejected: %v", err)
 		}
 	}
-	for _, args := range [][]string{{"serve", "--config"}, {"serve", "--config="}, {"serve", "--config", "a", "--config", "b"}, {"healthcheck", "--username", "admin"}, {"config", "--file="}, {"config", "--file", "a", "--show"}, {"config", "--file", "a", "--file", "b"}} {
+	for _, args := range [][]string{{"serve", "--config"}, {"serve", "--config="}, {"serve", "--config", "a", "--config", "b"}, {"healthcheck", "--username", "admin"}, {"config", "--file", "a"}, {"config", "--show"}} {
 		if _, err := parseCommand(args); err == nil {
 			t.Fatalf("invalid configuration argument accepted: %q", args)
 		}
@@ -76,6 +76,9 @@ func TestHelpWithoutConfiguration(t *testing.T) {
 		}
 		if !strings.Contains(output.String(), "zentrola") {
 			t.Fatal("missing help")
+		}
+		if strings.Contains(output.String(), "config --file") || strings.Contains(output.String(), "config --show") {
+			t.Fatal("removed config command is still shown")
 		}
 	}
 }

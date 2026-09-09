@@ -1,13 +1,55 @@
 package main
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
 )
+
+func TestParseWebOptions(t *testing.T) {
+	options, err := parseWebOptions([]string{"--api", "https://api.example.com", "--gateway", "https://gateway.example.com"})
+	if err != nil || options.APIBaseURL != "https://api.example.com" || options.GatewayBaseURL != "https://gateway.example.com" {
+		t.Fatalf("options=%+v err=%v", options, err)
+	}
+	if _, err := parseWebOptions([]string{"--unknown"}); err == nil {
+		t.Fatal("unknown option accepted")
+	}
+	var help bytes.Buffer
+	writeHelp(&help)
+	if !strings.Contains(help.String(), "--api") || !strings.Contains(help.String(), "9528") {
+		t.Fatal("help does not describe runtime configuration")
+	}
+}
+
+func TestCommandLineAPIOverridesEnvironmentAndGateway(t *testing.T) {
+	file := filepath.Join(t.TempDir(), ".env")
+	if err := os.WriteFile(file, []byte("WEB_API_BASE_URL=https://old-api.example.com\nWEB_GATEWAY_BASE_URL=https://old-gateway.example.com\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	config, err := loadConfig(file, webOptions{APIBaseURL: "https://api.example.com/base/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.APIBaseURL != "https://api.example.com/base" || config.APIOrigin != "https://api.example.com" || config.GatewayBaseURL != config.APIBaseURL {
+		t.Fatalf("unexpected config: %+v", config)
+	}
+}
+
+func TestCommandLineAPIWorksWithoutEnvFile(t *testing.T) {
+	config, err := loadConfig(filepath.Join(t.TempDir(), "missing.env"), webOptions{APIBaseURL: "https://api.example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Address != ":9528" || config.APIBaseURL != "https://api.example.com" || config.GatewayBaseURL != config.APIBaseURL {
+		t.Fatalf("unexpected config: %+v", config)
+	}
+}
 
 func TestHandlerServesRuntimeConfigAndOnlyPublicFiles(t *testing.T) {
 	files := fstest.MapFS{
@@ -58,10 +100,10 @@ func TestHandlerServesRuntimeConfigAndOnlyPublicFiles(t *testing.T) {
 
 func TestDisplayURL(t *testing.T) {
 	tests := map[string]string{
-		":3000":          "http://127.0.0.1:3000",
-		"0.0.0.0:3000":   "http://127.0.0.1:3000",
-		"127.0.0.1:3000": "http://127.0.0.1:3000",
-		"[::1]:3000":     "http://[::1]:3000",
+		":9528":          "http://127.0.0.1:9528",
+		"0.0.0.0:9528":   "http://127.0.0.1:9528",
+		"127.0.0.1:9528": "http://127.0.0.1:9528",
+		"[::1]:9528":     "http://[::1]:9528",
 	}
 	for input, want := range tests {
 		if got := displayURL(input); got != want {

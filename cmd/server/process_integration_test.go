@@ -113,9 +113,8 @@ func TestProcessLifecycleIntegration(t *testing.T) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}()
-	mustRun("config", "--file", file)
 	port := availableTestPort(t)
-	mustRun("start", "--port", strconv.Itoa(port))
+	mustRun("start", "--config", file, "--port", strconv.Itoa(port))
 	dir := filepath.Join(binDir, "run")
 	first, err := readProcessState(dir)
 	if err != nil {
@@ -181,7 +180,7 @@ func TestProcessLifecycleIntegration(t *testing.T) {
 	}
 	defer busy.Close()
 	busyPort := busy.Addr().(*net.TCPAddr).Port
-	for _, args := range [][]string{{"start", "--port", strconv.Itoa(busyPort)}, {"start", "--foreground", "--port", strconv.Itoa(busyPort)}} {
+	for _, args := range [][]string{{"start", "--port", strconv.Itoa(busyPort)}, {"serve", "--port", strconv.Itoa(busyPort)}} {
 		out, err := run(args...)
 		if err == nil || !strings.Contains(out, "cannot listen on HTTP_ADDR") {
 			t.Fatalf("port conflict missing diagnosis: %v %s", err, out)

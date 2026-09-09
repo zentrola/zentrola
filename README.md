@@ -136,24 +136,49 @@ Provider 端点按 `OPENAI` 和 `ANTHROPIC` 两类上游协议保存；其中 `A
 
 ## 发布包结构
 
-Backend 和 Admin Web 是两个独立程序，分别下载、配置和运行。
+Backend 和 Admin Web 是两个独立程序，但发布到同一个目标目录，共享配置模板和前端静态资源。
 
-Backend 发布目录：
+在仓库根目录运行跨平台 Go 发布工具，可一键生成统一发布目录：
 
-```text
-zentrola-backend/
-├── zentrola          # MacOS/Linux
-├── zentrola.exe      # Windows
-├── .env.example
-└── compose.yaml      # 可选：只用于快速启动 PostgreSQL
+```powershell
+go run ./cmd/release
 ```
 
-Admin Web 发布目录：
+默认在隔离的临时目录按 lockfile 安装前端依赖，不会修改开发目录中的 `web/node_modules`。
+不传参数时自动构建当前操作系统与 CPU 架构，输出到 `dist/<系统>/<架构>`。如果已有完整的
+`web/node_modules`，可加 `-skip-npm-install` 直接使用。也可以选择其他目标，例如构建 Linux
+ARM64 发布包：
+
+```powershell
+go run ./cmd/release -target-os linux -architecture arm64
+```
+
+Windows 也可继续使用兼容 Windows PowerShell 5.1 的快捷入口：
+
+```powershell
+.\scripts\Build-Release.ps1
+```
+
+脚本会依次选择发布内容（Backend、Admin Web 或全部）、目标操作系统和 CPU 架构；也可以通过参数直接构建，适合自动化使用：
+
+```powershell
+# 只构建 Windows AMD64 Backend
+.\scripts\Build-Release.ps1 -Component backend -TargetOS windows -Architecture amd64
+
+# 只构建 macOS ARM64 Admin Web，并复用已有的 web/node_modules
+.\scripts\Build-Release.ps1 -Component web -TargetOS macos -Architecture arm64 -SkipNpmInstall
+```
+
+对应的 Go 发布工具也支持 `-component backend|web|all`。单独构建某一组件时，只替换该组件的可执行文件或静态资源，不会删除同一目标下已生成的另一组件。
+
+统一发布目录：
 
 ```text
-zentrola-web/
-├── zentrola-web          # MacOS/Linux
-├── zentrola-web.exe      # Windows
+dist/<系统>/<架构>/
+├── zentrola              # macOS/Linux Backend
+├── zentrola.exe          # Windows Backend
+├── zentrola-web          # macOS/Linux Admin Web
+├── zentrola-web.exe      # Windows Admin Web
 ├── .env.example
 └── dist/
     ├── index.html
@@ -161,13 +186,46 @@ zentrola-web/
     └── assets/
 ```
 
-实际发布包只包含对应操作系统的一个可执行文件，不会同时包含无扩展名和 `.exe` 两个版本。
+实际发布包只包含对应操作系统的两个可执行文件，不会同时包含无扩展名和 `.exe` 两组版本。
+
+## 构建应用镜像
+
+应用镜像直接使用 `dist/linux/<架构>` 的统一发布包，同时包含 Backend、Admin Web 和前端静态资源。先生成 Linux 发布包：
+
+```powershell
+.\scripts\Build-Release.ps1 -Component all -TargetOS linux -Architecture amd64
+```
+
+再在仓库根目录构建镜像：
+
+```powershell
+docker build --build-arg TARGETARCH=amd64 -t zentrola:latest .
+```
+
+镜像默认以前台模式运行 Backend；真实配置通过环境变量注入，不会把本地 `.env` 写入镜像：
+
+```powershell
+docker run -d --name zentrola-backend `
+  -p 127.0.0.1:9527:9527 `
+  --env-file .env `
+  zentrola:latest backend
+```
+
+同一个镜像可以启动 Admin Web，镜像内的 `/app/dist` 由 `zentrola-web` 提供：
+
+```powershell
+docker run -d --name zentrola-web `
+  -p 127.0.0.1:9528:9528 `
+  zentrola:latest web --api https://api.zentrola.example.com
+```
+
+容器以非 root 用户运行。`backend` 不传后续参数时内部执行 `zentrola serve`，也可以执行一次性命令，例如 `zentrola:latest backend migrate`；`web` 后的参数原样传给 `zentrola-web`。
 
 ## 安装 Backend
 
 ### 1. 准备配置
 
-进入 Backend 发布目录，将示例配置改名为 `.env`。
+进入对应系统与架构的统一发布目录，将示例配置改名为 `.env`。Backend 和 Admin Web 可以共享该配置文件。
 
 MacOS/Linux：
 
@@ -193,7 +251,7 @@ POSTGRES_PASSWORD=请填写数据库密码
 ADMIN_JWT_SECRET=请填写至少包含32随机字节的Base64字符串
 
 CORS_ENABLED=true
-CORS_ALLOWED_ORIGINS=http://127.0.0.1:3000
+CORS_ALLOWED_ORIGINS=http://127.0.0.1:9528
 ```
 
 MacOS/Linux 可以使用 OpenSSL 生成 `ADMIN_JWT_SECRET`：
@@ -218,7 +276,7 @@ $rng.Dispose()
 
 如果已经有 PostgreSQL 17，只需创建 `.env` 中指定的数据库和用户，随后直接运行 Backend。
 
-发布目录中的 `compose.yaml` 是可选的 PostgreSQL 快速安装示例，只启动数据库，不运行 Zentrola Backend 或 Admin Web：
+仓库根目录的 `compose.yaml` 是可选的 PostgreSQL 快速安装示例，只启动数据库，不运行 Zentrola Backend 或 Admin Web；如需使用，可单独复制到部署目录：
 
 ```shell
 docker compose up -d postgres
@@ -271,24 +329,12 @@ Windows PowerShell：
 
 ### 1. 准备配置
 
-进入 Admin Web 发布目录，将示例配置改名为 `.env`。
-
-MacOS/Linux：
-
-```bash
-mv .env.example .env
-```
-
-Windows PowerShell：
-
-```powershell
-Rename-Item .env.example .env
-```
+Admin Web 与 Backend 位于同一个发布目录，直接使用前面由 `.env.example` 创建的 `.env`。
 
 配置监听端口和浏览器能够访问的 Backend 地址：
 
 ```dotenv
-WEB_ADDR=:3000
+WEB_ADDR=:9528
 WEB_API_BASE_URL=http://127.0.0.1:9527
 ```
 
@@ -309,7 +355,16 @@ Windows PowerShell：
 .\zentrola-web.exe
 ```
 
-Admin Web 默认地址为 `http://127.0.0.1:3000`。程序读取同目录的 `.env` 和 `dist`，启动后不需要 Node.js、npm 或 Vite。
+也可以通过命令行临时指定 Backend 地址；命令行参数优先于 `.env`，只传 `--api` 时
+同时作为 Gateway 地址：
+
+```powershell
+.\zentrola-web.exe --api https://api.example.com
+# API 与 Gateway 使用不同公网地址时：
+.\zentrola-web.exe --api https://api.example.com --gateway https://gateway.example.com
+```
+
+Admin Web 默认地址为 `http://127.0.0.1:9528`。程序读取同目录的 `.env` 和 `dist`，启动后不需要 Node.js、npm 或 Vite。
 
 ## 首次使用
 

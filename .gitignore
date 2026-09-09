@@ -6,6 +6,7 @@
 !.env.prod.example
 !/web/.env.example
 /bin/
+/dist/
 /.cache/
 /data/
 # 本地开发资料，不纳入开源仓库。
@@ -13,7 +14,6 @@
 coverage.out
 *.test
 *.exe
-/config.json
 /run/
 .zentrola-config-*
 .idea/

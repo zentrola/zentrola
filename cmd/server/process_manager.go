@@ -64,8 +64,6 @@ func applyPort(cfg *config.Config, port int) error {
 	return nil
 }
 
-func runtimeDir(bindingPath string) string { return filepath.Join(filepath.Dir(bindingPath), "run") }
-
 func prepareRuntime(dir string) error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return errors.New("无法创建 run 目录；请确认程序目录可写")
@@ -230,8 +228,7 @@ func (p *managedProcess) close(err error) error {
 	return saveErr
 }
 
-func managedChild(command commandOptions, selection configSelection, bindingPath string, output io.Writer) (runErr error) {
-	dir := runtimeDir(bindingPath)
+func managedChild(command commandOptions, selection configSelection, dir string, output io.Writer) (runErr error) {
 	if err := prepareRuntime(dir); err != nil {
 		return err
 	}
@@ -339,8 +336,7 @@ func accessURL(addr string) string {
 	return "http://" + net.JoinHostPort(host, port)
 }
 
-func manageProcess(command commandOptions, bindingPath string, output io.Writer) error {
-	dir := runtimeDir(bindingPath)
+func manageProcess(command commandOptions, dir string, output io.Writer) error {
 	if err := prepareRuntime(dir); err != nil {
 		return err
 	}
@@ -375,7 +371,7 @@ func manageProcess(command commandOptions, bindingPath string, output io.Writer)
 		return errors.New("无法读取工作目录")
 	}
 	if command.name == "restart" && state.PID != 0 && !command.configProvided {
-		selection = configSelection{path: state.ConfigFile, pinned: state.ConfigPinned, source: "上次运行"}
+		selection = configSelection{path: state.ConfigFile, pinned: state.ConfigPinned}
 		workdir = state.Workdir
 		if selection.pinned {
 			if err := requireConfigFile(selection.path); err != nil {
@@ -383,7 +379,7 @@ func manageProcess(command commandOptions, bindingPath string, output io.Writer)
 			}
 		}
 	} else {
-		selection, err = selectConfig(command, bindingPath)
+		selection, err = selectConfig(command)
 		if err != nil {
 			return err
 		}
@@ -430,7 +426,7 @@ func launchManaged(dir string, selection configSelection, workdir string, cfg co
 	if err != nil {
 		return errors.New("启动端口无效")
 	}
-	args := []string{"start", "--foreground", "--port", port}
+	args := []string{"serve", "--port", port}
 	if selection.pinned {
 		args = append(args, "--config", selection.path)
 	}

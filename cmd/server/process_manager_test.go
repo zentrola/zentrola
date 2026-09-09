@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,12 +14,12 @@ import (
 )
 
 func TestProcessCommandOptions(t *testing.T) {
-	for _, args := range [][]string{{"start"}, {"start", "--port=8081"}, {"start", "--port", "8081", "--foreground"}, {"restart", "--port=8082"}, {"restart"}, {"stop"}, {"status"}, {"serve", "--port=8081"}} {
+	for _, args := range [][]string{{"start"}, {"start", "--port=8081"}, {"restart", "--port=8082"}, {"restart"}, {"stop"}, {"status"}, {"serve", "--port=8081"}} {
 		if _, err := parseCommand(args); err != nil {
 			t.Fatalf("valid lifecycle command %q: %v", args, err)
 		}
 	}
-	for _, args := range [][]string{{"start", "--port=0"}, {"start", "--port=65536"}, {"start", "--port=-1"}, {"start", "--port=x"}, {"stop", "--port=8080"}, {"status", "--config=x"}, {"restart", "--foreground"}, {"start", "--port=1", "--port=2"}} {
+	for _, args := range [][]string{{"start", "--port=0"}, {"start", "--port=65536"}, {"start", "--port=-1"}, {"start", "--port=x"}, {"start", "--foreground"}, {"stop", "--port=8080"}, {"status", "--config=x"}, {"restart", "--foreground"}, {"start", "--port=1", "--port=2"}} {
 		if _, err := parseCommand(args); err == nil {
 			t.Fatalf("invalid lifecycle command accepted: %q", args)
 		}
@@ -128,22 +127,18 @@ func TestManagedStopAuthenticatesAndWaitsForFlush(t *testing.T) {
 }
 
 func TestManagementWorksWithoutConfigAndRefusesDuplicateCommands(t *testing.T) {
-	dir := t.TempDir()
-	binding := filepath.Join(dir, "config.json")
-	if err := os.WriteFile(binding, []byte("broken-binding"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	dir := filepath.Join(t.TempDir(), "run")
 	for _, name := range []string{"stop", "status"} {
-		if err := manageProcess(commandOptions{name: name}, binding, io.Discard); err != nil {
+		if err := manageProcess(commandOptions{name: name}, dir, io.Discard); err != nil {
 			t.Fatalf("%s depended on config: %v", name, err)
 		}
 	}
-	lock, err := acquireProcessLock(filepath.Join(runtimeDir(binding), "command.lock"))
+	lock, err := acquireProcessLock(filepath.Join(dir, "command.lock"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer lock.Close()
-	if err := manageProcess(commandOptions{name: "start"}, binding, io.Discard); err == nil {
+	if err := manageProcess(commandOptions{name: "start"}, dir, io.Discard); err == nil {
 		t.Fatal("simultaneous management command accepted")
 	}
 }

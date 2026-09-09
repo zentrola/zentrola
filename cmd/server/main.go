@@ -73,18 +73,15 @@ func run(args []string, output io.Writer) (runErr error) {
 		return writeHelp(output, command.name)
 	}
 	mode := command.name
-	bindingPath, err := bindingFile()
+	runtimePath, err := executableRuntimeDir()
 	if err != nil {
 		return err
 	}
-	if mode == "config" {
-		return configure(command, bindingPath, output)
-	}
-	if mode == "stop" || mode == "status" || mode == "restart" || (mode == "start" && !command.foreground) {
-		return manageProcess(command, bindingPath, output)
+	if mode == "stop" || mode == "status" || mode == "restart" || mode == "start" {
+		return manageProcess(command, runtimePath, output)
 	}
 	if mode == "healthcheck" && !command.configProvided {
-		addr, found, err := currentManagedAddress(runtimeDir(bindingPath))
+		addr, found, err := currentManagedAddress(runtimePath)
 		if err != nil {
 			return err
 		}
@@ -93,7 +90,7 @@ func run(args []string, output io.Writer) (runErr error) {
 		}
 	}
 	var selection configSelection
-	child := mode == "start" && command.foreground && os.Getenv("ZENTROLA_BACKGROUND_CHILD") == "1"
+	child := mode == "serve" && os.Getenv("ZENTROLA_BACKGROUND_CHILD") == "1"
 	if child {
 		selection = configSelection{path: os.Getenv("ZENTROLA_CHILD_CONFIG"), pinned: os.Getenv("ZENTROLA_CHILD_PINNED") == "1"}
 		if !filepath.IsAbs(selection.path) {
@@ -103,13 +100,13 @@ func run(args []string, output io.Writer) (runErr error) {
 			err = requireConfigFile(selection.path)
 		}
 	} else {
-		selection, err = selectConfig(command, bindingPath)
+		selection, err = selectConfig(command)
 	}
 	if err != nil {
 		return err
 	}
 	if child {
-		return managedChild(command, selection, bindingPath, output)
+		return managedChild(command, selection, runtimePath, output)
 	}
 	if mode == "healthcheck" {
 		addr := os.Getenv("HTTP_ADDR")
@@ -136,7 +133,7 @@ func run(args []string, output io.Writer) (runErr error) {
 
 func runService(command commandOptions, selection configSelection, cfg config.Config, managed *managedProcess, output io.Writer) (runErr error) {
 	mode := command.name
-	// 显式绑定配置后，Master Key 等相对运行路径也必须稳定。
+	// 显式指定配置后，Master Key 等相对运行路径也必须稳定。
 	if selection.pinned {
 		previous, err := os.Getwd()
 		if err != nil {
