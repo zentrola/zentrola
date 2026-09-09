@@ -348,6 +348,7 @@ export default {
     editCredentialFor: 'Edit the key for {name}',
     credentialHint:
       'Configure an API key for “{name}”. It is enabled immediately and the complete key is not shown after saving.',
+    credentialRequiredBeforeEnable: 'Configure a provider key before enabling the provider.',
     testConnectionFor: 'Test connection for {name}',
     syncModelsFor: 'Sync official models for {name}',
     connectionTitle: 'Basic settings',
@@ -556,6 +557,7 @@ export default {
     CONFLICT: 'The action conflicts with an existing code, state, or enabled provider credential.',
     PROVIDER_UNAVAILABLE: 'The upstream provider is disabled.',
     CREDENTIAL_UNRECOVERABLE: 'The credential cannot be decrypted. Enter it again.',
+    PROVIDER_CREDENTIAL_REQUIRED: 'Configure a provider key before enabling the provider.',
     PROXY_CONFIGURATION_UNRECOVERABLE:
       'The proxy configuration cannot be decrypted. Save the provider proxy configuration again.',
     SERVICE_UNAVAILABLE: 'The service is temporarily unavailable. Try again later.',

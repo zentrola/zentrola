@@ -130,6 +130,17 @@ func TestInvalidStatusStopsBeforeApplication(t *testing.T) {
 	}
 }
 
+func TestProviderCredentialRequiredReturnsConflict(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/providers/8/status", nil)
+
+	securityError(recorder, request, mgmt.ErrProviderCredentialRequired)
+
+	if recorder.Code != http.StatusConflict || !strings.Contains(recorder.Body.String(), `"code":"PROVIDER_CREDENTIAL_REQUIRED"`) {
+		t.Fatalf("unexpected response: status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestInvalidPathIDStopsBeforeApplication(t *testing.T) {
 	called := false
 	handler := statusEndpoint(func(context.Context, admin.Identity, int64, string, appsec.RequestMeta) error {

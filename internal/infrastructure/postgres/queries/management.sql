@@ -108,6 +108,11 @@ WHERE id=$1 AND is_deleted=false;
 SELECT * FROM provider WHERE is_deleted=false AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2;
 -- name: ManageProvider :one
 SELECT * FROM provider WHERE id=$1 AND is_deleted=false;
+-- name: ManageProviderCredentialConfigured :one
+SELECT EXISTS(
+    SELECT 1 FROM provider_credential
+    WHERE organization_id=$1 AND provider_id=$2 AND is_deleted=false
+);
 -- name: ManageProviderEndpoints :many
 SELECT * FROM provider_endpoint WHERE provider_id=$1 ORDER BY protocol_type;
 -- name: ManageCreateProvider :exec

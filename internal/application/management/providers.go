@@ -454,6 +454,15 @@ func (s *Service) SetProviderStatus(ctx context.Context, actor admin.Identity, i
 		if provider.Status == status {
 			return nil
 		}
+		if status == "ACTIVE" {
+			configured, err := w.ProviderCredentialConfigured(ctx, id)
+			if err != nil {
+				return err
+			}
+			if !configured {
+				return ErrProviderCredentialRequired
+			}
+		}
 		if err := w.SetProviderStatus(ctx, id, status); err != nil {
 			return err
 		}

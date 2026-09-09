@@ -14,9 +14,10 @@ import (
 )
 
 var (
-	ErrConflict   = errors.New("conflict")
-	ErrCredential = errors.New("credential unrecoverable")
-	ErrProvider   = errors.New("provider unavailable")
+	ErrConflict                   = errors.New("conflict")
+	ErrCredential                 = errors.New("credential unrecoverable")
+	ErrProvider                   = errors.New("provider unavailable")
+	ErrProviderCredentialRequired = errors.New("provider credential required")
 )
 
 type Page struct {
@@ -187,6 +188,7 @@ type Reader interface {
 	CountProviders(context.Context) (int64, error)
 	Provider(context.Context, int64) (Provider, error)
 	ProviderMappings(context.Context, int64) ([]ProviderMapping, error)
+	ProviderCredentialConfigured(context.Context, int64) (bool, error)
 	Resources(context.Context, Page) ([]Resource, error)
 	CountResources(context.Context) (int64, error)
 	Resource(context.Context, int64) (ResourceRecord, error)

@@ -62,7 +62,7 @@ func TestInitializeOfficialProvidersOnlyCreatesMissingTemplates(t *testing.T) {
 		t.Fatalf("existing provider was overwritten: %+v", state.providers[0])
 	}
 	for _, provider := range state.providers[1:] {
-		if provider.Type != "OFFICIAL" || provider.Status != "ACTIVE" || len(provider.Endpoints) == 0 {
+		if provider.Type != "OFFICIAL" || provider.Status != "DISABLED" || len(provider.Endpoints) == 0 {
 			t.Fatalf("invalid initialized provider: %+v", provider)
 		}
 	}

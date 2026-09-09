@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	appsec "github.com/zentrola/zentrola/internal/application/security"
+	"github.com/zentrola/zentrola/internal/domain/admin"
 	"github.com/zentrola/zentrola/internal/domain/catalog"
 )
 
@@ -16,6 +18,38 @@ type mappingWriter struct {
 	mappings []ProviderMapping
 	updated  []ProviderMapping
 	deleted  []int64
+}
+
+type providerStatusWriter struct {
+	Writer
+	provider             Provider
+	credentialConfigured bool
+	statusChanges        []string
+	audits               []Audit
+}
+
+func (w *providerStatusWriter) Provider(context.Context, int64) (Provider, error) {
+	return w.provider, nil
+}
+func (w *providerStatusWriter) ProviderCredentialConfigured(context.Context, int64) (bool, error) {
+	return w.credentialConfigured, nil
+}
+func (w *providerStatusWriter) SetProviderStatus(_ context.Context, _ int64, status string) error {
+	w.statusChanges = append(w.statusChanges, status)
+	return nil
+}
+func (w *providerStatusWriter) Audit(_ context.Context, audit Audit, _ appsec.RequestMeta) error {
+	w.audits = append(w.audits, audit)
+	return nil
+}
+
+type providerStatusStore struct{ writer *providerStatusWriter }
+
+func (s providerStatusStore) Read(context.Context, admin.Identity, func(Reader) error) error {
+	return nil
+}
+func (s providerStatusStore) Write(_ context.Context, _ admin.Identity, fn func(Writer) error) error {
+	return fn(s.writer)
 }
 
 func (w *mappingWriter) ProviderMappings(context.Context, int64) ([]ProviderMapping, error) {
@@ -135,6 +169,39 @@ func TestReplaceProviderMappingsLogicallyDeletesUncheckedModels(t *testing.T) {
 	}
 	if len(writer.deleted) != 1 || writer.deleted[0] != 11 {
 		t.Fatalf("unchecked mapping was not logically deleted: %+v", writer.deleted)
+	}
+}
+
+func TestSetProviderStatusRequiresConfiguredCredentialWhenEnabling(t *testing.T) {
+	writer := &providerStatusWriter{provider: Provider{ID: 8, Name: "待配置服务商", Status: "DISABLED"}}
+	service := New(providerStatusStore{writer: writer}, nil, nil, nil)
+
+	err := service.SetProviderStatus(context.Background(), admin.Identity{}, 8, "ACTIVE", appsec.RequestMeta{})
+	if !errors.Is(err, ErrProviderCredentialRequired) {
+		t.Fatalf("error=%v; want provider credential required", err)
+	}
+	if len(writer.statusChanges) != 0 || len(writer.audits) != 0 {
+		t.Fatalf("rejected enable changed state: statuses=%v audits=%v", writer.statusChanges, writer.audits)
+	}
+
+	writer.credentialConfigured = true
+	if err := service.SetProviderStatus(context.Background(), admin.Identity{}, 8, "ACTIVE", appsec.RequestMeta{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(writer.statusChanges) != 1 || writer.statusChanges[0] != "ACTIVE" || len(writer.audits) != 1 {
+		t.Fatalf("configured provider was not enabled and audited: statuses=%v audits=%v", writer.statusChanges, writer.audits)
+	}
+}
+
+func TestSetProviderStatusAllowsDisablingWithoutCredential(t *testing.T) {
+	writer := &providerStatusWriter{provider: Provider{ID: 8, Name: "已启用服务商", Status: "ACTIVE"}}
+	service := New(providerStatusStore{writer: writer}, nil, nil, nil)
+
+	if err := service.SetProviderStatus(context.Background(), admin.Identity{}, 8, "DISABLED", appsec.RequestMeta{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(writer.statusChanges) != 1 || writer.statusChanges[0] != "DISABLED" {
+		t.Fatalf("provider was not disabled: %v", writer.statusChanges)
 	}
 }
 

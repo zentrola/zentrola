@@ -1223,6 +1223,9 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   const row = page.getByRole('row').filter({ hasText: '阿里云百炼' })
   await expect(row).toContainText('dashscope.aliyuncs.com/compatible-mode/v1')
   await expect(row).toContainText('否')
+  const createdStatus = row.getByRole('switch', { name: '阿里云百炼的启用状态' })
+  await expect(createdStatus).toBeDisabled()
+  await expect(createdStatus).toHaveAttribute('title', '请先配置服务商密钥，再启用服务商。')
   await row.getByRole('button', { name: '配置 阿里云百炼 的密钥', exact: true }).click()
   await dialog.getByLabel('API Key', { exact: true }).fill('aliyun-fixture-credential')
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
@@ -1230,6 +1233,8 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await expect(modal(page)).toContainText('发现模型')
   await modal(page).getByRole('button', { name: '关闭', exact: true }).last().click()
   await expect(row).toContainText('是')
+  await expect(createdStatus).toBeEnabled()
+  await expect(createdStatus).not.toHaveAttribute('title')
   const testCredential = row.getByRole('button', {
     name: '测试 阿里云百炼 的连接',
     exact: true,

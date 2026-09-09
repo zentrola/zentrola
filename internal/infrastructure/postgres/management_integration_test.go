@@ -168,7 +168,10 @@ func TestStage3Integration(t *testing.T) {
 		},
 	}
 	customProvider := stage3Data[mgmt.Provider](t, request("POST", "/api/v1/providers", customProviderInput, 201))
-	request("PATCH", "/api/v1/providers/"+sid(customProvider.ID)+"/status", map[string]string{"status": "ACTIVE"}, 200)
+	missingCredential := request("PATCH", "/api/v1/providers/"+sid(customProvider.ID)+"/status", map[string]string{"status": "ACTIVE"}, 409)
+	if !strings.Contains(missingCredential.Body.String(), `"code":"PROVIDER_CREDENTIAL_REQUIRED"`) {
+		t.Fatalf("provider without a credential returned an unexpected error: %s", missingCredential.Body.String())
+	}
 	provider := customProvider
 	t.Cleanup(func() {
 		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -331,6 +334,7 @@ func TestStage3Integration(t *testing.T) {
 			return stage3Data[mgmt.Resource](t, request("POST", "/api/v1/resources", map[string]string{"providerId": sid(provider.ID), "name": name, "credential": credential}, 201))
 		}
 		first = create("主资源")
+		request("PATCH", "/api/v1/providers/"+sid(provider.ID)+"/status", map[string]string{"status": "ACTIVE"}, 200)
 		if first.Status != "ACTIVE" {
 			t.Fatal("new provider credential should be active")
 		}

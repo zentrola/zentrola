@@ -551,8 +551,15 @@ onMounted(() => {
               <StatusSwitch
                 :value="provider.status"
                 :name="provider.name"
-                :disabled="busy || loading"
+                :disabled="
+                  busy || loading || (provider.status !== 'ACTIVE' && !resourceFor(provider))
+                "
                 :busy="busy && statusTarget?.id === provider.id"
+                :title="
+                  provider.status !== 'ACTIVE' && !resourceFor(provider)
+                    ? t('providers.credentialRequiredBeforeEnable')
+                    : undefined
+                "
                 @change="statusTarget = provider"
               />
             </td>

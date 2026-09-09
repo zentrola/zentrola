@@ -391,6 +391,8 @@ func securityError(w http.ResponseWriter, r *http.Request, err error) {
 		status, code, message = http.StatusUnprocessableEntity, "CREDENTIAL_UNRECOVERABLE", "Replace the resource credential before enabling it."
 	case errors.Is(err, mgmt.ErrProvider):
 		status, code, message = http.StatusConflict, "PROVIDER_UNAVAILABLE", "Provider is unavailable."
+	case errors.Is(err, mgmt.ErrProviderCredentialRequired):
+		status, code, message = http.StatusConflict, "PROVIDER_CREDENTIAL_REQUIRED", "Configure a provider credential before enabling the provider."
 	}
 	writeJSON(w, r, status, response{Code: code, Message: message})
 }

@@ -1327,6 +1327,25 @@ func (q *Queries) ManageProvider(ctx context.Context, id int64) (Provider, error
 	return i, err
 }
 
+const manageProviderCredentialConfigured = `-- name: ManageProviderCredentialConfigured :one
+SELECT EXISTS(
+    SELECT 1 FROM provider_credential
+    WHERE organization_id=$1 AND provider_id=$2 AND is_deleted=false
+)
+`
+
+type ManageProviderCredentialConfiguredParams struct {
+	OrganizationID int64
+	ProviderID     int64
+}
+
+func (q *Queries) ManageProviderCredentialConfigured(ctx context.Context, arg ManageProviderCredentialConfiguredParams) (bool, error) {
+	row := q.db.QueryRow(ctx, manageProviderCredentialConfigured, arg.OrganizationID, arg.ProviderID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const manageProviderEndpoints = `-- name: ManageProviderEndpoints :many
 SELECT provider_id, protocol_type, base_url, created_by, updated_by, created_at, updated_at FROM provider_endpoint WHERE provider_id=$1 ORDER BY protocol_type
 `

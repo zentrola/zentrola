@@ -9,6 +9,7 @@ defineProps<{
   ariaLabel?: string
   activeLabel?: string
   inactiveLabel?: string
+  title?: string
 }>()
 defineEmits<{ change: [] }>()
 </script>
@@ -21,14 +22,13 @@ defineEmits<{ change: [] }>()
     :aria-label="ariaLabel || t('common.statusFor', { name })"
     :aria-checked="value === 'ACTIVE'"
     :aria-busy="!!busy"
+    :title="title"
     :disabled="disabled || busy"
     @click="$emit('change')"
   >
     <span class="status-switch-track" aria-hidden="true"><span class="status-switch-thumb" /></span>
     <span>{{
-      value === 'ACTIVE'
-        ? activeLabel || t('state.ACTIVE')
-        : inactiveLabel || t('state.DISABLED')
+      value === 'ACTIVE' ? activeLabel || t('state.ACTIVE') : inactiveLabel || t('state.DISABLED')
     }}</span>
   </button>
 </template>

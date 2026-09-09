@@ -38,7 +38,7 @@ func (s *Service) InitializeOfficialProviders(ctx context.Context, actor admin.I
 				return err
 			}
 			provider := Provider{
-				ID: id, Code: template.Code, Name: template.Name, Type: "OFFICIAL", Status: "ACTIVE",
+				ID: id, Code: template.Code, Name: template.Name, Type: "OFFICIAL", Status: "DISABLED",
 				Endpoints: make([]ProviderEndpoint, 0, len(template.Endpoints)),
 				CreatedAt: now, UpdatedAt: now,
 			}
