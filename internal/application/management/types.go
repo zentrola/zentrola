@@ -118,9 +118,13 @@ type ProviderDetail struct {
 	Provider
 	Mappings []ProviderMapping `json:"mappings"`
 }
+type ProviderInitializeInput struct {
+	Locale string `json:"locale" binding:"required" enums:"zh-CN,en-US"`
+}
 type ProviderInitializeResult struct {
 	Total    int `json:"total"`
 	Created  int `json:"created"`
+	Updated  int `json:"updated"`
 	Existing int `json:"existing"`
 }
 type Resource struct {
@@ -256,6 +260,7 @@ type ModelSyncResult struct {
 	ConnectionResult
 	Discovered int `json:"discovered"`
 	Created    int `json:"created"`
+	Updated    int `json:"updated"`
 	Mapped     int `json:"mapped"`
 }
 

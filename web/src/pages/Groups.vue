@@ -11,8 +11,20 @@ import PageHeader from '../components/PageHeader.vue'
 import ListFooter from '../components/ListFooter.vue'
 import ListSearch from '../components/ListSearch.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
-const { items, cursor, page, pageSize, total, loading, error, load, previous, retry, setPageSize } =
-  useCollection<Group>(() => '/groups')
+const {
+  items,
+  cursor,
+  page,
+  pageSize,
+  total,
+  loading,
+  error,
+  load,
+  refresh,
+  previous,
+  retry,
+  setPageSize,
+} = useCollection<Group>(() => '/groups')
 const { busy, error: actionError, run } = useAction()
 const creating = ref(false),
   name = ref(''),
@@ -133,7 +145,7 @@ function changeStatus() {
       status: group.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE',
     })
     statusTarget.value = null
-    await load()
+    await refresh()
   })
 }
 function deleteGroup() {

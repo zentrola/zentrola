@@ -49,10 +49,7 @@ func (b *usageInterruptedBody) Close() error { return nil }
 
 func TestStage5Integration(t *testing.T) {
 	ctx, pool, _ := integrationDatabase(t)
-	ids, err := idgen.New(8)
-	if err != nil {
-		t.Fatal(err)
-	}
+	ids := idgen.New(pool)
 	if err := bootstrap.New(NewBootstrapStore(pool), ids).Initialize(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +262,7 @@ func TestStage5Integration(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT id FROM provider_model WHERE provider_id=$1 AND model_id=$2 AND NOT is_deleted`, provider.ID, opus.ID).Scan(&opusProviderModelID); err != nil {
 		t.Fatal(err)
 	}
-	attemptID, err := ids.NextID()
+	attemptID, err := ids.NextID(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,7 +349,7 @@ func TestStage5Integration(t *testing.T) {
 	}
 	// 约束失败不得留下记录，重复提交不得重复记账。
 	makeEvent := func(label string) domain.Event {
-		aid, _ := ids.NextID()
+		aid, _ := ids.NextID(ctx)
 		now := time.Now().UTC()
 		return domain.Event{OrganizationID: actor.OrganizationID, RequestID: label, ClientProtocol: gw.AnthropicProtocol, PrincipalID: member.ID, ModelID: modelID, RequestAt: now, CompletedAt: now, Status: domain.Success, Attempt: &domain.Attempt{ID: aid, ProviderID: provider.ID, ProviderModelID: 1, ResourceID: resource.ID, ModelID: modelID, StartedAt: now, CompletedAt: now, Status: domain.Success}}
 	}

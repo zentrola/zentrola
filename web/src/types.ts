@@ -69,6 +69,7 @@ export interface ProviderDetail extends Provider {
 export interface ProviderInitializeResult {
   total: number
   created: number
+  updated: number
   existing: number
 }
 export interface Resource {
@@ -105,6 +106,7 @@ export interface ConnectionResult {
 export interface ModelSyncResult extends ConnectionResult {
   discovered: number
   created: number
+  updated: number
   mapped: number
 }
 export interface Usage {

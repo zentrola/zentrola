@@ -17,10 +17,7 @@ import (
 
 func TestAdminPasswordChangeIntegration(t *testing.T) {
 	ctx, pool, _ := integrationDatabase(t)
-	ids, err := idgen.New(16)
-	if err != nil {
-		t.Fatal(err)
-	}
+	ids := idgen.New(pool)
 	if err := bootstrap.New(NewBootstrapStore(pool), ids).Initialize(ctx); err != nil {
 		t.Fatal(err)
 	}

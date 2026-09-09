@@ -32,7 +32,6 @@ type Config struct {
 	LogFileMaxBackups int
 	Postgres          Postgres
 	AutoMigrate       bool
-	IDNode            int
 	CORS              CORS
 	Security          Security
 	Gateway           Gateway
@@ -237,7 +236,6 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 		LogFileMaxSizeMB:  integer("LOG_FILE_MAX_SIZE_MB", "100", 10240),
 		LogFileMaxBackups: integer("LOG_FILE_MAX_BACKUPS", "10", 1000),
 		AutoMigrate:       boolean("MIGRATIONS_AUTO_APPLY", "true"),
-		IDNode:            integer("ID_NODE", "1", 65535),
 		Postgres: Postgres{
 			Host:     get("POSTGRES_HOST", "127.0.0.1"),
 			Port:     integer("POSTGRES_PORT", "5432", 65535),

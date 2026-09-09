@@ -112,16 +112,22 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 	})
 	// @Summary 初始化官方服务商
 	// @Tags 模型与资源
-	// @Description 幂等补齐系统内置的官方服务商和协议地址；不会覆盖已有服务商配置，也不会访问外部网络。
+	// @Description 幂等补齐系统内置的官方服务商和协议地址，并按界面语言同步内置名称及官方网站；其他已有配置保持不变，也不会访问外部网络。
+	// @Accept json
 	// @Produce json
 	// @Security AdminBearer
+	// @Param body body mgmt.ProviderInitializeInput true "界面语言"
 	// @Success 200 {object} response{data=mgmt.ProviderInitializeResult}
 	// @Failure 401 {object} response
 	// @Failure 409 {object} response
 	// @Failure 503 {object} response
 	// @Router /api/v1/providers/initialize [post]
 	r.Post("/providers/initialize", func(w http.ResponseWriter, req *http.Request) {
-		data, err := m.InitializeOfficialProviders(req.Context(), adminFrom(req), requestMeta(req))
+		input, ok := decodeRequest[mgmt.ProviderInitializeInput](w, req)
+		if !ok {
+			return
+		}
+		data, err := m.InitializeOfficialProviders(req.Context(), adminFrom(req), input, requestMeta(req))
 		adminResult(w, req, 200, data, err)
 	})
 	// @Summary 编辑服务商
@@ -651,7 +657,7 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 	})
 	// @Summary 同步官方模型目录
 	// @Tags 模型与资源
-	// @Description 根据服务商编码选择官方模型目录适配器；当前支持 DeepSeek。只创建缺失模型和映射，新模型默认停用，不覆盖既有配置。HTTP 200 后仍需检查 data.ok 和 data.code。
+	// @Description 根据服务商编码选择官方模型目录适配器；当前支持 DeepSeek。创建缺失模型和映射，同编码模型更新官方名称；新模型默认停用，其他既有配置保持不变。HTTP 200 后仍需检查 data.ok 和 data.code。
 	// @Produce json
 	// @Security AdminBearer
 	// @Param id path string true "业务 ID（正整数字符串）"

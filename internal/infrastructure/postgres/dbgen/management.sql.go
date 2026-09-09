@@ -655,7 +655,7 @@ func (q *Queries) ManageGrantModel(ctx context.Context, arg ManageGrantModelPara
 }
 
 const manageGroup = `-- name: ManageGroup :one
-SELECT id, is_deleted, organization_id, group_code, group_name, remark, status, created_by, updated_by, created_at, updated_at FROM principal_group WHERE organization_id=$1 AND id=$2 AND is_deleted=false
+SELECT id, is_deleted, status, organization_id, group_code, group_name, remark, created_by, updated_by, created_at, updated_at FROM principal_group WHERE organization_id=$1 AND id=$2 AND is_deleted=false
 `
 
 type ManageGroupParams struct {
@@ -669,11 +669,11 @@ func (q *Queries) ManageGroup(ctx context.Context, arg ManageGroupParams) (Princ
 	err := row.Scan(
 		&i.ID,
 		&i.IsDeleted,
+		&i.Status,
 		&i.OrganizationID,
 		&i.GroupCode,
 		&i.GroupName,
 		&i.Remark,
-		&i.Status,
 		&i.CreatedBy,
 		&i.UpdatedBy,
 		&i.CreatedAt,
@@ -683,7 +683,7 @@ func (q *Queries) ManageGroup(ctx context.Context, arg ManageGroupParams) (Princ
 }
 
 const manageGroupMembers = `-- name: ManageGroupMembers :many
-SELECT p.id, p.is_deleted, p.organization_id, p.principal_type, p.name, p.remark, p.status, p.created_by, p.updated_by, p.created_at, p.updated_at FROM principal p JOIN principal_group_membership g ON g.principal_id=p.id AND g.organization_id=p.organization_id
+SELECT p.id, p.is_deleted, p.status, p.organization_id, p.principal_type, p.name, p.remark, p.created_by, p.updated_by, p.created_at, p.updated_at FROM principal p JOIN principal_group_membership g ON g.principal_id=p.id AND g.organization_id=p.organization_id
 WHERE p.organization_id=$1 AND g.group_id=$2 AND g.is_deleted=false AND p.is_deleted=false AND p.principal_type='MEMBER' AND (p.id<$3 OR $3=0) ORDER BY p.id DESC LIMIT $4
 `
 
@@ -711,11 +711,11 @@ func (q *Queries) ManageGroupMembers(ctx context.Context, arg ManageGroupMembers
 		if err := rows.Scan(
 			&i.ID,
 			&i.IsDeleted,
+			&i.Status,
 			&i.OrganizationID,
 			&i.PrincipalType,
 			&i.Name,
 			&i.Remark,
-			&i.Status,
 			&i.CreatedBy,
 			&i.UpdatedBy,
 			&i.CreatedAt,
@@ -732,7 +732,7 @@ func (q *Queries) ManageGroupMembers(ctx context.Context, arg ManageGroupMembers
 }
 
 const manageGroupModels = `-- name: ManageGroupModels :many
-SELECT m.id, m.is_deleted, m.model_code, m.display_name, m.status, m.created_by, m.updated_by, m.created_at, m.updated_at, m.input_modalities, m.output_modalities, m.remark FROM model m JOIN principal_group_model_permission g ON g.model_id=m.id
+SELECT m.id, m.is_deleted, m.status, m.model_code, m.display_name, m.input_modalities, m.output_modalities, m.remark, m.created_by, m.updated_by, m.created_at, m.updated_at FROM model m JOIN principal_group_model_permission g ON g.model_id=m.id
 WHERE g.organization_id=$1 AND g.group_id=$2 AND g.is_deleted=false AND m.is_deleted=false AND (m.id<$3 OR $3=0) ORDER BY m.id DESC LIMIT $4
 `
 
@@ -760,16 +760,16 @@ func (q *Queries) ManageGroupModels(ctx context.Context, arg ManageGroupModelsPa
 		if err := rows.Scan(
 			&i.ID,
 			&i.IsDeleted,
+			&i.Status,
 			&i.ModelCode,
 			&i.DisplayName,
-			&i.Status,
+			&i.InputModalities,
+			&i.OutputModalities,
+			&i.Remark,
 			&i.CreatedBy,
 			&i.UpdatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.InputModalities,
-			&i.OutputModalities,
-			&i.Remark,
 		); err != nil {
 			return nil, err
 		}
@@ -806,7 +806,7 @@ func (q *Queries) ManageGroupStatus(ctx context.Context, arg ManageGroupStatusPa
 }
 
 const manageGroups = `-- name: ManageGroups :many
-SELECT id, is_deleted, organization_id, group_code, group_name, remark, status, created_by, updated_by, created_at, updated_at FROM principal_group
+SELECT id, is_deleted, status, organization_id, group_code, group_name, remark, created_by, updated_by, created_at, updated_at FROM principal_group
 WHERE organization_id=$1
   AND is_deleted=false
   AND ($2::text = '' OR status = $2::text)
@@ -839,11 +839,11 @@ func (q *Queries) ManageGroups(ctx context.Context, arg ManageGroupsParams) ([]P
 		if err := rows.Scan(
 			&i.ID,
 			&i.IsDeleted,
+			&i.Status,
 			&i.OrganizationID,
 			&i.GroupCode,
 			&i.GroupName,
 			&i.Remark,
-			&i.Status,
 			&i.CreatedBy,
 			&i.UpdatedBy,
 			&i.CreatedAt,
@@ -915,7 +915,7 @@ func (q *Queries) ManageKeys(ctx context.Context, arg ManageKeysParams) ([]Manag
 }
 
 const manageMember = `-- name: ManageMember :one
-SELECT id, is_deleted, organization_id, principal_type, name, remark, status, created_by, updated_by, created_at, updated_at FROM principal WHERE organization_id=$1 AND id=$2 AND is_deleted=false AND principal_type='MEMBER'
+SELECT id, is_deleted, status, organization_id, principal_type, name, remark, created_by, updated_by, created_at, updated_at FROM principal WHERE organization_id=$1 AND id=$2 AND is_deleted=false AND principal_type='MEMBER'
 `
 
 type ManageMemberParams struct {
@@ -929,11 +929,11 @@ func (q *Queries) ManageMember(ctx context.Context, arg ManageMemberParams) (Pri
 	err := row.Scan(
 		&i.ID,
 		&i.IsDeleted,
+		&i.Status,
 		&i.OrganizationID,
 		&i.PrincipalType,
 		&i.Name,
 		&i.Remark,
-		&i.Status,
 		&i.CreatedBy,
 		&i.UpdatedBy,
 		&i.CreatedAt,
@@ -943,7 +943,7 @@ func (q *Queries) ManageMember(ctx context.Context, arg ManageMemberParams) (Pri
 }
 
 const manageMemberGroups = `-- name: ManageMemberGroups :many
-SELECT g.id, g.is_deleted, g.organization_id, g.group_code, g.group_name, g.remark, g.status, g.created_by, g.updated_by, g.created_at, g.updated_at FROM principal_group g JOIN principal_group_membership pg ON pg.group_id=g.id AND pg.organization_id=g.organization_id
+SELECT g.id, g.is_deleted, g.status, g.organization_id, g.group_code, g.group_name, g.remark, g.created_by, g.updated_by, g.created_at, g.updated_at FROM principal_group g JOIN principal_group_membership pg ON pg.group_id=g.id AND pg.organization_id=g.organization_id
 WHERE g.organization_id=$1 AND pg.principal_id=$2 AND pg.is_deleted=false AND g.is_deleted=false AND (g.id<$3 OR $3=0) ORDER BY g.id DESC LIMIT $4
 `
 
@@ -971,11 +971,11 @@ func (q *Queries) ManageMemberGroups(ctx context.Context, arg ManageMemberGroups
 		if err := rows.Scan(
 			&i.ID,
 			&i.IsDeleted,
+			&i.Status,
 			&i.OrganizationID,
 			&i.GroupCode,
 			&i.GroupName,
 			&i.Remark,
-			&i.Status,
 			&i.CreatedBy,
 			&i.UpdatedBy,
 			&i.CreatedAt,
@@ -1015,7 +1015,7 @@ func (q *Queries) ManageMemberStatus(ctx context.Context, arg ManageMemberStatus
 }
 
 const manageMemberSuggestions = `-- name: ManageMemberSuggestions :many
-SELECT id, is_deleted, organization_id, principal_type, name, remark, status, created_by, updated_by, created_at, updated_at FROM principal
+SELECT id, is_deleted, status, organization_id, principal_type, name, remark, created_by, updated_by, created_at, updated_at FROM principal
 WHERE organization_id=$1
   AND is_deleted=false
   AND principal_type='MEMBER'
@@ -1049,11 +1049,11 @@ func (q *Queries) ManageMemberSuggestions(ctx context.Context, arg ManageMemberS
 		if err := rows.Scan(
 			&i.ID,
 			&i.IsDeleted,
+			&i.Status,
 			&i.OrganizationID,
 			&i.PrincipalType,
 			&i.Name,
 			&i.Remark,
-			&i.Status,
 			&i.CreatedBy,
 			&i.UpdatedBy,
 			&i.CreatedAt,
@@ -1070,7 +1070,7 @@ func (q *Queries) ManageMemberSuggestions(ctx context.Context, arg ManageMemberS
 }
 
 const manageMembers = `-- name: ManageMembers :many
-SELECT id, is_deleted, organization_id, principal_type, name, remark, status, created_by, updated_by, created_at, updated_at FROM principal WHERE organization_id=$1 AND is_deleted=false AND principal_type='MEMBER' AND (id<$2 OR $2=0) ORDER BY id DESC LIMIT $3
+SELECT id, is_deleted, status, organization_id, principal_type, name, remark, created_by, updated_by, created_at, updated_at FROM principal WHERE organization_id=$1 AND is_deleted=false AND principal_type='MEMBER' AND (id<$2 OR $2=0) ORDER BY id DESC LIMIT $3
 `
 
 type ManageMembersParams struct {
@@ -1091,11 +1091,11 @@ func (q *Queries) ManageMembers(ctx context.Context, arg ManageMembersParams) ([
 		if err := rows.Scan(
 			&i.ID,
 			&i.IsDeleted,
+			&i.Status,
 			&i.OrganizationID,
 			&i.PrincipalType,
 			&i.Name,
 			&i.Remark,
-			&i.Status,
 			&i.CreatedBy,
 			&i.UpdatedBy,
 			&i.CreatedAt,
@@ -1129,7 +1129,7 @@ func (q *Queries) ManageMembershipExists(ctx context.Context, arg ManageMembersh
 }
 
 const manageModel = `-- name: ManageModel :one
-SELECT id, is_deleted, model_code, display_name, status, created_by, updated_by, created_at, updated_at, input_modalities, output_modalities, remark FROM model WHERE id=$1 AND is_deleted=false
+SELECT id, is_deleted, status, model_code, display_name, input_modalities, output_modalities, remark, created_by, updated_by, created_at, updated_at FROM model WHERE id=$1 AND is_deleted=false
 `
 
 func (q *Queries) ManageModel(ctx context.Context, id int64) (Model, error) {
@@ -1138,16 +1138,16 @@ func (q *Queries) ManageModel(ctx context.Context, id int64) (Model, error) {
 	err := row.Scan(
 		&i.ID,
 		&i.IsDeleted,
+		&i.Status,
 		&i.ModelCode,
 		&i.DisplayName,
-		&i.Status,
+		&i.InputModalities,
+		&i.OutputModalities,
+		&i.Remark,
 		&i.CreatedBy,
 		&i.UpdatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.InputModalities,
-		&i.OutputModalities,
-		&i.Remark,
 	)
 	return i, err
 }
@@ -1174,7 +1174,7 @@ func (q *Queries) ManageModelStatus(ctx context.Context, arg ManageModelStatusPa
 }
 
 const manageModels = `-- name: ManageModels :many
-SELECT id, is_deleted, model_code, display_name, status, created_by, updated_by, created_at, updated_at, input_modalities, output_modalities, remark FROM model
+SELECT id, is_deleted, status, model_code, display_name, input_modalities, output_modalities, remark, created_by, updated_by, created_at, updated_at FROM model
 WHERE is_deleted=false
   AND ($1::text = '' OR status = $1::text)
   AND (id<$2 OR $2=0)
@@ -1200,16 +1200,16 @@ func (q *Queries) ManageModels(ctx context.Context, arg ManageModelsParams) ([]M
 		if err := rows.Scan(
 			&i.ID,
 			&i.IsDeleted,
+			&i.Status,
 			&i.ModelCode,
 			&i.DisplayName,
-			&i.Status,
+			&i.InputModalities,
+			&i.OutputModalities,
+			&i.Remark,
 			&i.CreatedBy,
 			&i.UpdatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.InputModalities,
-			&i.OutputModalities,
-			&i.Remark,
 		); err != nil {
 			return nil, err
 		}
@@ -1296,7 +1296,7 @@ func (q *Queries) ManagePermissionExists(ctx context.Context, arg ManagePermissi
 }
 
 const manageProvider = `-- name: ManageProvider :one
-SELECT id, is_deleted, provider_code, provider_name, provider_type, status, created_by, updated_by, created_at, updated_at, official_website, proxy_enabled, proxy_url_display, proxy_url_ciphertext, proxy_url_nonce, proxy_url_key_version, proxy_header_names, proxy_headers_ciphertext, proxy_headers_nonce, proxy_headers_key_version FROM provider WHERE id=$1 AND is_deleted=false
+SELECT id, is_deleted, status, provider_code, provider_name, provider_type, official_website, proxy_enabled, proxy_url_display, proxy_url_ciphertext, proxy_url_nonce, proxy_url_key_version, proxy_header_names, proxy_headers_ciphertext, proxy_headers_nonce, proxy_headers_key_version, created_by, updated_by, created_at, updated_at FROM provider WHERE id=$1 AND is_deleted=false
 `
 
 func (q *Queries) ManageProvider(ctx context.Context, id int64) (Provider, error) {
@@ -1305,14 +1305,10 @@ func (q *Queries) ManageProvider(ctx context.Context, id int64) (Provider, error
 	err := row.Scan(
 		&i.ID,
 		&i.IsDeleted,
+		&i.Status,
 		&i.ProviderCode,
 		&i.ProviderName,
 		&i.ProviderType,
-		&i.Status,
-		&i.CreatedBy,
-		&i.UpdatedBy,
-		&i.CreatedAt,
-		&i.UpdatedAt,
 		&i.OfficialWebsite,
 		&i.ProxyEnabled,
 		&i.ProxyUrlDisplay,
@@ -1323,6 +1319,10 @@ func (q *Queries) ManageProvider(ctx context.Context, id int64) (Provider, error
 		&i.ProxyHeadersCiphertext,
 		&i.ProxyHeadersNonce,
 		&i.ProxyHeadersKeyVersion,
+		&i.CreatedBy,
+		&i.UpdatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -1437,7 +1437,7 @@ func (q *Queries) ManageProviderStatus(ctx context.Context, arg ManageProviderSt
 }
 
 const manageProviders = `-- name: ManageProviders :many
-SELECT id, is_deleted, provider_code, provider_name, provider_type, status, created_by, updated_by, created_at, updated_at, official_website, proxy_enabled, proxy_url_display, proxy_url_ciphertext, proxy_url_nonce, proxy_url_key_version, proxy_header_names, proxy_headers_ciphertext, proxy_headers_nonce, proxy_headers_key_version FROM provider WHERE is_deleted=false AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2
+SELECT id, is_deleted, status, provider_code, provider_name, provider_type, official_website, proxy_enabled, proxy_url_display, proxy_url_ciphertext, proxy_url_nonce, proxy_url_key_version, proxy_header_names, proxy_headers_ciphertext, proxy_headers_nonce, proxy_headers_key_version, created_by, updated_by, created_at, updated_at FROM provider WHERE is_deleted=false AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2
 `
 
 type ManageProvidersParams struct {
@@ -1457,14 +1457,10 @@ func (q *Queries) ManageProviders(ctx context.Context, arg ManageProvidersParams
 		if err := rows.Scan(
 			&i.ID,
 			&i.IsDeleted,
+			&i.Status,
 			&i.ProviderCode,
 			&i.ProviderName,
 			&i.ProviderType,
-			&i.Status,
-			&i.CreatedBy,
-			&i.UpdatedBy,
-			&i.CreatedAt,
-			&i.UpdatedAt,
 			&i.OfficialWebsite,
 			&i.ProxyEnabled,
 			&i.ProxyUrlDisplay,
@@ -1475,6 +1471,10 @@ func (q *Queries) ManageProviders(ctx context.Context, arg ManageProvidersParams
 			&i.ProxyHeadersCiphertext,
 			&i.ProxyHeadersNonce,
 			&i.ProxyHeadersKeyVersion,
+			&i.CreatedBy,
+			&i.UpdatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1510,7 +1510,7 @@ func (q *Queries) ManageRemoveMember(ctx context.Context, arg ManageRemoveMember
 }
 
 const manageResource = `-- name: ManageResource :one
-SELECT id, is_deleted, organization_id, provider_id, resource_name, credential_ciphertext, credential_nonce, key_version, status, last_active_at, created_by, updated_by, created_at, updated_at FROM provider_credential WHERE organization_id=$1 AND id=$2 AND is_deleted=false
+SELECT id, is_deleted, status, organization_id, provider_id, resource_name, credential_ciphertext, credential_nonce, key_version, last_active_at, created_by, updated_by, created_at, updated_at FROM provider_credential WHERE organization_id=$1 AND id=$2 AND is_deleted=false
 `
 
 type ManageResourceParams struct {
@@ -1524,13 +1524,13 @@ func (q *Queries) ManageResource(ctx context.Context, arg ManageResourceParams) 
 	err := row.Scan(
 		&i.ID,
 		&i.IsDeleted,
+		&i.Status,
 		&i.OrganizationID,
 		&i.ProviderID,
 		&i.ResourceName,
 		&i.CredentialCiphertext,
 		&i.CredentialNonce,
 		&i.KeyVersion,
-		&i.Status,
 		&i.LastActiveAt,
 		&i.CreatedBy,
 		&i.UpdatedBy,

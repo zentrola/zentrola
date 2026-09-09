@@ -352,8 +352,9 @@ export const i18n = createI18n({
       providers: {
         create: '添加服务商',
         initialize: '初始化',
-        initializeCompleted: '已补充 {created} 个官方服务商，共 {total} 个。',
-        initializeUnchanged: '官方服务商已完整初始化，共 {total} 个。',
+        initializeCompleted:
+          '已补充 {created} 个官方服务商，并同步 {updated} 个预置名称或官网，共 {total} 个。',
+        initializeUnchanged: '官方服务商的当前语言名称和官网已是最新，共 {total} 个。',
         edit: '编辑',
         editTitle: '编辑服务商',
         searchLabel: '服务商名称',
@@ -442,10 +443,12 @@ export const i18n = createI18n({
         syncModels: '同步模型',
         syncingModels: '正在读取官方模型目录…',
         syncPassed: '官方模型目录同步完成',
-        syncHint: '只创建缺失模型和服务商映射；新模型默认停用，既有配置不会被覆盖。',
+        syncHint:
+          '创建缺失模型和服务商映射；同编码模型更新官方名称，新模型默认停用，其他既有配置保持不变。',
         syncResult: '模型同步结果',
         discoveredModels: '发现模型',
         createdModels: '新增模型',
+        updatedModels: '更新名称',
         createdMappings: '新增映射',
         empty: '添加服务商凭证，为已授权模型提供调用能力。',
         limit: '同一服务商最多启用一个凭证。',

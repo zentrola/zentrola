@@ -12,7 +12,7 @@ import (
 
 type syncIDs struct{ next int64 }
 
-func (g *syncIDs) NextID() (int64, error) { g.next++; return g.next, nil }
+func (g *syncIDs) NextID(context.Context) (int64, error) { g.next++; return g.next, nil }
 
 type syncCipher struct{ Cipher }
 
@@ -64,6 +64,15 @@ func (s *syncState) CreateModel(_ context.Context, model Model) error {
 	s.models = append(s.models, model)
 	return nil
 }
+func (s *syncState) UpdateModel(_ context.Context, model Model) error {
+	for i := range s.models {
+		if s.models[i].ID == model.ID {
+			s.models[i] = model
+			return nil
+		}
+	}
+	return appsec.ErrUnavailable
+}
 func (s *syncState) CreateProviderMapping(_ context.Context, mapping ProviderMapping) error {
 	s.mappings = append(s.mappings, mapping)
 	return nil
@@ -73,12 +82,15 @@ func (s *syncState) Audit(_ context.Context, audit Audit, _ appsec.RequestMeta) 
 	return nil
 }
 
-func TestSyncResourceModelsCreatesOnlyMissingCatalogEntries(t *testing.T) {
+func TestSyncResourceModelsCreatesMissingEntriesAndRefreshesExistingNames(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	state := &syncState{
 		resource: ResourceRecord{Resource: Resource{ID: 10, ProviderID: 20, Name: "Official key", UpdatedAt: now}},
 		provider: Provider{ID: 20, Code: catalog.DeepSeekOfficialCode, Name: "Official", Endpoints: []ProviderEndpoint{{ProtocolType: "OPENAI", BaseURL: "https://api.example.com/v1"}}},
-		models:   []Model{{ID: 30, Code: "existing", Name: "管理员名称", Status: "ACTIVE"}},
+		models: []Model{{
+			ID: 30, Code: "existing", Name: "管理员名称", Status: "ACTIVE",
+			InputModalities: []string{"TEXT", "IMAGE"}, OutputModalities: []string{"TEXT"}, Remark: "保留说明",
+		}},
 		mappings: []ProviderMapping{{ID: 40, ProviderID: 20, ModelID: 30, UpstreamModelCode: "custom-existing", Priority: 7}},
 	}
 	discoverer := &syncDiscoverer{
@@ -97,14 +109,14 @@ func TestSyncResourceModelsCreatesOnlyMissingCatalogEntries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.OK || result.Discovered != 3 || result.Created != 2 || result.Mapped != 2 {
+	if !result.OK || result.Discovered != 3 || result.Created != 2 || result.Updated != 1 || result.Mapped != 2 {
 		t.Fatalf("unexpected result: %+v", result)
 	}
 	if discoverer.source.ProviderCode != state.provider.Code {
 		t.Fatalf("discovery provider code = %q, want %q", discoverer.source.ProviderCode, state.provider.Code)
 	}
-	if len(state.models) != 3 || state.models[0].Name != "管理员名称" || state.models[0].Status != "ACTIVE" || state.models[1].Name != "New Model" || state.models[1].Status != "DISABLED" || state.models[2].Name != "Deepseek v4 flash vision exp" || state.models[2].Status != "DISABLED" {
-		t.Fatalf("existing model was overwritten or new model was enabled: %+v", state.models)
+	if len(state.models) != 3 || state.models[0].Name != "Upstream name" || state.models[0].Status != "ACTIVE" || state.models[0].Remark != "保留说明" || len(state.models[0].InputModalities) != 2 || len(state.models[0].OutputModalities) != 1 || state.models[1].Name != "New Model" || state.models[1].Status != "DISABLED" || state.models[2].Name != "Deepseek v4 flash vision exp" || state.models[2].Status != "DISABLED" {
+		t.Fatalf("existing model metadata was not selectively updated or new model was enabled: %+v", state.models)
 	}
 	if len(state.mappings) != 3 || state.mappings[0].UpstreamModelCode != "custom-existing" || state.mappings[0].Priority != 7 {
 		t.Fatalf("existing mapping was overwritten: %+v", state.mappings)
@@ -114,7 +126,7 @@ func TestSyncResourceModelsCreatesOnlyMissingCatalogEntries(t *testing.T) {
 	}
 
 	result, err = service.SyncResourceModels(context.Background(), actor, 10, appsec.RequestMeta{})
-	if err != nil || result.Created != 0 || result.Mapped != 0 || len(state.models) != 3 || len(state.mappings) != 3 {
+	if err != nil || result.Created != 0 || result.Updated != 0 || result.Mapped != 0 || len(state.models) != 3 || len(state.mappings) != 3 {
 		t.Fatalf("sync is not idempotent: result=%+v err=%v", result, err)
 	}
 }

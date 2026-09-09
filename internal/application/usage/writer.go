@@ -74,7 +74,7 @@ func (w *Writer) Submit(event domain.Event) error {
 	a.CachedInputTokens = clone(a.CachedInputTokens)
 	event.Attempt = &a
 	var err error
-	event.Attempt.ID, err = w.ids.NextID()
+	event.Attempt.ID, err = w.ids.NextID(w.ctx)
 	if err != nil {
 		w.failure(event, "USAGE_ID_FAILED")
 		return errors.New("usage ID generation failed")

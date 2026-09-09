@@ -16,6 +16,8 @@ type AdminUser struct {
 	ID int64
 	// 逻辑删除标识；删除后不可恢复
 	IsDeleted bool
+	// 状态：ACTIVE=启用；DISABLED=停用
+	Status string
 	// 所属组织 ID
 	OrganizationID int64
 	// 管理员用户名
@@ -24,14 +26,14 @@ type AdminUser struct {
 	PasswordHash string
 	// 管理员显示名称
 	DisplayName string
-	// 状态：ACTIVE=启用；DISABLED=停用
-	Status string
 	// 连续登录失败次数
 	FailedLoginCount int64
 	// 锁定截止时间；NULL=未锁定
 	LockedUntil pgtype.Timestamptz
 	// 最后登录时间；NULL=从未登录
 	LastLoginAt pgtype.Timestamptz
+	// 凭证版本；重置密码递增，使旧管理员 JWT 失效
+	CredentialVersion int64
 	// 创建者引用：system、admin:<id> 或 principal:<id>
 	CreatedBy string
 	// 更新者引用：system、admin:<id> 或 principal:<id>
@@ -40,8 +42,6 @@ type AdminUser struct {
 	CreatedAt pgtype.Timestamptz
 	// 更新时间，UTC
 	UpdatedAt pgtype.Timestamptz
-	// 凭证版本；重置密码递增，使旧管理员 JWT 失效
-	CredentialVersion int64
 }
 
 // 平台稳定逻辑模型；与供应方解耦
@@ -50,12 +50,18 @@ type Model struct {
 	ID int64
 	// 逻辑删除标识；删除后不可恢复
 	IsDeleted bool
+	// 状态：ACTIVE=启用；DISABLED=停用
+	Status string
 	// 官方标准模型编码；已有客户端编码仅由管理员显式修改
 	ModelCode string
 	// 官方模型名称
 	DisplayName string
-	// 状态：ACTIVE=启用；DISABLED=停用
-	Status string
+	// 输入类型 JSON 数组：TEXT、IMAGE、AUDIO、VIDEO，非空且无重复
+	InputModalities []byte
+	// 输出类型 JSON 数组：TEXT、IMAGE、AUDIO、VIDEO，非空且无重复
+	OutputModalities []byte
+	// 模型用途、限制等备注，空字符串表示未填写
+	Remark string
 	// 创建者引用：system、admin:<id> 或 principal:<id>
 	CreatedBy string
 	// 更新者引用：system、admin:<id> 或 principal:<id>
@@ -64,12 +70,6 @@ type Model struct {
 	CreatedAt pgtype.Timestamptz
 	// 更新时间，UTC
 	UpdatedAt pgtype.Timestamptz
-	// 输入类型 JSON 数组：TEXT、IMAGE、AUDIO、VIDEO，非空且无重复
-	InputModalities []byte
-	// 输出类型 JSON 数组：TEXT、IMAGE、AUDIO、VIDEO，非空且无重复
-	OutputModalities []byte
-	// 模型用途、限制等备注，空字符串表示未填写
-	Remark string
 }
 
 // 管理员与系统操作日志；Append Only，普通操作禁止更新和删除
@@ -124,12 +124,12 @@ type Organization struct {
 	ID int64
 	// 逻辑删除标识；删除后不可恢复
 	IsDeleted bool
+	// 状态：ACTIVE=启用；DISABLED=停用
+	Status string
 	// 组织业务编码
 	OrganizationCode string
 	// 组织名称
 	OrganizationName string
-	// 状态：ACTIVE=启用；DISABLED=停用
-	Status string
 	// 备注；NULL=未设置
 	Remark *string
 	// 创建者引用：system、admin:<id> 或 principal:<id>
@@ -148,6 +148,8 @@ type Principal struct {
 	ID int64
 	// 逻辑删除标识；删除后不可恢复
 	IsDeleted bool
+	// 状态：ACTIVE=启用；DISABLED=停用
+	Status string
 	// 所属组织 ID
 	OrganizationID int64
 	// 主体类型：MEMBER=成员；APPLICATION=应用，仅预留类型
@@ -156,8 +158,6 @@ type Principal struct {
 	Name string
 	// 备注；NULL=未设置
 	Remark *string
-	// 状态：ACTIVE=启用；DISABLED=停用
-	Status string
 	// 创建者引用：system、admin:<id> 或 principal:<id>
 	CreatedBy string
 	// 更新者引用：system、admin:<id> 或 principal:<id>
@@ -174,6 +174,8 @@ type PrincipalAccessKey struct {
 	ID int64
 	// 逻辑删除标识；删除后不可恢复
 	IsDeleted bool
+	// 凭证状态：ACTIVE=启用；DISABLED=停用；REVOKED=已撤销
+	Status string
 	// 所属组织 ID
 	OrganizationID int64
 	// 所属治理主体 ID
@@ -184,8 +186,6 @@ type PrincipalAccessKey struct {
 	MaskedKey string
 	// 凭证名称
 	Name string
-	// 凭证状态：ACTIVE=启用；DISABLED=停用；REVOKED=已撤销
-	Status string
 	// 到期时间；NULL=永不过期
 	ExpiresAt pgtype.Timestamptz
 	// 最后使用时间；NULL=从未使用
@@ -208,6 +208,8 @@ type PrincipalGroup struct {
 	ID int64
 	// 逻辑删除标识；删除后不可恢复
 	IsDeleted bool
+	// 状态：ACTIVE=启用；DISABLED=停用
+	Status string
 	// 所属组织 ID
 	OrganizationID int64
 	// 分组业务编码
@@ -216,8 +218,6 @@ type PrincipalGroup struct {
 	GroupName string
 	// 备注；NULL=未设置
 	Remark *string
-	// 状态：ACTIVE=启用；DISABLED=停用
-	Status string
 	// 创建者引用：system、admin:<id> 或 principal:<id>
 	CreatedBy string
 	// 更新者引用：system、admin:<id> 或 principal:<id>
@@ -278,22 +278,14 @@ type Provider struct {
 	ID int64
 	// 逻辑删除标识；删除后不可恢复
 	IsDeleted bool
+	// 状态：ACTIVE=启用；DISABLED=停用
+	Status string
 	// 供应方业务编码
 	ProviderCode string
 	// 供应方名称
 	ProviderName string
 	// 供应方类型：OFFICIAL=官方供应方
 	ProviderType string
-	// 状态：ACTIVE=启用；DISABLED=停用
-	Status string
-	// 创建者引用：system、admin:<id> 或 principal:<id>
-	CreatedBy string
-	// 更新者引用：system、admin:<id> 或 principal:<id>
-	UpdatedBy string
-	// 创建时间，UTC
-	CreatedAt pgtype.Timestamptz
-	// 更新时间，UTC
-	UpdatedAt pgtype.Timestamptz
 	// 服务商官方网站；NULL=未填写
 	OfficialWebsite *string
 	// 是否通过服务商专属出站代理访问上游
@@ -314,6 +306,14 @@ type Provider struct {
 	ProxyHeadersNonce []byte
 	// 代理 Header 密文的根密钥版本
 	ProxyHeadersKeyVersion *int32
+	// 创建者引用：system、admin:<id> 或 principal:<id>
+	CreatedBy string
+	// 更新者引用：system、admin:<id> 或 principal:<id>
+	UpdatedBy string
+	// 创建时间，UTC
+	CreatedAt pgtype.Timestamptz
+	// 更新时间，UTC
+	UpdatedAt pgtype.Timestamptz
 }
 
 // 组织持有的供应方调用凭证；归属于 Provider
@@ -322,6 +322,8 @@ type ProviderCredential struct {
 	ID int64
 	// 逻辑删除标识；删除后不可恢复
 	IsDeleted bool
+	// 状态：ACTIVE=启用；DISABLED=停用
+	Status string
 	// 所属组织 ID
 	OrganizationID int64
 	// 资源所属供应方 ID，不归属于 Provider Model
@@ -334,8 +336,6 @@ type ProviderCredential struct {
 	CredentialNonce []byte
 	// 加密根密钥版本，不含 Master Key 本身
 	KeyVersion int32
-	// 状态：ACTIVE=启用；DISABLED=停用
-	Status string
 	// 最后调用时间；NULL=从未使用
 	LastActiveAt pgtype.Timestamptz
 	// 创建者引用：system、admin:<id> 或 principal:<id>
@@ -394,6 +394,8 @@ type ProviderModel struct {
 type UsageRecord struct {
 	// 主键，由应用侧生成的正数 64-bit ID
 	ID int64
+	// 调用最终状态：SUCCESS=成功；FAILED=失败；CANCELLED=客户端取消
+	Status string
 	// 所属组织 ID
 	OrganizationID int64
 	// 所属请求标识
@@ -412,6 +414,8 @@ type UsageRecord struct {
 	ModelID int64
 	// 使用场景：MODEL_GATEWAY=模型网关调用
 	UsageScene string
+	// 客户端协议：OPENAI_CHAT=Chat Completions；OPENAI_RESPONSES=Responses；ANTHROPIC_MESSAGES=Messages
+	ClientProtocol string
 	// 输入 Token 数；NULL=上游未返回可靠值，0=已确认零用量
 	InputTokens *int64
 	// 输出 Token 数；NULL=上游未返回可靠值，0=已确认零用量
@@ -432,12 +436,8 @@ type UsageRecord struct {
 	CompletedAt pgtype.Timestamptz
 	// 上游耗时，毫秒
 	LatencyMs int64
-	// 调用最终状态：SUCCESS=成功；FAILED=失败；CANCELLED=客户端取消
-	Status string
 	// 稳定大写错误码；NULL=无错误
 	ErrorType *string
 	// 事实记录创建时间，UTC
 	CreatedAt pgtype.Timestamptz
-	// 客户端协议：OPENAI_CHAT=Chat Completions；OPENAI_RESPONSES=Responses；ANTHROPIC_MESSAGES=Messages
-	ClientProtocol string
 }

@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { all, api, errorText } from '../api'
-import { useCollection, useAction, useListSearch, date, dateOnly, validText } from '../composables'
+import { computed, onMounted, ref } from 'vue'
+import { all, api } from '../api'
+import { useCollection, useAction, useListSearch, date, validText } from '../composables'
 import { t } from '../i18n'
-import type { Member, Group, AccessKey, CreatedKey, Page } from '../types'
+import type { Member, Group, CreatedKey } from '../types'
 import Icon from '../components/Icon.vue'
 import StatusSwitch from '../components/StatusSwitch.vue'
 import Modal from '../components/Modal.vue'
@@ -12,8 +12,20 @@ import ListFooter from '../components/ListFooter.vue'
 import ListSearch from '../components/ListSearch.vue'
 import MemberKeys from '../components/MemberKeys.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
-const { items, cursor, page, pageSize, total, loading, error, load, previous, retry, setPageSize } =
-  useCollection<Member>(() => '/members')
+const {
+  items,
+  cursor,
+  page,
+  pageSize,
+  total,
+  loading,
+  error,
+  load,
+  refresh,
+  previous,
+  retry,
+  setPageSize,
+} = useCollection<Member>(() => '/members')
 const { busy, error: actionError, run } = useAction()
 const notice = ref(''),
   creating = ref(false),
@@ -28,10 +40,7 @@ const notice = ref(''),
 const statusTarget = ref<Member | null>(null),
   selected = ref<Member | null>(null),
   viewingKeys = ref<Member | null>(null),
-  deleteTarget = ref<Member | null>(null),
-  memberKeys = ref<Record<string, AccessKey[]>>({}),
-  keyErrors = ref<Record<string, string>>({}),
-  keysLoading = ref<Record<string, boolean>>({})
+  deleteTarget = ref<Member | null>(null)
 const keyName = ref(''),
   expires = ref(''),
   createdKey = ref<CreatedKey | null>(null),
@@ -42,9 +51,6 @@ const { keyword, query, visible, search, reset } = useListSearch(
   load,
 )
 const originalGroupIDSet = computed(() => new Set(originalGroupIDs.value))
-watch(items, (members) => {
-  for (const member of members) void refreshKeys(member.id)
-})
 onMounted(() => load())
 function newMember() {
   editing.value = null
@@ -121,26 +127,6 @@ function openStatus(member: Member) {
   actionError.value = ''
   statusTarget.value = member
 }
-function statusDisabled(member: Member) {
-  if (busy.value || loading.value) return true
-  if (member.status === 'ACTIVE') return false
-  return (
-    !!keysLoading.value[member.id] ||
-    !!keyErrors.value[member.id] ||
-    !memberKeys.value[member.id]?.length
-  )
-}
-function statusTitle(member: Member) {
-  if (
-    member.status !== 'ACTIVE' &&
-    !keysLoading.value[member.id] &&
-    !keyErrors.value[member.id] &&
-    !memberKeys.value[member.id]?.length
-  ) {
-    return t('members.keyRequired')
-  }
-  return undefined
-}
 function changeStatus() {
   void run(async () => {
     const m = statusTarget.value!
@@ -149,21 +135,8 @@ function changeStatus() {
     })
     statusTarget.value = null
     notice.value = t('common.updatedOK')
-    await load()
+    await refresh()
   })
-}
-async function refreshKeys(memberID: string) {
-  if (keysLoading.value[memberID]) return
-  keysLoading.value[memberID] = true
-  delete keyErrors.value[memberID]
-  try {
-    const result = await api<Page<AccessKey>>(`/members/${memberID}/keys?limit=1`)
-    memberKeys.value[memberID] = result.items
-  } catch (error) {
-    keyErrors.value[memberID] = errorText(error)
-  } finally {
-    keysLoading.value[memberID] = false
-  }
 }
 function openKeys(member: Member) {
   selected.value = member
@@ -207,7 +180,6 @@ function issueKey() {
     expires.value = ''
     selected.value = null
     notice.value = t('members.keyCreated')
-    await refreshKeys(memberID)
   })
 }
 async function copyKey() {
@@ -248,7 +220,6 @@ async function copyKey() {
           <tr>
             <th>{{ t('members.member') }}</th>
             <th>{{ t('common.status') }}</th>
-            <th>{{ t('members.expiryDate') }}</th>
             <th>{{ t('common.remark') }}</th>
             <th>{{ t('common.created') }}</th>
             <th class="align-right">{{ t('common.actions') }}</th>
@@ -267,23 +238,12 @@ async function copyKey() {
                       class="icon-button view-keys"
                       :aria-label="t('members.viewKeys')"
                       :title="t('members.viewKeys')"
-                      :disabled="keysLoading[member.id]"
                       @click="viewingKeys = member"
                     >
                       <Icon name="eye" :size="16" />
                     </button>
                   </div>
                   <small>{{ member.id }}</small>
-                  <div v-if="keyErrors[member.id]" class="key-error" role="alert">
-                    {{ keyErrors[member.id] }}
-                    <button
-                      class="text-button"
-                      :disabled="keysLoading[member.id]"
-                      @click="refreshKeys(member.id)"
-                    >
-                      {{ t('common.retry') }}
-                    </button>
-                  </div>
                 </div>
               </div>
             </td>
@@ -294,29 +254,10 @@ async function copyKey() {
                 :aria-label="t('members.statusFor', { name: member.name })"
                 :active-label="t('members.active')"
                 :inactive-label="t('members.inactive')"
-                :disabled="statusDisabled(member)"
+                :disabled="busy || loading"
                 :busy="busy && statusTarget?.id === member.id"
-                :title="statusTitle(member)"
                 @change="openStatus(member)"
               />
-            </td>
-            <td>
-              <template v-if="!keyErrors[member.id] && !keysLoading[member.id]">
-                <div
-                  v-for="key in memberKeys[member.id]"
-                  :key="key.id"
-                  class="member-key key-expiry"
-                >
-                  {{ key.expiresAt ? dateOnly(key.expiresAt) : t('members.noExpiry') }}
-                </div>
-              </template>
-              <span
-                v-if="
-                  keyErrors[member.id] || keysLoading[member.id] || !memberKeys[member.id]?.length
-                "
-                class="muted"
-                >{{ t('members.none') }}</span
-              >
             </td>
             <td class="remark-cell" :title="member.remark || ''">
               {{ member.remark || t('members.none') }}
@@ -334,11 +275,7 @@ async function copyKey() {
                 >
                   {{ t('members.delete') }}
                 </button>
-                <button
-                  class="text-button"
-                  :disabled="busy || loading || keysLoading[member.id]"
-                  @click="openKeys(member)"
-                >
+                <button class="text-button" :disabled="busy || loading" @click="openKeys(member)">
                   {{ t('members.assignKey') }}
                 </button>
               </div>
@@ -523,7 +460,7 @@ async function copyKey() {
 
 <style scoped>
 .members-table {
-  min-width: 930px;
+  min-width: 820px;
   table-layout: fixed;
 }
 .members-table th:nth-child(1) {
@@ -533,15 +470,12 @@ async function copyKey() {
   width: 100px;
 }
 .members-table th:nth-child(3) {
-  width: 110px;
-}
-.members-table th:nth-child(4) {
   width: 164px;
 }
-.members-table th:nth-child(5) {
+.members-table th:nth-child(4) {
   width: 140px;
 }
-.members-table th:nth-child(6) {
+.members-table th:nth-child(5) {
   width: 176px;
 }
 .members-table th,
@@ -564,31 +498,11 @@ async function copyKey() {
   gap: 5px;
   min-width: 0;
 }
-.member-key {
-  height: 64px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 6px;
-}
-.member-key + .member-key {
-  border-top: 1px solid var(--line);
-}
-.key-expiry {
-  align-items: flex-start;
-}
 .view-keys {
   flex: 0 0 26px;
   width: 26px;
   height: 26px;
   color: var(--blue);
-}
-.key-error {
-  max-width: 210px;
-  margin-top: 5px;
-  font-size: 11px;
-  white-space: normal;
-  color: var(--danger);
 }
 .member-form-fields {
   display: grid;

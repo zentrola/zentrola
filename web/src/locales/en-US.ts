@@ -325,8 +325,10 @@ export default {
   providers: {
     create: 'Add provider',
     initialize: 'Initialize',
-    initializeCompleted: 'Added {created} official providers; {total} are now available.',
-    initializeUnchanged: 'All {total} official providers are already initialized.',
+    initializeCompleted:
+      'Added {created} official providers and synchronized {updated} preset names or websites; {total} are now available.',
+    initializeUnchanged:
+      'All {total} official providers, names for the current language, and websites are up to date.',
     edit: 'Edit',
     editTitle: 'Edit provider',
     searchLabel: 'Provider name',
@@ -423,10 +425,11 @@ export default {
     syncingModels: 'Reading the official model catalog…',
     syncPassed: 'Official model catalog synchronized',
     syncHint:
-      'Only missing models and provider mappings are created. New models are disabled and existing configuration is preserved.',
+      'Missing models and provider mappings are created. Official names are refreshed for matching model codes; new models are disabled and other existing configuration is preserved.',
     syncResult: 'Model sync result',
     discoveredModels: 'Discovered models',
     createdModels: 'Created models',
+    updatedModels: 'Updated names',
     createdMappings: 'Created mappings',
     empty: 'Add a provider credential to serve granted models.',
     limit: 'Only one credential can be enabled for each provider.',

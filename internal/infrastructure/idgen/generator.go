@@ -1,19 +1,45 @@
-// Package idgen 使用 Sonyflake 生成正数 int64 ID，适配 PostgreSQL BIGINT。
+// Package idgen 使用 PostgreSQL 全局 sequence 生成正数 int64 ID。
 package idgen
 
 import (
+	"context"
 	"errors"
 	"time"
 
-	"github.com/sony/sonyflake/v2"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func New(nodeID int) (*sonyflake.Sonyflake, error) {
-	if nodeID < 1 || nodeID > 65535 {
-		return nil, errors.New("ID_NODE must be between 1 and 65535")
+const (
+	nextIDSQL    = "SELECT nextval('zentrola_global_id_seq')"
+	queryTimeout = 5 * time.Second
+)
+
+type Querier interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+type scopedQuerierKey struct{}
+
+type Generator struct{ database Querier }
+
+func New(pool *pgxpool.Pool) *Generator { return &Generator{database: pool} }
+
+// WithQuerier 让事务内的 ID 查询复用当前连接，避免连接池耗尽时互相等待。
+func WithQuerier(ctx context.Context, database Querier) context.Context {
+	return context.WithValue(ctx, scopedQuerierKey{}, database)
+}
+
+func (g *Generator) NextID(parent context.Context) (int64, error) {
+	database := g.database
+	if scoped, ok := parent.Value(scopedQuerierKey{}).(Querier); ok {
+		database = scoped
 	}
-	return sonyflake.New(sonyflake.Settings{
-		StartTime: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-		MachineID: func() (int, error) { return nodeID, nil },
-	})
+	ctx, cancel := context.WithTimeout(parent, queryTimeout)
+	defer cancel()
+	var id int64
+	if err := database.QueryRow(ctx, nextIDSQL).Scan(&id); err != nil || id <= 0 {
+		return 0, errors.New("cannot generate ID from PostgreSQL sequence")
+	}
+	return id, nil
 }

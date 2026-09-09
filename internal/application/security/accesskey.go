@@ -42,7 +42,7 @@ func (s *Keys) Create(ctx context.Context, actor admin.Identity, principalID int
 	_, _ = rand.Read(entropy[:])
 	full := keyMarker + base64.RawURLEncoding.EncodeToString(entropy[:])
 	digest := sha256.Sum256([]byte(full))
-	id, err := s.ids.NextID()
+	id, err := s.ids.NextID(ctx)
 	if err != nil {
 		return CreatedKey{}, ErrUnavailable
 	}

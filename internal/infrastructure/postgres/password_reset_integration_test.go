@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"errors"
 	"strings"
@@ -17,7 +18,9 @@ import (
 
 type unavailableResetIDs struct{}
 
-func (unavailableResetIDs) NextID() (int64, error) { return 0, errors.New("audit ID unavailable") }
+func (unavailableResetIDs) NextID(context.Context) (int64, error) {
+	return 0, errors.New("audit ID unavailable")
+}
 
 type resetBeforeIssue struct {
 	appsec.Tokens
@@ -31,10 +34,7 @@ func (s resetBeforeIssue) Issue(identity admin.Identity) (string, time.Time, err
 
 func TestAdminPasswordResetIntegration(t *testing.T) {
 	ctx, pool, _ := integrationDatabase(t)
-	ids, err := idgen.New(15)
-	if err != nil {
-		t.Fatal(err)
-	}
+	ids := idgen.New(pool)
 	if err := bootstrap.New(NewBootstrapStore(pool), ids).Initialize(ctx); err != nil {
 		t.Fatal(err)
 	}

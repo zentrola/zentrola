@@ -200,7 +200,7 @@ func (q *Queries) GetActiveAdmin(ctx context.Context, arg GetActiveAdminParams) 
 }
 
 const getActiveOrganization = `-- name: GetActiveOrganization :one
-SELECT id, is_deleted, organization_code, organization_name, status, remark, created_by, updated_by, created_at, updated_at FROM organization WHERE is_deleted=false AND status='ACTIVE'
+SELECT id, is_deleted, status, organization_code, organization_name, remark, created_by, updated_by, created_at, updated_at FROM organization WHERE is_deleted=false AND status='ACTIVE'
 `
 
 func (q *Queries) GetActiveOrganization(ctx context.Context) (Organization, error) {
@@ -209,9 +209,9 @@ func (q *Queries) GetActiveOrganization(ctx context.Context) (Organization, erro
 	err := row.Scan(
 		&i.ID,
 		&i.IsDeleted,
+		&i.Status,
 		&i.OrganizationCode,
 		&i.OrganizationName,
-		&i.Status,
 		&i.Remark,
 		&i.CreatedBy,
 		&i.UpdatedBy,
@@ -222,7 +222,7 @@ func (q *Queries) GetActiveOrganization(ctx context.Context) (Organization, erro
 }
 
 const getAdminForLogin = `-- name: GetAdminForLogin :one
-SELECT a.id, a.is_deleted, a.organization_id, a.username, a.password_hash, a.display_name, a.status, a.failed_login_count, a.locked_until, a.last_login_at, a.created_by, a.updated_by, a.created_at, a.updated_at, a.credential_version, (o.status='ACTIVE') AS organization_active
+SELECT a.id, a.is_deleted, a.status, a.organization_id, a.username, a.password_hash, a.display_name, a.failed_login_count, a.locked_until, a.last_login_at, a.credential_version, a.created_by, a.updated_by, a.created_at, a.updated_at, (o.status='ACTIVE') AS organization_active
 FROM admin_user a JOIN organization o ON o.id=a.organization_id
 WHERE a.username=$1 AND a.is_deleted=false AND o.is_deleted=false
 FOR UPDATE OF a
@@ -231,19 +231,19 @@ FOR UPDATE OF a
 type GetAdminForLoginRow struct {
 	ID                 int64
 	IsDeleted          bool
+	Status             string
 	OrganizationID     int64
 	Username           string
 	PasswordHash       string
 	DisplayName        string
-	Status             string
 	FailedLoginCount   int64
 	LockedUntil        pgtype.Timestamptz
 	LastLoginAt        pgtype.Timestamptz
+	CredentialVersion  int64
 	CreatedBy          string
 	UpdatedBy          string
 	CreatedAt          pgtype.Timestamptz
 	UpdatedAt          pgtype.Timestamptz
-	CredentialVersion  int64
 	OrganizationActive bool
 }
 
@@ -253,26 +253,26 @@ func (q *Queries) GetAdminForLogin(ctx context.Context, username string) (GetAdm
 	err := row.Scan(
 		&i.ID,
 		&i.IsDeleted,
+		&i.Status,
 		&i.OrganizationID,
 		&i.Username,
 		&i.PasswordHash,
 		&i.DisplayName,
-		&i.Status,
 		&i.FailedLoginCount,
 		&i.LockedUntil,
 		&i.LastLoginAt,
+		&i.CredentialVersion,
 		&i.CreatedBy,
 		&i.UpdatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.CredentialVersion,
 		&i.OrganizationActive,
 	)
 	return i, err
 }
 
 const getKeyForRevoke = `-- name: GetKeyForRevoke :one
-SELECT id, is_deleted, organization_id, principal_id, key_hash, masked_key, name, status, expires_at, last_used_at, revoked_at, created_by, updated_by, created_at, updated_at FROM principal_access_key WHERE organization_id=$1 AND id=$2 AND is_deleted=false FOR UPDATE
+SELECT id, is_deleted, status, organization_id, principal_id, key_hash, masked_key, name, expires_at, last_used_at, revoked_at, created_by, updated_by, created_at, updated_at FROM principal_access_key WHERE organization_id=$1 AND id=$2 AND is_deleted=false FOR UPDATE
 `
 
 type GetKeyForRevokeParams struct {
@@ -286,12 +286,12 @@ func (q *Queries) GetKeyForRevoke(ctx context.Context, arg GetKeyForRevokeParams
 	err := row.Scan(
 		&i.ID,
 		&i.IsDeleted,
+		&i.Status,
 		&i.OrganizationID,
 		&i.PrincipalID,
 		&i.KeyHash,
 		&i.MaskedKey,
 		&i.Name,
-		&i.Status,
 		&i.ExpiresAt,
 		&i.LastUsedAt,
 		&i.RevokedAt,
@@ -304,7 +304,7 @@ func (q *Queries) GetKeyForRevoke(ctx context.Context, arg GetKeyForRevokeParams
 }
 
 const getMemberForKey = `-- name: GetMemberForKey :one
-SELECT p.id, p.is_deleted, p.organization_id, p.principal_type, p.name, p.remark, p.status, p.created_by, p.updated_by, p.created_at, p.updated_at FROM principal p JOIN organization o ON o.id=p.organization_id
+SELECT p.id, p.is_deleted, p.status, p.organization_id, p.principal_type, p.name, p.remark, p.created_by, p.updated_by, p.created_at, p.updated_at FROM principal p JOIN organization o ON o.id=p.organization_id
 WHERE p.organization_id=$1 AND p.id=$2 AND p.principal_type='MEMBER' AND p.is_deleted=false
 AND o.status='ACTIVE' AND o.is_deleted=false FOR UPDATE OF p
 `
@@ -320,11 +320,11 @@ func (q *Queries) GetMemberForKey(ctx context.Context, arg GetMemberForKeyParams
 	err := row.Scan(
 		&i.ID,
 		&i.IsDeleted,
+		&i.Status,
 		&i.OrganizationID,
 		&i.PrincipalType,
 		&i.Name,
 		&i.Remark,
-		&i.Status,
 		&i.CreatedBy,
 		&i.UpdatedBy,
 		&i.CreatedAt,
@@ -357,7 +357,7 @@ func (q *Queries) HasAnyAdmin(ctx context.Context) (bool, error) {
 }
 
 const listResourcesForCredentialCheck = `-- name: ListResourcesForCredentialCheck :many
-SELECT id, is_deleted, organization_id, provider_id, resource_name, credential_ciphertext, credential_nonce, key_version, status, last_active_at, created_by, updated_by, created_at, updated_at FROM provider_credential WHERE is_deleted=false AND status='ACTIVE' ORDER BY id FOR UPDATE
+SELECT id, is_deleted, status, organization_id, provider_id, resource_name, credential_ciphertext, credential_nonce, key_version, last_active_at, created_by, updated_by, created_at, updated_at FROM provider_credential WHERE is_deleted=false AND status='ACTIVE' ORDER BY id FOR UPDATE
 `
 
 func (q *Queries) ListResourcesForCredentialCheck(ctx context.Context) ([]ProviderCredential, error) {
@@ -372,13 +372,13 @@ func (q *Queries) ListResourcesForCredentialCheck(ctx context.Context) ([]Provid
 		if err := rows.Scan(
 			&i.ID,
 			&i.IsDeleted,
+			&i.Status,
 			&i.OrganizationID,
 			&i.ProviderID,
 			&i.ResourceName,
 			&i.CredentialCiphertext,
 			&i.CredentialNonce,
 			&i.KeyVersion,
-			&i.Status,
 			&i.LastActiveAt,
 			&i.CreatedBy,
 			&i.UpdatedBy,

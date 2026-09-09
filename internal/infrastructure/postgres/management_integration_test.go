@@ -38,7 +38,9 @@ func (f connectionTestFunc) Test(ctx context.Context, protocol, url string, key 
 
 type failedAuditIDs struct{}
 
-func (failedAuditIDs) NextID() (int64, error) { return 0, errors.New("test ID failure") }
+func (failedAuditIDs) NextID(context.Context) (int64, error) {
+	return 0, errors.New("test ID failure")
+}
 
 type synchronizedLogs struct {
 	mu  sync.Mutex
@@ -64,10 +66,7 @@ func stage3Data[T any](t *testing.T, rec *httptest.ResponseRecorder) T {
 
 func TestStage3Integration(t *testing.T) {
 	ctx, pool, _ := integrationDatabase(t)
-	ids, err := idgen.New(4)
-	if err != nil {
-		t.Fatal(err)
-	}
+	ids := idgen.New(pool)
 	if err := bootstrap.New(NewBootstrapStore(pool), ids).Initialize(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -149,8 +148,8 @@ func TestStage3Integration(t *testing.T) {
 	providers := stage3Data[struct {
 		Items []mgmt.Provider `json:"items"`
 	}](t, request("GET", "/api/v1/providers", nil, 200)).Items
-	if len(models) != 0 || len(providers) != 4 {
-		t.Fatal("bootstrap must create providers without guessing model catalogs")
+	if len(models) != 0 || len(providers) != 0 {
+		t.Fatal("bootstrap must not create models or providers")
 	}
 	model := stage3Data[mgmt.Model](t, request("POST", "/api/v1/models", mgmt.ModelInput{
 		Code: "management-base-model", Name: "管理端基础模型", InputModalities: []string{"TEXT"}, OutputModalities: []string{"TEXT"},
@@ -439,7 +438,7 @@ func TestStage3Integration(t *testing.T) {
 		} {
 			assertDescending(path)
 		}
-		foreignID, _ := ids.NextID()
+		foreignID, _ := ids.NextID(ctx)
 		if _, err := pool.Exec(ctx, "INSERT INTO principal(id,organization_id,principal_type,name,status,created_by,updated_by,created_at,updated_at) VALUES($1,$2,'MEMBER','foreign','ACTIVE','system','system',now(),now())", foreignID, actor.OrganizationID+1); err != nil {
 			t.Fatal(err)
 		}

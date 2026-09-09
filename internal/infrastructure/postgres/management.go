@@ -12,6 +12,7 @@ import (
 	"github.com/zentrola/zentrola/internal/domain/admin"
 	"github.com/zentrola/zentrola/internal/domain/catalog"
 	"github.com/zentrola/zentrola/internal/domain/shared"
+	"github.com/zentrola/zentrola/internal/infrastructure/idgen"
 	"github.com/zentrola/zentrola/internal/infrastructure/postgres/dbgen"
 	"time"
 )
@@ -48,6 +49,7 @@ func (s *ManagementStore) run(ctx context.Context, a admin.Identity, write bool,
 		return appsec.ErrUnavailable
 	}
 	defer tx.Rollback(context.Background())
+	ctx = idgen.WithQuerier(ctx, tx)
 	q := dbgen.New(tx)
 	if write {
 		// P0 单组织管理写入串行化；不在此事务中执行上游网络请求。
@@ -445,7 +447,7 @@ func (s *managementSession) SetGroupMember(ctx context.Context, groupID, memberI
 		return false, err
 	}
 	if add {
-		id, err := s.store.ids.NextID()
+		id, err := s.store.ids.NextID(ctx)
 		if err != nil {
 			return false, err
 		}
@@ -461,7 +463,7 @@ func (s *managementSession) SetGroupModel(ctx context.Context, groupID, modelID 
 		return false, err
 	}
 	if grant {
-		id, err := s.store.ids.NextID()
+		id, err := s.store.ids.NextID(ctx)
 		if err != nil {
 			return false, err
 		}

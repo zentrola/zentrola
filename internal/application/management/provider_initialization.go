@@ -3,6 +3,7 @@ package management
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/zentrola/zentrola/internal/application/bootstrap"
@@ -13,8 +14,20 @@ import (
 
 const providerInitializationReadLimit = 10000
 
-// InitializeOfficialProviders 只创建缺失的内置厂商，不修改任何已有厂商配置。
-func (s *Service) InitializeOfficialProviders(ctx context.Context, actor admin.Identity, meta appsec.RequestMeta) (ProviderInitializeResult, error) {
+func (input *ProviderInitializeInput) Normalize() {
+	input.Locale = strings.TrimSpace(input.Locale)
+}
+
+func (input ProviderInitializeInput) Valid() bool {
+	return input.Locale == "zh-CN" || input.Locale == "en-US"
+}
+
+// InitializeOfficialProviders 创建缺失的内置厂商，并同步已有内置厂商的本地化名称和官方网站。
+func (s *Service) InitializeOfficialProviders(ctx context.Context, actor admin.Identity, input ProviderInitializeInput, meta appsec.RequestMeta) (ProviderInitializeResult, error) {
+	input.Normalize()
+	if !input.Valid() {
+		return ProviderInitializeResult{}, appsec.ErrInvalidArgument
+	}
 	templates := bootstrap.OfficialProviderTemplates()
 	result := ProviderInitializeResult{Total: len(templates)}
 	err := s.store.Write(ctx, actor, func(writer Writer) error {
@@ -22,23 +35,41 @@ func (s *Service) InitializeOfficialProviders(ctx context.Context, actor admin.I
 		if err != nil {
 			return err
 		}
-		existing := make(map[string]struct{}, len(providers))
+		existing := make(map[string]Provider, len(providers))
 		for _, provider := range providers {
-			existing[provider.Code] = struct{}{}
+			existing[provider.Code] = provider
 		}
 
 		now := time.Now().UTC().Truncate(time.Microsecond)
 		for _, template := range templates {
-			if _, ok := existing[template.Code]; ok {
+			name := template.LocalizedName(input.Locale)
+			if provider, ok := existing[template.Code]; ok {
 				result.Existing++
+				if provider.Name == name && provider.Website != nil && *provider.Website == template.Website {
+					continue
+				}
+				before := provider
+				provider.Name = name
+				website := template.Website
+				provider.Website = &website
+				provider.UpdatedAt = now
+				if err := writer.UpdateProvider(ctx, provider); err != nil {
+					return err
+				}
+				if err := writer.Audit(ctx, Audit{Event: operation.ProviderUpdate, Target: "PROVIDER", ID: provider.ID, Name: provider.Name, Before: before, After: provider}, meta); err != nil {
+					return err
+				}
+				result.Updated++
 				continue
 			}
-			id, err := s.next()
+			id, err := s.next(ctx)
 			if err != nil {
 				return err
 			}
+			website := template.Website
 			provider := Provider{
-				ID: id, Code: template.Code, Name: template.Name, Type: "OFFICIAL", Status: "DISABLED",
+				ID: id, Code: template.Code, Name: name, Type: "OFFICIAL", Status: "DISABLED",
+				Website:   &website,
 				Endpoints: make([]ProviderEndpoint, 0, len(template.Endpoints)),
 				CreatedAt: now, UpdatedAt: now,
 			}
@@ -51,7 +82,7 @@ func (s *Service) InitializeOfficialProviders(ctx context.Context, actor admin.I
 			if err := writer.Audit(ctx, Audit{Event: operation.ProviderCreate, Target: "PROVIDER", ID: id, Name: provider.Name, After: provider}, meta); err != nil {
 				return err
 			}
-			existing[provider.Code] = struct{}{}
+			existing[provider.Code] = provider
 			result.Created++
 		}
 		return nil

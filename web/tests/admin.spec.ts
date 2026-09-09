@@ -50,7 +50,7 @@ async function fixture(page: Page) {
   const providers: any[] = [
     {
       id: '81',
-      name: 'DeepSeek Official',
+      name: 'DeepSeek',
       code: 'deepseek-official',
       type: 'OFFICIAL',
       status: 'ACTIVE',
@@ -256,27 +256,70 @@ async function fixture(page: Page) {
     }
     if (path === '/providers/initialize' && method === 'POST') {
       const templates = [
-        ['openai-official', 'OpenAI Official', 'https://api.openai.com/v1'],
-        ['anthropic-official', 'Anthropic Official', 'https://api.anthropic.com'],
+        ['openai-official', 'OpenAI', 'OpenAI', 'https://api.openai.com/v1', 'https://openai.com'],
         [
-          'gemini-official',
-          'Gemini Official',
-          'https://generativelanguage.googleapis.com/v1beta/openai',
+          'anthropic-official',
+          'Anthropic',
+          'Anthropic',
+          'https://api.anthropic.com',
+          'https://www.anthropic.com',
         ],
-        ['zhipu-official', 'Zhipu Official', 'https://open.bigmodel.cn/api/paas/v4'],
-        ['kimi-official', 'Kimi Official', 'https://api.moonshot.cn/v1'],
-        ['qwen-official', 'Qwen Official', 'https://dashscope.aliyuncs.com/compatible-mode/v1'],
+        [
+          'google-gemini-official',
+          'Google',
+          'Google',
+          'https://generativelanguage.googleapis.com/v1beta/openai',
+          'https://ai.google.dev/gemini-api',
+        ],
+        [
+          'deepseek-official',
+          '深度求索',
+          'DeepSeek',
+          'https://api.deepseek.com',
+          'https://www.deepseek.com',
+        ],
+        [
+          'zhipu-official',
+          '智谱 AI',
+          'Zhipu AI',
+          'https://open.bigmodel.cn/api/paas/v4',
+          'https://www.zhipuai.cn',
+        ],
+        [
+          'kimi-official',
+          '月之暗面',
+          'Moonshot AI',
+          'https://api.moonshot.cn/v1',
+          'https://www.moonshot.cn',
+        ],
+        [
+          'qwen-official',
+          '阿里云',
+          'Alibaba Cloud',
+          'https://dashscope.aliyuncs.com/compatible-mode/v1',
+          'https://qwen.ai',
+        ],
       ]
-      let created = 0
-      for (const [code, name, baseUrl] of templates) {
-        if (providers.some((provider) => provider.code === code)) continue
+      let created = 0,
+        updated = 0
+      for (const [code, nameZH, nameEN, baseUrl, website] of templates) {
+        const name = body.locale === 'zh-CN' ? nameZH : nameEN
+        const existing = providers.find((provider) => provider.code === code)
+        if (existing) {
+          if (existing.name !== name || existing.website !== website) {
+            existing.name = name
+            existing.website = website
+            updated++
+          }
+          continue
+        }
         providers.push({
           id: next(),
           code,
           name,
           type: 'OFFICIAL',
-          status: 'ACTIVE',
-          website: null,
+          status: 'DISABLED',
+          website,
           endpoints: [{ protocolType: 'OPENAI', baseUrl }],
           proxyEnabled: false,
           proxyUrl: null,
@@ -286,7 +329,12 @@ async function fixture(page: Page) {
         })
         created++
       }
-      return reply({ total: 7, created, existing: 7 - created })
+      return reply({
+        total: templates.length,
+        created,
+        updated,
+        existing: templates.length - created,
+      })
     }
     if (method === 'POST' && segments.length === 1) {
       const id = next()
@@ -507,6 +555,7 @@ async function fixture(page: Page) {
         latencyMs: 160,
         discovered: failedTest ? 0 : 2,
         created: failedTest ? 0 : 1,
+        updated: 0,
         mapped: failedTest ? 0 : 1,
       })
     return reply(null, 404, 'NOT_FOUND')
@@ -745,7 +794,7 @@ test('操作日志单侧快照显示为日志内容且登录失败隐藏内部�
   await page.screenshot({ path: '../.cache/web-visual/operation-login-failed.png', fullPage: true })
 })
 
-test('成员列表通过图标查看 Key、更新过期日期以及处理删除和失败恢复', async ({ page }) => {
+test('成员列表按需查看 Key 并处理删除和失败恢复', async ({ page }) => {
   const state = await fixture(page)
   state.keys.push(
     {
@@ -778,7 +827,7 @@ test('成员列表通过图标查看 Key、更新过期日期以及处理删除�
   await expect(row).not.toContainText('zt_vk_temp')
   await expect(row.getByText('工作站', { exact: true })).toHaveCount(0)
   await expect(row).not.toContainText('长期有效')
-  await expect(row).toContainText('2020年1月1日')
+  await expect(row).not.toContainText('2020年1月1日')
   await expect(row).not.toContainText('已过期')
   await expect(row.getByRole('button', { name: '撤销', exact: true })).toHaveCount(0)
   const viewKeys = row.getByRole('button', { name: '查看 Key 记录', exact: true })
@@ -846,10 +895,9 @@ test('成员列表通过图标查看 Key、更新过期日期以及处理删除�
   const disabledMemberStatus = disabledMemberRow.getByRole('switch', {
     name: '周予安的激活状态',
   })
-  await expect(disabledMemberStatus).toBeDisabled()
-  await expect(disabledMemberStatus).toHaveAttribute('title', '请先为该用户分配密钥，再激活用户。')
+  await expect(disabledMemberStatus).toBeEnabled()
+  await expect(disabledMemberStatus).not.toHaveAttribute('title')
   await expect(disabledMemberStatus).toContainText('未激活')
-  await expect(disabledMemberRow.locator('td').nth(2)).toHaveText('-')
   await expect(disabledMemberRow.getByRole('button', { name: '密钥', exact: true })).toBeEnabled()
   const assignKey = row.getByRole('button', { name: '密钥', exact: true })
   await expect(assignKey.locator('svg')).toHaveCount(0)
@@ -868,8 +916,7 @@ test('成员列表通过图标查看 Key、更新过期日期以及处理删除�
   await expect(row).not.toContainText('zt_vk_temp')
   await expect(row).not.toContainText('2020年1月1日')
   expect(state.keys).toHaveLength(3)
-  await expect(row).toContainText('2099年12月31日')
-  await expect(row.locator('.key-expiry')).toHaveText('2099年12月31日')
+  await expect(row).not.toContainText('2099年12月31日')
   expect(
     await page.evaluate((value) => {
       const expiry = new Date(value)
@@ -901,13 +948,13 @@ test('成员列表通过图标查看 Key、更新过期日期以及处理删除�
   expect(state.members).toHaveLength(2)
 })
 
-test('无密钥用户分配密钥后才可激活', async ({ page }) => {
+test('成员列表不预查密钥且分配密钥后可激活', async ({ page }) => {
   const state = await fixture(page)
   await signIn(page)
   const row = page.getByRole('row').filter({ hasText: '周予安' })
   const status = row.getByRole('switch', { name: '周予安的激活状态' })
 
-  await expect(status).toBeDisabled()
+  await expect(status).toBeEnabled()
   await row.getByRole('button', { name: '密钥', exact: true }).click()
   await modal(page).getByLabel('Key 名称').fill('工作站')
   await modal(page).getByRole('button', { name: '密钥', exact: true }).click()
@@ -921,7 +968,7 @@ test('无密钥用户分配密钥后才可激活', async ({ page }) => {
   expect(state.members.find((member) => member.name === '周予安')?.status).toBe('ACTIVE')
 })
 
-test('成员 Key 加载失败可重试', async ({ page }) => {
+test('成员 Key 弹层加载失败可重试', async ({ page }) => {
   await fixture(page)
   let fail = true
   await page.route(`**/api/v1/members/${longID}/keys?*`, async (route) => {
@@ -934,14 +981,15 @@ test('成员 Key 加载失败可重试', async ({ page }) => {
   })
   await signIn(page)
   const row = page.getByRole('row').filter({ hasText: '林知远' })
-  await expect(row.getByRole('alert')).toBeVisible()
-  fail = false
-  await row.getByRole('button', { name: '重试' }).click()
   await expect(row.getByRole('alert')).toHaveCount(0)
-  await expect(row.getByRole('button', { name: '查看 Key 记录' })).toBeEnabled()
+  await row.getByRole('button', { name: '查看 Key 记录' }).click()
+  await expect(modal(page).getByRole('alert')).toBeVisible()
+  fail = false
+  await modal(page).getByRole('button', { name: '重试' }).click()
+  await expect(modal(page).getByRole('alert')).toHaveCount(0)
 })
 
-test('主列表只请求最新密钥，弹层分页失败可重试并支持切换每页条数', async ({ page }) => {
+test('主列表不请求密钥，弹层按需分页并支持失败重试和切换每页条数', async ({ page }) => {
   const state = await fixture(page)
   for (let i = 0; i < 51; i++) {
     state.keys.push({
@@ -967,7 +1015,7 @@ test('主列表只请求最新密钥，弹层分页失败可重试并支持切�
   })
   await signIn(page)
   const row = page.getByRole('row').filter({ hasText: '林知远' })
-  expect(requests.map((query) => query.get('limit'))).toEqual(['1'])
+  expect(requests).toHaveLength(0)
   await row.getByRole('button', { name: '查看 Key 记录' }).click()
   const dialog = modal(page)
   await expect(dialog.locator('tbody tr')).toHaveCount(20)
@@ -1086,17 +1134,24 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
     (await providerSearch.locator('button').allTextContents()).slice(-2).map((text) => text.trim()),
   ).toEqual(['添加服务商', '初始化'])
   await providerSearch.getByRole('button', { name: '初始化', exact: true }).click()
-  await expect(page.getByRole('status')).toContainText('已补充 6 个官方服务商，共 7 个')
-  await expect(page.getByRole('row').filter({ hasText: 'Kimi Official' })).toBeVisible()
+  await expect(page.getByRole('status')).toContainText(
+    '已补充 6 个官方服务商，并同步 1 个预置名称或官网，共 7 个',
+  )
+  await expect(page.getByRole('row').filter({ hasText: '月之暗面' })).toBeVisible()
+  expect(state.providers.find((provider) => provider.code === 'kimi-official')?.website).toBe(
+    'https://www.moonshot.cn',
+  )
   await providerSearch.getByRole('button', { name: '初始化', exact: true }).click()
-  await expect(page.getByRole('status')).toContainText('官方服务商已完整初始化，共 7 个')
+  await expect(page.getByRole('status')).toContainText(
+    '官方服务商的当前语言名称和官网已是最新，共 7 个',
+  )
   expect(state.providers).toHaveLength(7)
 
-  const deepSeekRow = page.getByRole('row').filter({ hasText: 'DeepSeek Official' })
+  const deepSeekRow = page.getByRole('row').filter({ hasText: '深度求索' })
   await expect(page.getByRole('columnheader', { name: '配置密钥', exact: true })).toBeVisible()
   await expect(deepSeekRow).toContainText('否')
   await expect(
-    deepSeekRow.getByRole('button', { name: '配置 DeepSeek Official 的密钥', exact: true }),
+    deepSeekRow.getByRole('button', { name: '配置 深度求索 的密钥', exact: true }),
   ).toBeVisible()
   await expect(deepSeekRow.locator('td').last().getByRole('button')).toHaveText(['删除', '编辑'])
   await deepSeekRow.getByRole('button', { name: '编辑', exact: true }).click()
@@ -1136,11 +1191,12 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   expect(state.providerMappings.get('81')).toHaveLength(1)
   await expect(page.getByRole('columnheader', { name: '网站', exact: true })).toHaveCount(0)
   const websiteLink = deepSeekRow.getByRole('link', {
-    name: '在新页面打开 DeepSeek Official 官网',
+    name: '在新页面打开 深度求索 官网',
     exact: true,
   })
   await expect(websiteLink).toHaveAttribute('href', 'https://www.deepseek.com')
   await expect(websiteLink).toHaveAttribute('target', '_blank')
+  await expect(websiteLink.locator('svg')).toHaveCount(1)
 
   await page.getByRole('button', { name: '添加服务商' }).click()
   const dialog = modal(page)
@@ -1316,7 +1372,7 @@ test('通用确认框适配英文长文案和危险操作语义', async ({ page 
   await signIn(page)
   await page.getByRole('button', { name: 'EN', exact: true }).click()
   await page.getByRole('link', { name: 'Providers', exact: true }).click()
-  await page.getByRole('switch', { name: 'Status for DeepSeek Official' }).click()
+  await page.getByRole('switch', { name: 'Status for DeepSeek' }).click()
 
   const dialog = modal(page)
   await expect(dialog).toHaveAccessibleName('Disable access')
@@ -1576,6 +1632,38 @@ test('分组列表按最新记录倒序显示并提示输入分组名称', async
   await expect(modal(page).getByRole('checkbox', { name: '选择分组 较早分组' })).toBeVisible()
 })
 
+test('启停状态时保留列表直到当前页重新加载完成', async ({ page }) => {
+  await fixture(page)
+  await signIn(page)
+  await page.getByRole('link', { name: '模型', exact: true }).click()
+
+  const modelRow = page.getByRole('row').filter({ hasText: 'DeepSeek V4 Flash' })
+  const modelSwitch = modelRow.getByRole('switch', { name: 'DeepSeek V4 Flash的启用状态' })
+  await expect(modelSwitch).toBeChecked()
+
+  let releaseRefresh = () => {}
+  const refreshGate = new Promise<void>((resolve) => {
+    releaseRefresh = resolve
+  })
+  let delayNextRefresh = true
+  await page.route('**/api/v1/models?**', async (route) => {
+    if (delayNextRefresh) {
+      delayNextRefresh = false
+      await refreshGate
+    }
+    await route.fallback()
+  })
+
+  await modelSwitch.click()
+  await modal(page).getByRole('button', { name: '停用', exact: true }).click()
+  await expect(modal(page)).toHaveCount(0)
+  await expect(modelRow).toBeVisible()
+  await expect(page.locator('tbody tr')).toHaveCount(2)
+
+  releaseRefresh()
+  await expect(modelSwitch).not.toBeChecked()
+})
+
 test('管理员通过网页完成配置、Key 生命周期和用量查询', async ({ page }) => {
   const state = await fixture(page),
     errors: string[] = []
@@ -1697,19 +1785,15 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
 
   await page.getByRole('link', { name: '服务商', exact: true }).click()
   await expect(page.getByRole('link', { name: '服务商凭证', exact: true })).toHaveCount(0)
-  const providerRow = page.getByRole('row').filter({ hasText: 'DeepSeek Official' })
-  await expect(
-    providerRow.getByRole('link', { name: '在新页面打开 DeepSeek Official 官网' }),
-  ).toHaveCount(0)
-  await providerRow
-    .getByRole('button', { name: '配置 DeepSeek Official 的密钥', exact: true })
-    .click()
+  const providerRow = page.getByRole('row').filter({ hasText: 'DeepSeek' })
+  await expect(providerRow.getByRole('link', { name: '在新页面打开 DeepSeek 官网' })).toHaveCount(0)
+  await providerRow.getByRole('button', { name: '配置 DeepSeek 的密钥', exact: true }).click()
   await modal(page).getByLabel('API Key', { exact: true }).fill('fixture-upstream-credential')
   await modal(page).getByRole('button', { name: '保存' }).click()
   await expect(modal(page).getByRole('status')).toContainText('官方模型目录同步完成')
   await modal(page).getByRole('button', { name: '关闭', exact: true }).last().click()
   const testConnection = providerRow.getByRole('button', {
-    name: '测试 DeepSeek Official 的连接',
+    name: '测试 DeepSeek 的连接',
     exact: true,
   })
   await expect(testConnection).toBeVisible()
@@ -1722,7 +1806,7 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
   await expect(modal(page).getByRole('status')).toContainText('上游认证失败')
   await modal(page).getByRole('button', { name: '关闭', exact: true }).last().click()
   const editCredential = providerRow.getByRole('button', {
-    name: '配置 DeepSeek Official 的密钥',
+    name: '配置 DeepSeek 的密钥',
   })
   await expect(editCredential.locator('svg')).toHaveCount(1)
   await expect(providerRow.getByRole('button', { name: '更新 API Key' })).toHaveCount(0)
@@ -1733,7 +1817,7 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
   await modal(page).getByRole('button', { name: '关闭', exact: true }).last().click()
   await expect(
     providerRow.getByRole('switch', {
-      name: 'DeepSeek Official 服务商凭证的启用状态',
+      name: 'DeepSeek 服务商凭证的启用状态',
     }),
   ).toHaveCount(0)
   await expect(providerRow.getByText('是', { exact: true })).toBeVisible()

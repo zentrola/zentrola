@@ -109,12 +109,12 @@ func (s *Service) SyncResourceModels(ctx context.Context, actor admin.Identity, 
 			}
 			seen[candidate.Code] = struct{}{}
 			model, exists := modelsByCode[candidate.Code]
+			name := candidate.Name
+			if !validText(name, 128) || name == candidate.Code {
+				name = modelDisplayName(candidate.Code)
+			}
 			if !exists {
-				name := candidate.Name
-				if !validText(name, 128) || name == candidate.Code {
-					name = modelDisplayName(candidate.Code)
-				}
-				modelID, err := s.next()
+				modelID, err := s.next(ctx)
 				if err != nil {
 					return err
 				}
@@ -128,11 +128,19 @@ func (s *Service) SyncResourceModels(ctx context.Context, actor admin.Identity, 
 				}
 				modelsByCode[model.Code] = model
 				result.Created++
+			} else if model.Name != name {
+				model.Name = name
+				model.UpdatedAt = now
+				if err := writer.UpdateModel(ctx, model); err != nil {
+					return err
+				}
+				modelsByCode[model.Code] = model
+				result.Updated++
 			}
 			if _, exists := mappedModels[model.ID]; exists {
 				continue
 			}
-			mappingID, err := s.next()
+			mappingID, err := s.next(ctx)
 			if err != nil {
 				return err
 			}

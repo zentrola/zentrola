@@ -3421,7 +3421,10 @@
                         "AdminBearer": []
                     }
                 ],
-                "description": "幂等补齐系统内置的官方服务商和协议地址；不会覆盖已有服务商配置，也不会访问外部网络。",
+                "description": "幂等补齐系统内置的官方服务商和协议地址，并按界面语言同步内置名称及官方网站；其他已有配置保持不变，也不会访问外部网络。",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -3429,6 +3432,17 @@
                     "模型与资源"
                 ],
                 "summary": "初始化官方服务商",
+                "parameters": [
+                    {
+                        "description": "界面语言",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/management.ProviderInitializeInput"
+                        }
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -4222,7 +4236,7 @@
                         "AdminBearer": []
                     }
                 ],
-                "description": "根据服务商编码选择官方模型目录适配器；当前支持 DeepSeek。只创建缺失模型和映射，新模型默认停用，不覆盖既有配置。HTTP 200 后仍需检查 data.ok 和 data.code。",
+                "description": "根据服务商编码选择官方模型目录适配器；当前支持 DeepSeek。创建缺失模型和映射，同编码模型更新官方名称；新模型默认停用，其他既有配置保持不变。HTTP 200 后仍需检查 data.ok 和 data.code。",
                 "produces": [
                     "application/json"
                 ],
@@ -5844,6 +5858,9 @@
                 },
                 "ok": {
                     "type": "boolean"
+                },
+                "updated": {
+                    "type": "integer"
                 }
             }
         },
@@ -6008,6 +6025,21 @@
                 }
             }
         },
+        "management.ProviderInitializeInput": {
+            "type": "object",
+            "required": [
+                "locale"
+            ],
+            "properties": {
+                "locale": {
+                    "type": "string",
+                    "enum": [
+                        "zh-CN",
+                        "en-US"
+                    ]
+                }
+            }
+        },
         "management.ProviderInitializeResult": {
             "type": "object",
             "properties": {
@@ -6018,6 +6050,9 @@
                     "type": "integer"
                 },
                 "total": {
+                    "type": "integer"
+                },
+                "updated": {
                     "type": "integer"
                 }
             }

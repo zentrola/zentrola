@@ -113,7 +113,7 @@ func (q *Queries) GatewayModel(ctx context.Context, modelCode string) (GatewayMo
 }
 
 const gatewayResources = `-- name: GatewayResources :many
-SELECT id, is_deleted, organization_id, provider_id, resource_name, credential_ciphertext, credential_nonce, key_version, status, last_active_at, created_by, updated_by, created_at, updated_at FROM provider_credential WHERE organization_id=$1 AND provider_id=$2 AND NOT is_deleted AND status='ACTIVE' ORDER BY id LIMIT 2
+SELECT id, is_deleted, status, organization_id, provider_id, resource_name, credential_ciphertext, credential_nonce, key_version, last_active_at, created_by, updated_by, created_at, updated_at FROM provider_credential WHERE organization_id=$1 AND provider_id=$2 AND NOT is_deleted AND status='ACTIVE' ORDER BY id LIMIT 2
 `
 
 type GatewayResourcesParams struct {
@@ -133,13 +133,13 @@ func (q *Queries) GatewayResources(ctx context.Context, arg GatewayResourcesPara
 		if err := rows.Scan(
 			&i.ID,
 			&i.IsDeleted,
+			&i.Status,
 			&i.OrganizationID,
 			&i.ProviderID,
 			&i.ResourceName,
 			&i.CredentialCiphertext,
 			&i.CredentialNonce,
 			&i.KeyVersion,
-			&i.Status,
 			&i.LastActiveAt,
 			&i.CreatedBy,
 			&i.UpdatedBy,

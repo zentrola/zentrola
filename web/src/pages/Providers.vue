@@ -21,8 +21,20 @@ import PageHeader from '../components/PageHeader.vue'
 import StatusSwitch from '../components/StatusSwitch.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 
-const { items, cursor, page, pageSize, total, loading, error, load, previous, retry, setPageSize } =
-  useCollection<Provider>(() => '/providers')
+const {
+  items,
+  cursor,
+  page,
+  pageSize,
+  total,
+  loading,
+  error,
+  load,
+  refresh,
+  previous,
+  retry,
+  setPageSize,
+} = useCollection<Provider>(() => '/providers')
 const { busy, error: actionError, run } = useAction()
 const editing = ref(false)
 const editTarget = ref<Provider | null>(null)
@@ -282,10 +294,14 @@ function initializeProviders() {
   initializeNotice.value = ''
   actionError.value = ''
   void run(async () => {
-    const result = await api<ProviderInitializeResult>('/providers/initialize', 'POST')
+    const result = await api<ProviderInitializeResult>('/providers/initialize', 'POST', {
+      locale: i18n.global.locale.value,
+    })
     initializeNotice.value = t(
-      result.created > 0 ? 'providers.initializeCompleted' : 'providers.initializeUnchanged',
-      { created: result.created, total: result.total },
+      result.created > 0 || result.updated > 0
+        ? 'providers.initializeCompleted'
+        : 'providers.initializeUnchanged',
+      { created: result.created, updated: result.updated, total: result.total },
     )
     await load()
   })
@@ -450,7 +466,7 @@ function changeStatus() {
       status: provider.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE',
     })
     statusTarget.value = null
-    await load()
+    await refresh()
   })
 }
 
@@ -514,14 +530,14 @@ onMounted(() => {
                     ><strong>{{ provider.name }}</strong
                     ><a
                       v-if="provider.website"
-                      class="provider-quick-action"
+                      class="provider-quick-action provider-website-action"
                       :href="provider.website"
                       target="_blank"
                       rel="noopener noreferrer"
                       :aria-label="t('providers.openWebsiteFor', { name: provider.name })"
                       :title="t('providers.visitWebsite')"
                     >
-                      <Icon name="external" :size="14" /></a
+                      <Icon name="website" :size="15" /></a
                     ><button
                       v-if="resourceFor(provider)"
                       type="button"
@@ -993,6 +1009,8 @@ onMounted(() => {
         <dd>{{ syncResult.discovered }}</dd>
         <dt>{{ t('resources.createdModels') }}</dt>
         <dd>{{ syncResult.created }}</dd>
+        <dt>{{ t('resources.updatedModels') }}</dt>
+        <dd>{{ syncResult.updated }}</dd>
         <dt>{{ t('resources.createdMappings') }}</dt>
         <dd>{{ syncResult.mapped }}</dd>
         <dt>{{ t('resources.latency') }}</dt>
@@ -1094,6 +1112,10 @@ onMounted(() => {
 .provider-quick-action:hover:not(:disabled) {
   border-color: var(--blue);
   background: #eaf2ff;
+}
+.provider-website-action,
+.provider-website-action:hover:not(:disabled) {
+  border: 0;
 }
 .provider-direct-action,
 .provider-direct-action:hover:not(:disabled) {

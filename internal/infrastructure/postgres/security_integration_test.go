@@ -30,10 +30,7 @@ import (
 
 func TestStage2Integration(t *testing.T) {
 	ctx, pool, _ := integrationDatabase(t)
-	ids, err := idgen.New(3)
-	if err != nil {
-		t.Fatal(err)
-	}
+	ids := idgen.New(pool)
 	if err := bootstrap.New(NewBootstrapStore(pool), ids).Initialize(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +92,7 @@ func TestStage2Integration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	providerID, err := ids.NextID()
+	providerID, err := ids.NextID(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +182,7 @@ func TestStage2Integration(t *testing.T) {
 		}
 	})
 
-	principalID, _ := ids.NextID()
+	principalID, _ := ids.NextID(ctx)
 	if _, err := pool.Exec(ctx, `INSERT INTO principal (id,organization_id,principal_type,name,status,created_by,updated_by,created_at,updated_at) VALUES ($1,$2,'MEMBER','Test Member','ACTIVE','system','system',now(),now())`, principalID, actor.OrganizationID); err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +259,7 @@ func TestStage2Integration(t *testing.T) {
 			t.Fatal(err)
 		}
 		c, _ := cryptosec.NewCredentials(master)
-		resourceID, _ := ids.NextID()
+		resourceID, _ := ids.NextID(ctx)
 		owner := cryptosec.CredentialOwner{OrganizationID: actor.OrganizationID, ProviderID: providerID, ResourceID: resourceID}
 		sealed, _ := c.Encrypt([]byte("test-provider-secret"), owner)
 		if _, err := pool.Exec(ctx, `INSERT INTO provider_credential (id,organization_id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,created_by,updated_by,created_at,updated_at) VALUES ($1,$2,$3,'Test Resource',$4,$5,1,'ACTIVE','system','system',now(),now())`, resourceID, actor.OrganizationID, providerID, sealed.Ciphertext, sealed.Nonce); err != nil {

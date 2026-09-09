@@ -10,6 +10,8 @@ const paths: Record<string, string> = {
   connection: 'M8 3v5m8-5v5M5 8h14v3a7 7 0 0 1-14 0V8Zm7 10v4',
   activity: 'M3 12h4l2-6 4 12 3-9 2 3h3',
   external: 'M14 4h6v6M20 4l-9 9M18 13v6H5V6h6',
+  website:
+    'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM3 12h18M12 3c2.2 2.5 3.3 5.5 3.3 9S14.2 18.5 12 21M12 3C9.8 5.5 8.7 8.5 8.7 12s1.1 6.5 3.3 9',
   edit: 'M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4L16.5 3.5Z',
   resources: 'M8 3v5m8-5v5M5 8h14v3a7 7 0 0 1-14 0V8Zm7 10v4',
   usage: 'M4 3v18h17M8 16v-5m5 5V7m5 9V3',

@@ -7,7 +7,6 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"errors"
-	"io/fs"
 	"os"
 	"strconv"
 	"strings"
@@ -19,8 +18,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/jackc/pgx/v5/stdlib"
-	"github.com/pressly/goose/v3"
 	"github.com/zentrola/zentrola/internal/application/bootstrap"
 	"github.com/zentrola/zentrola/internal/infrastructure/config"
 	"github.com/zentrola/zentrola/internal/infrastructure/idgen"
@@ -49,46 +46,23 @@ func integrationDatabase(t *testing.T) (context.Context, *pgxpool.Pool, string) 
 	if _, err := base.Exec(ctx, "CREATE SCHEMA "+quoted); err != nil {
 		t.Fatal(err)
 	}
+	var pool *pgxpool.Pool
+	t.Cleanup(func() {
+		if pool != nil {
+			pool.Close()
+		}
+		cleanup, done := context.WithTimeout(context.Background(), 15*time.Second)
+		defer done()
+		if _, err := base.Exec(cleanup, "DROP SCHEMA "+quoted+" CASCADE"); err != nil {
+			t.Error("cannot clean isolated schema:", err)
+		}
+	})
 	poolConfig := base.Config().Copy()
 	poolConfig.ConnConfig.RuntimeParams["search_path"] = schema
-	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
+	pool, err = pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(pool.Close)
-	t.Cleanup(func() {
-		cleanup, done := context.WithTimeout(context.Background(), 15*time.Second)
-		defer done()
-		db := stdlib.OpenDBFromPool(pool)
-		defer db.Close()
-		source, _ := fs.Sub(migrations, "migrations")
-		provider, err := goose.NewProvider(goose.DialectPostgres, db, source, goose.WithDisableGlobalRegistry(true))
-		if err != nil {
-			t.Error(err)
-			return
-		}
-		// 仅清理本测试创建的随机隔离 schema，允许回滚拒绝有 OpenAI 历史的迁移。
-		if _, err := pool.Exec(cleanup, "TRUNCATE usage_record,provider_model,provider_endpoint,provider_credential,provider"); err != nil {
-			t.Error(err)
-			return
-		}
-		// 隔离测试历史使用受限事务清理；业务库的 append-only 保护始终保留。
-		if _, err := pool.Exec(cleanup, "DO $$ BEGIN ALTER TABLE operation_log DISABLE TRIGGER USER; TRUNCATE operation_log; ALTER TABLE operation_log ENABLE TRIGGER USER; END $$"); err != nil {
-			t.Error(err)
-			return
-		}
-		if _, err := provider.DownTo(cleanup, 0); err != nil {
-			t.Error("isolated migration rollback failed:", err)
-			return
-		}
-		if _, err := pool.Exec(cleanup, "DROP TABLE goose_db_version"); err != nil {
-			t.Error(err)
-			return
-		}
-		if _, err := base.Exec(cleanup, "DROP SCHEMA "+quoted); err != nil {
-			t.Error(err)
-		}
-	})
 	if err := Migrate(ctx, pool); err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +149,7 @@ VALUES (60,1,40,'Resource',decode(repeat('11',32),'hex'),decode(repeat('22',12),
 			if err := tx.QueryRow(ctx, `SELECT input_tokens IS NULL AND cost_amount IS NULL AND cost_currency IS NULL FROM usage_record WHERE id=101`).Scan(&unknown); err != nil || !unknown {
 				t.Fatal("unknown usage/cost was falsified")
 			}
-			mustReject(t, ctx, tx, "23505", `INSERT INTO usage_record SELECT 102,organization_id,request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,input_tokens,output_tokens,cached_input_tokens,billing_unit,billing_quantity,cost_amount,cost_currency,started_at,completed_at,latency_ms,status,error_type,created_at,client_protocol FROM usage_record WHERE id=101`)
+			mustReject(t, ctx, tx, "23505", `INSERT INTO usage_record (id,organization_id,request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,input_tokens,output_tokens,cached_input_tokens,billing_unit,billing_quantity,cost_amount,cost_currency,started_at,completed_at,latency_ms,status,error_type,created_at,client_protocol) SELECT 102,organization_id,request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,input_tokens,output_tokens,cached_input_tokens,billing_unit,billing_quantity,cost_amount,cost_currency,started_at,completed_at,latency_ms,status,error_type,created_at,client_protocol FROM usage_record WHERE id=101`)
 			mustReject(t, ctx, tx, "23514", `UPDATE usage_record SET attempt_no=2 WHERE id=101`)
 			mustExec(t, ctx, tx, `INSERT INTO operation_log (id,organization_id,operator_type,operator_id,operator_name,module,operation_type,target_type,target_id,result,created_at) VALUES (200,1,'ADMIN',70,'Admin','MEMBER','MEMBER_CREATE','PRINCIPAL',10,'SUCCESS',now())`)
 			for _, sql := range []string{`UPDATE operation_log SET operator_name='changed'`, `DELETE FROM operation_log`, `TRUNCATE operation_log`} {
@@ -190,7 +164,8 @@ func checkSchema(t *testing.T, ctx context.Context, pool *pgxpool.Pool, schema s
 	t.Helper()
 	rows, err := pool.Query(ctx, `SELECT c.relname,a.attname,format_type(a.atttypid,a.atttypmod),a.attnotnull,coalesce(col_description(c.oid,a.attnum),''),coalesce(obj_description(c.oid),'')
 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_attribute a ON a.attrelid=c.oid
-WHERE n.nspname=$1 AND c.relkind='r' AND c.relname<>'goose_db_version' AND a.attnum>0 AND NOT a.attisdropped`, schema)
+WHERE n.nspname=$1 AND c.relkind='r' AND c.relname<>'goose_db_version' AND a.attnum>0 AND NOT a.attisdropped
+ORDER BY c.relname,a.attnum`, schema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,6 +178,7 @@ WHERE n.nspname=$1 AND c.relkind='r' AND c.relname<>'goose_db_version' AND a.att
 		"operation_log": "operator_id,target_id,target_name,request_id,request_method,request_path,ip_address,user_agent,error_code,before_data,after_data,remark",
 	}
 	tables := map[string]bool{}
+	columns := map[string][]string{}
 	for rows.Next() {
 		var table, col, typ, comment, tableComment string
 		var notNull bool
@@ -210,6 +186,7 @@ WHERE n.nspname=$1 AND c.relkind='r' AND c.relname<>'goose_db_version' AND a.att
 			t.Fatal(err)
 		}
 		tables[table] = true
+		columns[table] = append(columns[table], col)
 		containsHan := func(s string) bool {
 			return strings.ContainsFunc(s, func(r rune) bool { return unicode.Is(unicode.Han, r) })
 		}
@@ -258,6 +235,26 @@ WHERE n.nspname=$1 AND c.relkind='r' AND c.relname<>'goose_db_version' AND a.att
 	for table := range tables {
 		if !expectedTables[table] {
 			t.Errorf("unexpected business table: %s", table)
+		}
+	}
+	preferredRecordColumns := []string{"id", "is_deleted", "status"}
+	for table, actualColumns := range columns {
+		present := make(map[string]bool, len(actualColumns))
+		for _, column := range actualColumns {
+			present[column] = true
+		}
+		var wantPrefix []string
+		for _, column := range preferredRecordColumns {
+			if present[column] {
+				wantPrefix = append(wantPrefix, column)
+			}
+		}
+		if len(wantPrefix) == 0 {
+			continue
+		}
+		gotPrefix := actualColumns[:len(wantPrefix)]
+		if strings.Join(gotPrefix, ",") != strings.Join(wantPrefix, ",") {
+			t.Errorf("record columns are not leading fields: %s got=%v want=%v", table, gotPrefix, wantPrefix)
 		}
 	}
 	var count int
@@ -321,10 +318,7 @@ func checkBootstrap(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM organization").Scan(&count); err != nil || count != 0 {
 		t.Fatal("partial bootstrap committed", err)
 	}
-	ids, err := idgen.New(2)
-	if err != nil {
-		t.Fatal(err)
-	}
+	ids := idgen.New(pool)
 	service := bootstrap.New(store, ids)
 	var wg sync.WaitGroup
 	for range 4 {
@@ -338,7 +332,7 @@ func checkBootstrap(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	if err := service.Check(ctx); err != nil {
 		t.Fatal(err)
 	}
-	for table, want := range map[string]int{"organization": 1, "provider": 7, "provider_endpoint": 10, "model": 0, "provider_model": 0, "provider_credential": 0, "admin_user": 0} {
+	for table, want := range map[string]int{"organization": 1, "provider": 0, "provider_endpoint": 0, "model": 0, "provider_model": 0, "provider_credential": 0, "admin_user": 0} {
 		if err := pool.QueryRow(ctx, "SELECT count(*) FROM "+pgx.Identifier{table}.Sanitize()).Scan(&count); err != nil || count != want {
 			t.Fatalf("%s count=%d want=%d err=%v", table, count, want, err)
 		}

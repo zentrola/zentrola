@@ -326,7 +326,7 @@ func (s *Service) replaceProviderMappings(ctx context.Context, w Writer, provide
 		}
 		mapping, exists := currentByModel[input.ModelID]
 		if !exists {
-			id, err := s.next()
+			id, err := s.next(ctx)
 			if err != nil {
 				return nil, err
 			}
@@ -373,7 +373,7 @@ func (s *Service) CreateProvider(ctx context.Context, actor admin.Identity, inpu
 			return Provider{}, appsec.ErrInvalidArgument
 		}
 	}
-	id, err := s.next()
+	id, err := s.next(ctx)
 	if err != nil {
 		return Provider{}, err
 	}

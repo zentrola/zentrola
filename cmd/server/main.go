@@ -219,10 +219,7 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 	if mode == "migrate" {
 		return nil
 	}
-	ids, err := idgen.New(cfg.IDNode)
-	if err != nil {
-		return err
-	}
+	ids := idgen.New(pool)
 	if mode == "password" {
 		passwords, err := cryptosec.NewPasswords(12)
 		if err != nil {

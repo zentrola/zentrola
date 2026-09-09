@@ -17,6 +17,7 @@ import (
 	"github.com/zentrola/zentrola/internal/domain/admin"
 	"github.com/zentrola/zentrola/internal/domain/operation"
 	"github.com/zentrola/zentrola/internal/domain/shared"
+	"github.com/zentrola/zentrola/internal/infrastructure/idgen"
 	"github.com/zentrola/zentrola/internal/infrastructure/postgres/dbgen"
 	cryptosec "github.com/zentrola/zentrola/internal/infrastructure/security"
 )
@@ -47,6 +48,7 @@ func (s *SecurityStore) createInitial(ctx context.Context, username string, hash
 		return appsec.ErrUnavailable
 	}
 	defer tx.Rollback(context.Background())
+	ctx = idgen.WithQuerier(ctx, tx)
 	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(829314003)"); err != nil {
 		return appsec.ErrUnavailable
 	}
@@ -72,7 +74,7 @@ func (s *SecurityStore) createInitial(ctx context.Context, username string, hash
 	if err != nil {
 		return appsec.ErrUnavailable
 	}
-	id, err := s.ids.NextID()
+	id, err := s.ids.NextID(ctx)
 	if err != nil {
 		return appsec.ErrUnavailable
 	}
@@ -107,6 +109,7 @@ func (s *SecurityStore) Attempt(ctx context.Context, username string, meta appse
 		return admin.Identity{}, appsec.ErrUnavailable
 	}
 	defer tx.Rollback(context.Background())
+	ctx = idgen.WithQuerier(ctx, tx)
 	q := dbgen.New(tx)
 	row, err := q.GetAdminForLogin(ctx, username)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -154,6 +157,7 @@ func (s *SecurityStore) Create(ctx context.Context, actor admin.Identity, key ap
 		return appsec.ErrUnavailable
 	}
 	defer tx.Rollback(context.Background())
+	ctx = idgen.WithQuerier(ctx, tx)
 	q := dbgen.New(tx)
 	if err := validateActor(ctx, q, actor); err != nil {
 		return err
@@ -184,6 +188,7 @@ func (s *SecurityStore) Revoke(ctx context.Context, actor admin.Identity, keyID 
 		return appsec.ErrUnavailable
 	}
 	defer tx.Rollback(context.Background())
+	ctx = idgen.WithQuerier(ctx, tx)
 	q := dbgen.New(tx)
 	if err := validateActor(ctx, q, actor); err != nil {
 		return err
@@ -231,6 +236,7 @@ func (s *SecurityStore) RecoverCredentials(ctx context.Context, cipher *cryptose
 		return 0, appsec.ErrUnavailable
 	}
 	defer tx.Rollback(context.Background())
+	ctx = idgen.WithQuerier(ctx, tx)
 	q := dbgen.New(tx)
 	resources, err := q.ListResourcesForCredentialCheck(ctx)
 	if err != nil {
@@ -271,7 +277,7 @@ func validateActor(ctx context.Context, q *dbgen.Queries, actor admin.Identity) 
 	return nil
 }
 func (s *SecurityStore) appendLog(ctx context.Context, q *dbgen.Queries, actor admin.Identity, module string, event operation.Type, target string, targetID int64, targetName, result, code string, meta appsec.RequestMeta, before, after []byte, remark string) error {
-	id, err := s.ids.NextID()
+	id, err := s.ids.NextID(ctx)
 	if err != nil {
 		return err
 	}

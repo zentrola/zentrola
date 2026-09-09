@@ -43,7 +43,7 @@ func (s *Service) CreateModel(ctx context.Context, actor admin.Identity, input M
 	if !input.Valid() {
 		return Model{}, appsec.ErrInvalidArgument
 	}
-	id, err := s.next()
+	id, err := s.next(ctx)
 	if err != nil {
 		return Model{}, err
 	}

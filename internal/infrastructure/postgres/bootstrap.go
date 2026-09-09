@@ -50,19 +50,5 @@ func (s *BootstrapStore) initialize(ctx context.Context, seed bootstrap.Seed) er
 	}); err != nil {
 		return err
 	}
-	for _, provider := range seed.Providers {
-		if err := queries.CreateBootstrapProvider(ctx, dbgen.CreateBootstrapProviderParams{
-			ID: provider.ID, ProviderCode: provider.Code, ProviderName: provider.Name, CreatedAt: at,
-		}); err != nil {
-			return err
-		}
-		for _, endpoint := range provider.Endpoints {
-			if err := queries.CreateBootstrapProviderEndpoint(ctx, dbgen.CreateBootstrapProviderEndpointParams{
-				ProviderID: provider.ID, ProtocolType: endpoint.ProtocolType, BaseUrl: endpoint.BaseURL, CreatedAt: at,
-			}); err != nil {
-				return err
-			}
-		}
-	}
 	return tx.Commit(ctx)
 }

@@ -318,6 +318,7 @@ var (
 	_ requestPayload = (*UpdateStatusRequest)(nil)
 	_ requestPayload = (*mgmt.ModelInput)(nil)
 	_ requestPayload = (*mgmt.ProviderInput)(nil)
+	_ requestPayload = (*mgmt.ProviderInitializeInput)(nil)
 )
 
 func decodeRequest[T any](w http.ResponseWriter, r *http.Request) (T, bool) {

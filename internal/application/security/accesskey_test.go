@@ -34,7 +34,7 @@ func (s *keyTestStore) Authenticate(_ context.Context, digest []byte, _ time.Tim
 
 type keyTestIDs struct{}
 
-func (keyTestIDs) NextID() (int64, error) { return 123, nil }
+func (keyTestIDs) NextID(context.Context) (int64, error) { return 123, nil }
 
 func TestCreateVirtualKeyFormatAndAuthentication(t *testing.T) {
 	store := &keyTestStore{identity: PrincipalIdentity{ID: 3, OrganizationID: 2, AccessKeyID: 123}}

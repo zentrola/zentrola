@@ -15,7 +15,7 @@ import (
 
 type testIDs struct{ n atomic.Int64 }
 
-func (i *testIDs) NextID() (int64, error) { return i.n.Add(1), nil }
+func (i *testIDs) NextID(context.Context) (int64, error) { return i.n.Add(1), nil }
 
 type storeFunc func(context.Context, []domain.Event) error
 

@@ -11,7 +11,7 @@ import (
 
 type fixedMemberID struct{ id int64 }
 
-func (g fixedMemberID) NextID() (int64, error) { return g.id, nil }
+func (g fixedMemberID) NextID(context.Context) (int64, error) { return g.id, nil }
 
 type memberCreateWriter struct {
 	Writer

@@ -78,6 +78,9 @@ export function useCollection<T>(path: () => string) {
     }
     await fetchPage(null, 1, true)
   }
+  async function refresh() {
+    await fetchPage(pageStarts[page.value - 1] ?? null, page.value, false)
+  }
   async function previous() {
     if (page.value <= 1) return
     await fetchPage(pageStarts[page.value - 2] ?? null, page.value - 1, false)
@@ -101,6 +104,7 @@ export function useCollection<T>(path: () => string) {
     loading,
     error,
     load,
+    refresh,
     previous,
     retry,
     setPageSize,

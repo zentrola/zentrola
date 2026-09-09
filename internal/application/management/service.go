@@ -59,8 +59,8 @@ func validCredential(s string) bool {
 	}
 	return true
 }
-func (s *Service) next() (int64, error) {
-	id, err := s.ids.NextID()
+func (s *Service) next(ctx context.Context) (int64, error) {
+	id, err := s.ids.NextID(ctx)
 	if err != nil {
 		return 0, appsec.ErrUnavailable
 	}
@@ -74,7 +74,7 @@ func (s *Service) CreateMemberWithGroups(ctx context.Context, actor admin.Identi
 	if !validText(name, 128) || !validRemark(note) || !uniquePositiveIDs(groupIDs) {
 		return Member{}, appsec.ErrInvalidArgument
 	}
-	id, err := s.next()
+	id, err := s.next(ctx)
 	if err != nil {
 		return Member{}, err
 	}
@@ -240,7 +240,7 @@ func (s *Service) createGroup(ctx context.Context, actor admin.Identity, code, n
 	if (code != "" && !validText(code, 64)) || !validText(name, 128) || !validRemark(note) || !uniquePositiveIDs(modelIDs) {
 		return Group{}, appsec.ErrInvalidArgument
 	}
-	id, err := s.next()
+	id, err := s.next(ctx)
 	if err != nil {
 		return Group{}, err
 	}
@@ -498,7 +498,7 @@ func (s *Service) CreateResource(ctx context.Context, actor admin.Identity, prov
 	if providerID <= 0 || !validText(name, 128) || !validCredential(credential) {
 		return Resource{}, appsec.ErrInvalidArgument
 	}
-	id, err := s.next()
+	id, err := s.next(ctx)
 	if err != nil {
 		return Resource{}, err
 	}

@@ -40,10 +40,7 @@ func (f gatewayOpenFunc) Open(ctx context.Context, r gw.Route, q gw.Request, c [
 
 func TestStage4Integration(t *testing.T) {
 	ctx, pool, _ := integrationDatabase(t)
-	ids, err := idgen.New(5)
-	if err != nil {
-		t.Fatal(err)
-	}
+	ids := idgen.New(pool)
 	if err := bootstrap.New(NewBootstrapStore(pool), ids).Initialize(ctx); err != nil {
 		t.Fatal(err)
 	}

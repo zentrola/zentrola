@@ -10,7 +10,7 @@ import (
 )
 
 const getAccessKeyByHash = `-- name: GetAccessKeyByHash :one
-SELECT id, is_deleted, organization_id, principal_id, key_hash, masked_key, name, status, expires_at, last_used_at, revoked_at, created_by, updated_by, created_at, updated_at FROM principal_access_key WHERE key_hash = $1 AND is_deleted = false
+SELECT id, is_deleted, status, organization_id, principal_id, key_hash, masked_key, name, expires_at, last_used_at, revoked_at, created_by, updated_by, created_at, updated_at FROM principal_access_key WHERE key_hash = $1 AND is_deleted = false
 `
 
 // 这里只定位凭证；完整认证和撤销/过期判断在阶段 2/4 实现。
@@ -20,12 +20,12 @@ func (q *Queries) GetAccessKeyByHash(ctx context.Context, keyHash []byte) (Princ
 	err := row.Scan(
 		&i.ID,
 		&i.IsDeleted,
+		&i.Status,
 		&i.OrganizationID,
 		&i.PrincipalID,
 		&i.KeyHash,
 		&i.MaskedKey,
 		&i.Name,
-		&i.Status,
 		&i.ExpiresAt,
 		&i.LastUsedAt,
 		&i.RevokedAt,
@@ -38,7 +38,7 @@ func (q *Queries) GetAccessKeyByHash(ctx context.Context, keyHash []byte) (Princ
 }
 
 const getAdminByUsername = `-- name: GetAdminByUsername :one
-SELECT id, is_deleted, organization_id, username, password_hash, display_name, status, failed_login_count, locked_until, last_login_at, created_by, updated_by, created_at, updated_at, credential_version FROM admin_user WHERE organization_id = $1 AND username = $2 AND is_deleted = false
+SELECT id, is_deleted, status, organization_id, username, password_hash, display_name, failed_login_count, locked_until, last_login_at, credential_version, created_by, updated_by, created_at, updated_at FROM admin_user WHERE organization_id = $1 AND username = $2 AND is_deleted = false
 `
 
 type GetAdminByUsernameParams struct {
@@ -52,25 +52,25 @@ func (q *Queries) GetAdminByUsername(ctx context.Context, arg GetAdminByUsername
 	err := row.Scan(
 		&i.ID,
 		&i.IsDeleted,
+		&i.Status,
 		&i.OrganizationID,
 		&i.Username,
 		&i.PasswordHash,
 		&i.DisplayName,
-		&i.Status,
 		&i.FailedLoginCount,
 		&i.LockedUntil,
 		&i.LastLoginAt,
+		&i.CredentialVersion,
 		&i.CreatedBy,
 		&i.UpdatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.CredentialVersion,
 	)
 	return i, err
 }
 
 const getOrganization = `-- name: GetOrganization :one
-SELECT id, is_deleted, organization_code, organization_name, status, remark, created_by, updated_by, created_at, updated_at FROM organization WHERE id = $1 AND is_deleted = false
+SELECT id, is_deleted, status, organization_code, organization_name, remark, created_by, updated_by, created_at, updated_at FROM organization WHERE id = $1 AND is_deleted = false
 `
 
 func (q *Queries) GetOrganization(ctx context.Context, id int64) (Organization, error) {
@@ -79,9 +79,9 @@ func (q *Queries) GetOrganization(ctx context.Context, id int64) (Organization, 
 	err := row.Scan(
 		&i.ID,
 		&i.IsDeleted,
+		&i.Status,
 		&i.OrganizationCode,
 		&i.OrganizationName,
-		&i.Status,
 		&i.Remark,
 		&i.CreatedBy,
 		&i.UpdatedBy,
@@ -92,7 +92,7 @@ func (q *Queries) GetOrganization(ctx context.Context, id int64) (Organization, 
 }
 
 const getPrincipal = `-- name: GetPrincipal :one
-SELECT id, is_deleted, organization_id, principal_type, name, remark, status, created_by, updated_by, created_at, updated_at FROM principal WHERE organization_id = $1 AND id = $2 AND is_deleted = false
+SELECT id, is_deleted, status, organization_id, principal_type, name, remark, created_by, updated_by, created_at, updated_at FROM principal WHERE organization_id = $1 AND id = $2 AND is_deleted = false
 `
 
 type GetPrincipalParams struct {
@@ -106,11 +106,11 @@ func (q *Queries) GetPrincipal(ctx context.Context, arg GetPrincipalParams) (Pri
 	err := row.Scan(
 		&i.ID,
 		&i.IsDeleted,
+		&i.Status,
 		&i.OrganizationID,
 		&i.PrincipalType,
 		&i.Name,
 		&i.Remark,
-		&i.Status,
 		&i.CreatedBy,
 		&i.UpdatedBy,
 		&i.CreatedAt,
@@ -120,7 +120,7 @@ func (q *Queries) GetPrincipal(ctx context.Context, arg GetPrincipalParams) (Pri
 }
 
 const getProvider = `-- name: GetProvider :one
-SELECT id, is_deleted, provider_code, provider_name, provider_type, status, created_by, updated_by, created_at, updated_at, official_website, proxy_enabled, proxy_url_display, proxy_url_ciphertext, proxy_url_nonce, proxy_url_key_version, proxy_header_names, proxy_headers_ciphertext, proxy_headers_nonce, proxy_headers_key_version FROM provider WHERE id = $1 AND is_deleted = false
+SELECT id, is_deleted, status, provider_code, provider_name, provider_type, official_website, proxy_enabled, proxy_url_display, proxy_url_ciphertext, proxy_url_nonce, proxy_url_key_version, proxy_header_names, proxy_headers_ciphertext, proxy_headers_nonce, proxy_headers_key_version, created_by, updated_by, created_at, updated_at FROM provider WHERE id = $1 AND is_deleted = false
 `
 
 func (q *Queries) GetProvider(ctx context.Context, id int64) (Provider, error) {
@@ -129,14 +129,10 @@ func (q *Queries) GetProvider(ctx context.Context, id int64) (Provider, error) {
 	err := row.Scan(
 		&i.ID,
 		&i.IsDeleted,
+		&i.Status,
 		&i.ProviderCode,
 		&i.ProviderName,
 		&i.ProviderType,
-		&i.Status,
-		&i.CreatedBy,
-		&i.UpdatedBy,
-		&i.CreatedAt,
-		&i.UpdatedAt,
 		&i.OfficialWebsite,
 		&i.ProxyEnabled,
 		&i.ProxyUrlDisplay,
@@ -147,6 +143,10 @@ func (q *Queries) GetProvider(ctx context.Context, id int64) (Provider, error) {
 		&i.ProxyHeadersCiphertext,
 		&i.ProxyHeadersNonce,
 		&i.ProxyHeadersKeyVersion,
+		&i.CreatedBy,
+		&i.UpdatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -174,7 +174,7 @@ func (q *Queries) GetProviderModel(ctx context.Context, id int64) (ProviderModel
 }
 
 const getResource = `-- name: GetResource :one
-SELECT id, is_deleted, organization_id, provider_id, resource_name, credential_ciphertext, credential_nonce, key_version, status, last_active_at, created_by, updated_by, created_at, updated_at FROM provider_credential WHERE organization_id = $1 AND id = $2 AND is_deleted = false
+SELECT id, is_deleted, status, organization_id, provider_id, resource_name, credential_ciphertext, credential_nonce, key_version, last_active_at, created_by, updated_by, created_at, updated_at FROM provider_credential WHERE organization_id = $1 AND id = $2 AND is_deleted = false
 `
 
 type GetResourceParams struct {
@@ -189,13 +189,13 @@ func (q *Queries) GetResource(ctx context.Context, arg GetResourceParams) (Provi
 	err := row.Scan(
 		&i.ID,
 		&i.IsDeleted,
+		&i.Status,
 		&i.OrganizationID,
 		&i.ProviderID,
 		&i.ResourceName,
 		&i.CredentialCiphertext,
 		&i.CredentialNonce,
 		&i.KeyVersion,
-		&i.Status,
 		&i.LastActiveAt,
 		&i.CreatedBy,
 		&i.UpdatedBy,
@@ -236,7 +236,7 @@ func (q *Queries) HasGroupModelPermission(ctx context.Context, arg HasGroupModel
 }
 
 const listGroupsForPrincipal = `-- name: ListGroupsForPrincipal :many
-SELECT g.id, g.is_deleted, g.organization_id, g.group_code, g.group_name, g.remark, g.status, g.created_by, g.updated_by, g.created_at, g.updated_at FROM principal_group g
+SELECT g.id, g.is_deleted, g.status, g.organization_id, g.group_code, g.group_name, g.remark, g.created_by, g.updated_by, g.created_at, g.updated_at FROM principal_group g
 JOIN principal_group_membership pg ON pg.group_id = g.id AND pg.organization_id = g.organization_id
 WHERE pg.organization_id = $1 AND pg.principal_id = $2
   AND pg.is_deleted = false AND g.is_deleted = false AND g.status = 'ACTIVE'
@@ -260,11 +260,11 @@ func (q *Queries) ListGroupsForPrincipal(ctx context.Context, arg ListGroupsForP
 		if err := rows.Scan(
 			&i.ID,
 			&i.IsDeleted,
+			&i.Status,
 			&i.OrganizationID,
 			&i.GroupCode,
 			&i.GroupName,
 			&i.Remark,
-			&i.Status,
 			&i.CreatedBy,
 			&i.UpdatedBy,
 			&i.CreatedAt,
@@ -281,7 +281,7 @@ func (q *Queries) ListGroupsForPrincipal(ctx context.Context, arg ListGroupsForP
 }
 
 const listModels = `-- name: ListModels :many
-SELECT id, is_deleted, model_code, display_name, status, created_by, updated_by, created_at, updated_at, input_modalities, output_modalities, remark FROM model WHERE is_deleted = false ORDER BY id
+SELECT id, is_deleted, status, model_code, display_name, input_modalities, output_modalities, remark, created_by, updated_by, created_at, updated_at FROM model WHERE is_deleted = false ORDER BY id
 `
 
 func (q *Queries) ListModels(ctx context.Context) ([]Model, error) {
@@ -296,16 +296,16 @@ func (q *Queries) ListModels(ctx context.Context) ([]Model, error) {
 		if err := rows.Scan(
 			&i.ID,
 			&i.IsDeleted,
+			&i.Status,
 			&i.ModelCode,
 			&i.DisplayName,
-			&i.Status,
+			&i.InputModalities,
+			&i.OutputModalities,
+			&i.Remark,
 			&i.CreatedBy,
 			&i.UpdatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.InputModalities,
-			&i.OutputModalities,
-			&i.Remark,
 		); err != nil {
 			return nil, err
 		}

@@ -2,7 +2,7 @@
 import { chromium } from '@playwright/test'
 import { mkdir, writeFile } from 'node:fs/promises'
 import assert from 'node:assert/strict'
-const webBase = process.env.ZENTROLA_WEB_URL || 'http://127.0.0.1:3000'
+const webBase = process.env.ZENTROLA_WEB_URL || 'http://127.0.0.1:9528'
 const apiBase = process.env.ZENTROLA_API_URL || 'http://127.0.0.1:8081'
 if (
   !['127.0.0.1', 'localhost'].includes(new URL(webBase).hostname) ||
