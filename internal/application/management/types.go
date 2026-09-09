@@ -20,8 +20,13 @@ var (
 )
 
 type Page struct {
-	After int64
-	Limit int32
+	After     int64
+	Limit     int32
+	ProbeNext bool
+}
+type PageData[T any] struct {
+	Items []T
+	Total int64
 }
 type Member struct {
 	ID        int64     `json:"id,string"`
@@ -74,8 +79,8 @@ type Provider struct {
 	ProxyHeadersSealed catalog.SealedCredential `json:"-"`
 }
 type ProviderEndpoint struct {
-	ProtocolType string `json:"protocolType" enums:"OPENAI_CHAT,OPENAI_RESPONSES,ANTHROPIC_MESSAGES"`
-	BaseURL      string `json:"baseUrl"`
+	ProtocolType string `json:"protocolType" binding:"required" enums:"OPENAI,ANTHROPIC"`
+	BaseURL      string `json:"baseUrl" binding:"required"`
 }
 type ProviderProxyHeader struct {
 	Key        string `json:"key"`
@@ -111,6 +116,11 @@ type ProviderMapping struct {
 type ProviderDetail struct {
 	Provider
 	Mappings []ProviderMapping `json:"mappings"`
+}
+type ProviderInitializeResult struct {
+	Total    int `json:"total"`
+	Created  int `json:"created"`
+	Existing int `json:"existing"`
 }
 type Resource struct {
 	ID                   int64     `json:"id,string"`
@@ -157,21 +167,33 @@ type Audit struct {
 }
 type Reader interface {
 	Members(context.Context, Page) ([]Member, error)
+	CountMembers(context.Context) (int64, error)
+	MemberSuggestions(context.Context, Page, string) ([]Member, error)
+	CountMemberSuggestions(context.Context, string) (int64, error)
 	Member(context.Context, int64) (Member, error)
 	Groups(context.Context, Page, string) ([]Group, error)
+	CountGroups(context.Context, string) (int64, error)
 	Group(context.Context, int64) (Group, error)
 	MemberGroups(context.Context, int64, Page) ([]Group, error)
+	CountMemberGroups(context.Context, int64) (int64, error)
 	GroupMembers(context.Context, int64, Page) ([]Member, error)
+	CountGroupMembers(context.Context, int64) (int64, error)
 	GroupModels(context.Context, int64, Page) ([]Model, error)
+	CountGroupModels(context.Context, int64) (int64, error)
 	Models(context.Context, Page, string) ([]Model, error)
+	CountModels(context.Context, string) (int64, error)
 	Model(context.Context, int64) (Model, error)
 	Providers(context.Context, Page) ([]Provider, error)
+	CountProviders(context.Context) (int64, error)
 	Provider(context.Context, int64) (Provider, error)
 	ProviderMappings(context.Context, int64) ([]ProviderMapping, error)
 	Resources(context.Context, Page) ([]Resource, error)
+	CountResources(context.Context) (int64, error)
 	Resource(context.Context, int64) (ResourceRecord, error)
 	Keys(context.Context, int64, Page) ([]Key, error)
+	CountKeys(context.Context, int64) (int64, error)
 	Operations(context.Context, Page) ([]Operation, error)
+	CountOperations(context.Context) (int64, error)
 }
 type Writer interface {
 	Reader
@@ -217,4 +239,24 @@ type ConnectionResult struct {
 }
 type ConnectionTester interface {
 	Test(context.Context, string, string, []byte, *catalog.OutboundProxy) ConnectionResult
+}
+
+type DiscoveredModel struct {
+	Code string
+	Name string
+}
+
+type ModelDiscoverySource struct {
+	ProviderCode string
+}
+
+type ModelSyncResult struct {
+	ConnectionResult
+	Discovered int `json:"discovered"`
+	Created    int `json:"created"`
+	Mapped     int `json:"mapped"`
+}
+
+type ModelDiscoverer interface {
+	Discover(context.Context, ModelDiscoverySource, []byte, *catalog.OutboundProxy) ([]DiscoveredModel, ConnectionResult)
 }

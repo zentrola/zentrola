@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -165,9 +166,8 @@ func (s *SecurityHandlers) mount(r chi.Router) {
 }
 
 func (s *SecurityHandlers) login(w http.ResponseWriter, r *http.Request) {
-	var input LoginRequest
-	if err := decodeBody(w, r, &input); err != nil {
-		securityError(w, r, appsec.ErrInvalidArgument)
+	input, ok := decodeRequest[LoginRequest](w, r)
+	if !ok {
 		return
 	}
 	result, err := s.Admin.Login(r.Context(), input.Username, input.Password, requestMeta(r))
@@ -178,9 +178,8 @@ func (s *SecurityHandlers) login(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusOK, response{Code: "OK", Data: result})
 }
 func (s *SecurityHandlers) changePassword(w http.ResponseWriter, r *http.Request) {
-	var input ChangePasswordRequest
-	if err := decodeBody(w, r, &input); err != nil {
-		securityError(w, r, appsec.ErrInvalidArgument)
+	input, ok := decodeRequest[ChangePasswordRequest](w, r)
+	if !ok {
 		return
 	}
 	if err := s.Admin.ChangePassword(r.Context(), adminFrom(r), input.CurrentPassword, input.NewPassword, requestMeta(r)); err != nil {
@@ -246,14 +245,13 @@ func (s *SecurityHandlers) openaiAuth(next http.Handler) http.Handler {
 	})
 }
 func (s *SecurityHandlers) createKey(w http.ResponseWriter, r *http.Request) {
-	var input CreateKeyRequest
 	id, err := positiveID(chi.URLParam(r, "id"))
 	if err != nil {
 		securityError(w, r, err)
 		return
 	}
-	if err := decodeBody(w, r, &input); err != nil {
-		securityError(w, r, appsec.ErrInvalidArgument)
+	input, ok := decodeRequest[CreateKeyRequest](w, r)
+	if !ok {
 		return
 	}
 	created, err := s.Keys.Create(r.Context(), adminFrom(r), id, input.Name, input.ExpiresAt, requestMeta(r))
@@ -276,7 +274,7 @@ func (s *SecurityHandlers) revokeKey(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusOK, response{Code: "OK", Data: RevokedResponse{Revoked: true}})
 }
 func positiveID(value string) (int64, error) {
-	id, err := strconv.ParseInt(value, 10, 64)
+	id, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
 	if err != nil || id <= 0 {
 		return 0, appsec.ErrInvalidArgument
 	}
@@ -301,18 +299,69 @@ func requestMeta(r *http.Request) appsec.RequestMeta {
 	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
 	return appsec.RequestMeta{RequestID: logging.RequestID(r.Context()), Method: r.Method, Path: r.URL.Path, IP: ip, UserAgent: r.UserAgent()}
 }
-func decodeBody(w http.ResponseWriter, r *http.Request, target any) error {
+
+type requestPayload interface {
+	Normalize()
+	Valid() bool
+}
+
+var (
+	_ requestPayload = (*ChangePasswordRequest)(nil)
+	_ requestPayload = (*LoginRequest)(nil)
+	_ requestPayload = (*CreateKeyRequest)(nil)
+	_ requestPayload = (*CreateMemberRequest)(nil)
+	_ requestPayload = (*UpdateMemberRequest)(nil)
+	_ requestPayload = (*CreateGroupRequest)(nil)
+	_ requestPayload = (*UpdateGroupRequest)(nil)
+	_ requestPayload = (*CreateResourceRequest)(nil)
+	_ requestPayload = (*UpdateCredentialRequest)(nil)
+	_ requestPayload = (*UpdateStatusRequest)(nil)
+	_ requestPayload = (*mgmt.ModelInput)(nil)
+	_ requestPayload = (*mgmt.ProviderInput)(nil)
+)
+
+func decodeRequest[T any](w http.ResponseWriter, r *http.Request) (T, bool) {
+	var input T
+	if r.URL.RawQuery != "" {
+		securityError(w, r, appsec.ErrInvalidArgument)
+		return input, false
+	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(target); err != nil {
-		return err
+	if err := decoder.Decode(&input); err != nil {
+		securityError(w, r, appsec.ErrInvalidArgument)
+		return input, false
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return appsec.ErrInvalidArgument
+		securityError(w, r, appsec.ErrInvalidArgument)
+		return input, false
 	}
-	return nil
+	payload, ok := any(&input).(requestPayload)
+	if !ok {
+		panic("http: request payload does not implement normalization and validation")
+	}
+	payload.Normalize()
+	if field := missingRequiredParameter(reflect.ValueOf(payload), ""); field != "" {
+		securityError(w, r, &missingRequiredParameterError{Field: field})
+		return input, false
+	}
+	if !payload.Valid() {
+		securityError(w, r, appsec.ErrInvalidArgument)
+		return input, false
+	}
+	return input, true
 }
+
 func securityError(w http.ResponseWriter, r *http.Request, err error) {
+	var missing *missingRequiredParameterError
+	if errors.As(err, &missing) {
+		writeJSON(w, r, http.StatusBadRequest, response{
+			Code:    "MISSING_REQUIRED_PARAMETER",
+			Message: missing.Error(),
+			Data:    map[string]string{"field": missing.Field},
+		})
+		return
+	}
 	var locked *appsec.AccountLockedError
 	if errors.As(err, &locked) {
 		remaining := time.Until(locked.LockedUntil)

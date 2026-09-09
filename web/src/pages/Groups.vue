@@ -11,7 +11,8 @@ import PageHeader from '../components/PageHeader.vue'
 import ListFooter from '../components/ListFooter.vue'
 import ListSearch from '../components/ListSearch.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
-const { items, cursor, loading, error, load } = useCollection<Group>(() => '/groups')
+const { items, cursor, page, pageSize, total, loading, error, load, previous, retry, setPageSize } =
+  useCollection<Group>(() => '/groups')
 const { busy, error: actionError, run } = useAction()
 const creating = ref(false),
   name = ref(''),
@@ -54,8 +55,16 @@ async function loadCreateModels() {
 }
 function create() {
   validation.value = ''
+  if (!name.value) {
+    validation.value = t('groups.nameRequired')
+    return
+  }
   if (!validText(name.value, 128) || !validText(remark.value, 2000, false)) {
     validation.value = t('common.byteLimit')
+    return
+  }
+  if (!createModelIDs.value.length) {
+    validation.value = t('groups.modelRequired')
     return
   }
   void run(async () => {
@@ -138,21 +147,26 @@ function deleteGroup() {
 }
 </script>
 <template>
-  <PageHeader name="groups"
-    ><button class="button primary" @click="newGroup">
-      <Icon name="plus" :size="18" />{{ t('groups.create') }}
-    </button></PageHeader
-  >
+  <PageHeader name="groups" />
   <section class="panel">
     <ListSearch
       v-model="keyword"
       :loading="loading"
+      :label="t('groups.searchLabel')"
       :placeholder="t('groups.searchPlaceholder')"
       @search="search"
       @reset="reset"
-    />
+    >
+      <template #actions>
+        <div class="list-toolbar-actions">
+          <button type="button" class="button primary" @click="newGroup">
+            <Icon name="plus" :size="18" />{{ t('groups.create') }}
+          </button>
+        </div>
+      </template>
+    </ListSearch>
     <p v-if="error" class="alert error" role="alert">
-      {{ error }}<button class="text-button" @click="load()">{{ t('common.retry') }}</button>
+      {{ error }}<button class="text-button" @click="retry">{{ t('common.retry') }}</button>
     </p>
     <div class="table-scroll">
       <table>
@@ -203,100 +217,134 @@ function deleteGroup() {
       <h3>{{ t(loading ? 'common.loading' : query ? 'common.noResults' : 'common.empty') }}</h3>
       <p v-if="!loading && !query">{{ t('groups.empty') }}</p>
     </div>
-    <ListFooter :count="items.length" :cursor="cursor" :loading="loading" @more="load(true)" />
+    <ListFooter
+      :cursor="cursor"
+      :page="page"
+      :page-size="pageSize"
+      :total="total"
+      :loading="loading"
+      @first="load()"
+      @previous="previous"
+      @more="load(true)"
+      @page-size="setPageSize"
+    />
   </section>
   <Modal v-if="creating" :title="t('groups.create')" :busy="busy" medium @close="creating = false"
-    ><form @submit.prevent="create">
-      <label>
-        {{ t('common.name') }}
-        <input v-model="name" required :disabled="busy" autofocus />
-      </label>
-      <label>
-        {{ t('common.remark') }}
-        <textarea v-model="remark" rows="3" :disabled="busy"></textarea>
-      </label>
-      <section class="group-model-field" aria-labelledby="create-models-title">
-        <div class="group-model-field-head">
-          <h3 id="create-models-title">{{ t('groups.allowedModels') }}</h3>
-          <span v-if="createModelsReady">{{
-            t('groups.selectionCount', {
-              count: createModelIDs.length,
-              total: creationModels.length,
-            })
-          }}</span>
-        </div>
-        <div class="create-models">
-          <div
-            v-if="createModelsReady && creationModels.length"
-            class="table-scroll create-model-list"
-          >
-            <table>
-              <colgroup>
-                <col class="model-check-column" />
-                <col class="model-name-column" />
-                <col class="model-code-column" />
-                <col class="model-type-column" />
-                <col class="model-type-column" />
-              </colgroup>
-              <thead>
-                <tr>
-                  <th class="model-check-cell">{{ t('common.select') }}</th>
-                  <th>{{ t('common.name') }}</th>
-                  <th>{{ t('common.code') }}</th>
-                  <th class="model-type-cell">{{ t('models.input') }}</th>
-                  <th class="model-type-cell">{{ t('models.output') }}</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="model in creationModels" :key="model.id">
-                  <td class="model-check-cell">
-                    <input
-                      v-model="createModelIDs"
-                      class="model-checkbox"
-                      type="checkbox"
-                      :value="model.id"
-                      :aria-label="t('groups.modelSelection', { name: model.name })"
-                      :disabled="busy || model.status !== 'ACTIVE'"
-                    />
-                  </td>
-                  <td>
-                    <strong>{{ model.name }}</strong>
-                  </td>
-                  <td>
-                    <code>{{ model.code }}</code>
-                  </td>
-                  <td class="model-type-cell">
-                    <div class="modality-tags">
-                      <span
-                        v-for="value in model.inputModalities"
-                        :key="value"
-                        class="modality-tag"
-                        >{{ t(`models.${value}`) }}</span
-                      >
-                    </div>
-                  </td>
-                  <td class="model-type-cell">
-                    <div class="modality-tags">
-                      <span
-                        v-for="value in model.outputModalities"
-                        :key="value"
-                        class="modality-tag"
-                        >{{ t(`models.${value}`) }}</span
-                      >
-                    </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+    ><form class="group-form" @submit.prevent="create">
+      <div class="group-form-fields">
+        <div class="group-form-row">
+          <label class="group-form-label required-label" for="create-group-name-input">{{
+            t('common.name')
+          }}</label>
+          <div class="group-form-control">
+            <input
+              id="create-group-name-input"
+              v-model="name"
+              required
+              :disabled="busy"
+              autofocus
+            />
           </div>
-          <p v-else-if="busy && !createModelsReady" class="empty-compact">
-            {{ t('common.loading') }}
-          </p>
-          <p v-else-if="createModelsReady" class="empty-compact">
-            {{ t('groups.noModelCatalog') }}
-          </p>
         </div>
-      </section>
+        <div class="group-form-row">
+          <label class="group-form-label" for="create-group-remark-input">{{
+            t('common.remark')
+          }}</label>
+          <div class="group-form-control">
+            <textarea
+              id="create-group-remark-input"
+              v-model="remark"
+              rows="3"
+              :disabled="busy"
+            ></textarea>
+          </div>
+        </div>
+        <div class="group-form-row">
+          <div id="create-models-title" class="group-form-label group-model-label required-label">
+            {{ t('groups.allowedModels') }}
+          </div>
+          <section
+            class="group-form-control group-model-field"
+            aria-labelledby="create-models-title"
+            aria-required="true"
+          >
+            <div v-if="createModelsReady" class="group-model-field-head">
+              <span>{{
+                t('groups.selectionCount', {
+                  count: createModelIDs.length,
+                  total: creationModels.length,
+                })
+              }}</span>
+            </div>
+            <div class="create-models">
+              <div
+                v-if="createModelsReady && creationModels.length"
+                class="table-scroll create-model-list"
+              >
+                <table>
+                  <colgroup>
+                    <col class="model-check-column" />
+                    <col class="model-name-column" />
+                    <col class="model-type-column" />
+                    <col class="model-type-column" />
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      <th class="model-check-cell">{{ t('common.select') }}</th>
+                      <th>{{ t('common.name') }}</th>
+                      <th class="model-type-cell">{{ t('models.input') }}</th>
+                      <th class="model-type-cell">{{ t('models.output') }}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="model in creationModels" :key="model.id">
+                      <td class="model-check-cell">
+                        <input
+                          v-model="createModelIDs"
+                          class="model-checkbox"
+                          type="checkbox"
+                          :value="model.id"
+                          :aria-label="t('groups.modelSelection', { name: model.name })"
+                          :disabled="busy || model.status !== 'ACTIVE'"
+                        />
+                      </td>
+                      <td>
+                        <strong class="model-name-regular">{{ model.name }}</strong>
+                      </td>
+                      <td class="model-type-cell">
+                        <div class="modality-tags">
+                          <span
+                            v-for="value in model.inputModalities"
+                            :key="value"
+                            class="modality-tag"
+                            >{{ t(`models.${value}`) }}</span
+                          >
+                        </div>
+                      </td>
+                      <td class="model-type-cell">
+                        <div class="modality-tags">
+                          <span
+                            v-for="value in model.outputModalities"
+                            :key="value"
+                            class="modality-tag"
+                            >{{ t(`models.${value}`) }}</span
+                          >
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p v-else-if="busy && !createModelsReady" class="empty-compact">
+                {{ t('common.loading') }}
+              </p>
+              <p v-else-if="createModelsReady" class="empty-compact">
+                {{ t('groups.noModelCatalog') }}
+              </p>
+            </div>
+          </section>
+        </div>
+      </div>
       <p v-if="validation" class="alert error" role="alert">{{ validation }}</p>
       <p v-if="actionError && !createModelsReady" class="form-retry">
         <button type="button" class="text-button" :disabled="busy" @click="run(loadCreateModels)">
@@ -319,102 +367,122 @@ function deleteGroup() {
     medium
     @close="selected = null"
   >
-    <form @submit.prevent="saveEdit">
-      <label>
-        {{ t('common.name') }}
-        <input v-model="editName" required :disabled="busy" autofocus />
-      </label>
-      <label>
-        {{ t('common.remark') }}
-        <textarea v-model="editRemark" rows="3" :disabled="busy"></textarea>
-      </label>
-      <section class="group-model-field" aria-labelledby="edit-models-title">
-        <div class="group-model-field-head">
-          <h3 id="edit-models-title">{{ t('groups.allowedModels') }}</h3>
-          <span v-if="relationReady">{{
-            t('groups.selectionCount', {
-              count: editModelIDs.length,
-              total: modelCandidates.length,
-            })
-          }}</span>
-        </div>
-        <div class="create-models">
-          <div
-            v-if="relationReady && modelCandidates.length"
-            class="table-scroll create-model-list"
-          >
-            <table>
-              <colgroup>
-                <col class="model-check-column" />
-                <col class="model-name-column" />
-                <col class="model-code-column" />
-                <col class="model-type-column" />
-                <col class="model-type-column" />
-              </colgroup>
-              <thead>
-                <tr>
-                  <th class="model-check-cell">{{ t('common.select') }}</th>
-                  <th>{{ t('common.name') }}</th>
-                  <th>{{ t('common.code') }}</th>
-                  <th class="model-type-cell">{{ t('models.input') }}</th>
-                  <th class="model-type-cell">{{ t('models.output') }}</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="model in modelCandidates" :key="model.id">
-                  <td class="model-check-cell">
-                    <input
-                      v-model="editModelIDs"
-                      class="model-checkbox"
-                      type="checkbox"
-                      :value="model.id"
-                      :aria-label="t('groups.modelSelection', { name: model.name })"
-                      :disabled="
-                        busy ||
-                        !relationReady ||
-                        (!grantedModelIDs.has(model.id) &&
-                          (model.status !== 'ACTIVE' || selected.status !== 'ACTIVE'))
-                      "
-                    />
-                  </td>
-                  <td class="model-type-cell">
-                    <strong>{{ model.name }}</strong>
-                  </td>
-                  <td class="model-type-cell">
-                    <code>{{ model.code }}</code>
-                  </td>
-                  <td>
-                    <div class="modality-tags">
-                      <span
-                        v-for="value in model.inputModalities"
-                        :key="value"
-                        class="modality-tag"
-                        >{{ t(`models.${value}`) }}</span
-                      >
-                    </div>
-                  </td>
-                  <td>
-                    <div class="modality-tags">
-                      <span
-                        v-for="value in model.outputModalities"
-                        :key="value"
-                        class="modality-tag"
-                        >{{ t(`models.${value}`) }}</span
-                      >
-                    </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+    <form class="group-form" @submit.prevent="saveEdit">
+      <div class="group-form-fields">
+        <div class="group-form-row">
+          <label class="group-form-label required-label" for="edit-group-name-input">{{
+            t('common.name')
+          }}</label>
+          <div class="group-form-control">
+            <input
+              id="edit-group-name-input"
+              v-model="editName"
+              required
+              :disabled="busy"
+              autofocus
+            />
           </div>
-          <p v-else-if="busy && !relationReady" class="empty-compact">
-            {{ t('common.loading') }}
-          </p>
-          <p v-else-if="relationReady" class="empty-compact">
-            {{ t('groups.noModelCatalog') }}
-          </p>
         </div>
-      </section>
+        <div class="group-form-row">
+          <label class="group-form-label" for="edit-group-remark-input">{{
+            t('common.remark')
+          }}</label>
+          <div class="group-form-control">
+            <textarea
+              id="edit-group-remark-input"
+              v-model="editRemark"
+              rows="3"
+              :disabled="busy"
+            ></textarea>
+          </div>
+        </div>
+        <div class="group-form-row">
+          <div id="edit-models-title" class="group-form-label group-model-label">
+            {{ t('groups.allowedModels') }}
+          </div>
+          <section class="group-form-control group-model-field" aria-labelledby="edit-models-title">
+            <div v-if="relationReady" class="group-model-field-head">
+              <span>{{
+                t('groups.selectionCount', {
+                  count: editModelIDs.length,
+                  total: modelCandidates.length,
+                })
+              }}</span>
+            </div>
+            <div class="create-models">
+              <div
+                v-if="relationReady && modelCandidates.length"
+                class="table-scroll create-model-list"
+              >
+                <table>
+                  <colgroup>
+                    <col class="model-check-column" />
+                    <col class="model-name-column" />
+                    <col class="model-type-column" />
+                    <col class="model-type-column" />
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      <th class="model-check-cell">{{ t('common.select') }}</th>
+                      <th>{{ t('common.name') }}</th>
+                      <th class="model-type-cell">{{ t('models.input') }}</th>
+                      <th class="model-type-cell">{{ t('models.output') }}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="model in modelCandidates" :key="model.id">
+                      <td class="model-check-cell">
+                        <input
+                          v-model="editModelIDs"
+                          class="model-checkbox"
+                          type="checkbox"
+                          :value="model.id"
+                          :aria-label="t('groups.modelSelection', { name: model.name })"
+                          :disabled="
+                            busy ||
+                            !relationReady ||
+                            (!grantedModelIDs.has(model.id) &&
+                              (model.status !== 'ACTIVE' || selected.status !== 'ACTIVE'))
+                          "
+                        />
+                      </td>
+                      <td>
+                        <strong class="model-name-regular">{{ model.name }}</strong>
+                      </td>
+                      <td class="model-type-cell">
+                        <div class="modality-tags">
+                          <span
+                            v-for="value in model.inputModalities"
+                            :key="value"
+                            class="modality-tag"
+                            >{{ t(`models.${value}`) }}</span
+                          >
+                        </div>
+                      </td>
+                      <td class="model-type-cell">
+                        <div class="modality-tags">
+                          <span
+                            v-for="value in model.outputModalities"
+                            :key="value"
+                            class="modality-tag"
+                            >{{ t(`models.${value}`) }}</span
+                          >
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p v-else-if="busy && !relationReady" class="empty-compact">
+                {{ t('common.loading') }}
+              </p>
+              <p v-else-if="relationReady" class="empty-compact">
+                {{ t('groups.noModelCatalog') }}
+              </p>
+            </div>
+          </section>
+        </div>
+      </div>
       <p v-if="validation" class="alert error" role="alert">{{ validation }}</p>
       <p v-if="actionError && !relationReady" class="form-retry">
         <button type="button" class="text-button" :disabled="busy" @click="run(refreshModels)">
@@ -461,20 +529,42 @@ function deleteGroup() {
   />
 </template>
 <style scoped>
-.group-model-field {
-  margin-top: 20px;
+.group-form-fields {
+  display: grid;
+  gap: 16px;
+}
+.group-form-row {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+.group-form-label {
+  display: block;
+  margin: 0;
+  padding-top: 10px;
+  color: #485e72;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: right;
+}
+.group-form-control {
+  min-width: 0;
+}
+.group-model-label {
+  padding-top: 2px;
+}
+.required-label::after {
+  content: '*';
+  margin-left: 4px;
+  color: var(--danger);
 }
 .group-model-field-head {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 7px;
-}
-.group-model-field-head h3 {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
+  justify-content: flex-end;
+  margin-bottom: 6px;
 }
 .group-model-field-head span {
   color: var(--muted);
@@ -483,28 +573,32 @@ function deleteGroup() {
 }
 .create-models {
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 8px;
   overflow: hidden;
 }
 .create-model-list {
-  max-height: 280px;
+  max-height: 224px;
   overflow: auto;
 }
 .create-model-list table {
   table-layout: fixed;
   margin: 0;
+  min-width: 420px;
+}
+.create-model-list th {
+  padding: 8px 10px;
+}
+.create-model-list td {
+  padding: 9px 10px;
 }
 .model-check-column {
-  width: 10%;
+  width: 58px;
 }
 .model-name-column {
-  width: 27%;
-}
-.model-code-column {
-  width: 31%;
+  width: auto;
 }
 .model-type-column {
-  width: 16%;
+  width: 22%;
 }
 .model-type-cell {
   text-align: center;
@@ -515,18 +609,17 @@ function deleteGroup() {
 .modality-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
 }
 .modality-tag {
   display: inline-block;
-  padding: 3px 7px;
+  padding: 2px 6px;
   border-radius: 5px;
   background: #edf3fb;
   font-size: 11px;
   white-space: nowrap;
 }
 .model-check-cell {
-  width: 60px;
   text-align: center;
 }
 .model-checkbox {
@@ -546,5 +639,16 @@ function deleteGroup() {
   margin: 0 0 12px;
   font-size: 12px;
   color: var(--muted);
+}
+@media (max-width: 640px) {
+  .group-form-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .group-form-label,
+  .group-model-label {
+    padding-top: 0;
+    text-align: left;
+  }
 }
 </style>

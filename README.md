@@ -112,10 +112,12 @@ Zentrola 遵循 Client-native First 和 Thin Gateway 原则：客户端已经具
 - 首位管理员初始化、登录、退出、修改密码和密码重置
 - MEMBER 创建、状态管理和删除
 - Group 创建、成员分配和 Group Model Allowlist
-- 在管理后台配置模型订阅、逻辑模型及其上游映射
-- Provider Credential 加密存储、Resource 启停和连接测试
+- 首次初始化预置 OpenAI、Anthropic、Google Gemini、DeepSeek、智谱、Kimi 和通义千问官方服务商及协议地址
+- Provider Credential 加密存储；保存 API Key 后从官方模型接口同步模型及上游映射
+- Resource 启停、连接测试和模型目录手动重新同步
 - Virtual Key 签发、有效期管理和撤销
 - Anthropic Messages、Count Tokens、SSE 和原生 Tool Loop
+- OpenAI 与 Anthropic 上游协议双向兼容；优先使用同协议端点，未配置时转换请求和响应后使用另一协议端点
 - OpenAI Models、Chat Completions、SSE 和工具调用往返
 - 按成员、逻辑模型和 Resource 记录 Usage
 - 查看主要 Operation Log
@@ -130,7 +132,7 @@ Zentrola 遵循 Client-native First 和 Thin Gateway 原则：客户端已经具
 - Enterprise Knowledge、Skill Registry 和 Managed MCP
 - SSO、OIDC、LDAP、SCIM、多组织和高可用部署
 
-当前 OpenAI Compatible 入口用于已配置的 DeepSeek Official 订阅及其 Chat Completions 协议，不提供 OpenAI Official GPT 模型或 Responses API。正式 Codex Native Path 仍需按 Responses API 单独实现和验收。
+Provider 端点按 `OPENAI` 和 `ANTHROPIC` 两类上游协议保存；其中 `ANTHROPIC` 即 Claude Code 使用的 Anthropic Messages 兼容协议。Gateway 客户端入口分别处理 OpenAI Chat Completions、OpenAI Responses 和 Anthropic Messages；路由优先选择与客户端相同的上游协议，缺少同协议端点时才转换为另一协议，并将响应转换回客户端原协议。正式 Codex 客户端的完整 E2E 仍需单独实现和验收。
 
 ## 发布包结构
 
@@ -313,10 +315,10 @@ Admin Web 默认地址为 `http://127.0.0.1:3000`。程序读取同目录的 `.e
 
 首次打开 Admin Web 时创建首位管理员。系统不提供默认用户名或密码，创建成功后初始化入口自动关闭。
 
-管理员按以下顺序完成第一条治理链路：
+首次初始化只写入公开的厂商信息和协议地址，不内置 API Key，也不会在没有凭据时访问厂商。管理员按以下顺序完成第一条治理链路：
 
-1. 在“模型”中维护客户端统一使用的逻辑模型。
-2. 在“服务商”中维护协议地址、逻辑模型到服务商模型名称的映射和 Provider Credential，并执行连接测试。
+1. 在“服务商”中为预置厂商填写 Provider Credential。保存后可通过服务商编码选择官方模型目录适配器并同步模型；当前支持 DeepSeek。同步只新增尚不存在的模型和上游映射，新模型默认停用。
+2. 在“模型”中检查同步结果，并启用准备开放给客户端的逻辑模型；必要时再调整服务商映射。
 3. 创建成员和 Group，将成员加入对应 Group。
 4. 为 Group 授权可用逻辑模型。
 5. 为成员签发 Virtual Key。
@@ -328,6 +330,8 @@ Admin Web 默认地址为 `http://127.0.0.1:3000`。程序读取同目录的 `.e
 ## Gateway 接入
 
 Virtual Key 只负责识别 MEMBER Principal，实际权限来自成员所属 Group 的 Model Allowlist。
+
+Gateway 路由遵循“同协议优先、异协议兜底”：Anthropic 客户端优先使用 `ANTHROPIC` 端点，否则使用 `OPENAI` 端点；OpenAI 客户端顺序相反。异协议调用会转换普通响应、SSE、工具调用、停止原因、错误和 Usage，客户端始终收到其请求协议的格式。上游已经开始调用后不会因超时或错误切换协议重试，避免同一请求被执行两次。Anthropic `count_tokens` 没有等价的 OpenAI 上游接口，因此仅配置 `OPENAI` 端点时返回路由不可用，不生成估算值。
 
 ### Anthropic Compatible
 
@@ -426,7 +430,7 @@ docker compose stop postgres
 
 ## 请求日志
 
-Backend 的控制台访问日志固定包含请求时间、HTTP 方法、请求追踪 ID、执行耗时、请求路径、状态码以及请求和响应字节数。
+Backend 的 `pretty` 控制台访问日志使用固定紧凑格式，包含请求时间、Trace/Span ID、HTTP 方法、请求路径、`status`、`cost`，以及经过白名单过滤的请求与响应 Header 摘要。`Authorization`、Cookie、API Key 等敏感 Header 永不记录。请求和响应字节数仍保留在 JSON 结构化日志中，便于统计但不占用控制台位置。
 
 `APP_ENV=dev` 时还会输出 `request_body` 和 `response_body` 调试摘要。JSON 中的密码、Token、Credential、Virtual Key、prompt、消息内容和模型输出会自动替换为 `[REDACTED]`；超过 8 KiB 的 JSON、SSE 和其他非 JSON 报文只记录类型及字节数。`APP_ENV=test` 或 `APP_ENV=prod` 时不采集请求和响应报文。
 

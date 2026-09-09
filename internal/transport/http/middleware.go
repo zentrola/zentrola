@@ -39,6 +39,51 @@ func requestID(next http.Handler) http.Handler {
 }
 
 const accessLogBodyLimit = 8 << 10
+const accessLogHeaderValueLimit = 256
+
+var requestHeaderAllowlist = []string{
+	"Accept",
+	"Accept-Encoding",
+	"Anthropic-Beta",
+	"Anthropic-Version",
+	"Content-Encoding",
+	"Content-Type",
+	"OpenAI-Beta",
+	"User-Agent",
+}
+
+var responseHeaderAllowlist = []string{
+	"Cache-Control",
+	"Content-Encoding",
+	"Content-Type",
+	"Retry-After",
+	"Anthropic-Ratelimit-Requests-Remaining",
+	"Anthropic-Ratelimit-Tokens-Remaining",
+	"X-Ratelimit-Remaining-Requests",
+	"X-Ratelimit-Remaining-Tokens",
+}
+
+func accessLogHeaders(headers http.Header, allowlist []string) map[string]string {
+	result := make(map[string]string)
+	for _, name := range allowlist {
+		value := strings.TrimSpace(strings.Join(headers.Values(name), ","))
+		if value == "" {
+			continue
+		}
+		value = strings.Map(func(character rune) rune {
+			if character < 32 || character == 127 {
+				return -1
+			}
+			return character
+		}, value)
+		characters := []rune(value)
+		if len(characters) > accessLogHeaderValueLimit {
+			value = string(characters[:accessLogHeaderValueLimit]) + "..."
+		}
+		result[strings.ToLower(name)] = value
+	}
+	return result
+}
 
 type accessLogDetailsKey struct{}
 
@@ -250,6 +295,12 @@ func accessLog(logger *slog.Logger, environments ...string) func(http.Handler) h
 						return r.ContentLength
 					}(),
 					"response_bytes", wrapped.BytesWritten(),
+				}
+				if headers := accessLogHeaders(r.Header, requestHeaderAllowlist); len(headers) > 0 {
+					attributes = append(attributes, "request_headers", headers)
+				}
+				if headers := accessLogHeaders(wrapped.Header(), responseHeaderAllowlist); len(headers) > 0 {
+					attributes = append(attributes, "response_headers", headers)
 				}
 				if development {
 					attributes = append(attributes,

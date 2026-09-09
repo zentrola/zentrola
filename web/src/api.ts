@@ -106,13 +106,17 @@ export class ApiError extends Error {
     public code: string,
     public requestId = '',
     public retryAfterSeconds = 0,
+    public field = '',
   ) {
     super(code)
   }
 }
 export function errorText(error: unknown) {
   const code = error instanceof ApiError ? error.code : 'UNKNOWN'
-  const text = t(i18n.global.te(`errors.${code}`) ? `errors.${code}` : 'errors.UNKNOWN')
+  const key = i18n.global.te(`errors.${code}`) ? `errors.${code}` : 'errors.UNKNOWN'
+  const text = t(key, {
+    field: error instanceof ApiError && error.field ? error.field : '-',
+  })
   return error instanceof ApiError && error.requestId ? `${text} (${error.requestId})` : text
 }
 export async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
@@ -145,6 +149,7 @@ export async function api<T>(path: string, method = 'GET', body?: unknown): Prom
         data.data.retryAfterSeconds > 0
           ? Math.ceil(data.data.retryAfterSeconds)
           : 0,
+        typeof data.data?.field === 'string' ? data.data.field : '',
       )
     }
     return data.data as T

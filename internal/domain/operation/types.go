@@ -32,6 +32,7 @@ const (
 	ModelStatusChange        Type = "MODEL_STATUS_CHANGE"
 	ModelCreate              Type = "MODEL_CREATE"
 	ModelUpdate              Type = "MODEL_UPDATE"
+	ModelCatalogSync         Type = "MODEL_CATALOG_SYNC"
 	ProviderCreate           Type = "PROVIDER_CREATE"
 	ProviderUpdate           Type = "PROVIDER_UPDATE"
 	ProviderDelete           Type = "PROVIDER_DELETE"

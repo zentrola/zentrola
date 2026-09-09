@@ -244,7 +244,9 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			encoding := http.Header(upstream.Headers).Get("Content-Encoding")
 			if encoding == "" || encoding == "identity" {
 				observer = gw.NewUsageObserver(media == "text/event-stream")
-				if protocol == gw.OpenAIProtocol || protocol == gw.OpenAIResponsesProtocol {
+				if protocol == gw.OpenAIResponsesProtocol {
+					observer = gw.NewOpenAIResponsesUsageObserver(media == "text/event-stream")
+				} else if protocol == gw.OpenAIProtocol {
 					observer = gw.NewOpenAIUsageObserver(media == "text/event-stream")
 				}
 			}

@@ -26,7 +26,7 @@ func (s *SecurityHandlers) mountSetup(r chi.Router) {
 	})
 	// @Summary 创建系统首位管理员
 	// @Tags 认证
-	// @Description 仅未初始化时可用；账号 1～64 bytes、密码 12～72 bytes；创建成功后使用登录接口。已有管理员时返回 ALREADY_INITIALIZED。
+	// @Description 仅未初始化时可用；账号 1～64 bytes，密码至少 6 个字符且不超过 72 bytes；创建成功后使用登录接口。已有管理员时返回 ALREADY_INITIALIZED。
 	// @Accept json
 	// @Produce json
 	// @Param body body LoginRequest true "初始管理员账号与密码"
@@ -37,12 +37,15 @@ func (s *SecurityHandlers) mountSetup(r chi.Router) {
 	// @Router /api/v1/auth/setup [post]
 	r.Post("/auth/setup", func(w http.ResponseWriter, req *http.Request) {
 		kind, _, err := mime.ParseMediaType(req.Header.Get("Content-Type"))
-		if err != nil || kind != "application/json" || req.URL.RawQuery != "" {
+		if err != nil || kind != "application/json" {
 			securityError(w, req, appsec.ErrInvalidArgument)
 			return
 		}
-		var input LoginRequest
-		if err := decodeBody(w, req, &input); err != nil {
+		input, ok := decodeRequest[LoginRequest](w, req)
+		if !ok {
+			return
+		}
+		if !validPassword(input.Password, 6) {
 			securityError(w, req, appsec.ErrInvalidArgument)
 			return
 		}

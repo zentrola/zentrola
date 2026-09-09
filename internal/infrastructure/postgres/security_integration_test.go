@@ -34,7 +34,7 @@ func TestStage2Integration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := bootstrap.New(NewBootstrapStore(pool), ids, "sonnet", "opus").Initialize(ctx); err != nil {
+	if err := bootstrap.New(NewBootstrapStore(pool), ids).Initialize(ctx); err != nil {
 		t.Fatal(err)
 	}
 	store := NewSecurityStore(pool, ids)
@@ -93,6 +93,18 @@ func TestStage2Integration(t *testing.T) {
 	initial := decodeLogin(login(username, password))
 	actor, err := admins.Authenticate(ctx, initial.Token)
 	if err != nil {
+		t.Fatal(err)
+	}
+	providerID, err := ids.NextID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO provider(id,provider_code,provider_name,provider_type,status,created_by,updated_by,created_at,updated_at)
+		VALUES($1,'security-test-provider','Security Test Provider','OFFICIAL','ACTIVE','system','system',now(),now())`, providerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO provider_endpoint(provider_id,protocol_type,base_url,created_by,updated_by,created_at,updated_at)
+		VALUES($1,'ANTHROPIC','https://security.example.com','system','system',now(),now())`, providerID); err != nil {
 		t.Fatal(err)
 	}
 	if rec := request("GET", "/api/v1/me", initial.Token, "", nil); rec.Code != 200 || rec.Header().Get("Cache-Control") != "no-store" {
@@ -211,13 +223,13 @@ func TestStage2Integration(t *testing.T) {
 		if rec := request("POST", "/anthropic/v1/messages", "", issued.Key, map[string]any{}); rec.Code != 501 {
 			t.Fatal("valid key must reach the explicitly unimplemented Gateway")
 		}
-		if _, err := pool.Exec(ctx, "UPDATE access_key SET expires_at=$1 WHERE id=$2", time.Now().Add(-time.Second), issued.ID); err != nil {
+		if _, err := pool.Exec(ctx, "UPDATE principal_access_key SET expires_at=$1 WHERE id=$2", time.Now().Add(-time.Second), issued.ID); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := keys.Authenticate(ctx, issued.Key); !errors.Is(err, appsec.ErrUnauthenticated) {
 			t.Fatal("expired key accepted")
 		}
-		if _, err := pool.Exec(ctx, "UPDATE access_key SET expires_at=NULL WHERE id=$1", issued.ID); err != nil {
+		if _, err := pool.Exec(ctx, "UPDATE principal_access_key SET expires_at=NULL WHERE id=$1", issued.ID); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := pool.Exec(ctx, "UPDATE principal SET status='DISABLED' WHERE id=$1", principalID); err != nil {
@@ -251,13 +263,9 @@ func TestStage2Integration(t *testing.T) {
 		}
 		c, _ := cryptosec.NewCredentials(master)
 		resourceID, _ := ids.NextID()
-		var providerID int64
-		if err := pool.QueryRow(ctx, "SELECT id FROM ai_provider LIMIT 1").Scan(&providerID); err != nil {
-			t.Fatal(err)
-		}
 		owner := cryptosec.CredentialOwner{OrganizationID: actor.OrganizationID, ProviderID: providerID, ResourceID: resourceID}
 		sealed, _ := c.Encrypt([]byte("test-provider-secret"), owner)
-		if _, err := pool.Exec(ctx, `INSERT INTO ai_resource (id,organization_id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,created_by,updated_by,created_at,updated_at) VALUES ($1,$2,$3,'Test Resource',$4,$5,1,'ACTIVE','system','system',now(),now())`, resourceID, actor.OrganizationID, providerID, sealed.Ciphertext, sealed.Nonce); err != nil {
+		if _, err := pool.Exec(ctx, `INSERT INTO provider_credential (id,organization_id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,created_by,updated_by,created_at,updated_at) VALUES ($1,$2,$3,'Test Resource',$4,$5,1,'ACTIVE','system','system',now(),now())`, resourceID, actor.OrganizationID, providerID, sealed.Ciphertext, sealed.Nonce); err != nil {
 			t.Fatal(err)
 		}
 		if n, err := store.RecoverCredentials(ctx, c, false); err != nil || n != 0 {

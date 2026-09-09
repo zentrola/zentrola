@@ -7,7 +7,7 @@ export default defineConfig({
   workers: 1,
   reporter: 'list',
   use: {
-    baseURL: process.env.ZENTROLA_WEB_URL || 'http://127.0.0.1:5173',
+    baseURL: process.env.ZENTROLA_WEB_URL || 'http://127.0.0.1:9528',
     locale: 'zh-CN',
     viewport: { width: 1440, height: 1000 },
     trace: 'off',
@@ -18,7 +18,7 @@ export default defineConfig({
     ? undefined
     : {
         command: 'npm run dev',
-        url: 'http://127.0.0.1:5173',
+        url: 'http://127.0.0.1:9528',
         reuseExistingServer: !process.env.CI,
         timeout: 30000,
       },

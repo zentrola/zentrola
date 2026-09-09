@@ -69,3 +69,22 @@ func TestOpenAIRequestNullStreamAndOpaqueRewrite(t *testing.T) {
 		t.Fatal("Anthropic null-stream validation regressed")
 	}
 }
+
+func TestOpenAIResponsesUsageFormats(t *testing.T) {
+	jsonBody := `{"object":"response","usage":{"input_tokens":12,"output_tokens":9,"total_tokens":21}}`
+	observer := NewOpenAIResponsesUsageObserver(false)
+	observer.Feed([]byte(jsonBody))
+	input, output, _ := observer.Tokens(observer.Complete())
+	if !observer.Complete() || input == nil || *input != 12 || output == nil || *output != 9 {
+		t.Fatal("Responses JSON usage not collected")
+	}
+
+	stream := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"usage\":null}}\n\n" +
+		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":12,\"output_tokens\":9,\"total_tokens\":21}}}\n\n"
+	observer = NewOpenAIResponsesUsageObserver(true)
+	observer.Feed([]byte(stream))
+	input, output, _ = observer.Tokens(observer.Complete())
+	if !observer.Complete() || input == nil || *input != 12 || output == nil || *output != 9 {
+		t.Fatal("Responses stream usage not collected")
+	}
+}

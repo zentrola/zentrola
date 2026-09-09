@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"golang.org/x/crypto/bcrypt"
+	"unicode/utf8"
 )
 
 type Passwords struct {
@@ -26,8 +27,8 @@ func NewPasswords(cost int) (*Passwords, error) {
 	return &Passwords{cost: cost, dummy: string(dummy)}, nil
 }
 func (p *Passwords) Hash(password string) (string, error) {
-	if len(password) < 12 || len(password) > 72 {
-		return "", errors.New("password must contain 12 to 72 bytes")
+	if !utf8.ValidString(password) || utf8.RuneCountInString(password) < 6 || len(password) > 72 {
+		return "", errors.New("password must contain at least 6 characters and at most 72 bytes")
 	}
 	value, err := bcrypt.GenerateFromPassword([]byte(password), p.cost)
 	if err != nil {

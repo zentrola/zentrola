@@ -16,14 +16,25 @@ import (
 )
 
 type Service struct {
-	store  Store
-	ids    shared.IDGenerator
-	cipher Cipher
-	tester ConnectionTester
+	store      Store
+	ids        shared.IDGenerator
+	cipher     Cipher
+	tester     ConnectionTester
+	discoverer ModelDiscoverer
 }
 
-func New(store Store, ids shared.IDGenerator, cipher Cipher, tester ConnectionTester) *Service {
-	return &Service{store: store, ids: ids, cipher: cipher, tester: tester}
+type Option func(*Service)
+
+func WithModelDiscoverer(discoverer ModelDiscoverer) Option {
+	return func(service *Service) { service.discoverer = discoverer }
+}
+
+func New(store Store, ids shared.IDGenerator, cipher Cipher, tester ConnectionTester, options ...Option) *Service {
+	service := &Service{store: store, ids: ids, cipher: cipher, tester: tester}
+	for _, option := range options {
+		option(service)
+	}
+	return service
 }
 
 func validText(s string, max int) bool {
@@ -586,18 +597,7 @@ func (s *Service) TestResource(ctx context.Context, actor admin.Identity, id int
 		return ConnectionResult{}, err
 	}
 	result := ConnectionResult{Code: "PROVIDER_UNAVAILABLE"}
-	protocol, baseURL := "", ""
-	for _, preferred := range providerProtocols {
-		for _, endpoint := range provider.Endpoints {
-			if endpoint.ProtocolType == preferred {
-				protocol, baseURL = endpoint.ProtocolType, endpoint.BaseURL
-				break
-			}
-		}
-		if baseURL != "" {
-			break
-		}
-	}
+	protocol, baseURL := preferredProviderEndpoint(provider)
 	if baseURL != "" {
 		plain, err := s.cipher.Decrypt(resource.Sealed, owner(actor, resource.Resource))
 		if err != nil {

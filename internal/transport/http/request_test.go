@@ -1,0 +1,208 @@
+package http
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/go-chi/chi/v5"
+	mgmt "github.com/zentrola/zentrola/internal/application/management"
+	appsec "github.com/zentrola/zentrola/internal/application/security"
+	"github.com/zentrola/zentrola/internal/domain/admin"
+)
+
+func assertMissingParameter[T any](t *testing.T, method, path, body, field string) {
+	t.Helper()
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(method, path, strings.NewReader(body))
+	if _, ok := decodeRequest[T](recorder, request); ok {
+		t.Fatalf("request missing %s was accepted", field)
+	}
+	var result struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+		Data    struct {
+			Field string `json:"field"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if recorder.Code != http.StatusBadRequest || result.Code != "MISSING_REQUIRED_PARAMETER" ||
+		result.Data.Field != field || !strings.Contains(result.Message, field) {
+		t.Fatalf("missing parameter response = %d %+v", recorder.Code, result)
+	}
+}
+
+func TestDecodeRequest(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		ok   bool
+	}{
+		{name: "valid and trimmed", body: `{"status":"  ACTIVE  "}`, ok: true},
+		{name: "invalid value", body: `{"status":"ARCHIVED"}`, ok: false},
+		{name: "malformed", body: `{"status":`, ok: false},
+		{name: "unknown field", body: `{"status":"ACTIVE","extra":true}`, ok: false},
+		{name: "multiple values", body: `{"status":"ACTIVE"} {"status":"DISABLED"}`, ok: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPatch, "/api/v1/models/1/status", strings.NewReader(test.body))
+			input, ok := decodeRequest[UpdateStatusRequest](recorder, request)
+			if ok != test.ok {
+				t.Fatalf("decodeRequest() ok = %v, want %v", ok, test.ok)
+			}
+			if ok {
+				if input.Status != "ACTIVE" || recorder.Body.Len() != 0 {
+					t.Fatalf("valid request decoded incorrectly: input=%+v body=%q", input, recorder.Body.String())
+				}
+				return
+			}
+			if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), `"code":"INVALID_ARGUMENT"`) {
+				t.Fatalf("invalid request response = %d %s", recorder.Code, recorder.Body.String())
+			}
+		})
+	}
+}
+
+func TestMissingRequiredParameterReturnsField(t *testing.T) {
+	t.Run("top level", func(t *testing.T) {
+		assertMissingParameter[UpdateStatusRequest](t, http.MethodPatch, "/api/v1/models/1/status", `{}`, "status")
+	})
+	t.Run("empty required collection", func(t *testing.T) {
+		assertMissingParameter[mgmt.ModelInput](t, http.MethodPost, "/api/v1/models",
+			`{"code":"model","name":"模型","inputModalities":[],"outputModalities":["TEXT"]}`,
+			"inputModalities")
+	})
+	t.Run("nested field", func(t *testing.T) {
+		assertMissingParameter[mgmt.ProviderInput](t, http.MethodPost, "/api/v1/providers",
+			`{"name":"服务商","endpoints":[{"protocolType":"OPENAI"}],"mappings":[{"modelId":"1","upstreamModelCode":"model"}]}`,
+			"endpoints[0].baseUrl")
+	})
+}
+
+func TestDecodeRequestNormalizesTextFields(t *testing.T) {
+	t.Run("login preserves password", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"username":"  admin  ","password":"  secret  "}`))
+		input, ok := decodeRequest[LoginRequest](recorder, request)
+		if !ok || input.Username != "admin" || input.Password != "  secret  " {
+			t.Fatalf("login normalization = %+v, ok=%v", input, ok)
+		}
+	})
+
+	t.Run("member fields and ids", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/members", strings.NewReader(`{"name":"  开发者  ","remark":"  研发成员  ","groupIds":[" 12 "]}`))
+		input, ok := decodeRequest[CreateMemberRequest](recorder, request)
+		if !ok || input.Name != "开发者" || input.Remark != "研发成员" || len(input.GroupIDs) != 1 || input.GroupIDs[0] != "12" {
+			t.Fatalf("member normalization = %+v, ok=%v", input, ok)
+		}
+	})
+
+	t.Run("model nested fields", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/models", strings.NewReader(`{"code":"  model-code  ","name":"  模型  ","inputModalities":[" TEXT "],"outputModalities":[" TEXT "],"remark":"  备注  "}`))
+		input, ok := decodeRequest[mgmt.ModelInput](recorder, request)
+		if !ok || input.Code != "model-code" || input.Name != "模型" || input.Remark != "备注" || input.InputModalities[0] != "TEXT" {
+			t.Fatalf("model normalization = %+v, ok=%v", input, ok)
+		}
+	})
+}
+
+func TestInvalidStatusStopsBeforeApplication(t *testing.T) {
+	called := false
+	handler := statusEndpoint(func(context.Context, admin.Identity, int64, string, appsec.RequestMeta) error {
+		called = true
+		return nil
+	})
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/models/1/status", strings.NewReader(`{"status":"ARCHIVED"}`))
+	handler.ServeHTTP(recorder, request)
+	if called || recorder.Code != http.StatusBadRequest {
+		t.Fatalf("invalid status called application=%v, status=%d", called, recorder.Code)
+	}
+}
+
+func TestInvalidPathIDStopsBeforeApplication(t *testing.T) {
+	called := false
+	handler := statusEndpoint(func(context.Context, admin.Identity, int64, string, appsec.RequestMeta) error {
+		called = true
+		return nil
+	})
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/models/not-a-number/status", strings.NewReader(`{"status":"ACTIVE"}`))
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("id", "not-a-number")
+	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
+	handler.ServeHTTP(recorder, request)
+	if called || recorder.Code != http.StatusBadRequest {
+		t.Fatalf("invalid path id called application=%v, status=%d", called, recorder.Code)
+	}
+}
+
+func TestOptionalQueryValueRejectsDuplicates(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/models?status=ACTIVE&status=DISABLED", nil)
+	if _, err := optionalQueryValue(request, "status"); err == nil {
+		t.Fatal("optionalQueryValue() accepted duplicate values")
+	}
+}
+
+func TestOptionalQueryValueTrimsSpace(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/models?status=++ACTIVE++", nil)
+	value, err := optionalQueryValue(request, "status")
+	if err != nil || value != "ACTIVE" {
+		t.Fatalf("optionalQueryValue() = %q, %v", value, err)
+	}
+}
+
+func TestListEndpointRejectsUnknownQueryBeforeLoading(t *testing.T) {
+	called := false
+	handler := listEndpoint(func(*http.Request, mgmt.Page) (mgmt.PageData[mgmt.Model], error) {
+		called = true
+		return mgmt.PageData[mgmt.Model]{}, nil
+	}, func(model mgmt.Model) int64 { return model.ID })
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/models?unknown=value", nil)
+	handler.ServeHTTP(recorder, request)
+	if called || recorder.Code != http.StatusBadRequest {
+		t.Fatalf("unknown query called loader=%v, status=%d", called, recorder.Code)
+	}
+}
+
+func TestListEndpointReturnsTotalAndUsesExtraRowToProbeNextPage(t *testing.T) {
+	probed := false
+	handler := listEndpoint(func(_ *http.Request, page mgmt.Page) (mgmt.PageData[mgmt.Model], error) {
+		probed = page.ProbeNext
+		return mgmt.PageData[mgmt.Model]{
+			Items: []mgmt.Model{{ID: 2}, {ID: 1}},
+			Total: 2,
+		}, nil
+	}, func(model mgmt.Model) int64 { return model.ID })
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/models?limit=1", nil)
+	handler.ServeHTTP(recorder, request)
+	var response struct {
+		Data PageResponse[mgmt.Model] `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if recorder.Code != http.StatusOK || !probed || len(response.Data.Items) != 1 || response.Data.Total != 2 || response.Data.NextCursor == nil || *response.Data.NextCursor != "2" {
+		t.Fatalf("unexpected page response: status=%d probed=%v data=%+v", recorder.Code, probed, response.Data)
+	}
+}
+
+func TestBodyEndpointRejectsQueryBeforeDecoding(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/models/1/status?force=true", strings.NewReader(`{"status":"ACTIVE"}`))
+	if _, ok := decodeRequest[UpdateStatusRequest](recorder, request); ok || recorder.Code != http.StatusBadRequest {
+		t.Fatalf("request with query accepted=%v, status=%d", ok, recorder.Code)
+	}
+}

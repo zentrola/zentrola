@@ -35,7 +35,7 @@ func TestAdminPasswordResetIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := bootstrap.New(NewBootstrapStore(pool), ids, "sonnet", "opus").Initialize(ctx); err != nil {
+	if err := bootstrap.New(NewBootstrapStore(pool), ids).Initialize(ctx); err != nil {
 		t.Fatal(err)
 	}
 	passwords, err := cryptosec.NewPasswords(4)

@@ -6,8 +6,10 @@ import { i18n, t } from '../i18n'
 import type {
   ConnectionResult,
   Model,
+  ModelSyncResult,
   Provider,
   ProviderDetail,
+  ProviderInitializeResult,
   ProviderProtocol,
   Resource,
 } from '../types'
@@ -19,7 +21,8 @@ import PageHeader from '../components/PageHeader.vue'
 import StatusSwitch from '../components/StatusSwitch.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 
-const { items, cursor, loading, error, load } = useCollection<Provider>(() => '/providers')
+const { items, cursor, page, pageSize, total, loading, error, load, previous, retry, setPageSize } =
+  useCollection<Provider>(() => '/providers')
 const { busy, error: actionError, run } = useAction()
 const editing = ref(false)
 const editTarget = ref<Provider | null>(null)
@@ -32,8 +35,11 @@ const modelError = ref('')
 const credentialTarget = ref<Provider | null>(null)
 const testTarget = ref<{ provider: Provider; resource: Resource } | null>(null)
 const testResult = ref<ConnectionResult | null>(null)
+const syncTarget = ref<{ provider: Provider; resource: Resource } | null>(null)
+const syncResult = ref<ModelSyncResult | null>(null)
 const credential = ref('')
 const validation = ref('')
+const initializeNotice = ref('')
 const activeConfigTab = ref<'models' | 'proxy'>('models')
 const modelConfigTab = ref<HTMLButtonElement | null>(null)
 const proxyConfigTab = ref<HTMLButtonElement | null>(null)
@@ -51,8 +57,7 @@ const form = reactive({
   name: '',
   website: '',
   anthropicBaseUrl: '',
-  openaiChatBaseUrl: '',
-  openaiResponsesBaseUrl: '',
+  openaiBaseUrl: '',
   proxyEnabled: false,
   proxyUrl: '',
   proxyHeaders: [] as ProxyHeaderDraft[],
@@ -99,14 +104,9 @@ function assignForm(provider: Provider | null, mappings: MappingDraft[] = []) {
     name: provider?.name ?? '',
     website: provider?.website ?? '',
     anthropicBaseUrl:
-      provider?.endpoints.find((endpoint) => endpoint.protocolType === 'ANTHROPIC_MESSAGES')
-        ?.baseUrl ?? '',
-    openaiChatBaseUrl:
-      provider?.endpoints.find((endpoint) => endpoint.protocolType === 'OPENAI_CHAT')?.baseUrl ??
-      '',
-    openaiResponsesBaseUrl:
-      provider?.endpoints.find((endpoint) => endpoint.protocolType === 'OPENAI_RESPONSES')
-        ?.baseUrl ?? '',
+      provider?.endpoints.find((endpoint) => endpoint.protocolType === 'ANTHROPIC')?.baseUrl ?? '',
+    openaiBaseUrl:
+      provider?.endpoints.find((endpoint) => endpoint.protocolType === 'OPENAI')?.baseUrl ?? '',
     proxyEnabled: provider?.proxyEnabled ?? false,
     proxyUrl: provider?.proxyUrl ?? '',
     proxyHeaders: (provider?.proxyHeaders ?? []).map((header) => ({
@@ -235,7 +235,9 @@ function modelCode(modelId: string) {
 }
 
 function endpointURL(provider: Provider, protocolType: ProviderProtocol) {
-  return provider.endpoints.find((endpoint) => endpoint.protocolType === protocolType)?.baseUrl ?? ''
+  return (
+    provider.endpoints.find((endpoint) => endpoint.protocolType === protocolType)?.baseUrl ?? ''
+  )
 }
 
 function resolvedUpstreamModelCode(mapping: MappingDraft) {
@@ -271,9 +273,22 @@ async function loadModels() {
 }
 
 function reload() {
-  void load()
+  void retry()
   void loadResources()
   void loadModels()
+}
+
+function initializeProviders() {
+  initializeNotice.value = ''
+  actionError.value = ''
+  void run(async () => {
+    const result = await api<ProviderInitializeResult>('/providers/initialize', 'POST')
+    initializeNotice.value = t(
+      result.created > 0 ? 'providers.initializeCompleted' : 'providers.initializeUnchanged',
+      { created: result.created, total: result.total },
+    )
+    await load()
+  })
 }
 
 function configureCredential(provider: Provider) {
@@ -311,11 +326,11 @@ function saveCredential() {
   }
   void run(async () => {
     const provider = credentialTarget.value!
-    const resource = resourceFor(provider)
+    let resource = resourceFor(provider)
     if (resource) {
       await api(`/resources/${resource.id}/credential`, 'PUT', { credential: credential.value })
     } else {
-      await api('/resources', 'POST', {
+      resource = await api<Resource>('/resources', 'POST', {
         providerId: provider.id,
         name: `${provider.name} ${t('providers.credential')}`,
         credential: credential.value,
@@ -323,6 +338,11 @@ function saveCredential() {
     }
     closeCredential()
     await loadResources()
+    syncTarget.value = { provider, resource }
+    syncResult.value = null
+    const result = await api<ModelSyncResult>(`/resources/${resource.id}/sync-models`, 'POST')
+    syncResult.value = result
+    if (result.ok) await loadModels()
   })
 }
 
@@ -337,6 +357,19 @@ function testConnection(provider: Provider) {
   })
 }
 
+function syncModels(provider: Provider) {
+  const resource = resourceFor(provider)
+  if (!resource) return
+  syncTarget.value = { provider, resource }
+  syncResult.value = null
+  actionError.value = ''
+  void run(async () => {
+    const result = await api<ModelSyncResult>(`/resources/${resource.id}/sync-models`, 'POST')
+    syncResult.value = result
+    if (result.ok) await loadModels()
+  })
+}
+
 function resultMessage(result: ConnectionResult) {
   return result.ok
     ? t('resources.testPassed')
@@ -346,9 +379,8 @@ function resultMessage(result: ConnectionResult) {
 function save() {
   validation.value = ''
   const endpointDrafts: Array<{ protocolType: ProviderProtocol; baseUrl: string }> = [
-    { protocolType: 'OPENAI_CHAT', baseUrl: normalizeURL(form.openaiChatBaseUrl) },
-    { protocolType: 'OPENAI_RESPONSES', baseUrl: normalizeURL(form.openaiResponsesBaseUrl) },
-    { protocolType: 'ANTHROPIC_MESSAGES', baseUrl: normalizeURL(form.anthropicBaseUrl) },
+    { protocolType: 'OPENAI', baseUrl: normalizeURL(form.openaiBaseUrl) },
+    { protocolType: 'ANTHROPIC', baseUrl: normalizeURL(form.anthropicBaseUrl) },
   ]
   const input = {
     name: form.name.trim(),
@@ -370,8 +402,7 @@ function save() {
     input.endpoints.some((endpoint) => !validURL(endpoint.baseUrl, true))
   )
     validation.value = t('providers.urlInvalid')
-  else if (!input.endpoints.length)
-    validation.value = t('providers.endpointRequired')
+  else if (!input.endpoints.length) validation.value = t('providers.endpointRequired')
   else if (input.proxyEnabled && !validProxyURL(input.proxyUrl))
     validation.value = t('providers.proxyUrlInvalid')
   else if (input.proxyEnabled && !validProxyHeaders())
@@ -431,19 +462,30 @@ onMounted(() => {
 </script>
 
 <template>
-  <PageHeader name="providers">
-    <button class="button primary" :disabled="busy" @click="openEdit()">
-      <Icon name="plus" :size="18" />{{ t('providers.create') }}
-    </button>
-  </PageHeader>
+  <PageHeader name="providers" />
   <section class="panel">
     <ListSearch
       v-model="keyword"
       :loading="loading"
+      :label="t('providers.searchLabel')"
       :placeholder="t('providers.searchPlaceholder')"
       @search="search"
       @reset="reset"
-    />
+    >
+      <template #actions>
+        <div class="provider-toolbar-actions">
+          <button type="button" class="button primary" :disabled="busy" @click="openEdit()">
+            <Icon name="plus" :size="18" />{{ t('providers.create') }}
+          </button>
+          <button type="button" class="button" :disabled="busy" @click="initializeProviders">
+            <Icon name="refresh" :size="17" />{{ t('providers.initialize') }}
+          </button>
+        </div>
+      </template>
+    </ListSearch>
+    <p v-if="initializeNotice" class="provider-initialize-notice notice" role="status">
+      {{ initializeNotice }}
+    </p>
     <p v-if="error || resourceError || modelError" class="alert error" role="alert">
       {{ error || resourceError || modelError
       }}<button class="text-button" @click="reload">
@@ -483,13 +525,23 @@ onMounted(() => {
                     ><button
                       v-if="resourceFor(provider)"
                       type="button"
-                      class="provider-quick-action provider-test-action"
+                      class="provider-quick-action provider-direct-action"
                       :aria-label="t('providers.testConnectionFor', { name: provider.name })"
                       :title="t('resources.test')"
                       :disabled="busy"
                       @click="testConnection(provider)"
                     >
                       <Icon name="activity" :size="16" /></button
+                    ><button
+                      v-if="resourceFor(provider)"
+                      type="button"
+                      class="provider-quick-action provider-direct-action"
+                      :aria-label="t('providers.syncModelsFor', { name: provider.name })"
+                      :title="t('resources.syncModels')"
+                      :disabled="busy"
+                      @click="syncModels(provider)"
+                    >
+                      <Icon name="refresh" :size="16" /></button
                   ></span>
                   <small>{{ provider.code }}</small>
                 </div>
@@ -533,25 +585,16 @@ onMounted(() => {
             <td>
               <div class="endpoint-stack">
                 <span
-                  ><b>OpenAI Chat</b
-                  ><code
-                    class="endpoint"
-                    :title="endpointURL(provider, 'OPENAI_CHAT') || undefined"
-                    >{{ endpointURL(provider, 'OPENAI_CHAT') || '-' }}</code
-                  ></span
+                  ><b>OpenAI</b
+                  ><code class="endpoint" :title="endpointURL(provider, 'OPENAI') || undefined">{{
+                    endpointURL(provider, 'OPENAI') || '-'
+                  }}</code></span
                 ><span
-                  ><b>OpenAI Responses</b
+                  ><b>Anthropic</b
                   ><code
                     class="endpoint"
-                    :title="endpointURL(provider, 'OPENAI_RESPONSES') || undefined"
-                    >{{ endpointURL(provider, 'OPENAI_RESPONSES') || '-' }}</code
-                  ></span
-                ><span
-                  ><b>Anthropic Messages</b
-                  ><code
-                    class="endpoint"
-                    :title="endpointURL(provider, 'ANTHROPIC_MESSAGES') || undefined"
-                    >{{ endpointURL(provider, 'ANTHROPIC_MESSAGES') || '-' }}</code
+                    :title="endpointURL(provider, 'ANTHROPIC') || undefined"
+                    >{{ endpointURL(provider, 'ANTHROPIC') || '-' }}</code
                   ></span
                 >
               </div>
@@ -574,7 +617,17 @@ onMounted(() => {
       <Icon name="providers" :size="32" />
       <p>{{ t(loading ? 'common.loading' : query ? 'common.noResults' : 'providers.empty') }}</p>
     </div>
-    <ListFooter :count="items.length" :cursor="cursor" :loading="loading" @more="load(true)" />
+    <ListFooter
+      :cursor="cursor"
+      :page="page"
+      :page-size="pageSize"
+      :total="total"
+      :loading="loading"
+      @first="load()"
+      @previous="previous"
+      @more="load(true)"
+      @page-size="setPageSize"
+    />
   </section>
 
   <Modal
@@ -606,18 +659,9 @@ onMounted(() => {
               :disabled="busy"
           /></label>
           <label
-            >{{ t('providers.openaiChatEndpoint')
+            >{{ t('providers.openaiEndpoint')
             }}<input
-              v-model="form.openaiChatBaseUrl"
-              type="url"
-              placeholder="https://api.example.com/v1"
-              spellcheck="false"
-              :disabled="busy"
-          /></label>
-          <label
-            >{{ t('providers.openaiResponsesEndpoint')
-            }}<input
-              v-model="form.openaiResponsesBaseUrl"
+              v-model="form.openaiBaseUrl"
               type="url"
               placeholder="https://api.example.com/v1"
               spellcheck="false"
@@ -716,7 +760,7 @@ onMounted(() => {
                   @change="toggleMapping(row.model)"
                 />
               </label>
-              <strong class="mapping-model-name">{{ row.model.name }}</strong>
+              <strong class="mapping-model-name model-name-regular">{{ row.model.name }}</strong>
               <label class="mapping-control">
                 <span>{{ t('providers.upstreamModelCode') }}</span>
                 <input
@@ -918,6 +962,42 @@ onMounted(() => {
     </footer>
   </Modal>
 
+  <Modal
+    v-if="syncTarget"
+    :title="`${syncTarget.provider.name} / ${t('resources.syncResult')}`"
+    :busy="busy"
+    @close="syncTarget = null"
+  >
+    <p v-if="busy && !syncResult" role="status">{{ t('resources.syncingModels') }}</p>
+    <template v-if="syncResult">
+      <div class="alert" :class="syncResult.ok ? 'success' : 'error'" role="status">
+        {{
+          syncResult.ok
+            ? t('resources.syncPassed')
+            : t(
+                i18n.global.te(`errors.${syncResult.code}`)
+                  ? `errors.${syncResult.code}`
+                  : 'errors.UNKNOWN',
+              )
+        }}
+      </div>
+      <dl class="detail-grid">
+        <dt>{{ t('resources.discoveredModels') }}</dt>
+        <dd>{{ syncResult.discovered }}</dd>
+        <dt>{{ t('resources.createdModels') }}</dt>
+        <dd>{{ syncResult.created }}</dd>
+        <dt>{{ t('resources.createdMappings') }}</dt>
+        <dd>{{ syncResult.mapped }}</dd>
+        <dt>{{ t('resources.latency') }}</dt>
+        <dd>{{ syncResult.latencyMs }} ms</dd>
+      </dl>
+    </template>
+    <p class="muted">{{ t('resources.syncHint') }}</p>
+    <footer class="form-footer">
+      <button class="button" :disabled="busy" @click="syncTarget = null">{{ t('close') }}</button>
+    </footer>
+  </Modal>
+
   <ConfirmDialog
     v-if="statusTarget"
     :title="t(statusTarget.status === 'ACTIVE' ? 'common.disableTitle' : 'common.enableTitle')"
@@ -939,6 +1019,14 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.provider-toolbar-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+.provider-initialize-notice {
+  margin: 0 22px 16px;
+}
 .panel table {
   min-width: 860px;
   table-layout: fixed;
@@ -1000,11 +1088,11 @@ onMounted(() => {
   border-color: var(--blue);
   background: #eaf2ff;
 }
-.provider-test-action,
-.provider-test-action:hover:not(:disabled) {
+.provider-direct-action,
+.provider-direct-action:hover:not(:disabled) {
   border-color: transparent;
 }
-.provider-test-action {
+.provider-direct-action {
   background: transparent;
 }
 .endpoint-stack {
@@ -1395,6 +1483,13 @@ onMounted(() => {
   text-align: center;
 }
 @media (max-width: 760px) {
+  .provider-toolbar-actions {
+    width: 100%;
+    margin-left: 0;
+  }
+  .provider-toolbar-actions .button {
+    flex: 1;
+  }
   .connection-fields {
     grid-template-columns: 1fr;
   }

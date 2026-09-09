@@ -1,0 +1,164 @@
+// Package modelcatalog 根据服务商能力同步官方模型目录。
+package modelcatalog
+
+import (
+	"context"
+	"errors"
+	"io"
+	"log/slog"
+	"net"
+	"net/http"
+	"time"
+
+	mgmt "github.com/zentrola/zentrola/internal/application/management"
+	"github.com/zentrola/zentrola/internal/domain/catalog"
+	"github.com/zentrola/zentrola/internal/infrastructure/provider"
+)
+
+type catalogRequest struct {
+	URL    string
+	Bearer bool
+}
+
+// adapter 隔离服务商专有的目录地址、认证方式和响应结构。
+// 适配器仅由服务商编码选择，与推理协议无关。
+type adapter interface {
+	Name() string
+	Request() catalogRequest
+	Decode([]byte) ([]mgmt.DiscoveredModel, error)
+}
+
+type Discoverer struct {
+	client   *http.Client
+	logger   *slog.Logger
+	adapters map[string]adapter
+}
+
+func NewDiscoverer(logger *slog.Logger) *Discoverer {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	transport.DialContext = (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext
+	transport.TLSHandshakeTimeout = 5 * time.Second
+	transport.ResponseHeaderTimeout = 10 * time.Second
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &Discoverer{
+		client: &http.Client{
+			Transport: transport,
+			Timeout:   15 * time.Second,
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
+		logger: logger,
+		adapters: map[string]adapter{
+			catalog.DeepSeekOfficialCode: deepSeekAdapter{},
+		},
+	}
+}
+
+func (d *Discoverer) Discover(ctx context.Context, source mgmt.ModelDiscoverySource, credential []byte, proxy *catalog.OutboundProxy) (models []mgmt.DiscoveredModel, result mgmt.ConnectionResult) {
+	started := time.Now()
+	defer func() { result.LatencyMS = time.Since(started).Milliseconds() }()
+
+	adapter, ok := d.adapters[source.ProviderCode]
+	if !ok {
+		result.Code = "MODEL_CATALOG_UNSUPPORTED"
+		return
+	}
+	if !validCredential(credential) {
+		result.Code = "CREDENTIAL_INVALID"
+		return
+	}
+
+	catalogRequest := adapter.Request()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, catalogRequest.URL, nil)
+	if err != nil {
+		result.Code = "UPSTREAM_UNAVAILABLE"
+		return
+	}
+	if catalogRequest.Bearer {
+		req.Header.Set("Authorization", "Bearer "+string(credential))
+	}
+	defer req.Header.Del("Authorization")
+	req.Header.Set("Accept", "application/json")
+
+	client, cleanup, err := provider.ClientWithProxy(d.client, proxy)
+	if err != nil {
+		result.Code = "PROXY_CONFIGURATION_UNRECOVERABLE"
+		return
+	}
+	defer cleanup()
+	resp, err := client.Do(req)
+	if err != nil {
+		result.Code = connectionErrorCode(ctx, err)
+		return
+	}
+	defer resp.Body.Close()
+
+	result.HTTPStatus = resp.StatusCode
+	data, readErr := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
+	d.logger.InfoContext(ctx, "official model catalog response",
+		"provider_code", source.ProviderCode,
+		"catalog_adapter", adapter.Name(),
+		"upstream_url", catalogRequest.URL,
+		"upstream_status", resp.StatusCode,
+		"response_bytes", len(data),
+		"response_body", string(data),
+	)
+	if resp.StatusCode != http.StatusOK {
+		result.Code = connectionStatusCode(resp.StatusCode)
+		return
+	}
+	if readErr != nil {
+		result.Code = connectionErrorCode(ctx, readErr)
+		return
+	}
+	if len(data) > 1<<20 {
+		result.Code = "UPSTREAM_INVALID_RESPONSE"
+		return
+	}
+	models, err = adapter.Decode(data)
+	if err != nil {
+		result.Code = "UPSTREAM_INVALID_RESPONSE"
+		return nil, result
+	}
+	result.OK = true
+	result.Code = "OK"
+	return
+}
+
+func validCredential(credential []byte) bool {
+	if len(credential) == 0 || len(credential) > 4096 {
+		return false
+	}
+	for _, ch := range credential {
+		if ch < 33 || ch > 126 {
+			return false
+		}
+	}
+	return true
+}
+
+func connectionStatusCode(status int) string {
+	switch status {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return "UPSTREAM_AUTH_FAILED"
+	case http.StatusTooManyRequests:
+		return "UPSTREAM_RATE_LIMITED"
+	default:
+		return "UPSTREAM_UNAVAILABLE"
+	}
+}
+
+func connectionErrorCode(ctx context.Context, err error) string {
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return "REQUEST_CANCELLED"
+	}
+	var netErr net.Error
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
+		return "UPSTREAM_TIMEOUT"
+	}
+	return "UPSTREAM_UNAVAILABLE"
+}

@@ -14,10 +14,10 @@ func TestModelModalitiesDatabaseConstraints(t *testing.T) {
 	withFixture(t, ctx, pool, func(tx pgx.Tx) {
 		for _, column := range []string{"input_modalities", "output_modalities"} {
 			for _, invalid := range []string{`[]`, `null`, `{}`, `"TEXT"`, `["TEXT","TEXT"]`, `["UNKNOWN"]`, `[null]`, `["TEXT",null]`, `[1]`, `[["TEXT"]]`, `["TEXT",["IMAGE"]]`} {
-				mustReject(t, ctx, tx, "23514", "UPDATE ai_model SET "+column+"=$1::jsonb WHERE id=30", invalid)
+				mustReject(t, ctx, tx, "23514", "UPDATE model SET "+column+"=$1::jsonb WHERE id=30", invalid)
 			}
-			mustReject(t, ctx, tx, "23502", "UPDATE ai_model SET "+column+"=NULL WHERE id=30")
-			mustExec(t, ctx, tx, "UPDATE ai_model SET "+column+"='[\"TEXT\",\"IMAGE\",\"AUDIO\",\"VIDEO\"]'::jsonb WHERE id=30")
+			mustReject(t, ctx, tx, "23502", "UPDATE model SET "+column+"=NULL WHERE id=30")
+			mustExec(t, ctx, tx, "UPDATE model SET "+column+"='[\"TEXT\",\"IMAGE\",\"AUDIO\",\"VIDEO\"]'::jsonb WHERE id=30")
 		}
 	})
 }
@@ -55,10 +55,10 @@ VALUES(1,'claude-sonnet','自定义显示名','CHAT','DISABLED','system','system
 		t.Fatal(err)
 	}
 	var preserved bool
-	if err := pool.QueryRow(ctx, `SELECT model_code='claude-sonnet' AND display_name='自定义显示名' AND status='DISABLED' AND input_modalities='["TEXT","IMAGE"]'::jsonb AND output_modalities='["TEXT"]'::jsonb AND remark='' FROM ai_model WHERE id=1`).Scan(&preserved); err != nil || !preserved {
+	if err := pool.QueryRow(ctx, `SELECT model_code='claude-sonnet' AND display_name='自定义显示名' AND status='DISABLED' AND input_modalities='["TEXT","IMAGE"]'::jsonb AND output_modalities='["TEXT"]'::jsonb AND remark='' FROM model WHERE id=1`).Scan(&preserved); err != nil || !preserved {
 		t.Fatal("legacy identity/status or backfill incorrect", err)
 	}
-	if err := pool.QueryRow(ctx, `SELECT input_modalities='["TEXT"]'::jsonb FROM ai_model WHERE id=2`).Scan(&preserved); err != nil || !preserved {
+	if err := pool.QueryRow(ctx, `SELECT input_modalities='["TEXT"]'::jsonb FROM model WHERE id=2`).Scan(&preserved); err != nil || !preserved {
 		t.Fatal("DeepSeek modality backfill incorrect", err)
 	}
 	if _, err := provider.Up(ctx); err != nil {

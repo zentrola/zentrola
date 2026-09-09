@@ -27,7 +27,7 @@ import (
 func TestFirstAdminSetupIntegration(t *testing.T) {
 	ctx, pool, _ := integrationDatabase(t)
 	ids, _ := idgen.New(19)
-	if err := bootstrap.New(NewBootstrapStore(pool), ids, "sonnet", "opus").Initialize(ctx); err != nil {
+	if err := bootstrap.New(NewBootstrapStore(pool), ids).Initialize(ctx); err != nil {
 		t.Fatal(err)
 	}
 	passwords, _ := cryptosec.NewPasswords(4)

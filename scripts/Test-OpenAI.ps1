@@ -52,9 +52,12 @@ function GatewayCall($Body=$null,[string]$Path='/v1/chat/completions'){
 try {
     $login=AdminCall POST '/auth/login' @{username=$AdminUsername;password=[Net.NetworkCredential]::new('',$AdminPassword).Password}
     $adminHeaders.Authorization="Bearer $($login.token)";$login=$null
-    $models=AdminCall GET '/models';$model=@($models.items|Where-Object code -eq 'deepseek-v4-flash')[0]
-    if (!$model){throw 'Configure the DeepSeek provider and model mappings in the database first'}
-    $providers=AdminCall GET '/providers';$provider=@($providers.items|Where-Object code -eq 'deepseek-official')[0]
+	$models=AdminCall GET '/models';$model=@($models.items|Where-Object code -eq 'deepseek-v4-flash')[0]
+	if (!$model){throw 'Configure the DeepSeek model and provider mapping in the management console first'}
+	$providers=AdminCall GET '/providers';$provider=@($providers.items|Where-Object {
+		@($_.endpoints|Where-Object { $_.protocolType -eq 'OPENAI' -and $_.baseUrl.TrimEnd('/') -eq 'https://api.deepseek.com' }).Count -gt 0
+	})[0]
+	if (!$provider){throw 'Configure a DeepSeek OpenAI Chat endpoint in the management console first'}
     $resources=AdminCall GET '/resources';$resource=@($resources.items|Where-Object {$_.providerId -eq $provider.id -and $_.status -eq 'ACTIVE'})[0]
     if (!$resource){throw 'An ACTIVE DeepSeek resource is required'}
     $stamp=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds().ToString()

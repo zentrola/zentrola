@@ -66,7 +66,7 @@ try {
   await page.getByLabel('密码', { exact: true }).fill(password)
   const login = await clickResponse(page.getByRole('button', { name: '登录控制台' }), '/auth/login')
   token = login.token
-  await page.getByRole('heading', { name: '用户', exact: true }).waitFor()
+  await page.getByRole('heading', { name: '用户管理', exact: true }).waitFor()
   step = 'create_member'
   await page.getByRole('button', { name: '创建用户' }).click()
   await dialog().getByLabel('名称', { exact: true }).fill(memberName)
@@ -75,7 +75,7 @@ try {
   ).id
   await page.getByText(memberName, { exact: true }).waitFor()
   step = 'create_group'
-  await page.getByRole('link', { name: '分组', exact: true }).click()
+  await page.getByRole('link', { name: '用户分组', exact: true }).click()
   const models = await api('/models?limit=100')
   const model = models.items.find((item) => item.code === 'deepseek-v4-flash')
   modelID = model.id
@@ -118,11 +118,11 @@ try {
   await dialog().getByText('连接测试通过', { exact: true }).waitFor({ timeout: 25000 })
   await dialog().getByRole('button', { name: '关闭', exact: true }).last().click()
   step = 'issue_revoke_key'
-  await page.getByRole('link', { name: '用户', exact: true }).click()
+  await page.getByRole('link', { name: '用户管理', exact: true }).click()
   await page
     .getByRole('row')
     .filter({ hasText: memberName })
-    .getByRole('button', { name: '分配密钥' })
+    .getByRole('button', { name: '密钥', exact: true })
     .click()
   await dialog().getByLabel('Key 名称').fill('Web 验收临时 Key')
   const until = new Date(Date.now() + 15 * 60000)
@@ -131,7 +131,7 @@ try {
     .fill(new Date(until.getTime() - until.getTimezoneOffset() * 60000).toISOString().slice(0, 16))
   keyID = (
     await clickResponse(
-      dialog().getByRole('button', { name: '分配密钥' }),
+      dialog().getByRole('button', { name: '密钥', exact: true }),
       `/members/${memberID}/keys`,
     )
   ).id

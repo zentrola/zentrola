@@ -36,3 +36,18 @@ func TestModelInputValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestModelInputNormalization(t *testing.T) {
+	input := ModelInput{
+		Code:             "  official-model-v1  ",
+		Name:             "  官方模型  ",
+		InputModalities:  []string{" TEXT ", " IMAGE "},
+		OutputModalities: []string{" TEXT "},
+		Remark:           "  备注  ",
+	}
+	input.Normalize()
+	if !input.Valid() || input.Code != "official-model-v1" || input.Name != "官方模型" || input.Remark != "备注" ||
+		input.InputModalities[0] != "TEXT" || input.InputModalities[1] != "IMAGE" {
+		t.Fatalf("unexpected normalized model input: %+v", input)
+	}
+}

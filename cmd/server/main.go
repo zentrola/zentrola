@@ -26,6 +26,7 @@ import (
 	"github.com/zentrola/zentrola/internal/infrastructure/config"
 	"github.com/zentrola/zentrola/internal/infrastructure/idgen"
 	"github.com/zentrola/zentrola/internal/infrastructure/logging"
+	"github.com/zentrola/zentrola/internal/infrastructure/modelcatalog"
 	"github.com/zentrola/zentrola/internal/infrastructure/openai"
 	"github.com/zentrola/zentrola/internal/infrastructure/postgres"
 	cryptosec "github.com/zentrola/zentrola/internal/infrastructure/security"
@@ -233,7 +234,7 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 		reset := appsec.NewPasswordReset(postgres.NewSecurityStore(pool, ids), passwords)
 		return resetPassword(startup, output, command.username, reset.Reset)
 	}
-	bootstrapService := bootstrap.New(postgres.NewBootstrapStore(pool), ids, cfg.BootstrapSonnet, cfg.BootstrapOpus)
+	bootstrapService := bootstrap.New(postgres.NewBootstrapStore(pool), ids)
 	if err := bootstrapService.Initialize(startup); err != nil {
 		return err
 	}
@@ -274,10 +275,17 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 		logger.Warn("resources disabled: credentials cannot be recovered", "count", disabled, "error_code", "CREDENTIAL_UNRECOVERABLE")
 	}
 	keyService := appsec.NewKeys(securityStore, ids)
-	managementService := management.New(postgres.NewManagementStore(pool, ids), ids, credentials, anthropic.NewConnectionTester())
-	upstreamClient := anthropic.NewGatewayClient(cfg.Gateway.HeaderTimeout)
-	defer upstreamClient.CloseIdleConnections()
-	gatewayService := gateway.New(postgres.NewGatewayStore(pool), credentials, upstreamClient)
+	connectionTester := anthropic.NewConnectionTester()
+	managementService := management.New(
+		postgres.NewManagementStore(pool, ids), ids, credentials, connectionTester,
+		management.WithModelDiscoverer(modelcatalog.NewDiscoverer(logger)),
+	)
+	anthropicClient := anthropic.NewGatewayClient(cfg.Gateway.HeaderTimeout)
+	defer anthropicClient.CloseIdleConnections()
+	openaiClient := openai.NewGatewayClient(cfg.Gateway.HeaderTimeout)
+	defer openaiClient.CloseIdleConnections()
+	compatibleUpstream := gateway.NewCompatibleUpstream(anthropicClient, openaiClient)
+	gatewayService := gateway.New(postgres.NewGatewayStore(pool), credentials, compatibleUpstream)
 	usageStore := postgres.NewUsageStore(pool)
 	usageWriter, err := usageapp.NewWriter(usageStore, ids, logger, usageapp.Options{QueueSize: cfg.Usage.QueueSize, BatchSize: cfg.Usage.BatchSize, FlushInterval: cfg.Usage.FlushInterval, WriteTimeout: cfg.Usage.WriteTimeout})
 	if err != nil {
@@ -293,9 +301,7 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 		logger.Info("usage writer stopped", "persisted", m.Persisted, "failed", m.Failed, "pending", m.Pending)
 	}()
 	gatewayHandler := httptransport.NewGatewayHandler(gatewayService, cfg.Gateway, logger, usageWriter)
-	openaiClient := openai.NewGatewayClient(cfg.Gateway.HeaderTimeout)
-	defer openaiClient.CloseIdleConnections()
-	openaiHandler := httptransport.NewOpenAIGatewayHandler(gateway.New(postgres.NewGatewayStore(pool), credentials, openaiClient), cfg.Gateway, logger, usageWriter)
+	openaiHandler := httptransport.NewOpenAIGatewayHandler(gatewayService, cfg.Gateway, logger, usageWriter)
 	cancel()
 
 	readiness := health.New(

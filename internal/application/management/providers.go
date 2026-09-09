@@ -22,7 +22,54 @@ var errInvalidProviderProxy = errors.New("invalid provider proxy")
 
 const defaultProviderMappingPriority int32 = 100
 
-var providerProtocols = [...]string{"OPENAI_CHAT", "OPENAI_RESPONSES", "ANTHROPIC_MESSAGES"}
+var providerProtocols = [...]string{"OPENAI", "ANTHROPIC"}
+
+func (input *ProviderInput) Normalize() {
+	input.Name = strings.TrimSpace(input.Name)
+	input.Website = strings.TrimSpace(input.Website)
+	input.ProxyURL = strings.TrimSpace(input.ProxyURL)
+	for index := range input.Endpoints {
+		input.Endpoints[index].ProtocolType = strings.TrimSpace(input.Endpoints[index].ProtocolType)
+		input.Endpoints[index].BaseURL = strings.TrimSpace(input.Endpoints[index].BaseURL)
+	}
+	for index := range input.ProxyHeaders {
+		input.ProxyHeaders[index].Key = strings.TrimSpace(input.ProxyHeaders[index].Key)
+		input.ProxyHeaders[index].Value = strings.TrimSpace(input.ProxyHeaders[index].Value)
+	}
+	for index := range input.Mappings {
+		input.Mappings[index].UpstreamModelCode = strings.TrimSpace(input.Mappings[index].UpstreamModelCode)
+	}
+}
+
+func (input ProviderInput) Valid() bool {
+	provider, ok := providerFromInput(Provider{}, input)
+	if !ok || !validProviderMappings(provider, input.Mappings) {
+		return false
+	}
+	if !input.ProxyEnabled {
+		return true
+	}
+	if _, _, ok := normalizeProxyURL(input.ProxyURL); !ok || len(input.ProxyHeaders) > 32 {
+		return false
+	}
+	seen := make(map[string]struct{}, len(input.ProxyHeaders))
+	for _, header := range input.ProxyHeaders {
+		key := http.CanonicalHeaderKey(header.Key)
+		if !validHeaderName(key) {
+			return false
+		}
+		key = strings.ToLower(key)
+		if _, duplicate := seen[key]; duplicate {
+			return false
+		}
+		seen[key] = struct{}{}
+		// 空值表示编辑时保留已有密文，是否存在由用例结合当前数据判断。
+		if header.Value != "" && !validHeaderValue(header.Value) {
+			return false
+		}
+	}
+	return true
+}
 
 func optionalURL(raw string, website bool) (*string, bool) {
 	raw = strings.TrimSpace(raw)
@@ -317,6 +364,15 @@ func (s *Service) replaceProviderMappings(ctx context.Context, w Writer, provide
 }
 
 func (s *Service) CreateProvider(ctx context.Context, actor admin.Identity, input ProviderInput, meta appsec.RequestMeta) (Provider, error) {
+	input.Normalize()
+	if !input.Valid() {
+		return Provider{}, appsec.ErrInvalidArgument
+	}
+	for _, header := range input.ProxyHeaders {
+		if input.ProxyEnabled && header.Value == "" {
+			return Provider{}, appsec.ErrInvalidArgument
+		}
+	}
 	id, err := s.next()
 	if err != nil {
 		return Provider{}, err
@@ -347,7 +403,8 @@ func (s *Service) CreateProvider(ctx context.Context, actor admin.Identity, inpu
 }
 
 func (s *Service) UpdateProvider(ctx context.Context, actor admin.Identity, id int64, input ProviderInput, meta appsec.RequestMeta) (Provider, error) {
-	if id <= 0 {
+	input.Normalize()
+	if id <= 0 || !input.Valid() {
 		return Provider{}, appsec.ErrInvalidArgument
 	}
 	var updated Provider

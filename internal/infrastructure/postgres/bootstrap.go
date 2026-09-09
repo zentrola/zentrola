@@ -7,7 +7,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/zentrola/zentrola/internal/application/bootstrap"
-	"github.com/zentrola/zentrola/internal/domain/catalog"
 	"github.com/zentrola/zentrola/internal/infrastructure/postgres/dbgen"
 )
 
@@ -42,42 +41,27 @@ func (s *BootstrapStore) initialize(ctx context.Context, seed bootstrap.Seed) er
 		return err
 	}
 	if hasHistory {
-		// 包括软删除记录。已初始化过就不恢复/重建任何 Bootstrap 配置。
+		// 包括软删除记录。已初始化过就不恢复或重建组织。
 		return tx.Commit(ctx)
 	}
 	at := pgtype.Timestamptz{Time: seed.CreatedAt, Valid: true}
-	anthropicBaseURL := "https://api.anthropic.com"
 	if err := queries.CreateBootstrapOrganization(ctx, dbgen.CreateBootstrapOrganizationParams{
 		ID: seed.OrganizationID, OrganizationCode: "default", OrganizationName: "zentrola", CreatedAt: at,
 	}); err != nil {
 		return err
 	}
-	if err := queries.CreateBootstrapProvider(ctx, dbgen.CreateBootstrapProviderParams{
-		ID: seed.ProviderID, ProviderCode: catalog.AnthropicOfficialCode, ProviderName: "Anthropic Official",
-		CreatedAt: at,
-	}); err != nil {
-		return err
-	}
-	if err := queries.CreateBootstrapProviderEndpoint(ctx, dbgen.CreateBootstrapProviderEndpointParams{
-		ProviderID: seed.ProviderID, ProtocolType: "ANTHROPIC_MESSAGES", BaseUrl: anthropicBaseURL, CreatedAt: at,
-	}); err != nil {
-		return err
-	}
-	for _, model := range seed.Models {
-		if err := queries.CreateBootstrapModel(ctx, dbgen.CreateBootstrapModelParams{
-			ID: model.ID, ModelCode: model.Code, DisplayName: model.Name,
-			InputModalities: []byte(model.InputModalities), CreatedAt: at,
+	for _, provider := range seed.Providers {
+		if err := queries.CreateBootstrapProvider(ctx, dbgen.CreateBootstrapProviderParams{
+			ID: provider.ID, ProviderCode: provider.Code, ProviderName: provider.Name, CreatedAt: at,
 		}); err != nil {
 			return err
 		}
-		if model.ProviderModelID == 0 {
-			continue
-		}
-		if err := queries.CreateBootstrapProviderModel(ctx, dbgen.CreateBootstrapProviderModelParams{
-			ID: model.ProviderModelID, ProviderID: seed.ProviderID, ModelID: model.ID,
-			UpstreamModelCode: model.UpstreamCode, CreatedAt: at,
-		}); err != nil {
-			return err
+		for _, endpoint := range provider.Endpoints {
+			if err := queries.CreateBootstrapProviderEndpoint(ctx, dbgen.CreateBootstrapProviderEndpointParams{
+				ProviderID: provider.ID, ProtocolType: endpoint.ProtocolType, BaseUrl: endpoint.BaseURL, CreatedAt: at,
+			}); err != nil {
+				return err
+			}
 		}
 	}
 	return tx.Commit(ctx)

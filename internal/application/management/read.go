@@ -13,88 +13,101 @@ func read[T any](ctx context.Context, s *Service, a admin.Identity, fn func(Read
 	err = s.store.Read(ctx, a, func(r Reader) error { var e error; result, e = fn(r); return e })
 	return
 }
-func (s *Service) Members(ctx context.Context, a admin.Identity, p Page) ([]Member, error) {
+func readPage[T any](ctx context.Context, s *Service, a admin.Identity, list func(Reader) ([]T, error), count func(Reader) (int64, error)) (PageData[T], error) {
+	return read(ctx, s, a, func(r Reader) (PageData[T], error) {
+		items, err := list(r)
+		if err != nil {
+			return PageData[T]{}, err
+		}
+		total, err := count(r)
+		return PageData[T]{Items: items, Total: total}, err
+	})
+}
+func (s *Service) Members(ctx context.Context, a admin.Identity, p Page) (PageData[Member], error) {
 	if !validPage(p) {
-		return nil, appsec.ErrInvalidArgument
+		return PageData[Member]{}, appsec.ErrInvalidArgument
 	}
-	return read(ctx, s, a, func(r Reader) ([]Member, error) { return r.Members(ctx, p) })
+	return readPage(ctx, s, a, func(r Reader) ([]Member, error) { return r.Members(ctx, p) }, func(r Reader) (int64, error) { return r.CountMembers(ctx) })
 }
-func (s *Service) Groups(ctx context.Context, a admin.Identity, p Page) ([]Group, error) {
-	return s.GroupsByStatus(ctx, a, p, "")
+func (s *Service) MemberSuggestions(ctx context.Context, a admin.Identity, p Page, name string) (PageData[Member], error) {
+	if !validPage(p) || !validText(name, 128) {
+		return PageData[Member]{}, appsec.ErrInvalidArgument
+	}
+	return readPage(ctx, s, a, func(r Reader) ([]Member, error) { return r.MemberSuggestions(ctx, p, name) }, func(r Reader) (int64, error) { return r.CountMemberSuggestions(ctx, name) })
 }
-func (s *Service) GroupsByStatus(ctx context.Context, a admin.Identity, p Page, status string) ([]Group, error) {
+func (s *Service) GroupsByStatus(ctx context.Context, a admin.Identity, p Page, status string) (PageData[Group], error) {
 	if !validPage(p) || (status != "" && !validStatus(status)) {
-		return nil, appsec.ErrInvalidArgument
+		return PageData[Group]{}, appsec.ErrInvalidArgument
 	}
-	return read(ctx, s, a, func(r Reader) ([]Group, error) { return r.Groups(ctx, p, status) })
+	return readPage(ctx, s, a, func(r Reader) ([]Group, error) { return r.Groups(ctx, p, status) }, func(r Reader) (int64, error) { return r.CountGroups(ctx, status) })
 }
-func (s *Service) Models(ctx context.Context, a admin.Identity, p Page, status string) ([]Model, error) {
+func (s *Service) Models(ctx context.Context, a admin.Identity, p Page, status string) (PageData[Model], error) {
 	if !validPage(p) || (status != "" && !validStatus(status)) {
-		return nil, appsec.ErrInvalidArgument
+		return PageData[Model]{}, appsec.ErrInvalidArgument
 	}
-	return read(ctx, s, a, func(r Reader) ([]Model, error) { return r.Models(ctx, p, status) })
+	return readPage(ctx, s, a, func(r Reader) ([]Model, error) { return r.Models(ctx, p, status) }, func(r Reader) (int64, error) { return r.CountModels(ctx, status) })
 }
-func (s *Service) Providers(ctx context.Context, a admin.Identity, p Page) ([]Provider, error) {
+func (s *Service) Providers(ctx context.Context, a admin.Identity, p Page) (PageData[Provider], error) {
 	if !validPage(p) {
-		return nil, appsec.ErrInvalidArgument
+		return PageData[Provider]{}, appsec.ErrInvalidArgument
 	}
-	return read(ctx, s, a, func(r Reader) ([]Provider, error) { return r.Providers(ctx, p) })
+	return readPage(ctx, s, a, func(r Reader) ([]Provider, error) { return r.Providers(ctx, p) }, func(r Reader) (int64, error) { return r.CountProviders(ctx) })
 }
-func (s *Service) Resources(ctx context.Context, a admin.Identity, p Page) ([]Resource, error) {
+func (s *Service) Resources(ctx context.Context, a admin.Identity, p Page) (PageData[Resource], error) {
 	if !validPage(p) {
-		return nil, appsec.ErrInvalidArgument
+		return PageData[Resource]{}, appsec.ErrInvalidArgument
 	}
-	return read(ctx, s, a, func(r Reader) ([]Resource, error) { return r.Resources(ctx, p) })
+	return readPage(ctx, s, a, func(r Reader) ([]Resource, error) { return r.Resources(ctx, p) }, func(r Reader) (int64, error) { return r.CountResources(ctx) })
 }
-func (s *Service) Operations(ctx context.Context, a admin.Identity, p Page) ([]Operation, error) {
+func (s *Service) Operations(ctx context.Context, a admin.Identity, p Page) (PageData[Operation], error) {
 	if !validPage(p) {
-		return nil, appsec.ErrInvalidArgument
+		return PageData[Operation]{}, appsec.ErrInvalidArgument
 	}
-	return read(ctx, s, a, func(r Reader) ([]Operation, error) { return r.Operations(ctx, p) })
+	return readPage(ctx, s, a, func(r Reader) ([]Operation, error) { return r.Operations(ctx, p) }, func(r Reader) (int64, error) { return r.CountOperations(ctx) })
 }
-func (s *Service) GroupMembers(ctx context.Context, a admin.Identity, id int64, p Page) ([]Member, error) {
+func (s *Service) GroupMembers(ctx context.Context, a admin.Identity, id int64, p Page) (PageData[Member], error) {
 	if id <= 0 || !validPage(p) {
-		return nil, appsec.ErrInvalidArgument
+		return PageData[Member]{}, appsec.ErrInvalidArgument
 	}
-	return read(ctx, s, a, func(r Reader) ([]Member, error) {
+	return readPage(ctx, s, a, func(r Reader) ([]Member, error) {
 		if _, err := r.Group(ctx, id); err != nil {
 			return nil, err
 		}
 		return r.GroupMembers(ctx, id, p)
-	})
+	}, func(r Reader) (int64, error) { return r.CountGroupMembers(ctx, id) })
 }
-func (s *Service) MemberGroups(ctx context.Context, a admin.Identity, id int64, p Page) ([]Group, error) {
+func (s *Service) MemberGroups(ctx context.Context, a admin.Identity, id int64, p Page) (PageData[Group], error) {
 	if id <= 0 || !validPage(p) {
-		return nil, appsec.ErrInvalidArgument
+		return PageData[Group]{}, appsec.ErrInvalidArgument
 	}
-	return read(ctx, s, a, func(r Reader) ([]Group, error) {
+	return readPage(ctx, s, a, func(r Reader) ([]Group, error) {
 		if _, err := r.Member(ctx, id); err != nil {
 			return nil, err
 		}
 		return r.MemberGroups(ctx, id, p)
-	})
+	}, func(r Reader) (int64, error) { return r.CountMemberGroups(ctx, id) })
 }
-func (s *Service) GroupModels(ctx context.Context, a admin.Identity, id int64, p Page) ([]Model, error) {
+func (s *Service) GroupModels(ctx context.Context, a admin.Identity, id int64, p Page) (PageData[Model], error) {
 	if id <= 0 || !validPage(p) {
-		return nil, appsec.ErrInvalidArgument
+		return PageData[Model]{}, appsec.ErrInvalidArgument
 	}
-	return read(ctx, s, a, func(r Reader) ([]Model, error) {
+	return readPage(ctx, s, a, func(r Reader) ([]Model, error) {
 		if _, err := r.Group(ctx, id); err != nil {
 			return nil, err
 		}
 		return r.GroupModels(ctx, id, p)
-	})
+	}, func(r Reader) (int64, error) { return r.CountGroupModels(ctx, id) })
 }
-func (s *Service) Keys(ctx context.Context, a admin.Identity, id int64, p Page) ([]Key, error) {
+func (s *Service) Keys(ctx context.Context, a admin.Identity, id int64, p Page) (PageData[Key], error) {
 	if id <= 0 || !validPage(p) {
-		return nil, appsec.ErrInvalidArgument
+		return PageData[Key]{}, appsec.ErrInvalidArgument
 	}
-	return read(ctx, s, a, func(r Reader) ([]Key, error) {
+	return readPage(ctx, s, a, func(r Reader) ([]Key, error) {
 		if _, err := r.Member(ctx, id); err != nil {
 			return nil, err
 		}
 		return r.Keys(ctx, id, p)
-	})
+	}, func(r Reader) (int64, error) { return r.CountKeys(ctx, id) })
 }
 func (s *Service) Member(ctx context.Context, a admin.Identity, id int64) (Member, error) {
 	if id <= 0 {

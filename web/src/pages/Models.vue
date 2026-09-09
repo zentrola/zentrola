@@ -11,7 +11,8 @@ import PageHeader from '../components/PageHeader.vue'
 import ListFooter from '../components/ListFooter.vue'
 import ListSearch from '../components/ListSearch.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
-const { items, cursor, loading, error, load } = useCollection<Model>(() => '/models')
+const { items, cursor, page, pageSize, total, loading, error, load, previous, retry, setPageSize } =
+  useCollection<Model>(() => '/models')
 const { busy, error: actionError, run } = useAction()
 const editing = ref(false),
   editTarget = ref<Model | null>(null),
@@ -85,21 +86,26 @@ function changeStatus() {
 }
 </script>
 <template>
-  <PageHeader name="models"
-    ><button class="button primary" :disabled="busy" @click="openEdit()">
-      <Icon name="plus" :size="18" />{{ t('models.create') }}
-    </button></PageHeader
-  >
+  <PageHeader name="models" />
   <section class="panel">
     <ListSearch
       v-model="keyword"
       :loading="loading"
+      :label="t('models.searchLabel')"
       :placeholder="t('models.searchPlaceholder')"
       @search="search"
       @reset="reset"
-    />
+    >
+      <template #actions>
+        <div class="list-toolbar-actions">
+          <button type="button" class="button primary" :disabled="busy" @click="openEdit()">
+            <Icon name="plus" :size="18" />{{ t('models.create') }}
+          </button>
+        </div>
+      </template>
+    </ListSearch>
     <p v-if="error" class="alert error" role="alert">
-      {{ error }}<button class="text-button" @click="load()">{{ t('common.retry') }}</button>
+      {{ error }}<button class="text-button" @click="retry">{{ t('common.retry') }}</button>
     </p>
     <div class="table-scroll">
       <table>
@@ -120,7 +126,7 @@ function changeStatus() {
               <div class="person">
                 <span class="avatar">{{ model.name.slice(0, 1) }}</span>
                 <div>
-                  <strong>{{ model.name }}</strong
+                  <strong class="model-name-regular">{{ model.name }}</strong
                   ><small>{{ model.id }}</small>
                 </div>
               </div>
@@ -169,7 +175,17 @@ function changeStatus() {
       <Icon name="models" :size="32" />
       <p>{{ t(loading ? 'common.loading' : query ? 'common.noResults' : 'models.empty') }}</p>
     </div>
-    <ListFooter :count="items.length" :cursor="cursor" :loading="loading" @more="load(true)" />
+    <ListFooter
+      :cursor="cursor"
+      :page="page"
+      :page-size="pageSize"
+      :total="total"
+      :loading="loading"
+      @first="load()"
+      @previous="previous"
+      @more="load(true)"
+      @page-size="setPageSize"
+    />
   </section>
   <Modal
     v-if="editing"

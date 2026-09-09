@@ -112,6 +112,7 @@ const touched = ref<Record<SetupField, boolean>>({
 const setupErrors = computed(() => {
   const usernameBytes = new TextEncoder().encode(username.value).length
   const passwordBytes = new TextEncoder().encode(password.value).length
+  const passwordCharacters = Array.from(password.value).length
   return {
     username: !username.value
       ? t('setup.usernameRequired')
@@ -126,7 +127,7 @@ const setupErrors = computed(() => {
       ? t('setup.passwordRequired')
       : password.value.includes('\0')
         ? t('setup.passwordControl')
-        : passwordBytes < 12
+        : passwordCharacters < 6
           ? t('setup.passwordShort')
           : passwordBytes > 72
             ? t('setup.passwordLong')
@@ -399,6 +400,17 @@ async function signOut() {
         <template v-for="item in navigation" :key="item"
           ><p v-if="item === 'home' || item === 'members' || item === 'usage'" class="nav-section">
             {{ t(item === 'home' ? 'overview' : item === 'members' ? 'governance' : 'records') }}
+            <a
+              v-if="item === 'home'"
+              class="community-source-link"
+              href="https://github.com/zentrola/zentrola"
+              target="_blank"
+              rel="noopener noreferrer"
+              :aria-label="t('communityRepository')"
+              :title="t('communityRepository')"
+            >
+              <Icon name="external" :size="12" />
+            </a>
           </p>
           <RouterLink :to="`/${item}`" :aria-label="t(`nav.${item}`)" :data-label="t(`nav.${item}`)"
             ><Icon :name="item" /><span>{{ t(`nav.${item}`) }}</span></RouterLink

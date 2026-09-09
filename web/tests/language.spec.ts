@@ -17,7 +17,7 @@ test('首次按浏览器语言选择英文，手动切换后记住偏好并覆�
       })
     if (path.endsWith('/me'))
       return reply({ id: '1', organizationId: '2', username: 'admin', displayName: 'Admin' })
-    return reply({ items: [], nextCursor: null })
+    return reply({ items: [], nextCursor: null, total: 0 })
   })
 
   await page.goto('/')

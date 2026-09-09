@@ -35,7 +35,7 @@ func TestPrettyConsoleAndJSONFileShareRecord(t *testing.T) {
 
 	pretty := console.String()
 	for _, expected := range []string{
-		" INFO  ", "[" + traceID + " " + spanID + "]", "[logging_test.go:",
+		" INFO  ", "[" + traceID + "," + spanID + "]", "[logging_test.go:",
 		" - service started", "status=200", `detail="two words"`,
 	} {
 		if !strings.Contains(pretty, expected) {
@@ -55,6 +55,45 @@ func TestPrettyConsoleAndJSONFileShareRecord(t *testing.T) {
 	}
 	if _, ok := entry["source"]; !ok {
 		t.Fatalf("JSON file is missing source: %#v", entry)
+	}
+}
+
+func TestPrettyCompactsHTTPAccessLog(t *testing.T) {
+	var output bytes.Buffer
+	logger := NewWithOptions(Options{Console: &output, ConsoleFormat: "pretty", Color: "never", Level: slog.LevelInfo})
+	logger.Info("http request",
+		"request_time", "2026-09-08T11:12:31Z",
+		"method", "GET",
+		"duration_ms", 3,
+		"path", "/api/v1/auth/setup",
+		"status", 200,
+		"request_bytes", 0,
+		"response_bytes", 91,
+		"request_headers", map[string]string{"accept": "application/json", "content-type": "application/json"},
+		"response_headers", map[string]string{"content-type": "application/json"},
+		"upstream_headers_ms", 2,
+		"first_byte_ms", 3,
+		"input_tokens", 12,
+		"output_tokens", 8,
+		"request_body", "",
+		"response_body", `{"code":"OK","data":{"required":"[REDACTED]"}}`,
+	)
+	formatted := output.String()
+	for _, expected := range []string{
+		" - GET - /api/v1/auth/setup - status=200 - cost=3ms",
+		`req_headers={"accept":"application/json","content-type":"application/json"}`,
+		`res_headers={"content-type":"application/json"}`,
+		"headers=2ms - ttfb=3ms - tokens=12/8/-",
+		`res={"code":"OK","data":{"required":"[REDACTED]"}}`,
+	} {
+		if !strings.Contains(formatted, expected) {
+			t.Fatalf("compact access log %q does not contain %q", formatted, expected)
+		}
+	}
+	for _, redundant := range []string{"http request", "request_time=", "method=", "duration_ms=", "path=", "in=", "out=", `response_body="`} {
+		if strings.Contains(formatted, redundant) {
+			t.Fatalf("compact access log contains redundant %q: %q", redundant, formatted)
+		}
 	}
 }
 

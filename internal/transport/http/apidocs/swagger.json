@@ -721,7 +721,7 @@
                 }
             },
             "post": {
-                "description": "仅未初始化时可用；账号 1～64 bytes、密码 12～72 bytes；创建成功后使用登录接口。已有管理员时返回 ALREADY_INITIALIZED。",
+                "description": "仅未初始化时可用；账号 1～64 bytes，密码至少 6 个字符且不超过 72 bytes；创建成功后使用登录接口。已有管理员时返回 ALREADY_INITIALIZED。",
                 "consumes": [
                     "application/json"
                 ],
@@ -2077,6 +2077,85 @@
                 }
             }
         },
+        "/api/v1/members/suggestions": {
+            "get": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "description": "按用户名模糊匹配当前组织成员，供实时自动完成使用。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "成员管理"
+                ],
+                "summary": "搜索成员候选项",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "用户名关键字",
+                        "name": "name",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "上一页 nextCursor，默认从头查询",
+                        "name": "after",
+                        "in": "query"
+                    },
+                    {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer",
+                        "default": 50,
+                        "description": "每页数量",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/http.PageResponse-management_Member"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/members/{id}": {
             "get": {
                 "security": [
@@ -3335,6 +3414,61 @@
                 }
             }
         },
+        "/api/v1/providers/initialize": {
+            "post": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "description": "幂等补齐系统内置的官方服务商和协议地址；不会覆盖已有服务商配置，也不会访问外部网络。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "模型与资源"
+                ],
+                "summary": "初始化官方服务商",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/management.ProviderInitializeResult"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/providers/{id}": {
             "get": {
                 "security": [
@@ -4030,6 +4164,94 @@
                                     "properties": {
                                         "data": {
                                             "$ref": "#/definitions/http.UpdatedResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "请求追踪 ID"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/resources/{id}/sync-models": {
+            "post": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "description": "根据服务商编码选择官方模型目录适配器；当前支持 DeepSeek。只创建缺失模型和映射，新模型默认停用，不覆盖既有配置。HTTP 200 后仍需检查 data.ok 和 data.code。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "模型与资源"
+                ],
+                "summary": "同步官方模型目录",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "业务 ID（正整数字符串）",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/management.ModelSyncResult"
                                         }
                                     }
                                 }
@@ -4991,7 +5213,7 @@
                     "type": "string"
                 },
                 "newPassword": {
-                    "description": "NewPassword 为 12–72 个 UTF-8 字节，不能包含空字符，也不能与当前密码相同。",
+                    "description": "NewPassword 至少 6 个字符且不超过 72 个 UTF-8 字节，不能包含空字符，也不能与当前密码相同。",
                     "type": "string"
                 }
             }
@@ -5187,6 +5409,9 @@
                 },
                 "nextCursor": {
                     "type": "string"
+                },
+                "total": {
+                    "type": "integer"
                 }
             }
         },
@@ -5201,6 +5426,9 @@
                 },
                 "nextCursor": {
                     "type": "string"
+                },
+                "total": {
+                    "type": "integer"
                 }
             }
         },
@@ -5215,6 +5443,9 @@
                 },
                 "nextCursor": {
                     "type": "string"
+                },
+                "total": {
+                    "type": "integer"
                 }
             }
         },
@@ -5229,6 +5460,9 @@
                 },
                 "nextCursor": {
                     "type": "string"
+                },
+                "total": {
+                    "type": "integer"
                 }
             }
         },
@@ -5243,6 +5477,9 @@
                 },
                 "nextCursor": {
                     "type": "string"
+                },
+                "total": {
+                    "type": "integer"
                 }
             }
         },
@@ -5257,6 +5494,9 @@
                 },
                 "nextCursor": {
                     "type": "string"
+                },
+                "total": {
+                    "type": "integer"
                 }
             }
         },
@@ -5271,6 +5511,9 @@
                 },
                 "nextCursor": {
                     "type": "string"
+                },
+                "total": {
+                    "type": "integer"
                 }
             }
         },
@@ -5285,6 +5528,9 @@
                 },
                 "nextCursor": {
                     "type": "string"
+                },
+                "total": {
+                    "type": "integer"
                 }
             }
         },
@@ -5575,6 +5821,32 @@
                 }
             }
         },
+        "management.ModelSyncResult": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "created": {
+                    "type": "integer"
+                },
+                "discovered": {
+                    "type": "integer"
+                },
+                "httpStatus": {
+                    "type": "integer"
+                },
+                "latencyMs": {
+                    "type": "integer"
+                },
+                "mapped": {
+                    "type": "integer"
+                },
+                "ok": {
+                    "type": "boolean"
+                }
+            }
+        },
         "management.Operation": {
             "type": "object",
             "properties": {
@@ -5719,6 +5991,10 @@
         },
         "management.ProviderEndpoint": {
             "type": "object",
+            "required": [
+                "baseUrl",
+                "protocolType"
+            ],
             "properties": {
                 "baseUrl": {
                     "type": "string"
@@ -5726,10 +6002,23 @@
                 "protocolType": {
                     "type": "string",
                     "enum": [
-                        "OPENAI_CHAT",
-                        "OPENAI_RESPONSES",
-                        "ANTHROPIC_MESSAGES"
+                        "OPENAI",
+                        "ANTHROPIC"
                     ]
+                }
+            }
+        },
+        "management.ProviderInitializeResult": {
+            "type": "object",
+            "properties": {
+                "created": {
+                    "type": "integer"
+                },
+                "existing": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
                 }
             }
         },
@@ -5972,18 +6261,14 @@
         "usage.ModelRank": {
             "type": "object",
             "properties": {
-                "modelId": {
-                    "type": "string",
-                    "example": "0"
-                },
-                "name": {
-                    "type": "string"
-                },
                 "requests": {
                     "type": "integer"
                 },
                 "tokens": {
                     "type": "integer"
+                },
+                "upstreamModelCode": {
+                    "type": "string"
                 }
             }
         },
@@ -6025,6 +6310,9 @@
                 "principalId": {
                     "type": "string",
                     "example": "0"
+                },
+                "principalName": {
+                    "type": "string"
                 },
                 "providerId": {
                     "type": "string",

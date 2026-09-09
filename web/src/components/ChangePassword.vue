@@ -15,13 +15,14 @@ const busy = ref(false),
 const form = ref<HTMLFormElement>()
 const errors = computed(() => {
   const bytes = new TextEncoder().encode(newPassword.value).length
+  const characters = Array.from(newPassword.value).length
   return {
     currentPassword: currentPassword.value ? '' : t('passwordChange.currentRequired'),
     newPassword: !newPassword.value
       ? t('setup.passwordRequired')
       : newPassword.value.includes('\0')
         ? t('setup.passwordControl')
-        : bytes < 12
+        : characters < 6
           ? t('setup.passwordShort')
           : bytes > 72
             ? t('setup.passwordLong')

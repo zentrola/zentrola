@@ -10,40 +10,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// 调用凭证；仅识别主体，不存储权限或完整 Key
-type AccessKey struct {
-	// 主键，由应用侧生成的正数 64-bit ID
-	ID int64
-	// 逻辑删除标识；删除后不可恢复
-	IsDeleted bool
-	// 所属组织 ID
-	OrganizationID int64
-	// 所属治理主体 ID
-	PrincipalID int64
-	// 完整 Access Key 的 SHA-256 摘要，32 bytes
-	KeyHash []byte
-	// 脱敏后的 Access Key，仅用于识别和展示，不能用于认证
-	MaskedKey string
-	// 凭证名称
-	Name string
-	// 凭证状态：ACTIVE=启用；DISABLED=停用；REVOKED=已撤销
-	Status string
-	// 到期时间；NULL=永不过期
-	ExpiresAt pgtype.Timestamptz
-	// 最后使用时间；NULL=从未使用
-	LastUsedAt pgtype.Timestamptz
-	// 撤销时间；NULL=未撤销
-	RevokedAt pgtype.Timestamptz
-	// 创建者引用：system、admin:<id> 或 principal:<id>
-	CreatedBy string
-	// 更新者引用：system、admin:<id> 或 principal:<id>
-	UpdatedBy string
-	// 创建时间，UTC
-	CreatedAt pgtype.Timestamptz
-	// 更新时间，UTC
-	UpdatedAt pgtype.Timestamptz
-}
-
 // 管理面管理员；与调用面 Principal 分离
 type AdminUser struct {
 	// 主键，由应用侧生成的正数 64-bit ID
@@ -78,34 +44,8 @@ type AdminUser struct {
 	CredentialVersion int64
 }
 
-// AI 使用治理分组
-type AiGroup struct {
-	// 主键，由应用侧生成的正数 64-bit ID
-	ID int64
-	// 逻辑删除标识；删除后不可恢复
-	IsDeleted bool
-	// 所属组织 ID
-	OrganizationID int64
-	// 分组业务编码
-	GroupCode string
-	// 分组名称
-	GroupName string
-	// 备注；NULL=未设置
-	Remark *string
-	// 状态：ACTIVE=启用；DISABLED=停用
-	Status string
-	// 创建者引用：system、admin:<id> 或 principal:<id>
-	CreatedBy string
-	// 更新者引用：system、admin:<id> 或 principal:<id>
-	UpdatedBy string
-	// 创建时间，UTC
-	CreatedAt pgtype.Timestamptz
-	// 更新时间，UTC
-	UpdatedAt pgtype.Timestamptz
-}
-
-// 官方模型目录；已有逻辑编码兼容保留，管理员可显式修正
-type AiModel struct {
+// 平台稳定逻辑模型；与供应方解耦
+type Model struct {
 	// 主键，由应用侧生成的正数 64-bit ID
 	ID int64
 	// 逻辑删除标识；删除后不可恢复
@@ -130,104 +70,6 @@ type AiModel struct {
 	OutputModalities []byte
 	// 模型用途、限制等备注，空字符串表示未填写
 	Remark string
-}
-
-// 模型服务供应方；不保存调用凭证
-type AiProvider struct {
-	// 主键，由应用侧生成的正数 64-bit ID
-	ID int64
-	// 逻辑删除标识；删除后不可恢复
-	IsDeleted bool
-	// 供应方业务编码
-	ProviderCode string
-	// 供应方名称
-	ProviderName string
-	// 供应方类型：OFFICIAL=官方供应方
-	ProviderType string
-	// 状态：ACTIVE=启用；DISABLED=停用
-	Status string
-	// 创建者引用：system、admin:<id> 或 principal:<id>
-	CreatedBy string
-	// 更新者引用：system、admin:<id> 或 principal:<id>
-	UpdatedBy string
-	// 创建时间，UTC
-	CreatedAt pgtype.Timestamptz
-	// 更新时间，UTC
-	UpdatedAt pgtype.Timestamptz
-	// 服务商官方网站；NULL=未填写
-	OfficialWebsite *string
-	// 是否通过服务商专属出站代理访问上游
-	ProxyEnabled bool
-	// 脱敏后的代理 URL，仅用于管理端展示
-	ProxyUrlDisplay *string
-	// 完整代理 URL 的 AES-256-GCM 密文，可包含用户名和密码
-	ProxyUrlCiphertext []byte
-	// 代理 URL 密文的 AES-GCM 随机 Nonce
-	ProxyUrlNonce []byte
-	// 代理 URL 密文的根密钥版本
-	ProxyUrlKeyVersion *int32
-	// 代理 Header 名称列表，不含 Header Value
-	ProxyHeaderNames []byte
-	// 代理 Header Key/Value 对象的 AES-256-GCM 密文
-	ProxyHeadersCiphertext []byte
-	// 代理 Header 密文的 AES-GCM 随机 Nonce
-	ProxyHeadersNonce []byte
-	// 代理 Header 密文的根密钥版本
-	ProxyHeadersKeyVersion *int32
-}
-
-// 组织持有的供应方调用资源；归属于 Provider
-type AiResource struct {
-	// 主键，由应用侧生成的正数 64-bit ID
-	ID int64
-	// 逻辑删除标识；删除后不可恢复
-	IsDeleted bool
-	// 所属组织 ID
-	OrganizationID int64
-	// 资源所属供应方 ID，不归属于 Provider Model
-	ProviderID int64
-	// 资源名称
-	ResourceName string
-	// AES-256-GCM 密文，包含 16-byte 认证标签；禁止明文
-	CredentialCiphertext []byte
-	// AES-GCM 随机 Nonce，12 bytes；每次加密重新生成
-	CredentialNonce []byte
-	// 加密根密钥版本，不含 Master Key 本身
-	KeyVersion int32
-	// 状态：ACTIVE=启用；DISABLED=停用
-	Status string
-	// 最后调用时间；NULL=从未使用
-	LastActiveAt pgtype.Timestamptz
-	// 创建者引用：system、admin:<id> 或 principal:<id>
-	CreatedBy string
-	// 更新者引用：system、admin:<id> 或 principal:<id>
-	UpdatedBy string
-	// 创建时间，UTC
-	CreatedAt pgtype.Timestamptz
-	// 更新时间，UTC
-	UpdatedAt pgtype.Timestamptz
-}
-
-// 分组模型显式授权；默认拒绝，多组授权取并集
-type GroupModelPermission struct {
-	// 主键，由应用侧生成的正数 64-bit ID
-	ID int64
-	// 逻辑删除标识；删除后不可恢复
-	IsDeleted bool
-	// 所属组织 ID
-	OrganizationID int64
-	// 被授权分组 ID
-	GroupID int64
-	// 被授权逻辑模型 ID
-	ModelID int64
-	// 创建者引用：system、admin:<id> 或 principal:<id>
-	CreatedBy string
-	// 更新者引用：system、admin:<id> 或 principal:<id>
-	UpdatedBy string
-	// 创建时间，UTC
-	CreatedAt pgtype.Timestamptz
-	// 更新时间，UTC
-	UpdatedAt pgtype.Timestamptz
 }
 
 // 管理员与系统操作日志；Append Only，普通操作禁止更新和删除
@@ -326,8 +168,68 @@ type Principal struct {
 	UpdatedAt pgtype.Timestamptz
 }
 
-// 主体与分组的多对多关系
+// 调用主体访问凭证；仅识别主体，不存储权限或完整 Key
+type PrincipalAccessKey struct {
+	// 主键，由应用侧生成的正数 64-bit ID
+	ID int64
+	// 逻辑删除标识；删除后不可恢复
+	IsDeleted bool
+	// 所属组织 ID
+	OrganizationID int64
+	// 所属治理主体 ID
+	PrincipalID int64
+	// 完整 Access Key 的 SHA-256 摘要，32 bytes
+	KeyHash []byte
+	// 脱敏后的 Access Key，仅用于识别和展示，不能用于认证
+	MaskedKey string
+	// 凭证名称
+	Name string
+	// 凭证状态：ACTIVE=启用；DISABLED=停用；REVOKED=已撤销
+	Status string
+	// 到期时间；NULL=永不过期
+	ExpiresAt pgtype.Timestamptz
+	// 最后使用时间；NULL=从未使用
+	LastUsedAt pgtype.Timestamptz
+	// 撤销时间；NULL=未撤销
+	RevokedAt pgtype.Timestamptz
+	// 创建者引用：system、admin:<id> 或 principal:<id>
+	CreatedBy string
+	// 更新者引用：system、admin:<id> 或 principal:<id>
+	UpdatedBy string
+	// 创建时间，UTC
+	CreatedAt pgtype.Timestamptz
+	// 更新时间，UTC
+	UpdatedAt pgtype.Timestamptz
+}
+
+// 调用主体的 AI 使用治理分组
 type PrincipalGroup struct {
+	// 主键，由应用侧生成的正数 64-bit ID
+	ID int64
+	// 逻辑删除标识；删除后不可恢复
+	IsDeleted bool
+	// 所属组织 ID
+	OrganizationID int64
+	// 分组业务编码
+	GroupCode string
+	// 分组名称
+	GroupName string
+	// 备注；NULL=未设置
+	Remark *string
+	// 状态：ACTIVE=启用；DISABLED=停用
+	Status string
+	// 创建者引用：system、admin:<id> 或 principal:<id>
+	CreatedBy string
+	// 更新者引用：system、admin:<id> 或 principal:<id>
+	UpdatedBy string
+	// 创建时间，UTC
+	CreatedAt pgtype.Timestamptz
+	// 更新时间，UTC
+	UpdatedAt pgtype.Timestamptz
+}
+
+// 调用主体与治理分组的多对多关系
+type PrincipalGroupMembership struct {
 	// 主键，由应用侧生成的正数 64-bit ID
 	ID int64
 	// 逻辑删除标识；删除后不可恢复
@@ -348,11 +250,109 @@ type PrincipalGroup struct {
 	UpdatedAt pgtype.Timestamptz
 }
 
+// 主体分组的模型显式授权；默认拒绝，多组授权取并集
+type PrincipalGroupModelPermission struct {
+	// 主键，由应用侧生成的正数 64-bit ID
+	ID int64
+	// 逻辑删除标识；删除后不可恢复
+	IsDeleted bool
+	// 所属组织 ID
+	OrganizationID int64
+	// 被授权分组 ID
+	GroupID int64
+	// 被授权逻辑模型 ID
+	ModelID int64
+	// 创建者引用：system、admin:<id> 或 principal:<id>
+	CreatedBy string
+	// 更新者引用：system、admin:<id> 或 principal:<id>
+	UpdatedBy string
+	// 创建时间，UTC
+	CreatedAt pgtype.Timestamptz
+	// 更新时间，UTC
+	UpdatedAt pgtype.Timestamptz
+}
+
+// 模型服务供应方；不保存组织调用凭证
+type Provider struct {
+	// 主键，由应用侧生成的正数 64-bit ID
+	ID int64
+	// 逻辑删除标识；删除后不可恢复
+	IsDeleted bool
+	// 供应方业务编码
+	ProviderCode string
+	// 供应方名称
+	ProviderName string
+	// 供应方类型：OFFICIAL=官方供应方
+	ProviderType string
+	// 状态：ACTIVE=启用；DISABLED=停用
+	Status string
+	// 创建者引用：system、admin:<id> 或 principal:<id>
+	CreatedBy string
+	// 更新者引用：system、admin:<id> 或 principal:<id>
+	UpdatedBy string
+	// 创建时间，UTC
+	CreatedAt pgtype.Timestamptz
+	// 更新时间，UTC
+	UpdatedAt pgtype.Timestamptz
+	// 服务商官方网站；NULL=未填写
+	OfficialWebsite *string
+	// 是否通过服务商专属出站代理访问上游
+	ProxyEnabled bool
+	// 脱敏后的代理 URL，仅用于管理端展示
+	ProxyUrlDisplay *string
+	// 完整代理 URL 的 AES-256-GCM 密文，可包含用户名和密码
+	ProxyUrlCiphertext []byte
+	// 代理 URL 密文的 AES-GCM 随机 Nonce
+	ProxyUrlNonce []byte
+	// 代理 URL 密文的根密钥版本
+	ProxyUrlKeyVersion *int32
+	// 代理 Header 名称列表，不含 Header Value
+	ProxyHeaderNames []byte
+	// 代理 Header Key/Value 对象的 AES-256-GCM 密文
+	ProxyHeadersCiphertext []byte
+	// 代理 Header 密文的 AES-GCM 随机 Nonce
+	ProxyHeadersNonce []byte
+	// 代理 Header 密文的根密钥版本
+	ProxyHeadersKeyVersion *int32
+}
+
+// 组织持有的供应方调用凭证；归属于 Provider
+type ProviderCredential struct {
+	// 主键，由应用侧生成的正数 64-bit ID
+	ID int64
+	// 逻辑删除标识；删除后不可恢复
+	IsDeleted bool
+	// 所属组织 ID
+	OrganizationID int64
+	// 资源所属供应方 ID，不归属于 Provider Model
+	ProviderID int64
+	// 资源名称
+	ResourceName string
+	// AES-256-GCM 密文，包含 16-byte 认证标签；禁止明文
+	CredentialCiphertext []byte
+	// AES-GCM 随机 Nonce，12 bytes；每次加密重新生成
+	CredentialNonce []byte
+	// 加密根密钥版本，不含 Master Key 本身
+	KeyVersion int32
+	// 状态：ACTIVE=启用；DISABLED=停用
+	Status string
+	// 最后调用时间；NULL=从未使用
+	LastActiveAt pgtype.Timestamptz
+	// 创建者引用：system、admin:<id> 或 principal:<id>
+	CreatedBy string
+	// 更新者引用：system、admin:<id> 或 principal:<id>
+	UpdatedBy string
+	// 创建时间，UTC
+	CreatedAt pgtype.Timestamptz
+	// 更新时间，UTC
+	UpdatedAt pgtype.Timestamptz
+}
+
 // 服务商支持的协议及对应上游基础地址
 type ProviderEndpoint struct {
 	// 所属服务商 ID
 	ProviderID int64
-	// 协议类型：OPENAI_CHAT=Chat Completions；OPENAI_RESPONSES=Responses；ANTHROPIC_MESSAGES=Messages
+	// 上游协议族：OPENAI=Chat Completions/Responses；ANTHROPIC=Messages
 	ProtocolType string
 	// 该协议对应的上游基础地址
 	BaseUrl string
@@ -406,8 +406,8 @@ type UsageRecord struct {
 	ProviderID int64
 	// 实际供应方模型映射 ID
 	ProviderModelID int64
-	// 实际调用资源 ID
-	ResourceID int64
+	// 实际调用的供应方凭证 ID
+	ProviderCredentialID int64
 	// 逻辑模型 ID
 	ModelID int64
 	// 使用场景：MODEL_GATEWAY=模型网关调用

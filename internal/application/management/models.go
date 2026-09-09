@@ -3,6 +3,7 @@ package management
 import (
 	"context"
 	"slices"
+	"strings"
 	"time"
 
 	appsec "github.com/zentrola/zentrola/internal/application/security"
@@ -10,6 +11,20 @@ import (
 	"github.com/zentrola/zentrola/internal/domain/catalog"
 	"github.com/zentrola/zentrola/internal/domain/operation"
 )
+
+func (input *ModelInput) Normalize() {
+	input.Code = strings.TrimSpace(input.Code)
+	input.Name = strings.TrimSpace(input.Name)
+	input.Remark = strings.TrimSpace(input.Remark)
+	for index := range input.InputModalities {
+		input.InputModalities[index] = strings.TrimSpace(input.InputModalities[index])
+	}
+	for index := range input.OutputModalities {
+		input.OutputModalities[index] = strings.TrimSpace(input.OutputModalities[index])
+	}
+}
+
+func (input ModelInput) Valid() bool { return validModelInput(input) }
 
 func validModelInput(input ModelInput) bool {
 	return validText(input.Code, 128) && validText(input.Name, 128) &&
@@ -24,7 +39,8 @@ func applyModelInput(m Model, input ModelInput) Model {
 }
 
 func (s *Service) CreateModel(ctx context.Context, actor admin.Identity, input ModelInput, meta appsec.RequestMeta) (Model, error) {
-	if !validModelInput(input) {
+	input.Normalize()
+	if !input.Valid() {
 		return Model{}, appsec.ErrInvalidArgument
 	}
 	id, err := s.next()
@@ -43,7 +59,8 @@ func (s *Service) CreateModel(ctx context.Context, actor admin.Identity, input M
 }
 
 func (s *Service) UpdateModel(ctx context.Context, actor admin.Identity, id int64, input ModelInput, meta appsec.RequestMeta) (Model, error) {
-	if id <= 0 || !validModelInput(input) {
+	input.Normalize()
+	if id <= 0 || !input.Valid() {
 		return Model{}, appsec.ErrInvalidArgument
 	}
 	var model Model

@@ -54,7 +54,7 @@ func TestProviderFromInput(t *testing.T) {
 		Name:    "阿里云百炼",
 		Website: "  https://www.deepseek.com/  ",
 		Endpoints: []ProviderEndpoint{{
-			ProtocolType: "OPENAI_CHAT",
+			ProtocolType: "OPENAI",
 			BaseURL:      "https://dashscope.aliyuncs.com/compatible-mode/v1/",
 		}},
 	})
@@ -64,15 +64,30 @@ func TestProviderFromInput(t *testing.T) {
 
 	for _, input := range []ProviderInput{
 		{Name: "没有接口"},
-		{Name: "不安全协议", Endpoints: []ProviderEndpoint{{ProtocolType: "OPENAI_CHAT", BaseURL: "http://api.example.com"}}},
-		{Name: "包含凭证", Endpoints: []ProviderEndpoint{{ProtocolType: "OPENAI_CHAT", BaseURL: "https://key@api.example.com"}}},
-		{Name: "包含查询参数", Endpoints: []ProviderEndpoint{{ProtocolType: "OPENAI_CHAT", BaseURL: "https://api.example.com/v1?token=secret"}}},
+		{Name: "不安全协议", Endpoints: []ProviderEndpoint{{ProtocolType: "OPENAI", BaseURL: "http://api.example.com"}}},
+		{Name: "包含凭证", Endpoints: []ProviderEndpoint{{ProtocolType: "OPENAI", BaseURL: "https://key@api.example.com"}}},
+		{Name: "包含查询参数", Endpoints: []ProviderEndpoint{{ProtocolType: "OPENAI", BaseURL: "https://api.example.com/v1?token=secret"}}},
 		{Name: "未知协议", Endpoints: []ProviderEndpoint{{ProtocolType: "GEMINI_NATIVE", BaseURL: "https://api.example.com"}}},
-		{Name: "重复协议", Endpoints: []ProviderEndpoint{{ProtocolType: "OPENAI_CHAT", BaseURL: "https://one.example.com"}, {ProtocolType: "OPENAI_CHAT", BaseURL: "https://two.example.com"}}},
+		{Name: "重复协议", Endpoints: []ProviderEndpoint{{ProtocolType: "OPENAI", BaseURL: "https://one.example.com"}, {ProtocolType: "OPENAI", BaseURL: "https://two.example.com"}}},
 	} {
 		if _, ok := providerFromInput(current, input); ok {
 			t.Fatalf("invalid provider accepted: %+v", input)
 		}
+	}
+}
+
+func TestProviderInputNormalizationAndValidation(t *testing.T) {
+	input := ProviderInput{
+		Name:      "  服务商  ",
+		Website:   "  https://example.com/  ",
+		Endpoints: []ProviderEndpoint{{ProtocolType: " OPENAI ", BaseURL: " https://api.example.com/v1/ "}},
+		Mappings:  []ProviderMappingInput{{ModelID: 1, UpstreamModelCode: " upstream-model "}},
+	}
+	input.Normalize()
+	if !input.Valid() || input.Name != "服务商" || input.Website != "https://example.com/" ||
+		input.Endpoints[0].ProtocolType != "OPENAI" || input.Endpoints[0].BaseURL != "https://api.example.com/v1/" ||
+		input.Mappings[0].UpstreamModelCode != "upstream-model" {
+		t.Fatalf("unexpected normalized provider input: %+v", input)
 	}
 }
 

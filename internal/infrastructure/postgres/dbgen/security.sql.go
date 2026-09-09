@@ -70,7 +70,7 @@ func (q *Queries) AppendSecurityOperation(ctx context.Context, arg AppendSecurit
 }
 
 const authenticateAccessKey = `-- name: AuthenticateAccessKey :one
-SELECT k.id,k.organization_id,k.principal_id FROM access_key k
+SELECT k.id,k.organization_id,k.principal_id FROM principal_access_key k
 JOIN principal p ON p.id=k.principal_id AND p.organization_id=k.organization_id
 JOIN organization o ON o.id=k.organization_id
 WHERE k.key_hash=$1 AND k.is_deleted=false AND k.status='ACTIVE' AND k.revoked_at IS NULL
@@ -98,7 +98,7 @@ func (q *Queries) AuthenticateAccessKey(ctx context.Context, arg AuthenticateAcc
 }
 
 const createAccessKey = `-- name: CreateAccessKey :exec
-INSERT INTO access_key (id,organization_id,principal_id,key_hash,masked_key,name,status,expires_at,created_by,updated_by,created_at,updated_at)
+INSERT INTO principal_access_key (id,organization_id,principal_id,key_hash,masked_key,name,status,expires_at,created_by,updated_by,created_at,updated_at)
 VALUES ($1,$2,$3,$4,$5,$6,'ACTIVE',$7,$8,$8,$9,$9)
 `
 
@@ -154,7 +154,7 @@ func (q *Queries) CreateInitialAdmin(ctx context.Context, arg CreateInitialAdmin
 }
 
 const disableUnrecoverableResource = `-- name: DisableUnrecoverableResource :exec
-UPDATE ai_resource SET status='DISABLED',updated_by='system',updated_at=$2 WHERE id=$1 AND is_deleted=false
+UPDATE provider_credential SET status='DISABLED',updated_by='system',updated_at=$2 WHERE id=$1 AND is_deleted=false
 `
 
 type DisableUnrecoverableResourceParams struct {
@@ -272,7 +272,7 @@ func (q *Queries) GetAdminForLogin(ctx context.Context, username string) (GetAdm
 }
 
 const getKeyForRevoke = `-- name: GetKeyForRevoke :one
-SELECT id, is_deleted, organization_id, principal_id, key_hash, masked_key, name, status, expires_at, last_used_at, revoked_at, created_by, updated_by, created_at, updated_at FROM access_key WHERE organization_id=$1 AND id=$2 AND is_deleted=false FOR UPDATE
+SELECT id, is_deleted, organization_id, principal_id, key_hash, masked_key, name, status, expires_at, last_used_at, revoked_at, created_by, updated_by, created_at, updated_at FROM principal_access_key WHERE organization_id=$1 AND id=$2 AND is_deleted=false FOR UPDATE
 `
 
 type GetKeyForRevokeParams struct {
@@ -280,9 +280,9 @@ type GetKeyForRevokeParams struct {
 	ID             int64
 }
 
-func (q *Queries) GetKeyForRevoke(ctx context.Context, arg GetKeyForRevokeParams) (AccessKey, error) {
+func (q *Queries) GetKeyForRevoke(ctx context.Context, arg GetKeyForRevokeParams) (PrincipalAccessKey, error) {
 	row := q.db.QueryRow(ctx, getKeyForRevoke, arg.OrganizationID, arg.ID)
-	var i AccessKey
+	var i PrincipalAccessKey
 	err := row.Scan(
 		&i.ID,
 		&i.IsDeleted,
@@ -357,18 +357,18 @@ func (q *Queries) HasAnyAdmin(ctx context.Context) (bool, error) {
 }
 
 const listResourcesForCredentialCheck = `-- name: ListResourcesForCredentialCheck :many
-SELECT id, is_deleted, organization_id, provider_id, resource_name, credential_ciphertext, credential_nonce, key_version, status, last_active_at, created_by, updated_by, created_at, updated_at FROM ai_resource WHERE is_deleted=false AND status='ACTIVE' ORDER BY id FOR UPDATE
+SELECT id, is_deleted, organization_id, provider_id, resource_name, credential_ciphertext, credential_nonce, key_version, status, last_active_at, created_by, updated_by, created_at, updated_at FROM provider_credential WHERE is_deleted=false AND status='ACTIVE' ORDER BY id FOR UPDATE
 `
 
-func (q *Queries) ListResourcesForCredentialCheck(ctx context.Context) ([]AiResource, error) {
+func (q *Queries) ListResourcesForCredentialCheck(ctx context.Context) ([]ProviderCredential, error) {
 	rows, err := q.db.Query(ctx, listResourcesForCredentialCheck)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []AiResource{}
+	items := []ProviderCredential{}
 	for rows.Next() {
-		var i AiResource
+		var i ProviderCredential
 		if err := rows.Scan(
 			&i.ID,
 			&i.IsDeleted,
@@ -424,7 +424,7 @@ func (q *Queries) ResetAdminPassword(ctx context.Context, arg ResetAdminPassword
 }
 
 const revokeAccessKey = `-- name: RevokeAccessKey :exec
-UPDATE access_key SET status='REVOKED',revoked_at=$3,updated_by=$4,updated_at=$3
+UPDATE principal_access_key SET status='REVOKED',revoked_at=$3,updated_by=$4,updated_at=$3
 WHERE organization_id=$1 AND id=$2 AND is_deleted=false
 `
 

@@ -210,6 +210,32 @@ func TestProductionAccessLogOmitsBodies(t *testing.T) {
 	}
 }
 
+func TestAccessLogHeadersUseSafeAllowlist(t *testing.T) {
+	headers := make(http.Header)
+	headers.Set("Content-Type", "application/json")
+	headers.Set("Accept", "application/json")
+	headers.Set("User-Agent", "zentrola-client/1.0")
+	headers.Set("Authorization", "Bearer authorization-secret")
+	headers.Set("Cookie", "session=cookie-secret")
+	headers.Set("X-Api-Key", "api-key-secret")
+
+	encoded, err := json.Marshal(accessLogHeaders(headers, requestHeaderAllowlist))
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(encoded)
+	for _, expected := range []string{"content-type", "accept", "user-agent", "zentrola-client/1.0"} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("safe header %q missing from %s", expected, output)
+		}
+	}
+	for _, secret := range []string{"authorization-secret", "cookie-secret", "api-key-secret", "authorization", "cookie", "x-api-key"} {
+		if strings.Contains(strings.ToLower(output), secret) {
+			t.Fatalf("sensitive header %q leaked in %s", secret, output)
+		}
+	}
+}
+
 func TestAccessLogAcceptsOnlySafeUpstreamRequestID(t *testing.T) {
 	for _, test := range []struct {
 		name, value, expected string

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,7 +17,9 @@ import (
 	"github.com/zentrola/zentrola/internal/infrastructure/provider"
 )
 
-type ConnectionTester struct{ client *http.Client }
+type ConnectionTester struct {
+	client *http.Client
+}
 
 func NewConnectionTester() *ConnectionTester {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
@@ -24,7 +27,20 @@ func NewConnectionTester() *ConnectionTester {
 	transport.DialContext = (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext
 	transport.TLSHandshakeTimeout = 5 * time.Second
 	transport.ResponseHeaderTimeout = 10 * time.Second
-	return &ConnectionTester{client: &http.Client{Transport: transport, Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+	return &ConnectionTester{
+		client: &http.Client{Transport: transport, Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
+	}
+}
+
+func connectionStatusCode(status int) string {
+	switch status {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return "UPSTREAM_AUTH_FAILED"
+	case http.StatusTooManyRequests:
+		return "UPSTREAM_RATE_LIMITED"
+	default:
+		return "UPSTREAM_UNAVAILABLE"
+	}
 }
 func (t *ConnectionTester) Test(ctx context.Context, protocol, baseURL string, credential []byte, proxy *catalog.OutboundProxy) (result mgmt.ConnectionResult) {
 	started := time.Now()
@@ -44,17 +60,10 @@ func (t *ConnectionTester) Test(ctx context.Context, protocol, baseURL string, c
 		result.Code = "CREDENTIAL_INVALID"
 		return
 	}
-	probeURL := base + "/v1/models?limit=1"
-	bearer := false
-	if protocol == "OPENAI_CHAT" || protocol == "OPENAI_RESPONSES" {
-		probeURL = strings.TrimSuffix(base, "/") + "/models"
-		bearer = true
-	} else if protocol != "ANTHROPIC_MESSAGES" {
+	probeURL, bearer, format, ok := connectionProbeEndpoint(protocol, base, 1)
+	if !ok {
 		result.Code = "UPSTREAM_URL_REJECTED"
 		return
-	} else if base == "https://api.deepseek.com/anthropic" {
-		probeURL = "https://api.deepseek.com/models"
-		bearer = true
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, probeURL, nil)
 	if err != nil {
@@ -93,23 +102,56 @@ func (t *ConnectionTester) Test(ctx context.Context, protocol, baseURL string, c
 			result.Code = "UPSTREAM_INVALID_RESPONSE"
 			return
 		}
-		var payload struct {
-			Data []json.RawMessage `json:"data"`
-		}
-		if err := json.Unmarshal(data, &payload); err != nil || payload.Data == nil {
+		if !validConnectionProbe(data, format) {
 			result.Code = "UPSTREAM_INVALID_RESPONSE"
 			return
 		}
 		result.OK = true
 		result.Code = "OK"
-	case 401, 403:
-		result.Code = "UPSTREAM_AUTH_FAILED"
-	case 429:
-		result.Code = "UPSTREAM_RATE_LIMITED"
 	default:
-		result.Code = "UPSTREAM_UNAVAILABLE"
+		result.Code = connectionStatusCode(resp.StatusCode)
 	}
 	return
+}
+
+type connectionProbeFormat uint8
+
+const (
+	openAIConnectionProbe connectionProbeFormat = iota
+	dashScopeConnectionProbe
+)
+
+func connectionProbeEndpoint(protocol, base string, limit int) (string, bool, connectionProbeFormat, bool) {
+	if protocol == "OPENAI" {
+		if strings.Contains(base, ".aliyuncs.com/") && strings.HasSuffix(base, "/compatible-mode/v1") {
+			url := strings.TrimSuffix(base, "/compatible-mode/v1") + "/api/v1/models"
+			return url + "?providers=qwen&capabilities=TG&page_no=1&page_size=" + strconv.Itoa(limit), true, dashScopeConnectionProbe, true
+		}
+		return strings.TrimSuffix(base, "/") + "/models", true, openAIConnectionProbe, true
+	}
+	if protocol != "ANTHROPIC" {
+		return "", false, 0, false
+	}
+	if base == "https://api.deepseek.com/anthropic" {
+		return "https://api.deepseek.com/models", true, openAIConnectionProbe, true
+	}
+	return strings.TrimSuffix(base, "/") + "/v1/models?limit=" + strconv.Itoa(limit), false, openAIConnectionProbe, true
+}
+
+func validConnectionProbe(data []byte, format connectionProbeFormat) bool {
+	if format == dashScopeConnectionProbe {
+		var payload struct {
+			Success bool `json:"success"`
+			Output  *struct {
+				Models []json.RawMessage `json:"models"`
+			} `json:"output"`
+		}
+		return json.Unmarshal(data, &payload) == nil && payload.Success && payload.Output != nil && payload.Output.Models != nil
+	}
+	var payload struct {
+		Data []json.RawMessage `json:"data"`
+	}
+	return json.Unmarshal(data, &payload) == nil && payload.Data != nil
 }
 
 func connectionErrorCode(ctx context.Context, err error) string {

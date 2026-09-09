@@ -3,6 +3,7 @@ package http
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -27,8 +28,8 @@ func (s *SecurityHandlers) mountUsage(r chi.Router) {
 			securityError(w, req, appsec.ErrInvalidArgument)
 			return
 		}
-		from, fromErr := time.Parse(time.RFC3339Nano, values.Get("from"))
-		to, toErr := time.Parse(time.RFC3339Nano, values.Get("to"))
+		from, fromErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(values.Get("from")))
+		to, toErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(values.Get("to")))
 		if fromErr != nil || toErr != nil {
 			securityError(w, req, appsec.ErrInvalidArgument)
 			return
@@ -63,7 +64,7 @@ func (s *SecurityHandlers) mountUsage(r chi.Router) {
 				securityError(w, req, appsec.ErrInvalidArgument)
 				return
 			}
-			v := list[0]
+			v := strings.TrimSpace(list[0])
 			switch key {
 			case "from", "to":
 				t, err := time.Parse(time.RFC3339Nano, v)
@@ -102,13 +103,16 @@ func (s *SecurityHandlers) mountUsage(r chi.Router) {
 		if f.From.IsZero() {
 			f.From = f.To.Add(-24 * time.Hour)
 		}
-		rows, err := s.Usage.Query(req.Context(), adminFrom(req), f)
+		f.ProbeNext = true
+		page, err := s.Usage.Query(req.Context(), adminFrom(req), f)
+		rows := page.Items
 		var next *string
-		if len(rows) == int(f.Limit) {
+		if len(rows) > int(f.Limit) {
+			rows = rows[:f.Limit]
 			n := strconv.FormatInt(rows[len(rows)-1].ID, 10)
 			next = &n
 		}
-		adminResult(w, req, 200, PageResponse[app.Row]{rows, next}, err)
+		adminResult(w, req, 200, PageResponse[app.Row]{Items: rows, NextCursor: next, Total: page.Total}, err)
 	})
 	if s.UsageWriter != nil {
 		// @Summary 用量写入队列指标

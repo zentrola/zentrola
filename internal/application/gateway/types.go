@@ -1,4 +1,4 @@
-// Package gateway 编排 Anthropic 原生调用；不包含 HTTP 管理响应或数据库记录。
+// Package gateway 编排 OpenAI 与 Anthropic Gateway 调用；不包含 HTTP 管理响应或数据库记录。
 package gateway
 
 import (
@@ -38,7 +38,7 @@ var (
 
 type Route struct {
 	ModelID, ProviderID, ProviderModelID, ResourceID int64
-	UpstreamModel, BaseURL                           string
+	UpstreamModel, BaseURL, EndpointProtocol         string
 	Credential                                       catalog.SealedCredential
 	ProxyEnabled                                     bool
 	ProxyURL, ProxyHeaders                           catalog.SealedCredential
@@ -48,6 +48,9 @@ type Route struct {
 const AnthropicProtocol = "ANTHROPIC_MESSAGES"
 const OpenAIProtocol = "OPENAI_CHAT"
 const OpenAIResponsesProtocol = "OPENAI_RESPONSES"
+
+const AnthropicEndpoint = "ANTHROPIC"
+const OpenAIEndpoint = "OPENAI"
 
 type Model struct {
 	ID      string `json:"id"`

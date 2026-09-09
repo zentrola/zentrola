@@ -21,7 +21,7 @@ func TestAdminPasswordChangeIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := bootstrap.New(NewBootstrapStore(pool), ids, "sonnet", "opus").Initialize(ctx); err != nil {
+	if err := bootstrap.New(NewBootstrapStore(pool), ids).Initialize(ctx); err != nil {
 		t.Fatal(err)
 	}
 	passwords, err := cryptosec.NewPasswords(4)
@@ -35,7 +35,7 @@ func TestAdminPasswordChangeIntegration(t *testing.T) {
 	store := NewSecurityStore(pool, ids)
 	policy := admin.LoginPolicy{MaxFailures: 2, LockDuration: time.Hour}
 	service := appsec.NewAdmin(store, passwords, tokens, policy)
-	const original, next = "original-password", "new-password-2026"
+	const original, next = "original-password", "123456"
 	meta := appsec.RequestMeta{Path: "/api/v1/auth/password", Method: "POST", RequestID: "password-change-test"}
 	if err := service.Bootstrap(ctx, "admin", original); err != nil {
 		t.Fatal(err)

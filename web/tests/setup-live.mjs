@@ -43,7 +43,7 @@ try {
   step = 'login'
   await page.getByLabel('密码', { exact: true }).fill(password)
   await page.getByRole('button', { name: '登录控制台' }).click()
-  await page.getByRole('heading', { name: '用户', exact: true }).waitFor()
+  await page.getByRole('heading', { name: '用户管理', exact: true }).waitFor()
   assert.equal((await context.request.get(`${apiBase}/health/ready`)).status(), 200)
   step = 'closed_setup'
   const status = await context.request.get(`${apiBase}/api/v1/auth/setup`)
@@ -54,7 +54,7 @@ try {
   assert.equal(repeated.status(), 409)
   assert.equal((await repeated.json()).code, 'ALREADY_INITIALIZED')
   await page.reload()
-  await page.getByRole('heading', { name: '用户', exact: true }).waitFor()
+  await page.getByRole('heading', { name: '用户管理', exact: true }).waitFor()
   assert.equal(await page.getByRole('button', { name: '创建管理员', exact: true }).count(), 0)
   assert.equal(errors.length, 0)
   passed = true

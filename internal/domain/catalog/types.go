@@ -6,13 +6,13 @@ type Protocol string
 
 const (
 	Official  ProviderType = "OFFICIAL"
-	Anthropic Protocol     = "ANTHROPIC_MESSAGES"
-	OpenAI    Protocol     = "OPENAI_CHAT"
-	Responses Protocol     = "OPENAI_RESPONSES"
+	Anthropic Protocol     = "ANTHROPIC"
+	OpenAI    Protocol     = "OPENAI"
 )
 
 const (
 	AnthropicOfficialCode = "anthropic-official"
+	DeepSeekOfficialCode  = "deepseek-official"
 	SonnetCode            = "claude-sonnet"
 	OpusCode              = "claude-opus"
 )

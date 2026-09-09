@@ -29,7 +29,7 @@ test('后端锁定提示、账号切换、刷新重查和倒计时到期重试',
           data: { id: '1', organizationId: '2', username: 'owner', displayName: 'owner' },
         },
       })
-    return route.fulfill({ json: { code: 'OK', data: { items: [], nextCursor: null } } })
+    return route.fulfill({ json: { code: 'OK', data: { items: [], nextCursor: null, total: 0 } } })
   })
   await page.goto('/')
   const username = page.getByLabel('管理员账号')
@@ -68,7 +68,7 @@ test('后端锁定提示、账号切换、刷新重查和倒计时到期重试',
   await expect(page.getByRole('alert')).toHaveCount(0)
   await password.fill('correct-password')
   await submit.click()
-  await expect(page.getByRole('heading', { name: '首页', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '控制面板', exact: true })).toBeVisible()
   expect(calls).toBe(3)
 })
 

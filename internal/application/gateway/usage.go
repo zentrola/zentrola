@@ -11,6 +11,7 @@ import (
 // SSE 仅缓存当前事件（最多 256 KiB）；JSON 只捕获顶层 type / usage。
 type UsageObserver struct {
 	openai                        bool
+	responses                     bool
 	stream                        bool
 	line, data                    []byte
 	drop                          bool
@@ -27,6 +28,26 @@ func NewOpenAIUsageObserver(stream bool) *UsageObserver {
 		if key == "object" {
 			var object string
 			if json.Unmarshal(raw, &object) != nil || object != "chat.completion" {
+				o.failed = true
+			} else {
+				o.start = true
+			}
+		}
+		if key == "usage" && !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			o.update(raw)
+		}
+	}
+	return o
+}
+
+func NewOpenAIResponsesUsageObserver(stream bool) *UsageObserver {
+	o := &UsageObserver{stream: stream, openai: true, responses: true}
+	o.json.kindKey = "object"
+	o.json.allowNullUsage = true
+	o.json.accept = func(key string, raw []byte) {
+		if key == "object" {
+			var object string
+			if json.Unmarshal(raw, &object) != nil || object != "response" {
 				o.failed = true
 			} else {
 				o.start = true
@@ -101,6 +122,30 @@ func (o *UsageObserver) sseLine() {
 }
 func (o *UsageObserver) event(raw []byte) {
 	if o.openai {
+		if o.responses {
+			var event struct {
+				Type     string `json:"type"`
+				Response struct {
+					Usage json.RawMessage `json:"usage"`
+				} `json:"response"`
+				Error json.RawMessage `json:"error"`
+			}
+			if json.Unmarshal(raw, &event) != nil {
+				o.badUsage = true
+				return
+			}
+			switch event.Type {
+			case "response.created", "response.in_progress":
+				o.start = true
+			case "response.completed":
+				o.start = true
+				o.update(event.Response.Usage)
+				o.stop = true
+			case "error", "response.failed", "response.incomplete":
+				o.failed = true
+			}
+			return
+		}
 		if bytes.Equal(bytes.TrimSpace(raw), []byte("[DONE]")) {
 			o.stop = true
 			return
@@ -188,28 +233,39 @@ func (o *UsageObserver) update(raw []byte) {
 		}
 		var dst **int64
 		if o.openai {
-			switch key {
-			case "prompt_tokens":
-				dst = &o.input
-			case "completion_tokens":
-				dst = &o.output
-			case "prompt_cache_hit_tokens":
-				dst = &o.cached
-			case "prompt_tokens_details":
-				var details struct {
-					Cached json.RawMessage `json:"cached_tokens"`
-				}
-				if json.Unmarshal(value, &details) != nil {
-					o.badUsage = true
+			if o.responses {
+				switch key {
+				case "input_tokens":
+					dst = &o.input
+				case "output_tokens":
+					dst = &o.output
+				default:
 					continue
 				}
-				if len(details.Cached) == 0 {
+			} else {
+				switch key {
+				case "prompt_tokens":
+					dst = &o.input
+				case "completion_tokens":
+					dst = &o.output
+				case "prompt_cache_hit_tokens":
+					dst = &o.cached
+				case "prompt_tokens_details":
+					var details struct {
+						Cached json.RawMessage `json:"cached_tokens"`
+					}
+					if json.Unmarshal(value, &details) != nil {
+						o.badUsage = true
+						continue
+					}
+					if len(details.Cached) == 0 {
+						continue
+					}
+					dst = &o.cached
+					value = details.Cached
+				default:
 					continue
 				}
-				dst = &o.cached
-				value = details.Cached
-			default:
-				continue
 			}
 		} else {
 			switch key {

@@ -20,7 +20,7 @@ async function fixture(page: Page) {
         json: { code: state.code, data: { clearToken: true } },
       })
     }
-    return reply({ items: [], nextCursor: null })
+    return reply({ items: [], nextCursor: null, total: 0 })
   })
   await page.goto('/')
   await page.getByLabel('管理员账号').fill('admin')
@@ -34,21 +34,21 @@ async function fixture(page: Page) {
 test('修改成功后清除会话并提示使用新密码登录', async ({ page }) => {
   const state = await fixture(page)
   await page.getByLabel('当前密码', { exact: true }).fill('original-password')
-  await page.getByLabel('新密码', { exact: true }).fill('new-password-2026')
-  await page.getByLabel('确认新密码').fill('new-password-2026')
+  await page.getByLabel('新密码', { exact: true }).fill('123456')
+  await page.getByLabel('确认新密码').fill('123456')
   await page.getByRole('button', { name: '确认修改', exact: true }).click()
   await expect(page.getByRole('button', { name: '登录控制台' })).toBeVisible()
   await expect(page.getByRole('status')).toContainText('登录密码已修改')
   expect(state.body).toEqual({
     currentPassword: 'original-password',
-    newPassword: 'new-password-2026',
+    newPassword: '123456',
   })
   expect(state.calls).toBe(1)
   expect(await page.evaluate(() => localStorage.getItem('zentrola.admin.session'))).toBeNull()
   await expect(page.getByLabel('密码', { exact: true })).toHaveValue('')
 })
 
-test('校验必填、字节长度、相同密码与两次输入一致', async ({ page }) => {
+test('校验必填、字符与字节长度、相同密码与两次输入一致', async ({ page }) => {
   const state = await fixture(page)
   const submit = page.getByRole('button', { name: '确认修改', exact: true })
   await submit.click()

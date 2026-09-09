@@ -12,7 +12,8 @@ import ListFooter from '../components/ListFooter.vue'
 import ListSearch from '../components/ListSearch.vue'
 import MemberKeys from '../components/MemberKeys.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
-const { items, cursor, loading, error, load } = useCollection<Member>(() => '/members')
+const { items, cursor, page, pageSize, total, loading, error, load, previous, retry, setPageSize } =
+  useCollection<Member>(() => '/members')
 const { busy, error: actionError, run } = useAction()
 const notice = ref(''),
   creating = ref(false),
@@ -92,6 +93,14 @@ function closeMemberForm() {
 }
 function saveMember() {
   validation.value = ''
+  if (!name.value) {
+    validation.value = t('common.required')
+    return
+  }
+  if (creating.value && !selectedGroupIDs.value.length) {
+    validation.value = t('members.groupRequired')
+    return
+  }
   if (!validText(name.value, 128) || !validText(remark.value, 2000, false)) {
     validation.value = t('common.byteLimit')
     return
@@ -211,22 +220,27 @@ async function copyKey() {
 }
 </script>
 <template>
-  <PageHeader name="members"
-    ><button class="button primary" @click="newMember">
-      <Icon name="plus" :size="18" />{{ t('members.create') }}
-    </button></PageHeader
-  >
+  <PageHeader name="members" />
   <p v-if="notice" class="notice" role="status">{{ notice }}</p>
   <section class="panel">
     <ListSearch
       v-model="keyword"
       :loading="loading"
+      :label="t('members.member')"
       :placeholder="t('members.searchPlaceholder')"
       @search="search"
       @reset="reset"
-    />
+    >
+      <template #actions>
+        <div class="list-toolbar-actions">
+          <button type="button" class="button primary" @click="newMember">
+            <Icon name="plus" :size="18" />{{ t('members.create') }}
+          </button>
+        </div>
+      </template>
+    </ListSearch>
     <div v-if="error" class="alert error" role="alert">
-      {{ error }}<button class="text-button" @click="load()">{{ t('common.retry') }}</button>
+      {{ error }}<button class="text-button" @click="retry">{{ t('common.retry') }}</button>
     </div>
     <div class="table-scroll">
       <table class="members-table">
@@ -234,7 +248,6 @@ async function copyKey() {
           <tr>
             <th>{{ t('members.member') }}</th>
             <th>{{ t('common.status') }}</th>
-            <th>{{ t('members.assignedKeys') }}</th>
             <th>{{ t('members.expiryDate') }}</th>
             <th>{{ t('common.remark') }}</th>
             <th>{{ t('common.created') }}</th>
@@ -247,8 +260,30 @@ async function copyKey() {
               <div class="person">
                 <span class="avatar">{{ member.name.slice(0, 1) }}</span>
                 <div>
-                  <strong>{{ member.name }}</strong
-                  ><small>{{ member.id }}</small>
+                  <div class="member-name-row">
+                    <strong>{{ member.name }}</strong>
+                    <button
+                      type="button"
+                      class="icon-button view-keys"
+                      :aria-label="t('members.viewKeys')"
+                      :title="t('members.viewKeys')"
+                      :disabled="keysLoading[member.id]"
+                      @click="viewingKeys = member"
+                    >
+                      <Icon name="eye" :size="16" />
+                    </button>
+                  </div>
+                  <small>{{ member.id }}</small>
+                  <div v-if="keyErrors[member.id]" class="key-error" role="alert">
+                    {{ keyErrors[member.id] }}
+                    <button
+                      class="text-button"
+                      :disabled="keysLoading[member.id]"
+                      @click="refreshKeys(member.id)"
+                    >
+                      {{ t('common.retry') }}
+                    </button>
+                  </div>
                 </div>
               </div>
             </td>
@@ -264,40 +299,6 @@ async function copyKey() {
                 :title="statusTitle(member)"
                 @change="openStatus(member)"
               />
-            </td>
-            <td>
-              <div v-if="keyErrors[member.id]" class="key-error" role="alert">
-                {{ keyErrors[member.id] }}
-                <button
-                  class="text-button"
-                  :disabled="keysLoading[member.id]"
-                  @click="refreshKeys(member.id)"
-                >
-                  {{ t('common.retry') }}
-                </button>
-              </div>
-              <span v-else-if="keysLoading[member.id]" class="muted">{{
-                t('common.loading')
-              }}</span>
-              <template v-else>
-                <div v-for="key in memberKeys[member.id]" :key="key.id" class="member-key">
-                  <div class="key-details">
-                    <code :title="key.name">{{ key.maskedKey }}</code>
-                    <button
-                      type="button"
-                      class="icon-button view-keys"
-                      :aria-label="t('members.viewKeys')"
-                      :title="t('members.viewKeys')"
-                      @click="viewingKeys = member"
-                    >
-                      <Icon name="eye" :size="17" />
-                    </button>
-                  </div>
-                </div>
-                <span v-if="!memberKeys[member.id]?.length" class="muted">{{
-                  t('members.noKeys')
-                }}</span>
-              </template>
             </td>
             <td>
               <template v-if="!keyErrors[member.id] && !keysLoading[member.id]">
@@ -351,7 +352,17 @@ async function copyKey() {
       <h3>{{ t(loading ? 'common.loading' : query ? 'common.noResults' : 'common.empty') }}</h3>
       <p v-if="!loading && !query">{{ t('members.empty') }}</p>
     </div>
-    <ListFooter :count="items.length" :cursor="cursor" :loading="loading" @more="load(true)" />
+    <ListFooter
+      :cursor="cursor"
+      :page="page"
+      :page-size="pageSize"
+      :total="total"
+      :loading="loading"
+      @first="load()"
+      @previous="previous"
+      @more="load(true)"
+      @page-size="setPageSize"
+    />
   </section>
   <MemberKeys v-if="viewingKeys" :member="viewingKeys" @close="viewingKeys = null" />
   <Modal
@@ -360,44 +371,66 @@ async function copyKey() {
     :busy="busy"
     medium
     @close="closeMemberForm"
-    ><form @submit.prevent="saveMember">
-      <label
-        >{{ t('common.name') }}<input v-model="name" required autofocus :disabled="busy" /></label
-      ><label
-        >{{ t('common.remark') }}<textarea v-model="remark" rows="3" :disabled="busy"></textarea>
-      </label>
-      <section class="member-group-field" aria-labelledby="member-groups-title">
-        <div class="member-group-field-head">
-          <h3 id="member-groups-title">{{ t('members.groups') }}</h3>
-          <span v-if="groupsReady">{{
-            t('members.groupSelectionCount', {
-              count: selectedGroupIDs.length,
-              total: groupCandidates.length,
-            })
-          }}</span>
+    ><form class="member-form" @submit.prevent="saveMember">
+      <div class="member-form-fields">
+        <div class="member-form-row">
+          <label class="member-form-label required-label" for="member-name-input">{{
+            t('members.member')
+          }}</label>
+          <div class="member-form-control">
+            <input id="member-name-input" v-model="name" required autofocus :disabled="busy" />
+          </div>
         </div>
-        <div class="member-group-list">
-          <label v-for="group in groupCandidates" :key="group.id" class="member-group-option">
-            <input
-              v-model="selectedGroupIDs"
-              type="checkbox"
-              :value="group.id"
-              :aria-label="t('members.groupSelection', { name: group.name })"
-              :disabled="
-                busy ||
-                !groupsReady ||
-                (!originalGroupIDSet.has(group.id) &&
-                  (group.status !== 'ACTIVE' || editing?.status === 'DISABLED'))
-              "
-            />
-            <strong>{{ group.name }}</strong>
-          </label>
-          <p v-if="busy && !groupsReady" class="empty-compact">{{ t('common.loading') }}</p>
-          <p v-else-if="groupsReady && !groupCandidates.length" class="empty-compact">
-            {{ t('members.noGroups') }}
-          </p>
+        <div class="member-form-row">
+          <div
+            id="member-groups-title"
+            class="member-form-label"
+            :class="{ 'required-label': creating }"
+          >
+            {{ t('members.groups') }}
+          </div>
+          <section
+            class="member-form-control member-group-field"
+            aria-labelledby="member-groups-title"
+            :aria-required="creating"
+          >
+            <div class="member-group-list">
+              <label v-for="group in groupCandidates" :key="group.id" class="member-group-option">
+                <input
+                  v-model="selectedGroupIDs"
+                  type="checkbox"
+                  :value="group.id"
+                  :aria-label="t('members.groupSelection', { name: group.name })"
+                  :disabled="
+                    busy ||
+                    !groupsReady ||
+                    (!originalGroupIDSet.has(group.id) &&
+                      (group.status !== 'ACTIVE' || editing?.status === 'DISABLED'))
+                  "
+                />
+                <strong>{{ group.name }}</strong>
+              </label>
+              <p v-if="busy && !groupsReady" class="empty-compact">{{ t('common.loading') }}</p>
+              <p v-else-if="groupsReady && !groupCandidates.length" class="empty-compact">
+                {{ t('members.noGroups') }}
+              </p>
+            </div>
+          </section>
         </div>
-      </section>
+        <div class="member-form-row">
+          <label class="member-form-label" for="member-remark-input">{{
+            t('common.remark')
+          }}</label>
+          <div class="member-form-control">
+            <textarea
+              id="member-remark-input"
+              v-model="remark"
+              rows="4"
+              :disabled="busy"
+            ></textarea>
+          </div>
+        </div>
+      </div>
       <div v-if="validation" class="alert error" role="alert">{{ validation }}</div>
       <div v-if="actionError && !groupsReady" class="form-retry">
         <button type="button" class="text-button" :disabled="busy" @click="run(loadMemberGroups)">
@@ -490,28 +523,25 @@ async function copyKey() {
 
 <style scoped>
 .members-table {
-  min-width: 1080px;
+  min-width: 930px;
   table-layout: fixed;
 }
 .members-table th:nth-child(1) {
-  width: 240px;
+  width: 260px;
 }
 .members-table th:nth-child(2) {
   width: 100px;
 }
 .members-table th:nth-child(3) {
-  width: 150px;
-}
-.members-table th:nth-child(4) {
   width: 110px;
 }
-.members-table th:nth-child(5) {
+.members-table th:nth-child(4) {
   width: 164px;
 }
-.members-table th:nth-child(6) {
+.members-table th:nth-child(5) {
   width: 140px;
 }
-.members-table th:nth-child(7) {
+.members-table th:nth-child(6) {
   width: 176px;
 }
 .members-table th,
@@ -524,8 +554,15 @@ async function copyKey() {
 }
 .members-table .person strong {
   display: block;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.member-name-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
 }
 .member-key {
   height: 64px;
@@ -537,50 +574,52 @@ async function copyKey() {
 .member-key + .member-key {
   border-top: 1px solid var(--line);
 }
-.key-details {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  font-size: 12px;
-}
-.key-details code {
-  min-width: 0;
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
 .key-expiry {
   align-items: flex-start;
 }
 .view-keys {
-  flex: 0 0 28px;
-  width: 28px;
-  height: 28px;
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
   color: var(--blue);
 }
 .key-error {
-  max-width: 260px;
+  max-width: 210px;
+  margin-top: 5px;
+  font-size: 11px;
   white-space: normal;
   color: var(--danger);
 }
-.member-group-field {
-  margin-top: 20px;
+.member-form-fields {
+  display: grid;
+  gap: 18px;
 }
-.member-group-field-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 7px;
+.member-form-row {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
 }
-.member-group-field-head h3 {
+.member-form-label {
+  display: block;
   margin: 0;
+  padding-top: 10px;
+  color: #485e72;
   font-size: 13px;
   font-weight: 600;
+  line-height: 1.4;
+  text-align: right;
 }
-.member-group-field-head span {
-  color: var(--muted);
-  font-size: 12px;
+.member-form-control {
+  min-width: 0;
+}
+.required-label::after {
+  content: '*';
+  margin-left: 4px;
+  color: var(--danger);
+}
+.member-group-field {
+  min-width: 0;
 }
 .member-group-list {
   display: grid;
@@ -588,20 +627,16 @@ async function copyKey() {
   gap: 8px;
   max-height: 240px;
   overflow: auto;
-  padding: 8px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
+  padding: 0;
 }
 .member-group-option {
   display: flex;
   flex-direction: row;
   align-items: center;
   gap: 12px;
-  padding: 11px 14px;
+  padding: 10px 0;
   margin: 0;
   min-width: 0;
-  border: 1px solid var(--line);
-  border-radius: 8px;
   cursor: pointer;
 }
 .member-group-option input {
@@ -617,5 +652,15 @@ async function copyKey() {
 }
 .member-group-list > .empty-compact {
   grid-column: 1 / -1;
+}
+@media (max-width: 640px) {
+  .member-form-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .member-form-label {
+    padding-top: 0;
+    text-align: left;
+  }
 }
 </style>

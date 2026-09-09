@@ -139,9 +139,12 @@ try {
             if ($usageRows.items.Count -ge 4) { break }
             Start-Sleep -Milliseconds 100
         } while ([DateTime]::UtcNow -lt $pollUntil)
-        Check 'usage_provider_call_count' ($usageRows.items.Count -eq 4) @{providerCalls=$usageRows.items.Count;expected=4}
-        $providers=Admin-Request GET '/providers'
-        $provider=@($providers.items|Where-Object code -eq 'deepseek-official')[0]
+		Check 'usage_provider_call_count' ($usageRows.items.Count -eq 4) @{providerCalls=$usageRows.items.Count;expected=4}
+		$providers=Admin-Request GET '/providers'
+		$provider=@($providers.items|Where-Object {
+			@($_.endpoints|Where-Object { $_.protocolType -eq 'ANTHROPIC' -and $_.baseUrl.TrimEnd('/') -eq 'https://api.deepseek.com/anthropic' }).Count -gt 0
+		})[0]
+		if (!$provider) { throw 'Configure a DeepSeek Anthropic endpoint in the management console first' }
         $resources=Admin-Request GET '/resources'
         $resource=@($resources.items|Where-Object { $_.providerId -eq $provider.id -and $_.status -eq 'ACTIVE' })[0]
         foreach ($expected in $expectedUsage) {

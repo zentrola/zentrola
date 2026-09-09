@@ -11,7 +11,8 @@ import PageHeader from '../components/PageHeader.vue'
 import ListFooter from '../components/ListFooter.vue'
 import ListSearch from '../components/ListSearch.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
-const { items, cursor, loading, error, load } = useCollection<Resource>(() => '/resources')
+const { items, cursor, page, pageSize, total, loading, error, load, previous, retry, setPageSize } =
+  useCollection<Resource>(() => '/resources')
 const { busy, error: actionError, run } = useAction()
 const providers = ref<Provider[]>([]),
   providerError = ref(''),
@@ -132,7 +133,7 @@ function resultMessage(result: ConnectionResult) {
   <section class="panel">
     <ListSearch v-model="keyword" :loading="loading" @search="search" @reset="reset" />
     <p v-if="error" class="alert error" role="alert">
-      {{ error }}<button class="text-button" @click="load()">{{ t('common.retry') }}</button>
+      {{ error }}<button class="text-button" @click="retry">{{ t('common.retry') }}</button>
     </p>
     <div class="table-scroll">
       <table>
@@ -186,7 +187,17 @@ function resultMessage(result: ConnectionResult) {
       <h3>{{ t(loading ? 'common.loading' : query ? 'common.noResults' : 'common.empty') }}</h3>
       <p v-if="!loading && !query">{{ t('resources.empty') }}</p>
     </div>
-    <ListFooter :count="items.length" :cursor="cursor" :loading="loading" @more="load(true)" />
+    <ListFooter
+      :cursor="cursor"
+      :page="page"
+      :page-size="pageSize"
+      :total="total"
+      :loading="loading"
+      @first="load()"
+      @previous="previous"
+      @more="load(true)"
+      @page-size="setPageSize"
+    />
   </section>
   <Modal
     v-if="creating || replaceTarget"

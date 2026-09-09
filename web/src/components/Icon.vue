@@ -16,6 +16,7 @@ const paths: Record<string, string> = {
   operations: 'M6 3h12v18H6zM9 7h6m-6 5h6m-6 5h4',
   plus: 'M12 5v14M5 12h14',
   search: 'M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0',
+  calendar: 'M7 3v3m10-3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v14H4V6a1 1 0 0 1 1-1Z',
   close: 'm6 6 12 12M18 6 6 18',
   trash: 'M3 6h18M8 6V4h8v2m-10 0 1 15h10l1-15M10 11v6m4-6v6',
   refresh: 'M20 7a9 9 0 1 0 1 9M20 2v6h-6',

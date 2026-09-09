@@ -1,6 +1,7 @@
 export interface Page<T> {
   items: T[]
   nextCursor: string | null
+  total: number
 }
 export interface Identity {
   id: string
@@ -44,7 +45,7 @@ export interface Provider {
   createdAt: string
   updatedAt: string
 }
-export type ProviderProtocol = 'OPENAI_CHAT' | 'OPENAI_RESPONSES' | 'ANTHROPIC_MESSAGES'
+export type ProviderProtocol = 'OPENAI' | 'ANTHROPIC'
 export interface ProviderEndpoint {
   protocolType: ProviderProtocol
   baseUrl: string
@@ -64,6 +65,11 @@ export interface ProviderMapping {
 }
 export interface ProviderDetail extends Provider {
   mappings: ProviderMapping[]
+}
+export interface ProviderInitializeResult {
+  total: number
+  created: number
+  existing: number
 }
 export interface Resource {
   id: string
@@ -96,11 +102,17 @@ export interface ConnectionResult {
   httpStatus?: number
   latencyMs: number
 }
+export interface ModelSyncResult extends ConnectionResult {
+  discovered: number
+  created: number
+  mapped: number
+}
 export interface Usage {
   id: string
   requestId: string
   clientProtocol: string
   principalId: string
+  principalName: string
   modelId: string
   resourceId: string
   providerId: string
@@ -121,8 +133,7 @@ export interface TokenRank {
   tokens: number
 }
 export interface ModelRank {
-  modelId: string
-  name: string
+  upstreamModelCode: string
   requests: number
   tokens: number
 }

@@ -25,7 +25,7 @@ test('空系统创建首位管理员，校验确认密码后切换为登录', as
       })
     if (path.endsWith('/me'))
       return reply({ id: '1', organizationId: '2', username: 'owner', displayName: 'owner' })
-    return reply({ items: [], nextCursor: null })
+    return reply({ items: [], nextCursor: null, total: 0 })
   })
   await page.goto('/')
   await expect(page.getByRole('heading', { name: '初始化管理员' })).toBeVisible()
@@ -45,14 +45,14 @@ test('空系统创建首位管理员，校验确认密码后切换为登录', as
   expect(setupCalls).toBe(1)
   await page.getByLabel('密码', { exact: true }).fill('owner-password-123')
   await page.getByRole('button', { name: '登录控制台' }).click()
-  await expect(page.getByRole('heading', { name: '首页', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '控制面板', exact: true })).toBeVisible()
   expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([1, 0])
   await page.reload()
-  await expect(page.getByRole('heading', { name: '首页', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '控制面板', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '创建管理员', exact: true })).toHaveCount(0)
 })
 
-test('初始化按字段校验，错误修正后消失，并按 UTF-8 字节限制提交', async ({ page }) => {
+test('初始化按字段校验，错误修正后消失，并按字符与 UTF-8 字节限制提交', async ({ page }) => {
   let setupCalls = 0
   await page.route('**/api/v1/auth/setup', async (route) => {
     if (route.request().method() === 'GET')
@@ -87,11 +87,11 @@ test('初始化按字段校验，错误修正后消失，并按 UTF-8 字节限�
   await username.fill('中'.repeat(21) + 'a')
   await expect(username).toHaveAttribute('aria-invalid', 'false')
 
-  await password.fill('密'.repeat(3) + 'ab')
+  await password.fill('密'.repeat(5))
   await expect(password).toHaveAccessibleDescription(/密码过短/)
-  await password.fill('密'.repeat(4))
+  await password.fill('密'.repeat(6))
   await expect(password).toHaveAttribute('aria-invalid', 'false')
-  await confirm.fill('密'.repeat(4))
+  await confirm.fill('密'.repeat(6))
   await expect(confirm).toHaveAttribute('aria-invalid', 'false')
   await password.fill('密'.repeat(25))
   await expect(password).toHaveAccessibleDescription(/密码过长/)

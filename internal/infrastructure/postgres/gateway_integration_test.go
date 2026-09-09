@@ -44,7 +44,7 @@ func TestStage4Integration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := bootstrap.New(NewBootstrapStore(pool), ids, "sonnet-upstream", "opus-upstream").Initialize(ctx); err != nil {
+	if err := bootstrap.New(NewBootstrapStore(pool), ids).Initialize(ctx); err != nil {
 		t.Fatal(err)
 	}
 	securityStore := NewSecurityStore(pool, ids)
@@ -79,6 +79,14 @@ func TestStage4Integration(t *testing.T) {
 		t.Fatal(err)
 	}
 	management := mgmt.New(NewManagementStore(pool, ids), ids, cipher, nil)
+	sonnet := createActiveTestModel(t, ctx, management, actor, "claude-sonnet", "Claude Sonnet", []string{"TEXT", "IMAGE"})
+	opus := createActiveTestModel(t, ctx, management, actor, "claude-opus", "Claude Opus", []string{"TEXT", "IMAGE"})
+	provider := createActiveTestProvider(t, ctx, pool, management, actor, "Anthropic 测试服务商",
+		[]mgmt.ProviderEndpoint{{ProtocolType: "ANTHROPIC", BaseURL: "https://api.anthropic.com"}},
+		[]mgmt.ProviderMappingInput{
+			{ModelID: sonnet.ID, UpstreamModelCode: "sonnet-upstream"},
+			{ModelID: opus.ID, UpstreamModelCode: "opus-upstream"},
+		})
 	member, err := management.CreateMember(ctx, actor, "网关测试成员", "", appsec.RequestMeta{})
 	if err != nil {
 		t.Fatal(err)
@@ -87,22 +95,9 @@ func TestStage4Integration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	models, err := management.Models(ctx, actor, mgmt.Page{Limit: 50}, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var modelID int64
-	for _, m := range models {
-		if m.Code == "claude-sonnet" {
-			modelID = m.ID
-		}
-	}
-	providers, err := management.Providers(ctx, actor, mgmt.Page{Limit: 50})
-	if err != nil || len(providers) != 1 {
-		t.Fatal("missing provider")
-	}
+	modelID := sonnet.ID
 	const providerKey = "stage4-provider-secret"
-	resource, err := management.CreateResource(ctx, actor, providers[0].ID, "网关资源", providerKey, appsec.RequestMeta{})
+	resource, err := management.CreateResource(ctx, actor, provider.ID, "网关资源", providerKey, appsec.RequestMeta{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,11 +275,11 @@ func TestStage4Integration(t *testing.T) {
 		if err := management.SetModelStatus(ctx, actor, modelID, "ACTIVE", appsec.RequestMeta{}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := pool.Exec(ctx, "DELETE FROM provider_endpoint WHERE provider_id=$1 AND protocol_type='ANTHROPIC_MESSAGES'", providers[0].ID); err != nil {
+		if _, err := pool.Exec(ctx, "DELETE FROM provider_endpoint WHERE provider_id=$1 AND protocol_type='ANTHROPIC'", provider.ID); err != nil {
 			t.Fatal(err)
 		}
 		checkFailure(503, "MODEL_ROUTE_UNAVAILABLE")
-		if _, err := pool.Exec(ctx, "INSERT INTO provider_endpoint(provider_id,protocol_type,base_url,created_by,updated_by,created_at,updated_at) VALUES($1,'ANTHROPIC_MESSAGES','https://api.anthropic.com','system','system',now(),now())", providers[0].ID); err != nil {
+		if _, err := pool.Exec(ctx, "INSERT INTO provider_endpoint(provider_id,protocol_type,base_url,created_by,updated_by,created_at,updated_at) VALUES($1,'ANTHROPIC','https://api.anthropic.com','system','system',now(),now())", provider.ID); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -381,7 +376,7 @@ func TestStage4Integration(t *testing.T) {
 		}
 	})
 	t.Run("credential recovery permission removal and revoke are immediate", func(t *testing.T) {
-		if _, err := pool.Exec(ctx, "UPDATE ai_resource SET credential_ciphertext=decode(repeat('00',32),'hex') WHERE id=$1", resource.ID); err != nil {
+		if _, err := pool.Exec(ctx, "UPDATE provider_credential SET credential_ciphertext=decode(repeat('00',32),'hex') WHERE id=$1", resource.ID); err != nil {
 			t.Fatal(err)
 		}
 		checkFailure(503, "CREDENTIAL_UNRECOVERABLE")

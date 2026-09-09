@@ -13,12 +13,14 @@ type Filter struct {
 	From, To                         time.Time
 	After                            int64
 	Limit                            int32
+	ProbeNext                        bool
 }
 type Row struct {
 	ClientProtocol    string    `json:"clientProtocol"`
 	ID                int64     `json:"id,string"`
 	RequestID         string    `json:"requestId"`
 	PrincipalID       int64     `json:"principalId,string"`
+	PrincipalName     string    `json:"principalName"`
 	ModelID           int64     `json:"modelId,string"`
 	RequestAt         time.Time `json:"requestAt"`
 	CompletedAt       time.Time `json:"completedAt"`
@@ -33,16 +35,19 @@ type Row struct {
 	OutputTokens      *int64    `json:"outputTokens"`
 	CachedInputTokens *int64    `json:"cachedInputTokens"`
 }
+type Page struct {
+	Items []Row
+	Total int64
+}
 type TokenRank struct {
 	PrincipalID int64  `json:"principalId,string"`
 	Name        string `json:"name"`
 	Tokens      int64  `json:"tokens"`
 }
 type ModelRank struct {
-	ModelID  int64  `json:"modelId,string"`
-	Name     string `json:"name"`
-	Requests int64  `json:"requests"`
-	Tokens   int64  `json:"tokens"`
+	UpstreamModelCode string `json:"upstreamModelCode"`
+	Requests          int64  `json:"requests"`
+	Tokens            int64  `json:"tokens"`
 }
 type Dashboard struct {
 	ActiveMemberCount int64       `json:"activeMemberCount"`
@@ -53,22 +58,22 @@ type Dashboard struct {
 	ModelRanking      []ModelRank `json:"modelRanking"`
 }
 type QueryStore interface {
-	Query(context.Context, admin.Identity, Filter) ([]Row, error)
+	Query(context.Context, admin.Identity, Filter) (Page, error)
 	Dashboard(context.Context, admin.Identity, time.Time, time.Time) (Dashboard, error)
 }
 type QueryService struct{ store QueryStore }
 
 func NewQuery(store QueryStore) *QueryService { return &QueryService{store} }
-func (s *QueryService) Query(ctx context.Context, a admin.Identity, f Filter) ([]Row, error) {
+func (s *QueryService) Query(ctx context.Context, a admin.Identity, f Filter) (Page, error) {
 	if a.ID <= 0 || a.OrganizationID <= 0 {
-		return nil, appsec.ErrUnauthenticated
+		return Page{}, appsec.ErrUnauthenticated
 	}
 	if f.After < 0 || f.Limit < 1 || f.Limit > 100 || f.From.IsZero() || !f.To.After(f.From) || f.To.Sub(f.From) > 366*24*time.Hour {
-		return nil, appsec.ErrInvalidArgument
+		return Page{}, appsec.ErrInvalidArgument
 	}
 	for _, id := range []*int64{f.PrincipalID, f.ModelID, f.ResourceID} {
 		if id != nil && *id <= 0 {
-			return nil, appsec.ErrInvalidArgument
+			return Page{}, appsec.ErrInvalidArgument
 		}
 	}
 	return s.store.Query(ctx, a, f)

@@ -33,8 +33,6 @@ type Config struct {
 	Postgres          Postgres
 	AutoMigrate       bool
 	IDNode            int
-	BootstrapSonnet   string
-	BootstrapOpus     string
 	CORS              CORS
 	Security          Security
 	Gateway           Gateway
@@ -240,8 +238,6 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 		LogFileMaxBackups: integer("LOG_FILE_MAX_BACKUPS", "10", 1000),
 		AutoMigrate:       boolean("MIGRATIONS_AUTO_APPLY", "true"),
 		IDNode:            integer("ID_NODE", "1", 65535),
-		BootstrapSonnet:   get("BOOTSTRAP_SONNET_MODEL", "claude-sonnet-5"),
-		BootstrapOpus:     get("BOOTSTRAP_OPUS_MODEL", "claude-opus-5"),
 		Postgres: Postgres{
 			Host:     get("POSTGRES_HOST", "127.0.0.1"),
 			Port:     integer("POSTGRES_PORT", "5432", 65535),
@@ -301,11 +297,6 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 	} {
 		if strings.TrimSpace(value) == "" {
 			problems = append(problems, fmt.Errorf("%s is required", key))
-		}
-	}
-	for key, value := range map[string]string{"BOOTSTRAP_SONNET_MODEL": cfg.BootstrapSonnet, "BOOTSTRAP_OPUS_MODEL": cfg.BootstrapOpus} {
-		if strings.TrimSpace(value) == "" || strings.ContainsAny(value, " \t\r\n") || len(value) > 128 {
-			problems = append(problems, fmt.Errorf("%s must be a nonempty model code of at most 128 bytes", key))
 		}
 	}
 	switch cfg.Postgres.SSLMode {

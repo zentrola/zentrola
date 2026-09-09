@@ -11,10 +11,43 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countUsage = `-- name: CountUsage :one
+SELECT COUNT(*)::bigint
+FROM usage_record u
+WHERE u.organization_id=$1
+AND u.started_at>=$2::timestamptz AND u.started_at<$3::timestamptz
+AND ($4::bigint IS NULL OR u.principal_id=$4)
+AND ($5::bigint IS NULL OR u.model_id=$5)
+AND ($6::bigint IS NULL OR u.provider_credential_id=$6)
+`
+
+type CountUsageParams struct {
+	OrganizationID int64
+	FromTime       pgtype.Timestamptz
+	ToTime         pgtype.Timestamptz
+	PrincipalID    *int64
+	ModelID        *int64
+	ResourceID     *int64
+}
+
+func (q *Queries) CountUsage(ctx context.Context, arg CountUsageParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countUsage,
+		arg.OrganizationID,
+		arg.FromTime,
+		arg.ToTime,
+		arg.PrincipalID,
+		arg.ModelID,
+		arg.ResourceID,
+	)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const insertUsageAttempts = `-- name: InsertUsageAttempts :exec
-INSERT INTO usage_record(id,organization_id,request_id,attempt_no,principal_id,provider_id,provider_model_id,resource_id,model_id,usage_scene,client_protocol,input_tokens,output_tokens,cached_input_tokens,billing_unit,started_at,completed_at,latency_ms,status,error_type,created_at)
-SELECT id,organization_id,request_id,1,principal_id,provider_id,provider_model_id,resource_id,model_id,'MODEL_GATEWAY',client_protocol,input_tokens,output_tokens,cached_input_tokens,'TOKEN',started_at,completed_at,latency_ms,status,error_type,completed_at
-FROM jsonb_to_recordset($1::jsonb) AS x(id bigint,organization_id bigint,request_id text,client_protocol text,principal_id bigint,provider_id bigint,provider_model_id bigint,resource_id bigint,model_id bigint,input_tokens bigint,output_tokens bigint,cached_input_tokens bigint,started_at timestamptz,completed_at timestamptz,latency_ms bigint,status text,error_type text)
+INSERT INTO usage_record(id,organization_id,request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,client_protocol,input_tokens,output_tokens,cached_input_tokens,billing_unit,started_at,completed_at,latency_ms,status,error_type,created_at)
+SELECT id,organization_id,request_id,1,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,'MODEL_GATEWAY',client_protocol,input_tokens,output_tokens,cached_input_tokens,'TOKEN',started_at,completed_at,latency_ms,status,error_type,completed_at
+FROM jsonb_to_recordset($1::jsonb) AS x(id bigint,organization_id bigint,request_id text,client_protocol text,principal_id bigint,provider_id bigint,provider_model_id bigint,provider_credential_id bigint,model_id bigint,input_tokens bigint,output_tokens bigint,cached_input_tokens bigint,started_at timestamptz,completed_at timestamptz,latency_ms bigint,status text,error_type text)
 ON CONFLICT(request_id,attempt_no) DO NOTHING
 `
 
@@ -24,16 +57,17 @@ func (q *Queries) InsertUsageAttempts(ctx context.Context, payload []byte) error
 }
 
 const queryUsage = `-- name: QueryUsage :many
-SELECT id,request_id,client_protocol,principal_id,model_id,started_at,completed_at,latency_ms,status,error_type,
-attempt_no,provider_id,provider_model_id,resource_id,input_tokens,output_tokens,cached_input_tokens
-FROM usage_record
-WHERE organization_id=$1
-AND (id<$2::bigint OR $2::bigint=0)
-AND started_at>=$3::timestamptz AND started_at<$4::timestamptz
-AND ($5::bigint IS NULL OR principal_id=$5)
-AND ($6::bigint IS NULL OR model_id=$6)
-AND ($7::bigint IS NULL OR resource_id=$7)
-ORDER BY id DESC LIMIT $8::int
+SELECT u.id,u.request_id,u.client_protocol,u.principal_id,p.name AS principal_name,u.model_id,u.started_at,u.completed_at,u.latency_ms,u.status,u.error_type,
+attempt_no,provider_id,provider_model_id,provider_credential_id AS resource_id,input_tokens,output_tokens,cached_input_tokens
+FROM usage_record u
+JOIN principal p ON p.id=u.principal_id AND p.organization_id=u.organization_id
+WHERE u.organization_id=$1
+AND (u.id<$2::bigint OR $2::bigint=0)
+AND u.started_at>=$3::timestamptz AND u.started_at<$4::timestamptz
+AND ($5::bigint IS NULL OR u.principal_id=$5)
+AND ($6::bigint IS NULL OR u.model_id=$6)
+AND ($7::bigint IS NULL OR u.provider_credential_id=$7)
+ORDER BY u.id DESC LIMIT $8::int
 `
 
 type QueryUsageParams struct {
@@ -52,6 +86,7 @@ type QueryUsageRow struct {
 	RequestID         string
 	ClientProtocol    string
 	PrincipalID       int64
+	PrincipalName     string
 	ModelID           int64
 	StartedAt         pgtype.Timestamptz
 	CompletedAt       pgtype.Timestamptz
@@ -90,6 +125,7 @@ func (q *Queries) QueryUsage(ctx context.Context, arg QueryUsageParams) ([]Query
 			&i.RequestID,
 			&i.ClientProtocol,
 			&i.PrincipalID,
+			&i.PrincipalName,
 			&i.ModelID,
 			&i.StartedAt,
 			&i.CompletedAt,
@@ -119,8 +155,8 @@ SELECT
     (SELECT COUNT(*)::bigint FROM principal p
      WHERE p.organization_id=$1
        AND p.principal_type='MEMBER' AND p.is_deleted=false AND p.status='ACTIVE') AS active_member_count,
-    (SELECT COUNT(*)::bigint FROM ai_model WHERE is_deleted=false AND status='ACTIVE') AS model_count,
-    (SELECT COUNT(*)::bigint FROM ai_provider WHERE is_deleted=false AND status='ACTIVE') AS provider_count,
+    (SELECT COUNT(*)::bigint FROM model WHERE is_deleted=false AND status='ACTIVE') AS model_count,
+    (SELECT COUNT(*)::bigint FROM provider WHERE is_deleted=false AND status='ACTIVE') AS provider_count,
     COALESCE((
         SELECT SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0))::bigint
         FROM usage_record u
@@ -156,16 +192,16 @@ func (q *Queries) UsageDashboardCounts(ctx context.Context, arg UsageDashboardCo
 }
 
 const usageModelRanking = `-- name: UsageModelRanking :many
-SELECT m.id AS model_id, m.display_name AS name,
+SELECT pm.upstream_model_code,
        COUNT(DISTINCT u.request_id)::bigint AS requests,
        COALESCE(SUM(COALESCE(u.input_tokens, 0) + COALESCE(u.output_tokens, 0)), 0)::bigint AS tokens
 FROM usage_record u
-JOIN ai_model m ON m.id=u.model_id
+JOIN provider_model pm ON pm.id=u.provider_model_id AND pm.provider_id=u.provider_id
 WHERE u.organization_id=$1
   AND u.started_at>=$2::timestamptz
   AND u.started_at<$3::timestamptz
-GROUP BY m.id, m.display_name
-ORDER BY requests DESC, tokens DESC, m.id DESC
+GROUP BY pm.upstream_model_code
+ORDER BY requests DESC, tokens DESC, pm.upstream_model_code
 LIMIT 10
 `
 
@@ -176,10 +212,9 @@ type UsageModelRankingParams struct {
 }
 
 type UsageModelRankingRow struct {
-	ModelID  int64
-	Name     string
-	Requests int64
-	Tokens   int64
+	UpstreamModelCode string
+	Requests          int64
+	Tokens            int64
 }
 
 func (q *Queries) UsageModelRanking(ctx context.Context, arg UsageModelRankingParams) ([]UsageModelRankingRow, error) {
@@ -191,12 +226,7 @@ func (q *Queries) UsageModelRanking(ctx context.Context, arg UsageModelRankingPa
 	items := []UsageModelRankingRow{}
 	for rows.Next() {
 		var i UsageModelRankingRow
-		if err := rows.Scan(
-			&i.ModelID,
-			&i.Name,
-			&i.Requests,
-			&i.Tokens,
-		); err != nil {
+		if err := rows.Scan(&i.UpstreamModelCode, &i.Requests, &i.Tokens); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

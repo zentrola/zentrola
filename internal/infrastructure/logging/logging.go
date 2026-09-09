@@ -4,6 +4,7 @@ package logging
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -216,21 +217,137 @@ func (h *prettyHandler) Handle(_ context.Context, record slog.Record) error {
 	line.WriteByte(' ')
 	line.WriteString(paint(h.color, levelColor(record.Level), levelText))
 	line.WriteByte(' ')
-	traceContext := strings.TrimSpace(singleLine(traceID) + " " + singleLine(spanID))
+	traceContext := singleLine(traceID)
+	if spanID = singleLine(spanID); spanID != "" {
+		if traceContext != "" {
+			traceContext += ","
+		}
+		traceContext += spanID
+	}
 	line.WriteString(paint(h.color, "35", "["+traceContext+"]"))
 	line.WriteByte(' ')
 	line.WriteString(paint(h.color, "33", component))
 	line.WriteByte(' ')
 	line.WriteString(paint(h.color, "32", "["+source+"]"))
 	line.WriteString(" - ")
-	line.WriteString(singleLine(record.Message))
-	appendAttrs(&line, h.groups, attributes)
+	message, remaining := compactPrettyRecord(record.Message, attributes)
+	line.WriteString(message)
+	appendAttrs(&line, h.groups, remaining)
 	line.WriteByte('\n')
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	_, err := h.out.Write(line.Bytes())
 	return err
+}
+
+var compactAccessKeys = map[string]struct{}{
+	"request_time": {}, "method": {}, "duration_ms": {}, "path": {}, "status": {},
+	"request_bytes": {}, "response_bytes": {}, "request_body": {}, "response_body": {},
+	"request_headers": {}, "response_headers": {},
+	"protocol": {}, "upstream_status": {}, "upstream_headers_ms": {}, "first_byte_ms": {},
+	"input_tokens": {}, "output_tokens": {}, "cached_input_tokens": {},
+	"provider_id": {}, "resource_id": {}, "model_id": {}, "provider_model_id": {},
+	"upstream_request_id": {},
+}
+
+// compactPrettyRecord 为访问日志提供固定的人类可读布局；JSON Handler 仍保留完整字段名。
+func compactPrettyRecord(message string, attributes []slog.Attr) (string, []slog.Attr) {
+	if message != "http request" {
+		return singleLine(message), attributes
+	}
+	values := make(map[string]slog.Value, len(compactAccessKeys))
+	remaining := make([]slog.Attr, 0, len(attributes))
+	for _, attr := range attributes {
+		if _, compact := compactAccessKeys[attr.Key]; compact {
+			values[attr.Key] = attr.Value.Resolve()
+			continue
+		}
+		remaining = append(remaining, attr)
+	}
+
+	var line strings.Builder
+	appendCompactValue(&line, "", values["method"], "")
+	appendCompactValue(&line, "", values["path"], "")
+	appendCompactValue(&line, "status=", values["status"], "")
+	appendCompactValue(&line, "cost=", values["duration_ms"], "ms")
+	appendCompactObject(&line, "req_headers=", values["request_headers"])
+	appendCompactObject(&line, "res_headers=", values["response_headers"])
+	appendCompactValue(&line, "proto=", values["protocol"], "")
+	appendCompactValue(&line, "upstream=", values["upstream_status"], "")
+	appendCompactValue(&line, "headers=", values["upstream_headers_ms"], "ms")
+	appendCompactValue(&line, "ttfb=", values["first_byte_ms"], "ms")
+	appendCompactTokens(&line, values)
+	appendCompactValue(&line, "provider=", values["provider_id"], "")
+	appendCompactValue(&line, "resource=", values["resource_id"], "")
+	appendCompactValue(&line, "model=", values["model_id"], "")
+	appendCompactValue(&line, "provider_model=", values["provider_model_id"], "")
+	appendCompactValue(&line, "upstream_request=", values["upstream_request_id"], "")
+	appendCompactBody(&line, "req=", values["request_body"])
+	appendCompactBody(&line, "res=", values["response_body"])
+	if line.Len() == 0 {
+		return "http request", remaining
+	}
+	return line.String(), remaining
+}
+
+func appendCompactValue(line *strings.Builder, prefix string, value slog.Value, suffix string) {
+	if value.Kind() == slog.KindAny && value.Any() == nil {
+		return
+	}
+	appendCompactText(line, prefix+formatValue(value)+suffix)
+}
+
+func appendCompactText(line *strings.Builder, value string) {
+	if value == "" {
+		return
+	}
+	if line.Len() > 0 {
+		line.WriteString(" - ")
+	}
+	line.WriteString(value)
+}
+
+func appendCompactTokens(line *strings.Builder, values map[string]slog.Value) {
+	input, inputOK := values["input_tokens"]
+	output, outputOK := values["output_tokens"]
+	cached, cachedOK := values["cached_input_tokens"]
+	if !inputOK && !outputOK && !cachedOK {
+		return
+	}
+	parts := []string{"-", "-", "-"}
+	if inputOK {
+		parts[0] = formatValue(input)
+	}
+	if outputOK {
+		parts[1] = formatValue(output)
+	}
+	if cachedOK {
+		parts[2] = formatValue(cached)
+	}
+	appendCompactText(line, "tokens="+strings.Join(parts, "/"))
+}
+
+func appendCompactBody(line *strings.Builder, prefix string, value slog.Value) {
+	if value.Kind() != slog.KindString || value.String() == "" {
+		return
+	}
+	body := singleLine(value.String())
+	if !json.Valid([]byte(body)) {
+		body = formatValue(value)
+	}
+	appendCompactText(line, prefix+body)
+}
+
+func appendCompactObject(line *strings.Builder, prefix string, value slog.Value) {
+	if value.Kind() == slog.KindAny && value.Any() == nil {
+		return
+	}
+	encoded, err := json.Marshal(value.Any())
+	if err != nil || bytes.Equal(encoded, []byte("null")) || bytes.Equal(encoded, []byte("{}")) {
+		return
+	}
+	appendCompactText(line, prefix+singleLine(string(encoded)))
 }
 
 func (h *prettyHandler) WithAttrs(attrs []slog.Attr) slog.Handler {

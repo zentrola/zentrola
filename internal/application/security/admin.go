@@ -51,7 +51,7 @@ func (s *AdminService) Initialize(ctx context.Context, username, password string
 func (s *AdminService) initialPassword(username, password string) func() (string, error) {
 	return func() (string, error) {
 		if len(username) == 0 || len(username) > 64 || !utf8.ValidString(username) || strings.TrimSpace(username) != username ||
-			strings.IndexFunc(username, unicode.IsControl) >= 0 || !utf8.ValidString(password) || len(password) < 12 || len(password) > 72 || strings.ContainsRune(password, 0) {
+			strings.IndexFunc(username, unicode.IsControl) >= 0 || !utf8.ValidString(password) || utf8.RuneCountInString(password) < 6 || len(password) > 72 || strings.ContainsRune(password, 0) {
 			return "", ErrInvalidArgument
 		}
 		return s.passwords.Hash(password)
@@ -109,7 +109,7 @@ func (s *AdminService) verifyCredentials(ctx context.Context, username, password
 }
 
 func (s *AdminService) ChangePassword(ctx context.Context, actor admin.Identity, current, next string, meta RequestMeta) error {
-	if current == "" || current == next || !utf8.ValidString(next) || len(next) < 12 || len(next) > 72 || strings.ContainsRune(next, 0) {
+	if current == "" || current == next || !utf8.ValidString(next) || utf8.RuneCountInString(next) < 6 || len(next) > 72 || strings.ContainsRune(next, 0) {
 		return ErrInvalidArgument
 	}
 	// 复用登录失败计数与锁定策略，避免通过修改密码接口无限猜测当前密码。

@@ -24,6 +24,7 @@ type LoginLockResponse struct {
 type PageResponse[T any] struct {
 	Items      []T     `json:"items"`
 	NextCursor *string `json:"nextCursor"`
+	Total      int64   `json:"total"`
 }
 
 type UpdatedResponse struct {

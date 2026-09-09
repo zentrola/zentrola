@@ -16,8 +16,8 @@ type queryStoreStub struct {
 	to        time.Time
 }
 
-func (s *queryStoreStub) Query(context.Context, admin.Identity, Filter) ([]Row, error) {
-	return nil, nil
+func (s *queryStoreStub) Query(context.Context, admin.Identity, Filter) (Page, error) {
+	return Page{}, nil
 }
 
 func (s *queryStoreStub) Dashboard(_ context.Context, _ admin.Identity, from, to time.Time) (Dashboard, error) {

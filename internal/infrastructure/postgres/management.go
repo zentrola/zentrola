@@ -117,17 +117,17 @@ func (s *managementSession) Audit(ctx context.Context, a mgmt.Audit, meta appsec
 func memberView(r dbgen.Principal) mgmt.Member {
 	return mgmt.Member{ID: r.ID, Name: r.Name, Remark: r.Remark, Status: r.Status, CreatedAt: r.CreatedAt.Time}
 }
-func groupView(r dbgen.AiGroup) mgmt.Group {
+func groupView(r dbgen.PrincipalGroup) mgmt.Group {
 	return mgmt.Group{ID: r.ID, Code: r.GroupCode, Name: r.GroupName, Remark: r.Remark, Status: r.Status, CreatedAt: r.CreatedAt.Time}
 }
-func modelView(r dbgen.AiModel) mgmt.Model {
+func modelView(r dbgen.Model) mgmt.Model {
 	// 数组格式由数据库 CHECK 保证；响应只暴露业务字段。
 	input, output := []string{}, []string{}
 	_ = json.Unmarshal(r.InputModalities, &input)
 	_ = json.Unmarshal(r.OutputModalities, &output)
 	return mgmt.Model{ID: r.ID, Code: r.ModelCode, Name: r.DisplayName, Status: r.Status, InputModalities: input, OutputModalities: output, Remark: r.Remark, CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time}
 }
-func providerView(r dbgen.AiProvider) mgmt.Provider {
+func providerView(r dbgen.Provider) mgmt.Provider {
 	names := []string{}
 	_ = json.Unmarshal(r.ProxyHeaderNames, &names)
 	headers := make([]mgmt.ProviderProxyHeader, 0, len(names))
@@ -192,8 +192,25 @@ func keyView(r dbgen.ManageKeysRow) mgmt.Key {
 func operationView(r dbgen.ManageOperationsRow) mgmt.Operation {
 	return mgmt.Operation{ID: r.ID, OperatorName: r.OperatorName, Type: r.OperationType, TargetType: r.TargetType, TargetID: r.TargetID, RequestID: r.RequestID, Result: r.Result, ErrorCode: r.ErrorCode, Before: r.BeforeData, After: r.AfterData, CreatedAt: r.CreatedAt.Time}
 }
+func managementPageLimit(p mgmt.Page) int32 {
+	if p.ProbeNext {
+		return p.Limit + 1
+	}
+	return p.Limit
+}
 func (s *managementSession) Members(ctx context.Context, p mgmt.Page) ([]mgmt.Member, error) {
-	rows, err := s.q.ManageMembers(ctx, dbgen.ManageMembersParams{OrganizationID: s.actor.OrganizationID, ID: p.After, Limit: p.Limit})
+	rows, err := s.q.ManageMembers(ctx, dbgen.ManageMembersParams{OrganizationID: s.actor.OrganizationID, ID: p.After, Limit: managementPageLimit(p)})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]mgmt.Member, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, memberView(row))
+	}
+	return result, nil
+}
+func (s *managementSession) MemberSuggestions(ctx context.Context, p mgmt.Page, name string) ([]mgmt.Member, error) {
+	rows, err := s.q.ManageMemberSuggestions(ctx, dbgen.ManageMemberSuggestionsParams{OrganizationID: s.actor.OrganizationID, MemberName: name, AfterID: p.After, PageLimit: managementPageLimit(p)})
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +221,7 @@ func (s *managementSession) Members(ctx context.Context, p mgmt.Page) ([]mgmt.Me
 	return result, nil
 }
 func (s *managementSession) Groups(ctx context.Context, p mgmt.Page, status string) ([]mgmt.Group, error) {
-	rows, err := s.q.ManageGroups(ctx, dbgen.ManageGroupsParams{OrganizationID: s.actor.OrganizationID, Status: status, AfterID: p.After, PageLimit: p.Limit})
+	rows, err := s.q.ManageGroups(ctx, dbgen.ManageGroupsParams{OrganizationID: s.actor.OrganizationID, Status: status, AfterID: p.After, PageLimit: managementPageLimit(p)})
 	if err != nil {
 		return nil, err
 	}
@@ -215,7 +232,7 @@ func (s *managementSession) Groups(ctx context.Context, p mgmt.Page, status stri
 	return result, nil
 }
 func (s *managementSession) Models(ctx context.Context, p mgmt.Page, status string) ([]mgmt.Model, error) {
-	rows, err := s.q.ManageModels(ctx, dbgen.ManageModelsParams{Status: status, AfterID: p.After, PageLimit: p.Limit})
+	rows, err := s.q.ManageModels(ctx, dbgen.ManageModelsParams{Status: status, AfterID: p.After, PageLimit: managementPageLimit(p)})
 	if err != nil {
 		return nil, err
 	}
@@ -226,7 +243,7 @@ func (s *managementSession) Models(ctx context.Context, p mgmt.Page, status stri
 	return result, nil
 }
 func (s *managementSession) Providers(ctx context.Context, p mgmt.Page) ([]mgmt.Provider, error) {
-	rows, err := s.q.ManageProviders(ctx, dbgen.ManageProvidersParams{ID: p.After, Limit: p.Limit})
+	rows, err := s.q.ManageProviders(ctx, dbgen.ManageProvidersParams{ID: p.After, Limit: managementPageLimit(p)})
 	if err != nil {
 		return nil, err
 	}
@@ -253,7 +270,7 @@ func (s *managementSession) ProviderMappings(ctx context.Context, providerID int
 	return result, nil
 }
 func (s *managementSession) Resources(ctx context.Context, p mgmt.Page) ([]mgmt.Resource, error) {
-	rows, err := s.q.ManageResources(ctx, dbgen.ManageResourcesParams{OrganizationID: s.actor.OrganizationID, ID: p.After, Limit: p.Limit})
+	rows, err := s.q.ManageResources(ctx, dbgen.ManageResourcesParams{OrganizationID: s.actor.OrganizationID, ID: p.After, Limit: managementPageLimit(p)})
 	if err != nil {
 		return nil, err
 	}
@@ -264,7 +281,7 @@ func (s *managementSession) Resources(ctx context.Context, p mgmt.Page) ([]mgmt.
 	return result, nil
 }
 func (s *managementSession) Operations(ctx context.Context, p mgmt.Page) ([]mgmt.Operation, error) {
-	rows, err := s.q.ManageOperations(ctx, dbgen.ManageOperationsParams{OrganizationID: s.actor.OrganizationID, ID: p.After, Limit: p.Limit})
+	rows, err := s.q.ManageOperations(ctx, dbgen.ManageOperationsParams{OrganizationID: s.actor.OrganizationID, ID: p.After, Limit: managementPageLimit(p)})
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +292,7 @@ func (s *managementSession) Operations(ctx context.Context, p mgmt.Page) ([]mgmt
 	return result, nil
 }
 func (s *managementSession) GroupMembers(ctx context.Context, id int64, p mgmt.Page) ([]mgmt.Member, error) {
-	rows, err := s.q.ManageGroupMembers(ctx, dbgen.ManageGroupMembersParams{OrganizationID: s.actor.OrganizationID, GroupID: id, ID: p.After, Limit: p.Limit})
+	rows, err := s.q.ManageGroupMembers(ctx, dbgen.ManageGroupMembersParams{OrganizationID: s.actor.OrganizationID, GroupID: id, ID: p.After, Limit: managementPageLimit(p)})
 	if err != nil {
 		return nil, err
 	}
@@ -286,7 +303,7 @@ func (s *managementSession) GroupMembers(ctx context.Context, id int64, p mgmt.P
 	return result, nil
 }
 func (s *managementSession) MemberGroups(ctx context.Context, id int64, p mgmt.Page) ([]mgmt.Group, error) {
-	rows, err := s.q.ManageMemberGroups(ctx, dbgen.ManageMemberGroupsParams{OrganizationID: s.actor.OrganizationID, PrincipalID: id, ID: p.After, Limit: p.Limit})
+	rows, err := s.q.ManageMemberGroups(ctx, dbgen.ManageMemberGroupsParams{OrganizationID: s.actor.OrganizationID, PrincipalID: id, ID: p.After, Limit: managementPageLimit(p)})
 	if err != nil {
 		return nil, err
 	}
@@ -297,7 +314,7 @@ func (s *managementSession) MemberGroups(ctx context.Context, id int64, p mgmt.P
 	return result, nil
 }
 func (s *managementSession) GroupModels(ctx context.Context, id int64, p mgmt.Page) ([]mgmt.Model, error) {
-	rows, err := s.q.ManageGroupModels(ctx, dbgen.ManageGroupModelsParams{OrganizationID: s.actor.OrganizationID, GroupID: id, ID: p.After, Limit: p.Limit})
+	rows, err := s.q.ManageGroupModels(ctx, dbgen.ManageGroupModelsParams{OrganizationID: s.actor.OrganizationID, GroupID: id, ID: p.After, Limit: managementPageLimit(p)})
 	if err != nil {
 		return nil, err
 	}
@@ -308,7 +325,7 @@ func (s *managementSession) GroupModels(ctx context.Context, id int64, p mgmt.Pa
 	return result, nil
 }
 func (s *managementSession) Keys(ctx context.Context, id int64, p mgmt.Page) ([]mgmt.Key, error) {
-	rows, err := s.q.ManageKeys(ctx, dbgen.ManageKeysParams{OrganizationID: s.actor.OrganizationID, PrincipalID: id, ID: p.After, Limit: p.Limit})
+	rows, err := s.q.ManageKeys(ctx, dbgen.ManageKeysParams{OrganizationID: s.actor.OrganizationID, PrincipalID: id, ID: p.After, Limit: managementPageLimit(p)})
 	if err != nil {
 		return nil, err
 	}
@@ -317,6 +334,39 @@ func (s *managementSession) Keys(ctx context.Context, id int64, p mgmt.Page) ([]
 		result = append(result, keyView(row))
 	}
 	return result, nil
+}
+func (s *managementSession) CountMembers(ctx context.Context) (int64, error) {
+	return s.q.CountManageMembers(ctx, s.actor.OrganizationID)
+}
+func (s *managementSession) CountMemberSuggestions(ctx context.Context, name string) (int64, error) {
+	return s.q.CountManageMemberSuggestions(ctx, dbgen.CountManageMemberSuggestionsParams{OrganizationID: s.actor.OrganizationID, MemberName: name})
+}
+func (s *managementSession) CountGroups(ctx context.Context, status string) (int64, error) {
+	return s.q.CountManageGroups(ctx, dbgen.CountManageGroupsParams{OrganizationID: s.actor.OrganizationID, Status: status})
+}
+func (s *managementSession) CountModels(ctx context.Context, status string) (int64, error) {
+	return s.q.CountManageModels(ctx, status)
+}
+func (s *managementSession) CountProviders(ctx context.Context) (int64, error) {
+	return s.q.CountManageProviders(ctx)
+}
+func (s *managementSession) CountResources(ctx context.Context) (int64, error) {
+	return s.q.CountManageResources(ctx, s.actor.OrganizationID)
+}
+func (s *managementSession) CountOperations(ctx context.Context) (int64, error) {
+	return s.q.CountManageOperations(ctx, s.actor.OrganizationID)
+}
+func (s *managementSession) CountGroupMembers(ctx context.Context, id int64) (int64, error) {
+	return s.q.CountManageGroupMembers(ctx, dbgen.CountManageGroupMembersParams{OrganizationID: s.actor.OrganizationID, GroupID: id})
+}
+func (s *managementSession) CountMemberGroups(ctx context.Context, id int64) (int64, error) {
+	return s.q.CountManageMemberGroups(ctx, dbgen.CountManageMemberGroupsParams{OrganizationID: s.actor.OrganizationID, PrincipalID: id})
+}
+func (s *managementSession) CountGroupModels(ctx context.Context, id int64) (int64, error) {
+	return s.q.CountManageGroupModels(ctx, dbgen.CountManageGroupModelsParams{OrganizationID: s.actor.OrganizationID, GroupID: id})
+}
+func (s *managementSession) CountKeys(ctx context.Context, id int64) (int64, error) {
+	return s.q.CountManageKeys(ctx, dbgen.CountManageKeysParams{OrganizationID: s.actor.OrganizationID, PrincipalID: id})
 }
 func (s *managementSession) Member(ctx context.Context, id int64) (mgmt.Member, error) {
 	row, err := s.q.ManageMember(ctx, dbgen.ManageMemberParams{OrganizationID: s.actor.OrganizationID, ID: id})
@@ -468,7 +518,7 @@ func (s *managementSession) syncProviderEndpoints(ctx context.Context, p mgmt.Pr
 			return err
 		}
 	}
-	for _, protocol := range []string{"OPENAI_CHAT", "OPENAI_RESPONSES", "ANTHROPIC_MESSAGES"} {
+	for _, protocol := range []string{"OPENAI", "ANTHROPIC"} {
 		if _, keep := desired[protocol]; keep {
 			continue
 		}

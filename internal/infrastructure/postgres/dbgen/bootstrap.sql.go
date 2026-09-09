@@ -15,36 +15,12 @@ const bootstrapInitialized = `-- name: BootstrapInitialized :one
 SELECT EXISTS (SELECT 1 FROM organization WHERE is_deleted = false)
 `
 
-// 只检查首次初始化的事实，不要求管理员未曾修改/停用模型或 Provider。
+// 只检查首次初始化的事实，不恢复已删除的组织。
 func (q *Queries) BootstrapInitialized(ctx context.Context) (bool, error) {
 	row := q.db.QueryRow(ctx, bootstrapInitialized)
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
-}
-
-const createBootstrapModel = `-- name: CreateBootstrapModel :exec
-INSERT INTO ai_model (id, model_code, display_name, input_modalities, output_modalities, status, created_by, updated_by, created_at, updated_at)
-VALUES ($1, $2, $3, $4, '["TEXT"]', 'ACTIVE', 'system', 'system', $5, $5)
-`
-
-type CreateBootstrapModelParams struct {
-	ID              int64
-	ModelCode       string
-	DisplayName     string
-	InputModalities []byte
-	CreatedAt       pgtype.Timestamptz
-}
-
-func (q *Queries) CreateBootstrapModel(ctx context.Context, arg CreateBootstrapModelParams) error {
-	_, err := q.db.Exec(ctx, createBootstrapModel,
-		arg.ID,
-		arg.ModelCode,
-		arg.DisplayName,
-		arg.InputModalities,
-		arg.CreatedAt,
-	)
-	return err
 }
 
 const createBootstrapOrganization = `-- name: CreateBootstrapOrganization :exec
@@ -70,7 +46,7 @@ func (q *Queries) CreateBootstrapOrganization(ctx context.Context, arg CreateBoo
 }
 
 const createBootstrapProvider = `-- name: CreateBootstrapProvider :exec
-INSERT INTO ai_provider (id, provider_code, provider_name, provider_type, status, created_by, updated_by, created_at, updated_at)
+INSERT INTO provider (id, provider_code, provider_name, provider_type, status, created_by, updated_by, created_at, updated_at)
 VALUES ($1, $2, $3, 'OFFICIAL', 'ACTIVE', 'system', 'system', $4, $4)
 `
 
@@ -108,30 +84,6 @@ func (q *Queries) CreateBootstrapProviderEndpoint(ctx context.Context, arg Creat
 		arg.ProviderID,
 		arg.ProtocolType,
 		arg.BaseUrl,
-		arg.CreatedAt,
-	)
-	return err
-}
-
-const createBootstrapProviderModel = `-- name: CreateBootstrapProviderModel :exec
-INSERT INTO provider_model (id, provider_id, model_id, upstream_model_code, priority, created_by, updated_by, created_at, updated_at)
-VALUES ($1, $2, $3, $4, 100, 'system', 'system', $5, $5)
-`
-
-type CreateBootstrapProviderModelParams struct {
-	ID                int64
-	ProviderID        int64
-	ModelID           int64
-	UpstreamModelCode string
-	CreatedAt         pgtype.Timestamptz
-}
-
-func (q *Queries) CreateBootstrapProviderModel(ctx context.Context, arg CreateBootstrapProviderModelParams) error {
-	_, err := q.db.Exec(ctx, createBootstrapProviderModel,
-		arg.ID,
-		arg.ProviderID,
-		arg.ModelID,
-		arg.UpstreamModelCode,
 		arg.CreatedAt,
 	)
 	return err

@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { api, errorText, gatewayBaseUrl } from '../api'
-import { count, dateOnly } from '../composables'
-import { t } from '../i18n'
+import { count } from '../composables'
+import { activeLocale, t } from '../i18n'
 import type { Dashboard } from '../types'
 import Icon from '../components/Icon.vue'
 import Modal from '../components/Modal.vue'
 import PageHeader from '../components/PageHeader.vue'
 
 type AccessProtocol = 'openai' | 'anthropic'
+type SetupMethod = 'script' | 'ccswitch'
 type SetupPlatform = 'unix' | 'windows'
 
 const summary = ref<Dashboard | null>(null)
@@ -16,38 +17,40 @@ const loading = ref(false)
 const error = ref('')
 const copied = ref('')
 const setupProtocol = ref<AccessProtocol | null>(null)
-const setupPlatform = ref<SetupPlatform>('unix')
+const setupMethod = ref<SetupMethod>('script')
 const scriptCopied = ref('')
 let revision = 0
 
 const codexUrl = `${gatewayBaseUrl}/v1`
 const claudeUrl = `${gatewayBaseUrl}/anthropic`
-const today = new Date()
-const todayLabel = dateOnly(today.toISOString())
+const currentMonth = ref(new Date())
+const monthLabel = computed(() =>
+  new Intl.DateTimeFormat(activeLocale.value, { year: 'numeric', month: 'long' }).format(
+    currentMonth.value,
+  ),
+)
 const maxTokens = computed(() =>
   Math.max(1, ...(summary.value?.tokenRanking.map((item) => item.tokens) ?? [])),
 )
 const maxRequests = computed(() =>
   Math.max(1, ...(summary.value?.modelRanking.map((item) => item.requests) ?? [])),
 )
-const setupProtocolName = computed(() =>
-  setupProtocol.value === 'anthropic' ? 'Anthropic' : 'OpenAI',
-)
 const setupUrl = computed(() => (setupProtocol.value === 'anthropic' ? claudeUrl : codexUrl))
-const setupScript = computed(() => {
+const setupScripts = computed<Record<SetupPlatform, string>>(() => {
   const baseVariable =
     setupProtocol.value === 'anthropic' ? 'ANTHROPIC_BASE_URL' : 'OPENAI_BASE_URL'
   const keyVariable = setupProtocol.value === 'anthropic' ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY'
-  return setupPlatform.value === 'windows'
-    ? `$secureKey = Read-Host 'Zentrola Access Key' -AsSecureString\n$zentrolaKey = [Net.NetworkCredential]::new('', $secureKey).Password\n$env:${baseVariable} = '${setupUrl.value}'\n$env:${keyVariable} = $zentrolaKey\nRemove-Variable secureKey, zentrolaKey`
-    : `printf 'Zentrola Access Key: '\nread -r -s ZENTROLA_KEY\nprintf '\\n'\nexport ${baseVariable}='${setupUrl.value}'\nexport ${keyVariable}="$ZENTROLA_KEY"\nunset ZENTROLA_KEY`
+  return {
+    unix: `printf 'Zentrola Access Key: '\nread -r -s ZENTROLA_KEY\nprintf '\\n'\nexport ${baseVariable}='${setupUrl.value}'\nexport ${keyVariable}="$ZENTROLA_KEY"\nunset ZENTROLA_KEY`,
+    windows: `$secureKey = Read-Host 'Zentrola Access Key' -AsSecureString\n$zentrolaKey = [Net.NetworkCredential]::new('', $secureKey).Password\n$env:${baseVariable} = '${setupUrl.value}'\n$env:${keyVariable} = $zentrolaKey\nRemove-Variable secureKey, zentrolaKey`,
+  }
 })
 
-function todayQuery() {
-  const from = new Date()
-  from.setHours(0, 0, 0, 0)
-  const to = new Date(from)
-  to.setDate(to.getDate() + 1)
+function monthQuery() {
+  const now = new Date()
+  currentMonth.value = now
+  const from = new Date(now.getFullYear(), now.getMonth(), 1)
+  const to = new Date(now.getFullYear(), now.getMonth() + 1, 1)
   return new URLSearchParams({ from: from.toISOString(), to: to.toISOString() }).toString()
 }
 
@@ -56,7 +59,7 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const result = await api<Dashboard>(`/usage/dashboard?${todayQuery()}`)
+    const result = await api<Dashboard>(`/usage/dashboard?${monthQuery()}`)
     if (current === revision)
       summary.value = {
         activeMemberCount: Number.isFinite(result.activeMemberCount) ? result.activeMemberCount : 0,
@@ -87,8 +90,20 @@ async function copyAddress(name: string, value: string) {
 
 function openSetup() {
   setupProtocol.value = 'openai'
-  setupPlatform.value = 'unix'
+  setupMethod.value = 'script'
   scriptCopied.value = ''
+}
+
+function selectSetupMethod(method: SetupMethod) {
+  setupMethod.value = method
+  scriptCopied.value = ''
+}
+
+function focusSetupMethod(method: SetupMethod) {
+  selectSetupMethod(method)
+  window.requestAnimationFrame(() =>
+    document.querySelector<HTMLElement>(`#setup-method-${method}-tab`)?.focus(),
+  )
 }
 
 function selectSetupProtocol(protocol: AccessProtocol) {
@@ -96,9 +111,11 @@ function selectSetupProtocol(protocol: AccessProtocol) {
   scriptCopied.value = ''
 }
 
-function selectSetupPlatform(platform: SetupPlatform) {
-  setupPlatform.value = platform
-  scriptCopied.value = ''
+function focusSetupProtocol(protocol: AccessProtocol) {
+  selectSetupProtocol(protocol)
+  window.requestAnimationFrame(() =>
+    document.querySelector<HTMLElement>(`#setup-${protocol}-tab`)?.focus(),
+  )
 }
 
 function closeSetup() {
@@ -106,12 +123,12 @@ function closeSetup() {
   scriptCopied.value = ''
 }
 
-async function copySetupScript() {
+async function copySetupScript(platform: SetupPlatform) {
   try {
-    await navigator.clipboard.writeText(setupScript.value)
-    scriptCopied.value = 'success'
+    await navigator.clipboard.writeText(setupScripts.value[platform])
+    scriptCopied.value = platform
     window.setTimeout(() => {
-      if (scriptCopied.value === 'success') scriptCopied.value = ''
+      if (scriptCopied.value === platform) scriptCopied.value = ''
     }, 1800)
   } catch {
     scriptCopied.value = 'error'
@@ -133,11 +150,11 @@ onMounted(load)
   </p>
 
   <div class="dashboard-overview" :aria-busy="loading">
-    <section class="dashboard-metrics" :aria-label="t('home.todayOverview')">
+    <section class="dashboard-metrics" :aria-label="t('home.monthOverview')">
       <div class="dashboard-section-head">
         <div>
-          <h2>{{ t('home.todayOverview') }}</h2>
-          <p>{{ todayLabel }}</p>
+          <h2>{{ t('home.monthOverview') }}</h2>
+          <p>{{ monthLabel }}</p>
         </div>
         <span class="live-indicator"><i></i>{{ t('home.liveData') }}</span>
       </div>
@@ -155,7 +172,7 @@ onMounted(load)
           <dd>{{ summary ? count(summary.providerCount) : '—' }}</dd>
         </div>
         <div class="token-total">
-          <dt>{{ t('home.todayTokens') }}</dt>
+          <dt>{{ t('home.monthTokens') }}</dt>
           <dd>{{ summary ? count(summary.totalTokens) : '—' }}</dd>
         </div>
       </dl>
@@ -248,11 +265,11 @@ onMounted(load)
         <span>Top 10</span>
       </div>
       <ol v-if="summary?.modelRanking.length" class="ranking-list model-ranking">
-        <li v-for="(item, index) in summary.modelRanking" :key="item.modelId">
+        <li v-for="(item, index) in summary.modelRanking" :key="item.upstreamModelCode">
           <span class="rank-number">{{ String(index + 1).padStart(2, '0') }}</span>
           <div class="rank-content">
             <div class="rank-label">
-              <strong>{{ item.name }}</strong>
+              <strong class="model-name-regular">{{ item.upstreamModelCode }}</strong>
               <span>{{ t('home.requestCount', { count: count(item.requests) }) }}</span>
             </div>
             <div class="rank-track">
@@ -280,130 +297,178 @@ onMounted(load)
       <p id="access-setup-description" class="setup-intro">
         {{ t('home.setupDescription') }}
       </p>
-      <section class="setup-step">
-        <div class="setup-step-head">
-          <span class="setup-step-number">1</span>
-          <div>
-            <h3 id="setup-protocol-label">{{ t('home.protocol') }}</h3>
-            <p>{{ t('home.protocolHint') }}</p>
-          </div>
-        </div>
-        <div class="setup-protocols" role="radiogroup" aria-labelledby="setup-protocol-label">
-          <button
-            type="button"
-            role="radio"
-            :class="{ active: setupProtocol === 'openai' }"
-            :aria-checked="setupProtocol === 'openai'"
-            @click="selectSetupProtocol('openai')"
-          >
-            <span>
-              <strong>OpenAI</strong>
-              <small>{{ t('home.openaiSetupHint') }}</small>
-            </span>
-            <code>/v1</code>
-            <Icon v-if="setupProtocol === 'openai'" name="check" :size="16" />
-          </button>
-          <button
-            type="button"
-            role="radio"
-            :class="{ active: setupProtocol === 'anthropic' }"
-            :aria-checked="setupProtocol === 'anthropic'"
-            @click="selectSetupProtocol('anthropic')"
-          >
-            <span>
-              <strong>Anthropic</strong>
-              <small>{{ t('home.anthropicSetupHint') }}</small>
-            </span>
-            <code>/anthropic</code>
-            <Icon v-if="setupProtocol === 'anthropic'" name="check" :size="16" />
-          </button>
-        </div>
-      </section>
+      <div class="setup-method-tabs" role="tablist" :aria-label="t('home.setupMethod')">
+        <button
+          id="setup-method-script-tab"
+          type="button"
+          role="tab"
+          :class="{ active: setupMethod === 'script' }"
+          :aria-selected="setupMethod === 'script'"
+          :tabindex="setupMethod === 'script' ? 0 : -1"
+          aria-controls="setup-method-script-panel"
+          @click="selectSetupMethod('script')"
+          @keydown.right.prevent="focusSetupMethod('ccswitch')"
+          @keydown.end.prevent="focusSetupMethod('ccswitch')"
+        >
+          <strong>{{ t('home.scriptMethod') }}</strong>
+          <small>{{ t('home.scriptMethodHint') }}</small>
+        </button>
+        <button
+          id="setup-method-ccswitch-tab"
+          type="button"
+          role="tab"
+          :class="{ active: setupMethod === 'ccswitch' }"
+          :aria-selected="setupMethod === 'ccswitch'"
+          :tabindex="setupMethod === 'ccswitch' ? 0 : -1"
+          aria-controls="setup-method-ccswitch-panel"
+          @click="selectSetupMethod('ccswitch')"
+          @keydown.left.prevent="focusSetupMethod('script')"
+          @keydown.home.prevent="focusSetupMethod('script')"
+        >
+          <strong>{{ t('home.ccSwitchMethod') }}</strong>
+          <small>{{ t('home.ccSwitchMethodHint') }}</small>
+        </button>
+      </div>
 
-      <section class="setup-step setup-script-step">
-        <div class="setup-step-head setup-script-step-head">
-          <span class="setup-step-number">2</span>
-          <div class="setup-step-title">
-            <h3 id="setup-platform-label">{{ t('home.setupCode') }}</h3>
-            <p>{{ t('home.platform') }}</p>
+      <div
+        v-show="setupMethod === 'script'"
+        id="setup-method-script-panel"
+        class="setup-method-panel"
+        role="tabpanel"
+        aria-labelledby="setup-method-script-tab"
+      >
+        <section class="setup-step">
+          <div class="setup-step-head">
+            <span class="setup-step-number">1</span>
+            <div>
+              <h3 id="setup-protocol-label">{{ t('home.protocol') }}</h3>
+              <p>{{ t('home.protocolHint') }}</p>
+            </div>
           </div>
-          <div class="setup-platform" role="tablist" aria-labelledby="setup-platform-label">
+          <div class="setup-protocols" role="tablist" aria-labelledby="setup-protocol-label">
             <button
-              id="setup-unix-tab"
+              id="setup-openai-tab"
               type="button"
               role="tab"
-              :class="{ active: setupPlatform === 'unix' }"
-              :aria-selected="setupPlatform === 'unix'"
-              aria-controls="access-setup-script"
-              @click="selectSetupPlatform('unix')"
+              :class="{ active: setupProtocol === 'openai' }"
+              :aria-selected="setupProtocol === 'openai'"
+              :tabindex="setupProtocol === 'openai' ? 0 : -1"
+              aria-controls="setup-protocol-panel"
+              @click="selectSetupProtocol('openai')"
+              @keydown.right.prevent="focusSetupProtocol('anthropic')"
+              @keydown.end.prevent="focusSetupProtocol('anthropic')"
             >
-              macOS / Linux
+              <span>
+                <strong>OpenAI</strong>
+                <small>{{ t('home.openaiSetupHint') }}</small>
+              </span>
+              <code>/v1</code>
             </button>
             <button
-              id="setup-windows-tab"
+              id="setup-anthropic-tab"
               type="button"
               role="tab"
-              :class="{ active: setupPlatform === 'windows' }"
-              :aria-selected="setupPlatform === 'windows'"
-              aria-controls="access-setup-script"
-              @click="selectSetupPlatform('windows')"
+              :class="{ active: setupProtocol === 'anthropic' }"
+              :aria-selected="setupProtocol === 'anthropic'"
+              :tabindex="setupProtocol === 'anthropic' ? 0 : -1"
+              aria-controls="setup-protocol-panel"
+              @click="selectSetupProtocol('anthropic')"
+              @keydown.left.prevent="focusSetupProtocol('openai')"
+              @keydown.home.prevent="focusSetupProtocol('openai')"
             >
-              Windows
+              <span>
+                <strong>Anthropic</strong>
+                <small>{{ t('home.anthropicSetupHint') }}</small>
+              </span>
+              <code>/anthropic</code>
             </button>
           </div>
-        </div>
-        <div
-          id="access-setup-script"
-          class="setup-script"
-          role="tabpanel"
-          :aria-labelledby="setupPlatform === 'unix' ? 'setup-unix-tab' : 'setup-windows-tab'"
-        >
-          <div class="setup-script-head">
-            <span class="setup-script-context">
-              <strong>{{ setupProtocolName }}</strong>
-              <span>{{ t(setupPlatform === 'windows' ? 'home.powershell' : 'home.shell') }}</span>
-            </span>
-            <button type="button" @click="copySetupScript">
-              <Icon :name="scriptCopied === 'success' ? 'check' : 'copy'" :size="15" />
-              {{ t(scriptCopied === 'success' ? 'common.copied' : 'home.copyScript') }}
-            </button>
+          <div
+            id="setup-protocol-panel"
+            class="setup-protocol-panel"
+            role="tabpanel"
+            :aria-labelledby="
+              setupProtocol === 'anthropic' ? 'setup-anthropic-tab' : 'setup-openai-tab'
+            "
+          >
+            <div class="setup-scripts">
+              <div class="setup-script">
+                <div class="setup-script-head">
+                  <span class="setup-script-context">
+                    <strong>macOS / Linux</strong>
+                    <span>{{ t('home.shell') }}</span>
+                  </span>
+                  <button
+                    type="button"
+                    :aria-label="t('home.copyPlatformScript', { platform: 'macOS / Linux' })"
+                    @click="copySetupScript('unix')"
+                  >
+                    <Icon :name="scriptCopied === 'unix' ? 'check' : 'copy'" :size="15" />
+                    {{ t(scriptCopied === 'unix' ? 'common.copied' : 'home.copyScript') }}
+                  </button>
+                </div>
+                <pre><code>{{ setupScripts.unix }}</code></pre>
+              </div>
+              <div class="setup-script">
+                <div class="setup-script-head">
+                  <span class="setup-script-context">
+                    <strong>Windows</strong>
+                    <span>{{ t('home.powershell') }}</span>
+                  </span>
+                  <button
+                    type="button"
+                    :aria-label="t('home.copyPlatformScript', { platform: 'Windows' })"
+                    @click="copySetupScript('windows')"
+                  >
+                    <Icon :name="scriptCopied === 'windows' ? 'check' : 'copy'" :size="15" />
+                    {{ t(scriptCopied === 'windows' ? 'common.copied' : 'home.copyScript') }}
+                  </button>
+                </div>
+                <pre><code>{{ setupScripts.windows }}</code></pre>
+              </div>
+            </div>
           </div>
-          <pre><code>{{ setupScript }}</code></pre>
-        </div>
-      </section>
-      <p v-if="scriptCopied === 'error'" class="setup-copy-error" role="alert">
-        {{ t('common.copyFailed') }}
-      </p>
+        </section>
+        <p v-if="scriptCopied === 'error'" class="setup-copy-error" role="alert">
+          {{ t('common.copyFailed') }}
+        </p>
 
-      <section class="setup-step setup-run-step">
-        <div class="setup-step-head">
-          <span class="setup-step-number">3</span>
-          <div>
-            <h3>{{ t('home.runClient') }}</h3>
-            <p class="setup-note">{{ t('home.setupNote') }}</p>
+        <section class="setup-step setup-run-step">
+          <div class="setup-step-head">
+            <span class="setup-step-number">2</span>
+            <div>
+              <h3>{{ t('home.runClient') }}</h3>
+              <p class="setup-note">{{ t('home.setupNote') }}</p>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+      </div>
 
-      <aside class="cc-switch-help">
-        <div class="cc-switch-copy">
-          <span class="cc-switch-mark">CC</span>
-          <div>
-            <strong>{{ t('home.ccSwitchTitle') }}</strong>
-            <p>
-              {{ t(setupPlatform === 'windows' ? 'home.ccSwitchWindows' : 'home.ccSwitchUnix') }}
-            </p>
+      <div
+        v-show="setupMethod === 'ccswitch'"
+        id="setup-method-ccswitch-panel"
+        class="setup-method-panel setup-cc-method-panel"
+        role="tabpanel"
+        aria-labelledby="setup-method-ccswitch-tab"
+      >
+        <aside class="cc-switch-help">
+          <div class="cc-switch-copy">
+            <span class="cc-switch-mark">CC</span>
+            <div>
+              <strong>{{ t('home.ccSwitchTitle') }}</strong>
+              <p>{{ t('home.ccSwitchAll') }}</p>
+            </div>
           </div>
-        </div>
-        <a
-          class="button subtle cc-switch-link"
-          href="https://ccswitch.io/"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          {{ t('home.ccSwitchWebsite') }}<Icon name="external" :size="15" />
-        </a>
-      </aside>
+          <a
+            class="button subtle cc-switch-link"
+            href="https://ccswitch.io/"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {{ t('home.ccSwitchWebsite') }}<Icon name="external" :size="15" />
+          </a>
+        </aside>
+      </div>
     </div>
   </Modal>
 </template>

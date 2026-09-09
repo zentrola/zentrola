@@ -11,9 +11,8 @@ import ConfirmDialog from './ConfirmDialog.vue'
 
 const props = defineProps<{ member: Member }>()
 defineEmits<{ close: [] }>()
-const { items, cursor, loading, error, load } = useCollection<AccessKey>(
-  () => `/members/${props.member.id}/keys`,
-)
+const { items, cursor, page, pageSize, total, loading, error, load, previous, retry, setPageSize } =
+  useCollection<AccessKey>(() => `/members/${props.member.id}/keys`)
 const { busy, error: actionError, run } = useAction()
 const revokeTarget = ref<AccessKey | null>(null),
   notice = ref(''),
@@ -69,7 +68,7 @@ function revoke() {
     <p v-if="notice" class="notice" role="status">{{ notice }}</p>
     <div v-if="error" class="alert error" role="alert">
       {{ error }}
-      <button class="text-button" :disabled="loading" @click="load(!!cursor)">
+      <button class="text-button" :disabled="loading" @click="retry">
         {{ t('common.retry') }}
       </button>
     </div>
@@ -108,10 +107,15 @@ function revoke() {
     <p v-else-if="!loading && !error" class="muted">{{ t('members.noKeys') }}</p>
     <ListFooter
       v-if="!error && items.length"
-      :count="items.length"
       :cursor="cursor"
+      :page="page"
+      :page-size="pageSize"
+      :total="total"
       :loading="loading"
+      @first="load()"
+      @previous="previous"
       @more="load(true)"
+      @page-size="setPageSize"
     />
   </Modal>
   <ConfirmDialog

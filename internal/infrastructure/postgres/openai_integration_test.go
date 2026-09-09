@@ -34,11 +34,7 @@ func TestOpenAIIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bootstrapStore := NewBootstrapStore(pool)
-	if err := bootstrap.New(bootstrapStore, ids, "sonnet", "opus").Initialize(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if err := bootstrap.SetupDeepSeek(ctx, bootstrapStore, ids); err != nil {
+	if err := bootstrap.New(NewBootstrapStore(pool), ids).Initialize(ctx); err != nil {
 		t.Fatal(err)
 	}
 	securityStore := NewSecurityStore(pool, ids)
@@ -64,6 +60,21 @@ func TestOpenAIIntegration(t *testing.T) {
 	}
 	cipher, _ := cryptosec.NewCredentials(master)
 	management := mgmt.New(NewManagementStore(pool, ids), ids, cipher, nil)
+	flash := createActiveTestModel(t, ctx, management, actor, "deepseek-v4-flash", "DeepSeek V4 Flash", []string{"TEXT"})
+	pro := createActiveTestModel(t, ctx, management, actor, "deepseek-v4-pro", "DeepSeek V4 Pro", []string{"TEXT"})
+	claude := createActiveTestModel(t, ctx, management, actor, "claude-sonnet", "Claude Sonnet", []string{"TEXT", "IMAGE"})
+	provider := createActiveTestProvider(t, ctx, pool, management, actor, "DeepSeek 测试服务商",
+		[]mgmt.ProviderEndpoint{
+			{ProtocolType: "ANTHROPIC", BaseURL: "https://api.deepseek.com/anthropic"},
+			{ProtocolType: "OPENAI", BaseURL: "https://api.deepseek.com"},
+		},
+		[]mgmt.ProviderMappingInput{
+			{ModelID: flash.ID, UpstreamModelCode: "deepseek-v4-flash"},
+			{ModelID: pro.ID, UpstreamModelCode: "deepseek-v4-pro"},
+		})
+	anthropicProvider := createActiveTestProvider(t, ctx, pool, management, actor, "Anthropic 测试服务商",
+		[]mgmt.ProviderEndpoint{{ProtocolType: "ANTHROPIC", BaseURL: "https://api.anthropic.com"}},
+		[]mgmt.ProviderMappingInput{{ModelID: claude.ID, UpstreamModelCode: "claude-sonnet"}})
 	member, err := management.CreateMember(ctx, actor, "OpenAI integration", "", appsec.RequestMeta{})
 	if err != nil {
 		t.Fatal(err)
@@ -72,28 +83,19 @@ func TestOpenAIIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	models, _ := management.Models(ctx, actor, mgmt.Page{Limit: 50}, "")
-	var modelID, claudeID int64
-	for _, m := range models {
-		if m.Code == "deepseek-v4-flash" {
-			modelID = m.ID
-		}
-		if m.Code == "claude-sonnet" {
-			claudeID = m.ID
-		}
-	}
-	providers, _ := management.Providers(ctx, actor, mgmt.Page{Limit: 50})
-	var providerID int64
-	for _, p := range providers {
-		if p.Code == "deepseek-official" {
-			providerID = p.ID
-		}
-	}
-	resource, err := management.CreateResource(ctx, actor, providerID, "OpenAI resource", "openai-upstream-secret", appsec.RequestMeta{})
+	modelID, claudeID := flash.ID, claude.ID
+	resource, err := management.CreateResource(ctx, actor, provider.ID, "OpenAI resource", "openai-upstream-secret", appsec.RequestMeta{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := management.SetResourceStatus(ctx, actor, resource.ID, "ACTIVE", appsec.RequestMeta{}); err != nil {
+		t.Fatal(err)
+	}
+	anthropicResource, err := management.CreateResource(ctx, actor, anthropicProvider.ID, "Anthropic resource", "anthropic-upstream-secret", appsec.RequestMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := management.SetResourceStatus(ctx, actor, anthropicResource.ID, "ACTIVE", appsec.RequestMeta{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := management.SetGroupModel(ctx, actor, group.ID, modelID, true, appsec.RequestMeta{}); err != nil {
@@ -122,7 +124,11 @@ func TestOpenAIIntegration(t *testing.T) {
 	const tail = "data: {\"object\":\"chat.completion.chunk\",\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":7,\"prompt_cache_hit_tokens\":2}}\n\ndata: [DONE]\n\n"
 	upstream := gatewayOpenFunc(func(c context.Context, r gw.Route, q gw.Request, secret []byte) (*gw.Response, error) {
 		calls.Add(1)
-		if string(secret) != "openai-upstream-secret" {
+		wantSecret := "openai-upstream-secret"
+		if r.ProviderID == anthropicProvider.ID {
+			wantSecret = "anthropic-upstream-secret"
+		}
+		if string(secret) != wantSecret {
 			t.Error("wrong shared resource credential")
 		}
 		media := "application/json"
@@ -130,13 +136,25 @@ func TestOpenAIIntegration(t *testing.T) {
 		body := `{"object":"chat.completion","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":12,"completion_tokens":7,"prompt_cache_hit_tokens":2}}`
 		var reader io.ReadCloser
 		if q.Protocol == gw.AnthropicProtocol {
-			if r.BaseURL != "https://api.deepseek.com/anthropic" {
+			wantBaseURL := "https://api.deepseek.com/anthropic"
+			if r.ProviderID == anthropicProvider.ID {
+				wantBaseURL = "https://api.anthropic.com"
+			}
+			if r.BaseURL != wantBaseURL {
 				t.Error("Anthropic URL changed")
 			}
-			body = `{"type":"message","usage":{"input_tokens":12,"output_tokens":7}}`
+			body = `{"id":"msg_compat","type":"message","role":"assistant","model":"claude-sonnet","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":12,"output_tokens":7}}`
 		} else {
-			if r.BaseURL != "https://api.deepseek.com" || q.Path != "/v1/chat/completions" {
+			if r.BaseURL != "https://api.deepseek.com" {
 				t.Error("wrong OpenAI route")
+			}
+			if q.Protocol == gw.OpenAIResponsesProtocol {
+				if q.Path != "/v1/responses" {
+					t.Error("wrong OpenAI Responses route")
+				}
+				body = `{"object":"response","status":"completed","usage":{"input_tokens":12,"output_tokens":7}}`
+			} else if q.Path != "/v1/chat/completions" {
+				t.Error("wrong OpenAI Chat Completions route")
 			}
 			switch {
 			case strings.Contains(string(q.Body), `"scenario":"timeout"`):
@@ -168,7 +186,7 @@ func TestOpenAIIntegration(t *testing.T) {
 		return &gw.Response{Status: status, Headers: map[string][]string{"Content-Type": {media}, "Retry-After": {"2"}}, Body: reader}, nil
 	})
 	cfg := config.Gateway{MaxBodyBytes: 1 << 20, RequestTimeout: 200 * time.Millisecond, BodyReadTimeout: time.Second, WriteTimeout: time.Second}
-	service := gw.New(NewGatewayStore(pool), cipher, upstream)
+	service := gw.New(NewGatewayStore(pool), cipher, gw.NewCompatibleUpstream(upstream, upstream))
 	server := httptest.NewServer(httptransport.NewRouter(logger, health.New(), config.CORS{}, time.Second, "prod", &httptransport.SecurityHandlers{Admin: admins, Keys: keys, Management: management, Gateway: httptransport.NewGatewayHandler(service, cfg, logger, writer), OpenAI: httptransport.NewOpenAIGatewayHandler(service, cfg, logger, writer), Usage: usageapp.NewQuery(usageStore), UsageWriter: writer}))
 	defer server.Close()
 	requestIDs := map[string]string{}
@@ -215,22 +233,29 @@ func TestOpenAIIntegration(t *testing.T) {
 			t.Fatal("SSE changed")
 		}
 	}
+	call("responses", "POST", "/v1/responses", `{"model":"deepseek-v4-flash","input":"hello"}`, key.Key, 200)
 	call("anthropic", "POST", "/anthropic/v1/messages", `{"model":"deepseek-v4-flash"}`, key.Key, 200)
 	before := calls.Load()
 	call("no_key", "POST", "/v1/chat/completions", `{}`, "", 401)
 	call("admin_key", "POST", "/v1/chat/completions", `{}`, login.Token, 401)
 	call("method", "GET", "/v1/chat/completions", "", key.Key, 405)
-	call("responses", "POST", "/v1/responses", `{}`, key.Key, 400)
+	call("invalid_responses", "POST", "/v1/responses", `{}`, key.Key, 400)
 	call("query", "GET", "/v1/models?bad=1", "", key.Key, 400)
 	if calls.Load() != before {
 		t.Fatal("invalid request reached upstream")
 	}
-	// 已授权 Claude 模型也不能错投到 OpenAI 协议上游。
+	// 仅配置 Anthropic endpoint 的 Claude 模型可由 OpenAI 协议调用，响应仍为 OpenAI 格式。
 	if err := management.SetGroupModel(ctx, actor, group.ID, claudeID, true, appsec.RequestMeta{}); err != nil {
 		t.Fatal(err)
 	}
-	call("wrong_protocol", "POST", "/v1/chat/completions", `{"model":"claude-sonnet"}`, key.Key, 503)
+	converted := call("protocol_fallback", "POST", "/v1/chat/completions", `{"model":"claude-sonnet","messages":[{"role":"user","content":"hello"}]}`, key.Key, 200)
+	if !strings.Contains(string(converted), `"object":"chat.completion"`) {
+		t.Fatal("Anthropic fallback did not return OpenAI response")
+	}
 	if err := management.SetResourceStatus(ctx, actor, resource.ID, "DISABLED", appsec.RequestMeta{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := management.SetResourceStatus(ctx, actor, anthropicResource.ID, "DISABLED", appsec.RequestMeta{}); err != nil {
 		t.Fatal(err)
 	}
 	list = call("disabled_models", "GET", "/v1/models", "", key.Key, 200)
@@ -270,12 +295,12 @@ func TestOpenAIIntegration(t *testing.T) {
 	if err := writer.Close(ctx); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := usageapp.NewQuery(usageStore).Query(ctx, actor, usageapp.Filter{From: time.Now().Add(-time.Hour), To: time.Now().Add(time.Hour), Limit: 100})
+	page, err := usageapp.NewQuery(usageStore).Query(ctx, actor, usageapp.Filter{From: time.Now().Add(-time.Hour), To: time.Now().Add(time.Hour), Limit: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
 	byID := map[string]usageapp.Row{}
-	for _, r := range rows {
+	for _, r := range page.Items {
 		byID[r.RequestID] = r
 	}
 	for _, name := range []string{"normal", "stream", "tool", "tool_result"} {
@@ -283,6 +308,9 @@ func TestOpenAIIntegration(t *testing.T) {
 		if r.ClientProtocol != "OPENAI_CHAT" || r.Status != "SUCCESS" || r.InputTokens == nil || *r.InputTokens != 12 || r.OutputTokens == nil || *r.OutputTokens != 7 || r.ResourceID != resource.ID {
 			t.Fatalf("OpenAI usage invalid: %+v", r)
 		}
+	}
+	if r := byID[requestIDs["responses"]]; r.ClientProtocol != "OPENAI_RESPONSES" || r.ProviderModelID != byID[requestIDs["normal"]].ProviderModelID {
+		t.Fatalf("OpenAI Responses did not share the OpenAI provider endpoint: %+v", r)
 	}
 	if r := byID[requestIDs["anthropic"]]; r.ClientProtocol != "ANTHROPIC_MESSAGES" || r.Status != "SUCCESS" || r.ProviderModelID != byID[requestIDs["normal"]].ProviderModelID {
 		t.Fatal("shared provider-model attribution lost")

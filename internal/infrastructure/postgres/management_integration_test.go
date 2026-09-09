@@ -68,7 +68,7 @@ func TestStage3Integration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := bootstrap.New(NewBootstrapStore(pool), ids, "sonnet", "opus").Initialize(ctx); err != nil {
+	if err := bootstrap.New(NewBootstrapStore(pool), ids).Initialize(ctx); err != nil {
 		t.Fatal(err)
 	}
 	securityStore := NewSecurityStore(pool, ids)
@@ -96,7 +96,7 @@ func TestStage3Integration(t *testing.T) {
 	}
 	const credential = "stage3-private-provider-key"
 	tester := connectionTestFunc(func(_ context.Context, _ string, url string, key []byte, _ *catalog.OutboundProxy) mgmt.ConnectionResult {
-		if url != "https://api.anthropic.com" || string(key) != credential {
+		if url != "https://provider.example.com/v1" || string(key) != credential {
 			t.Error("unexpected connection test inputs")
 		}
 		return mgmt.ConnectionResult{OK: true, Code: "OK", HTTPStatus: 200}
@@ -149,23 +149,27 @@ func TestStage3Integration(t *testing.T) {
 	providers := stage3Data[struct {
 		Items []mgmt.Provider `json:"items"`
 	}](t, request("GET", "/api/v1/providers", nil, 200)).Items
-	if len(models) != 4 || len(providers) != 1 {
-		t.Fatal("bootstrap catalogs unavailable")
+	if len(models) != 0 || len(providers) != 4 {
+		t.Fatal("bootstrap must create providers without guessing model catalogs")
 	}
-	model := models[0]
-	provider := providers[0]
+	model := stage3Data[mgmt.Model](t, request("POST", "/api/v1/models", mgmt.ModelInput{
+		Code: "management-base-model", Name: "管理端基础模型", InputModalities: []string{"TEXT"}, OutputModalities: []string{"TEXT"},
+	}, 201))
+	request("PATCH", "/api/v1/models/"+sid(model.ID)+"/status", map[string]string{"status": "ACTIVE"}, 200)
 	mappedModel := stage3Data[mgmt.Model](t, request("POST", "/api/v1/models", mgmt.ModelInput{
 		Code: "management-mapped-model", Name: "管理端映射模型", InputModalities: []string{"TEXT"}, OutputModalities: []string{"TEXT"},
 	}, 201))
 	customProviderInput := mgmt.ProviderInput{
 		Name:      "管理端服务商",
-		Endpoints: []mgmt.ProviderEndpoint{{ProtocolType: "OPENAI_CHAT", BaseURL: "https://provider.example.com/v1"}},
+		Endpoints: []mgmt.ProviderEndpoint{{ProtocolType: "OPENAI", BaseURL: "https://provider.example.com/v1"}},
 		Mappings: []mgmt.ProviderMappingInput{
 			{ModelID: mappedModel.ID, UpstreamModelCode: "vendor-model-v1"},
 			{ModelID: model.ID, UpstreamModelCode: "vendor-model-v2"},
 		},
 	}
 	customProvider := stage3Data[mgmt.Provider](t, request("POST", "/api/v1/providers", customProviderInput, 201))
+	request("PATCH", "/api/v1/providers/"+sid(customProvider.ID)+"/status", map[string]string{"status": "ACTIVE"}, 200)
+	provider := customProvider
 	t.Cleanup(func() {
 		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -175,7 +179,7 @@ func TestStage3Integration(t *testing.T) {
 		if _, err := pool.Exec(cleanup, "DELETE FROM provider_endpoint WHERE provider_id=$1", customProvider.ID); err != nil {
 			t.Error(err)
 		}
-		if _, err := pool.Exec(cleanup, "DELETE FROM ai_provider WHERE id=$1", customProvider.ID); err != nil {
+		if _, err := pool.Exec(cleanup, "DELETE FROM provider WHERE id=$1", customProvider.ID); err != nil {
 			t.Error(err)
 		}
 	})
@@ -275,9 +279,10 @@ func TestStage3Integration(t *testing.T) {
 		type keyPage struct {
 			Items []mgmt.Key `json:"items"`
 			Next  *string    `json:"nextCursor"`
+			Total int64      `json:"total"`
 		}
 		first := stage3Data[keyPage](t, request("GET", memberPath+"/keys?limit=1", nil, 200))
-		if len(first.Items) != 1 || first.Items[0].ID != newer.ID || first.Next == nil || *first.Next != sid(newer.ID) {
+		if len(first.Items) != 1 || first.Items[0].ID != newer.ID || first.Next == nil || *first.Next != sid(newer.ID) || first.Total != 2 {
 			t.Fatal("key list must return the newest key first")
 		}
 		olderResponse := request("GET", memberPath+"/keys?after="+*first.Next, nil, 200)
@@ -312,10 +317,10 @@ func TestStage3Integration(t *testing.T) {
 		request("PUT", memberLink, nil, 200)
 		allowed(true)
 		var history, active int
-		if err := pool.QueryRow(ctx, "SELECT count(*),count(*) FILTER(WHERE NOT is_deleted) FROM group_model_permission WHERE group_id=$1 AND model_id=$2", group.ID, model.ID).Scan(&history, &active); err != nil || history != 2 || active != 1 {
+		if err := pool.QueryRow(ctx, "SELECT count(*),count(*) FILTER(WHERE NOT is_deleted) FROM principal_group_model_permission WHERE group_id=$1 AND model_id=$2", group.ID, model.ID).Scan(&history, &active); err != nil || history != 2 || active != 1 {
 			t.Fatal("grant recreated old row")
 		}
-		if err := pool.QueryRow(ctx, "SELECT count(*),count(*) FILTER(WHERE NOT is_deleted) FROM principal_group WHERE group_id=$1 AND principal_id=$2", group.ID, member.ID).Scan(&history, &active); err != nil || history != 2 || active != 1 {
+		if err := pool.QueryRow(ctx, "SELECT count(*),count(*) FILTER(WHERE NOT is_deleted) FROM principal_group_membership WHERE group_id=$1 AND principal_id=$2", group.ID, member.ID).Scan(&history, &active); err != nil || history != 2 || active != 1 {
 			t.Fatal("membership recreated old row")
 		}
 	})
@@ -332,7 +337,7 @@ func TestStage3Integration(t *testing.T) {
 		firstPath := "/api/v1/resources/" + sid(first.ID)
 		request("POST", "/api/v1/resources", map[string]string{"providerId": sid(provider.ID), "name": "备用配置", "credential": credential}, 409)
 		var encrypted []byte
-		if err := pool.QueryRow(ctx, "SELECT credential_ciphertext FROM ai_resource WHERE id=$1", first.ID).Scan(&encrypted); err != nil || bytes.Contains(encrypted, []byte(credential)) {
+		if err := pool.QueryRow(ctx, "SELECT credential_ciphertext FROM provider_credential WHERE id=$1", first.ID).Scan(&encrypted); err != nil || bytes.Contains(encrypted, []byte(credential)) {
 			t.Fatal("resource stored plaintext")
 		}
 		for _, path := range []string{"/api/v1/resources", firstPath} {
@@ -348,7 +353,7 @@ func TestStage3Integration(t *testing.T) {
 		request("PATCH", firstPath+"/status", map[string]string{"status": "DISABLED"}, 200)
 		request("PATCH", firstPath+"/status", map[string]string{"status": "ACTIVE"}, 200)
 		request("PATCH", firstPath+"/status", map[string]string{"status": "DISABLED"}, 200)
-		if _, err := pool.Exec(ctx, "UPDATE ai_resource SET credential_ciphertext=decode(repeat('00',32),'hex') WHERE id=$1", first.ID); err != nil {
+		if _, err := pool.Exec(ctx, "UPDATE provider_credential SET credential_ciphertext=decode(repeat('00',32),'hex') WHERE id=$1", first.ID); err != nil {
 			t.Fatal(err)
 		}
 		request("PATCH", firstPath+"/status", map[string]string{"status": "ACTIVE"}, 422)
@@ -386,14 +391,15 @@ func TestStage3Integration(t *testing.T) {
 		type memberPage struct {
 			Items []mgmt.Member `json:"items"`
 			Next  *string       `json:"nextCursor"`
+			Total int64         `json:"total"`
 		}
 		page := stage3Data[memberPage](t, request("GET", "/api/v1/members?limit=1", nil, 200))
-		if len(page.Items) != 1 || page.Items[0].ID != latest.ID || page.Next == nil || *page.Next != sid(latest.ID) {
+		if len(page.Items) != 1 || page.Items[0].ID != latest.ID || page.Next == nil || *page.Next != sid(latest.ID) || page.Total != 3 {
 			t.Fatal("descending first page must contain the latest member and its cursor")
 		}
 		inserted := stage3Data[mgmt.Member](t, request("POST", "/api/v1/members", map[string]string{"name": "翻页期间新增成员"}, 201))
 		second := stage3Data[memberPage](t, request("GET", "/api/v1/members?limit=1&after="+*page.Next, nil, 200))
-		if len(second.Items) != 1 || second.Items[0].ID != earlier.ID || second.Next == nil {
+		if len(second.Items) != 1 || second.Items[0].ID != earlier.ID || second.Next == nil || second.Total != 4 {
 			t.Fatal("descending second page skipped or repeated a member after insertion")
 		}
 		tail := stage3Data[memberPage](t, request("GET", "/api/v1/members?after="+*second.Next, nil, 200))
@@ -444,7 +450,7 @@ func TestStage3Integration(t *testing.T) {
 		if _, err := service.Members(ctx, badActor, mgmt.Page{Limit: 50}); !errors.Is(err, appsec.ErrUnauthenticated) {
 			t.Fatal("forged organization accepted")
 		}
-		if _, err := pool.Exec(ctx, "UPDATE ai_group SET is_deleted=true WHERE id=$1", group.ID); err != nil {
+		if _, err := pool.Exec(ctx, "UPDATE principal_group SET is_deleted=true WHERE id=$1", group.ID); err != nil {
 			t.Fatal(err)
 		}
 		request("GET", groupPath, nil, 404)
@@ -502,7 +508,7 @@ func TestStage3Integration(t *testing.T) {
 			t.Fatal("deleted member still listed in group")
 		}
 		var deleted, revoked, unlinked bool
-		if err := pool.QueryRow(ctx, "SELECT p.is_deleted, k.status='REVOKED' AND k.revoked_at IS NOT NULL, g.is_deleted FROM principal p JOIN access_key k ON k.principal_id=p.id JOIN principal_group g ON g.principal_id=p.id WHERE p.id=$1", m.ID).Scan(&deleted, &revoked, &unlinked); err != nil || !deleted || !revoked || !unlinked {
+		if err := pool.QueryRow(ctx, "SELECT p.is_deleted, k.status='REVOKED' AND k.revoked_at IS NOT NULL, g.is_deleted FROM principal p JOIN principal_access_key k ON k.principal_id=p.id JOIN principal_group_membership g ON g.principal_id=p.id WHERE p.id=$1", m.ID).Scan(&deleted, &revoked, &unlinked); err != nil || !deleted || !revoked || !unlinked {
 			t.Fatalf("incomplete member deletion: %v %v %v %v", deleted, revoked, unlinked, err)
 		}
 		var count int
@@ -565,7 +571,7 @@ func TestStage3Integration(t *testing.T) {
 			t.Fatal("member group change survived an audit rollback")
 		}
 
-		if _, err := pool.Exec(ctx, "UPDATE ai_group SET status='DISABLED' WHERE id=$1", group.ID); err != nil {
+		if _, err := pool.Exec(ctx, "UPDATE principal_group SET status='DISABLED' WHERE id=$1", group.ID); err != nil {
 			t.Fatal(err)
 		}
 		request("GET", "/api/v1/groups?status=UNKNOWN", nil, 400)
@@ -670,7 +676,7 @@ func TestStage3Integration(t *testing.T) {
 			t.Fatalf("group creation ignored audit failure: %v", err)
 		}
 		var count int
-		if err := pool.QueryRow(ctx, "SELECT count(*) FROM ai_group WHERE group_name='创建回滚分组'").Scan(&count); err != nil || count != 0 {
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM principal_group WHERE group_name='创建回滚分组'").Scan(&count); err != nil || count != 0 {
 			t.Fatal("group creation survived an audit rollback")
 		}
 
@@ -686,9 +692,9 @@ func TestStage3Integration(t *testing.T) {
 		var deleted, membersDeleted, modelsDeleted bool
 		if err := pool.QueryRow(ctx, `
 			SELECT g.is_deleted, pg.is_deleted, permission.is_deleted
-			FROM ai_group g
-			JOIN principal_group pg ON pg.group_id=g.id
-			JOIN group_model_permission permission ON permission.group_id=g.id
+			FROM principal_group g
+			JOIN principal_group_membership pg ON pg.group_id=g.id
+			JOIN principal_group_model_permission permission ON permission.group_id=g.id
 			WHERE g.id=$1`, created.ID).Scan(&deleted, &membersDeleted, &modelsDeleted); err != nil || !deleted || !membersDeleted || !modelsDeleted {
 			t.Fatalf("incomplete group deletion: %v %v %v %v", deleted, membersDeleted, modelsDeleted, err)
 		}
@@ -780,7 +786,7 @@ func TestStage3Integration(t *testing.T) {
 			t.Fatal("model edit broke group association")
 		}
 		conflicting := input
-		conflicting.Code = models[0].Code
+		conflicting.Code = model.Code
 		request("PUT", path, conflicting, 409)
 		broken := mgmt.New(NewManagementStore(pool, failedAuditIDs{}), ids, cipher, tester)
 		input.Code = "model-must-rollback"
@@ -791,7 +797,7 @@ func TestStage3Integration(t *testing.T) {
 			t.Fatal("model edit ignored audit failure")
 		}
 		var count int
-		if err := pool.QueryRow(ctx, "SELECT count(*) FROM ai_model WHERE model_code='model-must-rollback'").Scan(&count); err != nil || count != 0 {
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM model WHERE model_code='model-must-rollback'").Scan(&count); err != nil || count != 0 {
 			t.Fatal("unaudited model mutation committed")
 		}
 		if err := pool.QueryRow(ctx, "SELECT count(*) FROM operation_log WHERE target_id=$1 AND operation_type IN ('MODEL_CREATE','MODEL_UPDATE')", created.ID).Scan(&count); err != nil || count != 2 {

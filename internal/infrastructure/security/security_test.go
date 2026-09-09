@@ -251,4 +251,14 @@ func TestPasswordHash(t *testing.T) {
 	if _, err := p.Hash(strings.Repeat("a", 73)); err == nil {
 		t.Fatal("bcrypt length limit ignored")
 	}
+	for _, password := range []string{"12345", "密码五位啊"} {
+		if _, err := p.Hash(password); err == nil {
+			t.Fatalf("short password accepted: %q", password)
+		}
+	}
+	for _, password := range []string{"123456", "密码长度六位"} {
+		if _, err := p.Hash(password); err != nil {
+			t.Fatalf("six-character password rejected: %q: %v", password, err)
+		}
+	}
 }

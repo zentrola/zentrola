@@ -22,7 +22,6 @@ func TestConfigValidation(t *testing.T) {
 		{"invalid log file backups", "LOG_FILE_MAX_BACKUPS", "0", "LOG_FILE_MAX_BACKUPS"},
 		{"invalid boolean", "CORS_ENABLED", "maybe", "CORS_ENABLED"},
 		{"invalid ID node", "ID_NODE", "0", "ID_NODE"},
-		{"empty upstream model", "BOOTSTRAP_SONNET_MODEL", "", "BOOTSTRAP_SONNET_MODEL"},
 		{"unbounded gateway", "GATEWAY_REQUEST_TIMEOUT", "0s", "GATEWAY_REQUEST_TIMEOUT"},
 		{"oversized body limit", "GATEWAY_MAX_BODY_BYTES", "2147483647", "GATEWAY_MAX_BODY_BYTES"},
 		{"empty usage queue", "USAGE_QUEUE_SIZE", "0", "USAGE_QUEUE_SIZE"},

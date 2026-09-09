@@ -4,7 +4,7 @@
 
 ## 开发
 
-开发时不构建或运行 Zentrola 应用镜像。Backend 直接执行 `go run ./cmd/server`（端口 `9527`），Admin Web 使用 Vite 开发服务（`npm run dev`，端口 `5173`），前端修改通过热更新生效。Docker Compose 仅在本机没有可用 PostgreSQL 时用于启动数据库：`docker compose up -d postgres`。
+开发时不构建或运行 Zentrola 应用镜像。Backend 直接执行 `go run ./cmd/server`（端口 `9527`），Admin Web 使用 Vite 开发服务（`npm run dev`，端口 `9528`），前端修改通过热更新生效。Docker Compose 仅在本机没有可用 PostgreSQL 时用于启动数据库：`docker compose up -d postgres`。
 
 使用 Node.js 24 LTS。先在仓库根目录启动已有 Go 服务，再在另一终端执行：
 
@@ -24,18 +24,18 @@ npm.cmd ci
 npm.cmd run dev
 ```
 
-打开 `http://127.0.0.1:5173`。浏览器只访问当前前端域名，Vite 将 `/api` 代理至 `http://127.0.0.1:9527`，无需为本地开发放开跨域。后端端口不同可在启动 Vite 前设置：
+打开 `http://127.0.0.1:9528`。浏览器只访问当前前端域名，Vite 将 `/api` 代理至 `http://127.0.0.1:9527`，无需为本地开发放开跨域。后端端口不同可在启动 Vite 前设置：
 
 MacOS/Linux：
 
 ```bash
-ZENTROLA_API_TARGET='http://127.0.0.1:9528' npm run dev
+ZENTROLA_API_TARGET='http://127.0.0.1:9530' npm run dev
 ```
 
 Windows PowerShell：
 
 ```powershell
-$env:ZENTROLA_API_TARGET = 'http://127.0.0.1:9528'
+$env:ZENTROLA_API_TARGET = 'http://127.0.0.1:9530'
 npm.cmd run dev
 ```
 

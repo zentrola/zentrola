@@ -23,6 +23,7 @@ func (s *GatewayStore) Resolve(ctx context.Context, identity appsec.PrincipalIde
 	if protocol != gw.AnthropicProtocol && protocol != gw.OpenAIProtocol && protocol != gw.OpenAIResponsesProtocol {
 		return gw.Route{}, gw.ErrInvalid
 	}
+	endpointProtocols := gatewayEndpointProtocols(protocol)
 	// 使用每次请求的一致性快照，不缓存身份、授权或路由，也不在网络转发期间占用连接。
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
@@ -54,9 +55,17 @@ func (s *GatewayStore) Resolve(ctx context.Context, identity appsec.PrincipalIde
 	if !allowed {
 		return gw.Route{ModelID: m.ID}, gw.ErrPermission
 	}
-	mappings, err := q.GatewayMappings(ctx, dbgen.GatewayMappingsParams{ModelID: m.ID, ProtocolType: protocol})
-	if err != nil {
-		return gw.Route{ModelID: m.ID}, gw.ErrUnavailable
+	var mappings []dbgen.GatewayMappingsRow
+	endpointProtocol := ""
+	for _, candidate := range endpointProtocols {
+		mappings, err = q.GatewayMappings(ctx, dbgen.GatewayMappingsParams{ModelID: m.ID, ProtocolType: candidate})
+		if err != nil {
+			return gw.Route{ModelID: m.ID}, gw.ErrUnavailable
+		}
+		if len(mappings) > 0 {
+			endpointProtocol = candidate
+			break
+		}
 	}
 	if len(mappings) == 0 {
 		return gw.Route{ModelID: m.ID}, gw.ErrRoute
@@ -75,7 +84,7 @@ func (s *GatewayStore) Resolve(ctx context.Context, identity appsec.PrincipalIde
 	}
 	route := gw.Route{
 		ModelID: m.ID, ProviderID: mapping.ProviderID, ProviderModelID: mapping.ID, ResourceID: r.ID,
-		UpstreamModel: mapping.UpstreamModelCode, BaseURL: mapping.BaseUrl,
+		UpstreamModel: mapping.UpstreamModelCode, BaseURL: mapping.BaseUrl, EndpointProtocol: endpointProtocol,
 		Credential:   catalog.SealedCredential{Ciphertext: r.CredentialCiphertext, Nonce: r.CredentialNonce, KeyVersion: r.KeyVersion},
 		ProxyEnabled: mapping.ProxyEnabled,
 	}
@@ -86,6 +95,13 @@ func (s *GatewayStore) Resolve(ctx context.Context, identity appsec.PrincipalIde
 		route.ProxyHeaders = catalog.SealedCredential{Ciphertext: mapping.ProxyHeadersCiphertext, Nonce: mapping.ProxyHeadersNonce, KeyVersion: *mapping.ProxyHeadersKeyVersion}
 	}
 	return route, nil
+}
+
+func gatewayEndpointProtocols(protocol string) []string {
+	if protocol == gw.AnthropicProtocol {
+		return []string{gw.AnthropicEndpoint, gw.OpenAIEndpoint}
+	}
+	return []string{gw.OpenAIEndpoint, gw.AnthropicEndpoint}
 }
 
 func (s *GatewayStore) Models(ctx context.Context, identity appsec.PrincipalIdentity) ([]gw.Model, error) {

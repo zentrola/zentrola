@@ -11,7 +11,7 @@ Zentrola 由 Go 后端和 Vue 管理界面组成。程序入口位于 `cmd/serve
 - `go build ./cmd/server ./cmd/web`：编译两个 Go 程序。
 - `sqlc generate`：在迁移或查询变更后重新生成 `dbgen`；固定使用 sqlc 1.30.0。
 - `cd web && npm ci`：按 lockfile 安装依赖；要求 Node 22.18+，推荐 Node 24 LTS。
-- `cd web && npm run dev`：在 5173 端口启动 Vite，并将 `/api` 代理到后端。
+- `cd web && npm run dev`：在 9528 端口启动 Vite，并将 `/api` 代理到后端。
 - `cd web && npm run build`：执行类型检查并生成 `web/dist`。
 - `cd web && npm test`：运行使用模拟 API 的 Playwright 测试。
 
