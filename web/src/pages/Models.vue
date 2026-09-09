@@ -10,7 +10,6 @@ import Modal from '../components/Modal.vue'
 import PageHeader from '../components/PageHeader.vue'
 import ListFooter from '../components/ListFooter.vue'
 import ListSearch from '../components/ListSearch.vue'
-import ConfirmDialog from '../components/ConfirmDialog.vue'
 const {
   items,
   cursor,
@@ -82,18 +81,18 @@ const { keyword, query, visible, search, reset } = useListSearch(
   load,
 )
 onMounted(() => load())
-function openStatus(model: Model) {
+function changeStatus(model: Model) {
   actionError.value = ''
   statusTarget.value = model
-}
-function changeStatus() {
   void run(async () => {
-    const m = statusTarget.value!
-    await api(`/models/${m.id}/status`, 'PATCH', {
-      status: m.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE',
-    })
-    statusTarget.value = null
-    await refresh()
+    try {
+      await api(`/models/${model.id}/status`, 'PATCH', {
+        status: model.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE',
+      })
+      await refresh()
+    } finally {
+      statusTarget.value = null
+    }
   })
 }
 </script>
@@ -124,7 +123,6 @@ function changeStatus() {
         <thead>
           <tr>
             <th>{{ t('models.name') }}</th>
-            <th>{{ t('models.code') }}</th>
             <th>{{ t('common.status') }}</th>
             <th>{{ t('models.input') }}</th>
             <th>{{ t('models.output') }}</th>
@@ -139,12 +137,9 @@ function changeStatus() {
                 <span class="avatar">{{ model.name.slice(0, 1) }}</span>
                 <div>
                   <strong class="model-name-regular">{{ model.name }}</strong
-                  ><small>{{ model.id }}</small>
+                  ><small>{{ model.code }}</small>
                 </div>
               </div>
-            </td>
-            <td>
-              <code>{{ model.code }}</code>
             </td>
             <td>
               <StatusSwitch
@@ -152,7 +147,7 @@ function changeStatus() {
                 :name="model.name"
                 :disabled="busy || loading"
                 :busy="busy && statusTarget?.id === model.id"
-                @change="openStatus(model)"
+                @change="changeStatus(model)"
               />
             </td>
             <td>
@@ -261,24 +256,6 @@ function changeStatus() {
       </footer>
     </form>
   </Modal>
-  <ConfirmDialog
-    v-if="statusTarget"
-    :title="t(statusTarget.status === 'ACTIVE' ? 'common.disableTitle' : 'common.enableTitle')"
-    :message="
-      t('common.confirmStatus', {
-        name: statusTarget.name,
-        status: t(statusTarget.status === 'ACTIVE' ? 'common.disable' : 'common.enable'),
-      })
-    "
-    :hint="statusTarget.status === 'ACTIVE' ? t('common.disableHint') : undefined"
-    :confirm-label="
-      t(statusTarget.status === 'ACTIVE' ? 'common.disableAction' : 'common.enableAction')
-    "
-    :busy="busy"
-    :tone="statusTarget.status === 'ACTIVE' ? 'warning' : 'success'"
-    @close="statusTarget = null"
-    @confirm="changeStatus"
-  />
 </template>
 <style scoped>
 .model-form {

@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { api, all } from '../api'
 import { useCollection, useAction, useListSearch, date, validText } from '../composables'
 import { t } from '../i18n'
+import { showErrorToast } from '../toast'
 import type { Group, Model } from '../types'
 import Icon from '../components/Icon.vue'
 import StatusSwitch from '../components/StatusSwitch.vue'
@@ -57,8 +58,15 @@ function newGroup() {
   createModelIDs.value = []
   createModelsReady.value = false
   actionError.value = ''
-  creating.value = true
-  void run(loadCreateModels)
+  creating.value = false
+  void run(async () => {
+    await loadCreateModels()
+    if (!creationModels.value.length) {
+      showErrorToast(t('groups.addModelFirst'))
+      return
+    }
+    creating.value = true
+  })
 }
 async function loadCreateModels() {
   createModelsReady.value = false
@@ -134,18 +142,18 @@ function openDelete(group: Group) {
   actionError.value = ''
   deleteTarget.value = group
 }
-function openStatus(group: Group) {
+function changeStatus(group: Group) {
   actionError.value = ''
   statusTarget.value = group
-}
-function changeStatus() {
   void run(async () => {
-    const group = statusTarget.value!
-    await api(`/groups/${group.id}/status`, 'PATCH', {
-      status: group.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE',
-    })
-    statusTarget.value = null
-    await refresh()
+    try {
+      await api(`/groups/${group.id}/status`, 'PATCH', {
+        status: group.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE',
+      })
+      await refresh()
+    } finally {
+      statusTarget.value = null
+    }
   })
 }
 function deleteGroup() {
@@ -205,7 +213,7 @@ function deleteGroup() {
                 :name="group.name"
                 :disabled="busy || loading"
                 :busy="busy && statusTarget?.id === group.id"
-                @change="openStatus(group)"
+                @change="changeStatus(group)"
               />
             </td>
             <td>{{ date(group.createdAt) }}</td>
@@ -510,24 +518,6 @@ function deleteGroup() {
       </footer>
     </form>
   </Modal>
-  <ConfirmDialog
-    v-if="statusTarget"
-    :title="t(statusTarget.status === 'ACTIVE' ? 'common.disableTitle' : 'common.enableTitle')"
-    :message="
-      t('common.confirmStatus', {
-        name: statusTarget.name,
-        status: t(statusTarget.status === 'ACTIVE' ? 'common.disable' : 'common.enable'),
-      })
-    "
-    :hint="statusTarget.status === 'ACTIVE' ? t('common.disableHint') : undefined"
-    :confirm-label="
-      t(statusTarget.status === 'ACTIVE' ? 'common.disableAction' : 'common.enableAction')
-    "
-    :busy="busy"
-    :tone="statusTarget.status === 'ACTIVE' ? 'warning' : 'success'"
-    @close="statusTarget = null"
-    @confirm="changeStatus"
-  />
   <ConfirmDialog
     v-if="deleteTarget"
     :title="t('groups.deleteTitle')"

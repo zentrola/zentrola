@@ -459,14 +459,18 @@ function save() {
   })
 }
 
-function changeStatus() {
+function changeStatus(provider: Provider) {
+  actionError.value = ''
+  statusTarget.value = provider
   void run(async () => {
-    const provider = statusTarget.value!
-    await api(`/providers/${provider.id}/status`, 'PATCH', {
-      status: provider.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE',
-    })
-    statusTarget.value = null
-    await refresh()
+    try {
+      await api(`/providers/${provider.id}/status`, 'PATCH', {
+        status: provider.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE',
+      })
+      await refresh()
+    } finally {
+      statusTarget.value = null
+    }
   })
 }
 
@@ -576,7 +580,7 @@ onMounted(() => {
                     ? t('providers.credentialRequiredBeforeEnable')
                     : undefined
                 "
-                @change="statusTarget = provider"
+                @change="changeStatus(provider)"
               />
             </td>
             <td>
@@ -1022,25 +1026,6 @@ onMounted(() => {
       <button class="button" :disabled="busy" @click="syncTarget = null">{{ t('close') }}</button>
     </footer>
   </Modal>
-
-  <ConfirmDialog
-    v-if="statusTarget"
-    :title="t(statusTarget.status === 'ACTIVE' ? 'common.disableTitle' : 'common.enableTitle')"
-    :message="
-      t('common.confirmStatus', {
-        name: statusTarget.name,
-        status: t(statusTarget.status === 'ACTIVE' ? 'common.disable' : 'common.enable'),
-      })
-    "
-    :hint="statusTarget.status === 'ACTIVE' ? t('providers.disableHint') : undefined"
-    :confirm-label="
-      t(statusTarget.status === 'ACTIVE' ? 'common.disableAction' : 'common.enableAction')
-    "
-    :busy="busy"
-    :tone="statusTarget.status === 'ACTIVE' ? 'warning' : 'success'"
-    @close="statusTarget = null"
-    @confirm="changeStatus"
-  />
 </template>
 
 <style scoped>

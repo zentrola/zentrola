@@ -10,7 +10,6 @@ import Modal from '../components/Modal.vue'
 import PageHeader from '../components/PageHeader.vue'
 import ListFooter from '../components/ListFooter.vue'
 import ListSearch from '../components/ListSearch.vue'
-import ConfirmDialog from '../components/ConfirmDialog.vue'
 const {
   items,
   cursor,
@@ -101,18 +100,18 @@ function save() {
     await load()
   })
 }
-function openStatus(resource: Resource) {
+function changeStatus(resource: Resource) {
   actionError.value = ''
   statusTarget.value = resource
-}
-function changeStatus() {
   void run(async () => {
-    const r = statusTarget.value!
-    await api(`/resources/${r.id}/status`, 'PATCH', {
-      status: r.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE',
-    })
-    statusTarget.value = null
-    await refresh()
+    try {
+      await api(`/resources/${resource.id}/status`, 'PATCH', {
+        status: resource.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE',
+      })
+      await refresh()
+    } finally {
+      statusTarget.value = null
+    }
   })
 }
 function test(resource: Resource) {
@@ -178,7 +177,7 @@ function resultMessage(result: ConnectionResult) {
                 :name="resource.name"
                 :disabled="busy || loading"
                 :busy="busy && statusTarget?.id === resource.id"
-                @change="openStatus(resource)"
+                @change="changeStatus(resource)"
               />
             </td>
             <td>
@@ -261,24 +260,6 @@ function resultMessage(result: ConnectionResult) {
       </footer>
     </form></Modal
   >
-  <ConfirmDialog
-    v-if="statusTarget"
-    :title="t(statusTarget.status === 'ACTIVE' ? 'common.disableTitle' : 'common.enableTitle')"
-    :message="
-      t('common.confirmStatus', {
-        name: statusTarget.name,
-        status: t(statusTarget.status === 'ACTIVE' ? 'common.disable' : 'common.enable'),
-      })
-    "
-    :hint="t(statusTarget.status === 'ACTIVE' ? 'common.disableHint' : 'resources.limit')"
-    :confirm-label="
-      t(statusTarget.status === 'ACTIVE' ? 'common.disableAction' : 'common.enableAction')
-    "
-    :busy="busy"
-    :tone="statusTarget.status === 'ACTIVE' ? 'warning' : 'success'"
-    @close="statusTarget = null"
-    @confirm="changeStatus"
-  />
   <Modal
     v-if="testTarget"
     :title="`${testTarget.name} / ${t('resources.result')}`"

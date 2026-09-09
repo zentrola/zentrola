@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { all, api } from '../api'
 import { useCollection, useAction, useListSearch, date, validText } from '../composables'
 import { t } from '../i18n'
+import { showErrorToast } from '../toast'
 import type { Member, Group, CreatedKey } from '../types'
 import Icon from '../components/Icon.vue'
 import StatusSwitch from '../components/StatusSwitch.vue'
@@ -62,8 +63,15 @@ function newMember() {
   originalGroupIDs.value = []
   groupsReady.value = false
   actionError.value = ''
-  creating.value = true
-  void run(loadMemberGroups)
+  creating.value = false
+  void run(async () => {
+    await loadMemberGroups()
+    if (!groupCandidates.value.length) {
+      showErrorToast(t('members.addGroupFirst'))
+      return
+    }
+    creating.value = true
+  })
 }
 async function loadMemberGroups() {
   groupsReady.value = false
@@ -123,19 +131,19 @@ function saveMember() {
     await load()
   })
 }
-function openStatus(member: Member) {
+function changeStatus(member: Member) {
   actionError.value = ''
   statusTarget.value = member
-}
-function changeStatus() {
   void run(async () => {
-    const m = statusTarget.value!
-    await api(`/members/${m.id}/status`, 'PATCH', {
-      status: m.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE',
-    })
-    statusTarget.value = null
-    notice.value = t('common.updatedOK')
-    await refresh()
+    try {
+      await api(`/members/${member.id}/status`, 'PATCH', {
+        status: member.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE',
+      })
+      notice.value = t('common.updatedOK')
+      await refresh()
+    } finally {
+      statusTarget.value = null
+    }
   })
 }
 function openKeys(member: Member) {
@@ -256,7 +264,7 @@ async function copyKey() {
                 :inactive-label="t('members.inactive')"
                 :disabled="busy || loading"
                 :busy="busy && statusTarget?.id === member.id"
-                @change="openStatus(member)"
+                @change="changeStatus(member)"
               />
             </td>
             <td class="remark-cell" :title="member.remark || ''">
@@ -383,24 +391,6 @@ async function copyKey() {
       </footer>
     </form></Modal
   >
-  <ConfirmDialog
-    v-if="statusTarget"
-    :title="
-      t(statusTarget.status === 'ACTIVE' ? 'members.deactivateTitle' : 'members.activateTitle')
-    "
-    :message="
-      t('common.confirmStatus', {
-        name: statusTarget.name,
-        status: t(statusTarget.status === 'ACTIVE' ? 'members.deactivate' : 'members.activate'),
-      })
-    "
-    :hint="statusTarget.status === 'ACTIVE' ? t('members.deactivateHint') : undefined"
-    :confirm-label="t(statusTarget.status === 'ACTIVE' ? 'members.deactivate' : 'members.activate')"
-    :busy="busy"
-    :tone="statusTarget.status === 'ACTIVE' ? 'warning' : 'success'"
-    @close="statusTarget = null"
-    @confirm="changeStatus"
-  />
   <ConfirmDialog
     v-if="deleteTarget"
     :title="t('members.deleteTitle')"

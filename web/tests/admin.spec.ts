@@ -962,8 +962,8 @@ test('成员列表不预查密钥且分配密钥后可激活', async ({ page }) 
 
   await expect(status).toBeEnabled()
   await status.click()
-  await modal(page).getByRole('button', { name: '激活', exact: true }).click()
   await expect(status).toBeChecked()
+  await expect(modal(page)).toHaveCount(0)
   await expect(status).toContainText('已激活')
   expect(state.members.find((member) => member.name === '周予安')?.status).toBe('ACTIVE')
 })
@@ -1052,6 +1052,18 @@ test('模型新增编辑、模态校验、冲突恢复和窄屏表单', async ({
   const state = await fixture(page)
   await signIn(page)
   await page.getByRole('link', { name: '模型', exact: true }).click()
+  await expect(page.getByRole('columnheader')).toHaveText([
+    '官方模型名称',
+    '状态',
+    '输入类型',
+    '输出类型',
+    '备注',
+    '操作',
+  ])
+  const existingModelRow = page.getByRole('row').filter({ hasText: 'DeepSeek V4 Flash' })
+  await expect(existingModelRow.locator('.person strong')).toHaveText('DeepSeek V4 Flash')
+  await expect(existingModelRow.locator('.person small')).toHaveText('deepseek-v4-flash')
+  await expect(existingModelRow.getByRole('cell')).toHaveCount(6)
   await page.getByRole('button', { name: '添加模型' }).click()
   const dialog = modal(page)
   await dialog.getByLabel('官方模型名称', { exact: true }).fill('测试官方模型')
@@ -1331,16 +1343,16 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expect(page.getByRole('row').filter({ hasText: '阿里云模型服务' })).toBeVisible()
 
-  await page.getByRole('switch', { name: '阿里云模型服务的启用状态' }).click()
-  const statusDialog = modal(page)
-  await expect(statusDialog.locator('.modal-head')).toHaveCSS('border-bottom-width', '0px')
-  await statusDialog.getByRole('button', { name: '启用', exact: true }).click()
+  const renamedStatus = page.getByRole('switch', { name: '阿里云模型服务的启用状态' })
+  await renamedStatus.click()
+  await expect(renamedStatus).toBeChecked()
   expect(created.status).toBe('ACTIVE')
+  await expect(modal(page)).toHaveCount(0)
   await mkdir('../.cache/web-visual', { recursive: true })
-  await page.getByRole('switch', { name: '阿里云模型服务的启用状态' }).click()
-  const disableDialog = modal(page)
-  await disableDialog.screenshot({ path: '../.cache/web-visual/status-confirm-dialog.png' })
-  await disableDialog.getByRole('button', { name: '取消', exact: true }).click()
+  await renamedStatus.click()
+  await expect(renamedStatus).not.toBeChecked()
+  expect(created.status).toBe('DISABLED')
+  await expect(modal(page)).toHaveCount(0)
   await page.screenshot({
     path: '../.cache/web-visual/provider-catalog-desktop.png',
     fullPage: true,
@@ -1367,25 +1379,30 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   expect(state.resources.some((resource) => resource.providerId === created.id)).toBe(false)
 })
 
-test('通用确认框适配英文长文案和危险操作语义', async ({ page }) => {
+test('状态 switch 直接生效且危险操作仍需确认', async ({ page }) => {
   await fixture(page)
   await signIn(page)
   await page.getByRole('button', { name: 'EN', exact: true }).click()
   await page.getByRole('link', { name: 'Providers', exact: true }).click()
-  await page.getByRole('switch', { name: 'Status for DeepSeek' }).click()
+  const row = page.getByRole('row').filter({ hasText: 'DeepSeek' })
+  const status = row.getByRole('switch', { name: 'Status for DeepSeek' })
+  await status.click()
+  await expect(status).not.toBeChecked()
+  await expect(modal(page)).toHaveCount(0)
+  await row.getByRole('button', { name: 'Delete', exact: true }).click()
 
   const dialog = modal(page)
-  await expect(dialog).toHaveAccessibleName('Disable access')
+  await expect(dialog).toHaveAccessibleName('Delete provider')
   await expect(dialog).toContainText(
-    'Disabling a provider removes all of its model mappings and credentials from routing.',
+    'Its model mappings and configured keys will stop routing immediately and cannot be restored.',
   )
   await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeFocused()
-  await expect(dialog.getByRole('button', { name: 'Disable', exact: true })).toBeVisible()
+  await expect(dialog.getByRole('button', { name: 'Delete', exact: true })).toBeVisible()
   expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(
     true,
   )
   await mkdir('../.cache/web-visual', { recursive: true })
-  await dialog.screenshot({ path: '../.cache/web-visual/status-confirm-dialog-en.png' })
+  await dialog.screenshot({ path: '../.cache/web-visual/delete-confirm-dialog-en.png' })
 })
 
 test('创建和编辑用户时可选择分组', async ({ page }) => {
@@ -1573,6 +1590,19 @@ test('分组编辑表单与创建一致、失败恢复及停用授权限制', as
   expect(state.relationships.get('groups/51/models')?.has('71')).toBe(false)
 })
 
+test('没有模型时提示先添加模型且不打开创建分组弹窗', async ({ page }) => {
+  const state = await fixture(page)
+  state.models.splice(0)
+  await signIn(page)
+  await page.getByRole('link', { name: '用户分组', exact: true }).click()
+
+  await page.getByRole('button', { name: '创建分组' }).click()
+
+  await expect(page.getByRole('alert')).toHaveText('请先添加模型。')
+  await expect(modal(page)).toHaveCount(0)
+  expect(state.modelQueries.at(-1)?.get('status')).toBe('ACTIVE')
+})
+
 test('分组列表按最新记录倒序显示并提示输入分组名称', async ({ page }) => {
   const state = await fixture(page)
   state.groups.push(
@@ -1619,17 +1649,25 @@ test('分组列表按最新记录倒序显示并提示输入分组名称', async
   const latestSwitch = page.getByRole('switch', { name: '最新分组的启用状态' })
   await expect(latestSwitch).toBeChecked()
   await latestSwitch.click()
-  await modal(page).getByRole('button', { name: '取消', exact: true }).click()
-  await expect(latestSwitch).toBeChecked()
-  await latestSwitch.click()
-  await modal(page).getByRole('button', { name: '停用', exact: true }).click()
   await expect(latestSwitch).not.toBeChecked()
+  await expect(modal(page)).toHaveCount(0)
   expect(state.groups.find((group) => group.id === '52')?.status).toBe('DISABLED')
 
   await page.getByRole('link', { name: '用户管理', exact: true }).click()
   await page.getByRole('button', { name: '创建用户' }).click()
   await expect(modal(page).getByRole('checkbox', { name: '选择分组 最新分组' })).toHaveCount(0)
   await expect(modal(page).getByRole('checkbox', { name: '选择分组 较早分组' })).toBeVisible()
+})
+
+test('没有用户分组时提示先添加分组且不打开创建用户弹窗', async ({ page }) => {
+  const state = await fixture(page)
+  await signIn(page)
+
+  await page.getByRole('button', { name: '创建用户' }).click()
+
+  await expect(page.getByRole('alert')).toHaveText('请先添加用户分组。')
+  await expect(modal(page)).toHaveCount(0)
+  expect(state.groupQueries.at(-1)?.get('status')).toBe('ACTIVE')
 })
 
 test('启停状态时保留列表直到当前页重新加载完成', async ({ page }) => {
@@ -1655,7 +1693,6 @@ test('启停状态时保留列表直到当前页重新加载完成', async ({ pa
   })
 
   await modelSwitch.click()
-  await modal(page).getByRole('button', { name: '停用', exact: true }).click()
   await expect(modal(page)).toHaveCount(0)
   await expect(modelRow).toBeVisible()
   await expect(page.locator('tbody tr')).toHaveCount(2)
@@ -1748,13 +1785,9 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
   const modelSwitch = page.getByRole('switch', { name: 'DeepSeek V4 Flash的启用状态' })
   await expect(modelSwitch).toBeChecked()
   await modelSwitch.press('Space')
-  await modal(page).getByRole('button', { name: '取消', exact: true }).click()
-  await expect(modelSwitch).toBeChecked()
-  await modelSwitch.click()
-  await modal(page).getByRole('button', { name: '停用', exact: true }).click()
   await expect(modelSwitch).not.toBeChecked()
+  await expect(modal(page)).toHaveCount(0)
   await modelSwitch.click()
-  await modal(page).getByRole('button', { name: '启用', exact: true }).click()
   await expect(modelSwitch).toBeChecked()
   await expect(page.getByRole('button', { name: '授权', exact: true })).toHaveCount(0)
   await page.getByRole('link', { name: '用户分组', exact: true }).click()
@@ -1859,8 +1892,8 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
     .filter({ hasText: '林知远' })
     .getByRole('switch', { name: '林知远的激活状态' })
     .click()
-  await modal(page).getByRole('button', { name: '取消激活', exact: true }).click()
   await expect(page.getByRole('switch', { name: '林知远的激活状态' })).not.toBeChecked()
+  await expect(modal(page)).toHaveCount(0)
   expect(state.members[0].status).toBe('DISABLED')
 
   const memberListRequestCount = state.memberListQueries.length
