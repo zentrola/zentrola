@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { all, api, errorText } from '../api'
 import { useAction, useCollection, useListSearch, validText } from '../composables'
 import { i18n, t } from '../i18n'
-import { showSuccessToast } from '../toast'
+import { showErrorToast, showSuccessToast } from '../toast'
 import type {
   ConnectionResult,
   Model,
@@ -53,7 +53,6 @@ const testResult = ref<ConnectionResult | null>(null)
 const syncTarget = ref<{ provider: Provider; resource: Resource } | null>(null)
 const syncResult = ref<ModelSyncResult | null>(null)
 const credential = ref('')
-const validation = ref('')
 const activeConfigTab = ref<'models' | 'proxy'>('models')
 const modelConfigTab = ref<HTMLButtonElement | null>(null)
 const proxyConfigTab = ref<HTMLButtonElement | null>(null)
@@ -145,7 +144,6 @@ function assignForm(provider: Provider | null, mappings: MappingDraft[] = []) {
     })),
     mappings,
   })
-  validation.value = ''
   actionError.value = ''
 }
 
@@ -241,7 +239,6 @@ function activateConfigTab(tab: 'models' | 'proxy', focus = false) {
 }
 
 function toggleMapping(model: Model) {
-  validation.value = ''
   const index = form.mappings.findIndex((mapping) => mapping.modelId === model.id)
   if (index < 0) {
     form.mappings.push({
@@ -423,7 +420,6 @@ function initializeProviders() {
 function configureCredential(provider: Provider) {
   credentialTarget.value = provider
   credential.value = ''
-  validation.value = ''
   actionError.value = ''
 }
 
@@ -448,9 +444,8 @@ function closeCredential() {
 }
 
 function saveCredential() {
-  validation.value = ''
   if (!/^[\x21-\x7e]{1,4096}$/.test(credential.value)) {
-    validation.value = t('resources.credentialRequired')
+    showErrorToast(t('resources.credentialRequired'))
     return
   }
   void run(async () => {
@@ -504,7 +499,7 @@ function resultMessage(result: ConnectionResult) {
 }
 
 function save() {
-  validation.value = ''
+  let validation = ''
   const endpointDrafts: Array<{ protocolType: ProviderProtocol; baseUrl: string }> = [
     { protocolType: 'OPENAI', baseUrl: normalizeURL(form.openaiBaseUrl) },
     { protocolType: 'ANTHROPIC', baseUrl: normalizeURL(form.anthropicBaseUrl) },
@@ -523,18 +518,18 @@ function save() {
       upstreamModelCode: resolvedUpstreamModelCode(mapping),
     })),
   }
-  if (!validText(input.name, 128)) validation.value = t('common.byteLimit')
+  if (!validText(input.name, 128)) validation = t('common.byteLimit')
   else if (
     !validURL(input.website) ||
     input.endpoints.some((endpoint) => !validURL(endpoint.baseUrl, true))
   )
-    validation.value = t('providers.urlInvalid')
-  else if (!input.endpoints.length) validation.value = t('providers.endpointRequired')
+    validation = t('providers.urlInvalid')
+  else if (!input.endpoints.length) validation = t('providers.endpointRequired')
   else if (input.proxyEnabled && !validProxyURL(input.proxyUrl))
-    validation.value = t('providers.proxyUrlInvalid')
+    validation = t('providers.proxyUrlInvalid')
   else if (input.proxyEnabled && !validProxyHeaders())
-    validation.value = t('providers.proxyHeadersInvalid')
-  else if (!form.mappings.length) validation.value = t('providers.mappingRequired')
+    validation = t('providers.proxyHeadersInvalid')
+  else if (!form.mappings.length) validation = t('providers.mappingRequired')
   else if (
     form.mappings.some(
       (mapping) =>
@@ -542,10 +537,10 @@ function save() {
         !validText(resolvedUpstreamModelCode(mapping), 128),
     )
   )
-    validation.value = t('providers.mappingInvalid')
+    validation = t('providers.mappingInvalid')
   else if (new Set(form.mappings.map((mapping) => mapping.modelId)).size !== form.mappings.length)
-    validation.value = t('providers.mappingDuplicate')
-  if (validation.value) {
+    validation = t('providers.mappingDuplicate')
+  if (validation) {
     if (input.proxyEnabled && (!validProxyURL(input.proxyUrl) || !validProxyHeaders()))
       activeConfigTab.value = 'proxy'
     else if (
@@ -557,6 +552,7 @@ function save() {
       )
     )
       activeConfigTab.value = 'models'
+    showErrorToast(validation)
     return
   }
   void run(async () => {
@@ -1067,7 +1063,6 @@ onMounted(() => {
           </div>
         </section>
       </section>
-      <p v-if="validation" class="alert error" role="alert">{{ validation }}</p>
     </form>
     <template #footer>
       <button type="button" class="button" :disabled="busy" @click="editing = false">
@@ -1116,7 +1111,6 @@ onMounted(() => {
           spellcheck="false"
       /></label>
       <p class="field-hint">{{ t('resources.credentialHint') }}</p>
-      <p v-if="validation" class="alert error" role="alert">{{ validation }}</p>
       <footer class="form-footer">
         <button type="button" class="button" :disabled="busy" @click="closeCredential">
           {{ t('common.cancel') }}</button

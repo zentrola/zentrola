@@ -1916,13 +1916,6 @@ tbody tr:hover {
   background: #dce9f6;
   color: #195dc2;
 }
-.copy-feedback {
-  position: absolute;
-  right: 25px;
-  bottom: 4px;
-  color: #60778c;
-  font-size: 11px;
-}
 .access-setup-dialog {
   display: grid;
   gap: 20px;
@@ -2175,11 +2168,6 @@ tbody tr:hover {
 .setup-script code {
   font: inherit;
   white-space: pre;
-}
-.setup-copy-error {
-  margin: -12px 0 0 34px;
-  color: var(--danger);
-  font-size: 12px;
 }
 .setup-run-step {
   padding-top: 1px;

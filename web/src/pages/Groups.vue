@@ -30,7 +30,6 @@ const { busy, error: actionError, run } = useAction()
 const creating = ref(false),
   name = ref(''),
   remark = ref(''),
-  validation = ref(''),
   creationModels = ref<Model[]>([]),
   createModelIDs = ref<string[]>([]),
   createModelsReady = ref(false)
@@ -53,7 +52,6 @@ onMounted(() => load())
 function newGroup() {
   name.value = ''
   remark.value = ''
-  validation.value = ''
   creationModels.value = []
   createModelIDs.value = []
   createModelsReady.value = false
@@ -74,17 +72,16 @@ async function loadCreateModels() {
   createModelsReady.value = true
 }
 function create() {
-  validation.value = ''
   if (!name.value) {
-    validation.value = t('groups.nameRequired')
+    showErrorToast(t('groups.nameRequired'))
     return
   }
   if (!validText(name.value, 128) || !validText(remark.value, 2000, false)) {
-    validation.value = t('common.byteLimit')
+    showErrorToast(t('common.byteLimit'))
     return
   }
   if (!createModelIDs.value.length) {
-    validation.value = t('groups.modelRequired')
+    showErrorToast(t('groups.modelRequired'))
     return
   }
   void run(async () => {
@@ -116,15 +113,13 @@ function manage(group: Group) {
   editModelIDs.value = []
   grantedModels.value = []
   modelCandidates.value = []
-  validation.value = ''
   actionError.value = ''
   void run(refreshModels)
 }
 function saveEdit() {
-  validation.value = ''
   if (!selected.value) return
   if (!validText(editName.value, 128) || !validText(editRemark.value, 2000, false)) {
-    validation.value = t('common.byteLimit')
+    showErrorToast(t('common.byteLimit'))
     return
   }
   const groupID = selected.value.id
@@ -365,7 +360,6 @@ function deleteGroup() {
           </section>
         </div>
       </div>
-      <p v-if="validation" class="alert error" role="alert">{{ validation }}</p>
       <p v-if="actionError && !createModelsReady" class="form-retry">
         <button type="button" class="text-button" :disabled="busy" @click="run(loadCreateModels)">
           {{ t('common.retry') }}
@@ -503,7 +497,6 @@ function deleteGroup() {
           </section>
         </div>
       </div>
-      <p v-if="validation" class="alert error" role="alert">{{ validation }}</p>
       <p v-if="actionError && !relationReady" class="form-retry">
         <button type="button" class="text-button" :disabled="busy" @click="run(refreshModels)">
           {{ t('common.retry') }}

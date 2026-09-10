@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue'
 import { api, all, errorText } from '../api'
 import { useCollection, useAction, useListSearch, date, validText } from '../composables'
 import { t, i18n } from '../i18n'
+import { showErrorToast } from '../toast'
 import type { Resource, Provider, ConnectionResult } from '../types'
 import Icon from '../components/Icon.vue'
 import Status from '../components/Status.vue'
@@ -35,8 +36,7 @@ const providers = ref<Provider[]>([]),
   testResult = ref<ConnectionResult | null>(null)
 const name = ref(''),
   providerID = ref(''),
-  credential = ref(''),
-  validation = ref('')
+  credential = ref('')
 const { keyword, query, visible, search, reset } = useListSearch(
   items,
   (r) => `${r.name} ${r.id} ${providerName(r.providerId)}`,
@@ -62,13 +62,11 @@ function newResource() {
   name.value = ''
   providerID.value = ''
   credential.value = ''
-  validation.value = ''
   actionError.value = ''
 }
 function replace(resource: Resource) {
   replaceTarget.value = resource
   credential.value = ''
-  validation.value = ''
   actionError.value = ''
 }
 function closeEdit() {
@@ -77,13 +75,12 @@ function closeEdit() {
   credential.value = ''
 }
 function save() {
-  validation.value = ''
   if (!/^[\x21-\x7e]{1,4096}$/.test(credential.value)) {
-    validation.value = t('resources.credentialRequired')
+    showErrorToast(t('resources.credentialRequired'))
     return
   }
   if (creating.value && (!validText(name.value, 128) || !providerID.value)) {
-    validation.value = t('common.byteLimit')
+    showErrorToast(t('common.byteLimit'))
     return
   }
   void run(async () => {
@@ -267,7 +264,6 @@ function runtimeReason(resource: Resource) {
           spellcheck="false"
       /></label>
       <p class="field-hint">{{ t('resources.credentialHint') }}</p>
-      <p v-if="validation" class="alert error" role="alert">{{ validation }}</p>
       <footer class="form-footer">
         <button type="button" class="button" :disabled="busy" @click="closeEdit">
           {{ t('common.cancel') }}</button

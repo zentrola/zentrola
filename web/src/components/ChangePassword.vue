@@ -2,6 +2,7 @@
 import { computed, ref, nextTick } from 'vue'
 import { api, ApiError, errorText } from '../api'
 import { t } from '../i18n'
+import { showErrorToast } from '../toast'
 import Modal from './Modal.vue'
 
 defineProps<{ username: string }>()
@@ -10,8 +11,7 @@ const currentPassword = ref(''),
   newPassword = ref(''),
   confirmation = ref('')
 const busy = ref(false),
-  submitted = ref(false),
-  error = ref('')
+  submitted = ref(false)
 const form = ref<HTMLFormElement>()
 const errors = computed(() => {
   const bytes = new TextEncoder().encode(newPassword.value).length
@@ -39,7 +39,6 @@ const errors = computed(() => {
 async function submit() {
   if (busy.value) return
   submitted.value = true
-  error.value = ''
   const invalid = (Object.keys(errors.value) as (keyof typeof errors.value)[]).find(
     (key) => errors.value[key],
   )
@@ -56,7 +55,7 @@ async function submit() {
     currentPassword.value = newPassword.value = confirmation.value = ''
     emit('changed')
   } catch (e) {
-    error.value = errorText(e)
+    showErrorToast(errorText(e))
     if (e instanceof ApiError && e.code === 'CURRENT_PASSWORD_INCORRECT') {
       currentPassword.value = ''
       busy.value = false
@@ -145,7 +144,6 @@ async function submit() {
       >
         {{ errors.confirmation }}
       </p>
-      <p v-if="error" class="alert error" role="alert">{{ error }}</p>
       <footer class="form-footer">
         <button type="button" class="button" :disabled="busy" @click="emit('close')">
           {{ t('common.cancel') }}

@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { all, api, errorText, gatewayBaseUrl } from '../api'
 import { compactCount, count } from '../composables'
 import { activeLocale, i18n, t } from '../i18n'
+import { showErrorToast, showSuccessToast } from '../toast'
 import type { Dashboard, Provider, Resource } from '../types'
 import Icon from '../components/Icon.vue'
 import Modal from '../components/Modal.vue'
@@ -187,11 +188,13 @@ async function copyAddress(name: string, value: string) {
   try {
     await navigator.clipboard.writeText(value)
     copied.value = name
+    showSuccessToast(t('common.copied'))
     window.setTimeout(() => {
       if (copied.value === name) copied.value = ''
     }, 1800)
   } catch {
-    copied.value = 'error'
+    copied.value = ''
+    showErrorToast(t('common.copyFailed'))
   }
 }
 
@@ -234,11 +237,13 @@ async function copySetupScript(platform: SetupPlatform) {
   try {
     await navigator.clipboard.writeText(setupScripts.value[platform])
     scriptCopied.value = platform
+    showSuccessToast(t('common.copied'))
     window.setTimeout(() => {
       if (scriptCopied.value === platform) scriptCopied.value = ''
     }, 1800)
   } catch {
-    scriptCopied.value = 'error'
+    scriptCopied.value = ''
+    showErrorToast(t('common.copyFailed'))
   }
 }
 
@@ -358,9 +363,6 @@ onMounted(load)
           </button>
         </div>
       </div>
-      <p v-if="copied" class="copy-feedback" role="status">
-        {{ t(copied === 'error' ? 'common.copyFailed' : 'common.copied') }}
-      </p>
     </section>
   </div>
 
@@ -607,10 +609,6 @@ onMounted(load)
             </div>
           </div>
         </section>
-        <p v-if="scriptCopied === 'error'" class="setup-copy-error" role="alert">
-          {{ t('common.copyFailed') }}
-        </p>
-
         <section class="setup-step setup-run-step">
           <div class="setup-step-head">
             <span class="setup-step-number">2</span>

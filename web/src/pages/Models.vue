@@ -3,6 +3,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { api } from '../api'
 import { useCollection, useAction, useListSearch, validText } from '../composables'
 import { t } from '../i18n'
+import { showErrorToast } from '../toast'
 import type { Model, Modality } from '../types'
 import Icon from '../components/Icon.vue'
 import StatusSwitch from '../components/StatusSwitch.vue'
@@ -25,9 +26,8 @@ const {
   setPageSize,
 } = useCollection<Model>(() => '/models')
 const { busy, error: actionError, run } = useAction()
-const editing = ref(false),
-  editTarget = ref<Model | null>(null),
-  validation = ref('')
+const editing = ref(false)
+const editTarget = ref<Model | null>(null)
 const modalities: Modality[] = ['TEXT', 'IMAGE', 'AUDIO', 'VIDEO']
 const form = reactive({
   name: '',
@@ -45,22 +45,20 @@ function openEdit(model: Model | null = null) {
     outputModalities: [...(model?.outputModalities ?? [])],
     remark: model?.remark ?? '',
   })
-  validation.value = ''
   actionError.value = ''
   editing.value = true
 }
 function save() {
-  validation.value = ''
   if (
     !validText(form.name, 128) ||
     !validText(form.code, 128) ||
     (form.remark !== '' && !validText(form.remark, 2000))
   ) {
-    validation.value = t('common.byteLimit')
+    showErrorToast(t('common.byteLimit'))
     return
   }
   if (!form.inputModalities.length || !form.outputModalities.length) {
-    validation.value = t('models.modalityRequired')
+    showErrorToast(t('models.modalityRequired'))
     return
   }
   void run(async () => {
@@ -248,7 +246,6 @@ function changeStatus(model: Model) {
           rows="3"
         />
       </label>
-      <p v-if="validation" class="alert error" role="alert">{{ validation }}</p>
       <footer class="form-footer">
         <button type="button" class="button" :disabled="busy" @click="editing = false">
           {{ t('common.cancel') }}</button

@@ -8,8 +8,7 @@ async function fixture(page: Page) {
     if (path.endsWith('/auth/setup')) return reply({ required: false })
     if (path.endsWith('/auth/login'))
       return reply({ token: 'test-token', expiresAt: new Date(Date.now() + 3600000).toISOString() })
-    if (path.endsWith('/me'))
-      return reply({ id: '1', username: 'admin', displayName: '管理员' })
+    if (path.endsWith('/me')) return reply({ id: '1', username: 'admin', displayName: '管理员' })
     if (path.endsWith('/auth/password')) {
       state.calls++
       state.body = route.request().postDataJSON()
@@ -79,7 +78,8 @@ test('当前密码错误保留对话框和登录状态，允许重试', async ({
   await page.getByLabel('确认新密码').fill('new-password-2026')
   await page.getByRole('button', { name: '确认修改', exact: true }).click()
   await expect(page.getByRole('dialog')).toBeVisible()
-  await expect(page.getByRole('dialog')).toContainText('当前密码不正确')
+  await expect(page.locator('.toast')).toContainText('当前密码不正确')
+  await expect(page.getByRole('dialog').locator('.alert.error')).toHaveCount(0)
   await expect(page.getByLabel('当前密码', { exact: true })).toHaveValue('')
   await expect(page.getByLabel('当前密码', { exact: true })).toBeFocused()
   expect(await page.evaluate(() => localStorage.getItem('zentrola.admin.session'))).not.toBeNull()

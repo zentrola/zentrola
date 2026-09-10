@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import Icon from './Icon.vue'
 import { t } from '../i18n'
+import { showErrorToast, showSuccessToast } from '../toast'
 
 const props = defineProps<{ before: unknown; after: unknown }>()
 
@@ -10,7 +11,7 @@ type ChangeKind = 'added' | 'removed' | 'changed'
 type JsonLine = { text: string; kind?: ChangeKind }
 
 const missing = Symbol('missing')
-const copyState = ref<Record<Side, 'idle' | 'copied' | 'error'>>({
+const copyState = ref<Record<Side, 'idle' | 'copied'>>({
   before: 'idle',
   after: 'idle',
 })
@@ -134,8 +135,10 @@ async function copy(side: Side) {
   try {
     await navigator.clipboard.writeText(formatted(value))
     copyState.value[side] = 'copied'
+    showSuccessToast(t('common.copied'))
   } catch {
-    copyState.value[side] = 'error'
+    copyState.value[side] = 'idle'
+    showErrorToast(t('common.copyFailed'))
   }
 }
 
@@ -194,13 +197,6 @@ function lineLabel(line: JsonLine) {
     </section>
   </div>
   <p v-else class="json-diff-empty">{{ t('operations.noSnapshot') }}</p>
-  <p
-    v-if="copyState.before === 'error' || copyState.after === 'error'"
-    class="json-copy-error"
-    role="alert"
-  >
-    {{ t('common.copyFailed') }}
-  </p>
 </template>
 
 <style scoped>
@@ -292,11 +288,6 @@ function lineLabel(line: JsonLine) {
   color: var(--muted);
   text-align: center;
   font-size: 13px;
-}
-.json-copy-error {
-  margin-top: 12px;
-  color: var(--danger);
-  font-size: 12px;
 }
 @media (max-width: 700px) {
   .json-diff {

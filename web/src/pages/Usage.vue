@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { api, all, errorText } from '../api'
 import { useCollection, date, count } from '../composables'
 import { t } from '../i18n'
+import { showErrorToast } from '../toast'
 import type { Usage, Member, Model, Page, Resource } from '../types'
 import Icon from '../components/Icon.vue'
 import Status from '../components/Status.vue'
@@ -15,7 +16,6 @@ const memberID = ref(''),
   from = ref(''),
   to = ref(''),
   query = ref(''),
-  validation = ref(''),
   lookupError = ref(''),
   metricsError = ref('')
 const models = ref<Model[]>([]),
@@ -120,15 +120,14 @@ function dateBounds(startValue: string, endValue: string) {
 }
 function search() {
   if (memberName.value && !memberID.value) {
-    validation.value = t('usage.selectMember')
+    showErrorToast(t('usage.selectMember'))
     return
   }
   const bounds = dateBounds(from.value, to.value)
   if (!bounds) {
-    validation.value = t('usage.invalidRange')
+    showErrorToast(t('usage.invalidRange'))
     return
   }
-  validation.value = ''
   const params = new URLSearchParams({
     from: new Date(bounds.start).toISOString(),
     to: new Date(bounds.end).toISOString(),
@@ -191,7 +190,6 @@ function selectMember(member: Member) {
   memberID.value = member.id
   memberName.value = member.name
   memberSuggestionsOpen.value = false
-  validation.value = ''
 }
 function toggleDatePicker() {
   if (datePickerOpen.value) {
@@ -228,7 +226,6 @@ function selectDate(value: string) {
   from.value = start
   to.value = end
   datePickerValidation.value = ''
-  validation.value = ''
   datePickerOpen.value = false
 }
 function changeCalendarMonth(amount: number) {
@@ -418,7 +415,6 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </form>
-    <p v-if="validation" class="alert error" role="alert">{{ validation }}</p>
     <p v-if="lookupError" class="alert error" role="alert">
       {{ lookupError }}<button class="text-button" @click="lookups">{{ t('common.retry') }}</button>
     </p>

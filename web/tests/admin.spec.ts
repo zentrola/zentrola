@@ -623,6 +623,7 @@ async function signIn(page: Page, destination: 'home' | 'members' = 'members') {
 const modal = (page: Page) => page.locator('dialog').last()
 test('首页展示本月指标、应用接入、配置脚本和分项排行榜', async ({ page }) => {
   const state = await fixture(page)
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
   state.resources.push({
     id: '88',
     name: 'DeepSeek Key',
@@ -734,6 +735,8 @@ test('首页展示本月指标、应用接入、配置脚本和分项排行榜',
   const accessPanel = page.getByRole('region', { name: '应用接入' })
   const openaiRow = accessPanel.locator('.access-addresses > div').filter({ hasText: 'OpenAI' })
   const openaiUrl = await openaiRow.locator('code').innerText()
+  await openaiRow.getByRole('button', { name: '复制 OpenAI 接入地址' }).click()
+  await expect(page.locator('.toast-success')).toContainText('已复制')
   await expect(accessPanel.getByRole('button', { name: '接入指南' })).toHaveCount(1)
   await accessPanel.getByRole('button', { name: '接入指南' }).click()
   await expect(modal(page).getByRole('heading', { name: '应用接入指南' })).toBeVisible()
@@ -755,6 +758,8 @@ test('首页展示本月指标、应用接入、配置脚本和分项排行榜',
   )
   await expect(modal(page)).toContainText('输入过程不会回显')
   await expect(modal(page).locator('.setup-script')).toHaveCount(2)
+  await modal(page).getByRole('button', { name: '复制 macOS / Linux 脚本' }).click()
+  await expect(page.locator('.toast-success')).toContainText('已复制')
   await expect(modal(page).locator('.setup-script').nth(1)).toContainText(
     `$env:OPENAI_BASE_URL = '${openaiUrl}'`,
   )
@@ -775,7 +780,7 @@ test('首页展示本月指标、应用接入、配置脚本和分项排行榜',
   await page.screenshot({ path: '../.cache/web-visual/home-setup-cc-switch.png', fullPage: true })
   await modal(page).getByRole('tab', { name: '使用脚本' }).click()
   await page.screenshot({ path: '../.cache/web-visual/home-setup.png', fullPage: true })
-  await modal(page).getByRole('button', { name: '关闭' }).click()
+  await modal(page).getByRole('button', { name: '关闭', exact: true }).click()
 
   const anthropicRow = accessPanel
     .locator('.access-addresses > div')
@@ -908,6 +913,7 @@ test('首页用黄色角标表示部分启用服务商不可用', async ({ page 
 
 test('操作日志详情展示原始 JSON、差异高亮和追踪信息', async ({ page }) => {
   await fixture(page)
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
   await signIn(page, 'home')
   await page.getByRole('link', { name: '操作日志', exact: true }).click()
   await expect(page.getByRole('searchbox', { name: '请输入操作人名称' })).toHaveAttribute(
@@ -928,8 +934,11 @@ test('操作日志详情展示原始 JSON、差异高亮和追踪信息', async 
   await expect(after.locator('code')).toContainText('"status": "DISABLED"')
   await expect(before.locator('.json-line.changed')).toContainText('"status": "ACTIVE"')
   await expect(after.locator('.json-line.changed')).toContainText('"status": "DISABLED"')
-  await expect(before.getByRole('button', { name: '复制修改前', exact: true })).toBeVisible()
+  const copyBefore = before.getByRole('button', { name: '复制修改前', exact: true })
+  await expect(copyBefore).toBeVisible()
   await expect(after.getByRole('button', { name: '复制修改后', exact: true })).toBeVisible()
+  await copyBefore.click()
+  await expect(page.locator('.toast-success')).toContainText('已复制')
   await expect(dialog.getByText('req_provider_status', { exact: true })).toBeVisible()
   await expect(dialog.getByText('PROVIDER_STATUS_CHANGE', { exact: true })).toHaveCount(0)
   await expect(dialog.getByText('admin', { exact: true })).toHaveCount(0)
@@ -972,6 +981,7 @@ test('操作日志单侧快照显示为日志内容且登录失败隐藏内部�
 
 test('成员列表按需查看 Key 并处理删除和失败恢复', async ({ page }) => {
   const state = await fixture(page)
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
   state.keys.push(
     {
       id: '801',
@@ -1083,9 +1093,12 @@ test('成员列表按需查看 Key 并处理删除和失败恢复', async ({ pag
   await expect(modal(page).getByLabel('到期日期（可选）')).toHaveAttribute('type', 'date')
   await modal(page).getByLabel('到期日期（可选）').fill('2020-01-01')
   await modal(page).getByRole('button', { name: '密钥', exact: true }).click()
-  await expect(modal(page).getByRole('alert')).toContainText('不能早于今天')
+  await expect(page.locator('.toast')).toContainText('不能早于今天')
+  await expect(modal(page).locator('.alert.error')).toHaveCount(0)
   await modal(page).getByLabel('到期日期（可选）').fill('2099-12-31')
   await modal(page).getByRole('button', { name: '密钥', exact: true }).click()
+  await modal(page).getByRole('button', { name: '复制', exact: true }).click()
+  await expect(page.locator('.toast-success')).toContainText('已复制')
   await modal(page).getByRole('button', { name: '我已保存，关闭' }).click()
   await expect(page.locator('dialog')).toHaveCount(0)
   await expect(row).not.toContainText('vk-fixture1')
@@ -1249,7 +1262,8 @@ test('模型新增编辑、模态校验、冲突恢复和窄屏表单', async ({
   await dialog.getByLabel('官方模型名称', { exact: true }).fill('测试官方模型')
   await dialog.getByLabel('官方模型编码', { exact: true }).fill('official-test-v1')
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
-  await expect(dialog.getByRole('alert')).toContainText('至少选择一项')
+  await expect(page.locator('.toast')).toContainText('至少选择一项')
+  await expect(dialog.locator('.alert.error')).toHaveCount(0)
   await dialog.getByRole('group', { name: '输入类型' }).getByLabel('文本', { exact: true }).check()
   await dialog.getByRole('group', { name: '输入类型' }).getByLabel('图片', { exact: true }).check()
   await dialog.getByRole('group', { name: '输出类型' }).getByLabel('文本', { exact: true }).check()
@@ -1425,12 +1439,14 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await dialog.getByLabel('服务商名称').fill('阿里云百炼')
   await dialog.getByLabel('网站').fill('https://www.aliyun.com')
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
-  await expect(dialog.getByRole('alert')).toContainText('至少填写一种协议接口地址')
+  await expect(page.locator('.toast')).toContainText('至少填写一种协议接口地址')
+  await expect(dialog.locator('.alert.error')).toHaveCount(0)
   await dialog
     .getByLabel('OpenAI 协议地址')
     .fill('http://dashscope.aliyuncs.com/compatible-mode/v1')
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
-  await expect(dialog.getByRole('alert')).toContainText('有效的网站或 HTTPS 接口地址')
+  await expect(page.locator('.toast')).toContainText('有效的网站或 HTTPS 接口地址')
+  await expect(dialog.locator('.alert.error')).toHaveCount(0)
   await dialog
     .getByLabel('OpenAI 协议地址')
     .fill('https://dashscope.aliyuncs.com/compatible-mode/v1')
@@ -1445,7 +1461,8 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await dialog.getByLabel('VALUE', { exact: true }).fill('proxy-header-secret')
   await expect(dialog.getByLabel('VALUE', { exact: true })).toHaveValue('proxy-header-secret')
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
-  await expect(dialog.getByRole('alert')).toContainText('请至少启用一个系统模型')
+  await expect(page.locator('.toast')).toContainText('请至少启用一个系统模型')
+  await expect(dialog.locator('.alert.error')).toHaveCount(0)
   await expect(dialog.getByRole('tab', { name: '模型配置', exact: true })).toHaveAttribute(
     'aria-selected',
     'true',
@@ -1766,7 +1783,8 @@ test('分组编辑表单与创建一致、失败恢复及停用授权限制', as
   await expect(createModelRow.getByRole('cell').nth(3)).toHaveText('文本')
   await createDialog.getByLabel('名称', { exact: true }).fill('必填校验分组')
   await createDialog.getByRole('button', { name: '创建', exact: true }).click()
-  await expect(createDialog.getByRole('alert')).toContainText('必须选择至少一个访问模型')
+  await expect(page.locator('.toast')).toContainText('必须选择至少一个访问模型')
+  await expect(createDialog.locator('.alert.error')).toHaveCount(0)
   await createDialog.getByRole('button', { name: '关闭', exact: true }).click()
   state.models[1].status = 'ACTIVE'
   await page.getByRole('button', { name: '创建分组' }).click()
@@ -1976,7 +1994,8 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
   await page.screenshot({ path: 'test-results/visual/member-create.png', fullPage: true })
   await modal(page).getByLabel('用户名', { exact: true }).fill('浏览器验收成员')
   await modal(page).getByRole('button', { name: '创建', exact: true }).click()
-  await expect(modal(page).getByRole('alert')).toContainText('必须选择至少一个用户分组')
+  await expect(page.locator('.toast')).toContainText('必须选择至少一个用户分组')
+  await expect(modal(page).locator('.alert.error')).toHaveCount(0)
   await modal(page).getByRole('checkbox', { name: '选择分组 默认分组' }).check()
   await modal(page).getByRole('button', { name: '创建', exact: true }).click()
   await expect(page.getByText('浏览器验收成员', { exact: true })).toBeVisible()

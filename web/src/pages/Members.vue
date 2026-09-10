@@ -32,7 +32,6 @@ const creating = ref(false),
   editing = ref<Member | null>(null),
   name = ref(''),
   remark = ref(''),
-  validation = ref(''),
   groupCandidates = ref<Group[]>([]),
   selectedGroupIDs = ref<string[]>([]),
   originalGroupIDs = ref<string[]>([]),
@@ -43,8 +42,7 @@ const statusTarget = ref<Member | null>(null),
   deleteTarget = ref<Member | null>(null)
 const keyName = ref(''),
   expires = ref(''),
-  createdKey = ref<CreatedKey | null>(null),
-  copied = ref('')
+  createdKey = ref<CreatedKey | null>(null)
 const { keyword, query, visible, search, reset } = useListSearch(
   items,
   (m) => `${m.name} ${m.id} ${m.remark || ''}`,
@@ -56,7 +54,6 @@ function newMember() {
   editing.value = null
   name.value = ''
   remark.value = ''
-  validation.value = ''
   groupCandidates.value = []
   selectedGroupIDs.value = []
   originalGroupIDs.value = []
@@ -92,7 +89,6 @@ function openEdit(member: Member) {
   editing.value = member
   name.value = member.name
   remark.value = member.remark || ''
-  validation.value = ''
   groupCandidates.value = []
   selectedGroupIDs.value = []
   originalGroupIDs.value = []
@@ -105,17 +101,16 @@ function closeMemberForm() {
   editing.value = null
 }
 function saveMember() {
-  validation.value = ''
   if (!name.value) {
-    validation.value = t('common.required')
+    showErrorToast(t('common.required'))
     return
   }
   if (creating.value && !selectedGroupIDs.value.length) {
-    validation.value = t('members.groupRequired')
+    showErrorToast(t('members.groupRequired'))
     return
   }
   if (!validText(name.value, 128) || !validText(remark.value, 2000, false)) {
-    validation.value = t('common.byteLimit')
+    showErrorToast(t('common.byteLimit'))
     return
   }
   void run(async () => {
@@ -150,7 +145,6 @@ function openKeys(member: Member) {
   keyName.value = ''
   expires.value = ''
   actionError.value = ''
-  validation.value = ''
 }
 function openDelete(member: Member) {
   actionError.value = ''
@@ -165,15 +159,14 @@ function deleteMember() {
   })
 }
 function issueKey() {
-  validation.value = ''
   if (!validText(keyName.value, 128)) {
-    validation.value = t('common.byteLimit')
+    showErrorToast(t('common.byteLimit'))
     return
   }
   // 日期按浏览器本地时区解释，选中当天仍可使用至当天结束。
   const expiresAt = expires.value ? new Date(`${expires.value}T23:59:59.999`) : null
   if (expiresAt && (!Number.isFinite(expiresAt.getTime()) || expiresAt.getTime() <= Date.now())) {
-    validation.value = t('members.future')
+    showErrorToast(t('members.future'))
     return
   }
   void run(async () => {
@@ -182,7 +175,6 @@ function issueKey() {
       name: keyName.value,
       ...(expiresAt ? { expiresAt: expiresAt.toISOString() } : {}),
     })
-    copied.value = ''
     keyName.value = ''
     expires.value = ''
     selected.value = null
@@ -192,9 +184,9 @@ function issueKey() {
 async function copyKey() {
   try {
     await navigator.clipboard.writeText(createdKey.value!.key)
-    copied.value = t('common.copied')
+    showSuccessToast(t('common.copied'))
   } catch {
-    copied.value = t('common.copyFailed')
+    showErrorToast(t('common.copyFailed'))
   }
 }
 </script>
@@ -373,7 +365,6 @@ async function copyKey() {
           </div>
         </div>
       </div>
-      <div v-if="validation" class="alert error" role="alert">{{ validation }}</div>
       <div v-if="actionError && !groupsReady" class="form-retry">
         <button type="button" class="text-button" :disabled="busy" @click="run(loadMemberGroups)">
           {{ t('common.retry') }}
@@ -414,7 +405,6 @@ async function copyKey() {
         >{{ t('members.expires') }}<input v-model="expires" type="date" :disabled="busy"
       /></label>
       <p class="muted">{{ t('members.expiresHint') }}</p>
-      <p v-if="validation" class="alert error" role="alert">{{ validation }}</p>
       <footer class="form-footer">
         <button type="button" class="button" :disabled="busy" @click="selected = null">
           {{ t('common.cancel') }}
@@ -435,7 +425,6 @@ async function copyKey() {
       spellcheck="false"
       rows="3"
     ></textarea>
-    <p role="status">{{ copied }}</p>
     <footer class="form-footer">
       <button class="button" @click="copyKey">{{ t('common.copy') }}</button
       ><button class="button primary" @click="createdKey = null">
