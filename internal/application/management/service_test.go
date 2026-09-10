@@ -39,6 +39,37 @@ func (s memberCreateStore) Write(_ context.Context, _ admin.Identity, fn func(Wr
 	return fn(s.writer)
 }
 
+type credentialUpdateWriter struct {
+	Writer
+	resource ResourceRecord
+	updated  ResourceRecord
+	audit    Audit
+}
+
+func (w *credentialUpdateWriter) Resource(context.Context, int64) (ResourceRecord, error) {
+	return w.resource, nil
+}
+
+func (w *credentialUpdateWriter) UpdateResource(_ context.Context, resource ResourceRecord) error {
+	w.updated = resource
+	return nil
+}
+
+func (w *credentialUpdateWriter) Audit(_ context.Context, audit Audit, _ appsec.RequestMeta) error {
+	w.audit = audit
+	return nil
+}
+
+type credentialUpdateStore struct{ writer *credentialUpdateWriter }
+
+func (s credentialUpdateStore) Read(context.Context, admin.Identity, func(Reader) error) error {
+	return nil
+}
+
+func (s credentialUpdateStore) Write(_ context.Context, _ admin.Identity, fn func(Writer) error) error {
+	return fn(s.writer)
+}
+
 type memberSuggestionReader struct {
 	Reader
 	page   Page
@@ -81,6 +112,38 @@ func TestCreateMemberDefaultsToDisabled(t *testing.T) {
 	after, ok := writer.audit.After.(Member)
 	if !ok || after.Status != "DISABLED" {
 		t.Fatalf("audit after=%#v; want disabled member", writer.audit.After)
+	}
+}
+
+func TestUpdateCredentialActivatesResource(t *testing.T) {
+	writer := &credentialUpdateWriter{resource: ResourceRecord{Resource: Resource{
+		ID: 48, ProviderID: 40, Name: "深度求索 API Key", Status: "DISABLED",
+	}}}
+	service := New(credentialUpdateStore{writer: writer}, nil, providerTestCipher{}, nil)
+
+	err := service.UpdateCredential(
+		context.Background(),
+		admin.Identity{OrganizationID: 1},
+		48,
+		"replacement-credential",
+		appsec.RequestMeta{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if writer.updated.Status != "ACTIVE" {
+		t.Fatalf("updated status=%q; want ACTIVE", writer.updated.Status)
+	}
+	if string(writer.updated.Sealed.Ciphertext) != "replacement-credential" {
+		t.Fatal("updated credential was not persisted")
+	}
+	before, ok := writer.audit.Before.(map[string]string)
+	if !ok || before["status"] != "DISABLED" {
+		t.Fatalf("audit before=%#v; want disabled status", writer.audit.Before)
+	}
+	after, ok := writer.audit.After.(map[string]any)
+	if !ok || after["credentialConfigured"] != true || after["status"] != "ACTIVE" {
+		t.Fatalf("audit after=%#v; want configured active credential", writer.audit.After)
 	}
 }
 

@@ -532,15 +532,26 @@ func (s *Service) UpdateCredential(ctx context.Context, actor admin.Identity, id
 		if err != nil {
 			return err
 		}
+		beforeStatus := r.Status
 		r.Sealed, err = s.cipher.Encrypt(plain, owner(actor, r.Resource))
 		if err != nil {
 			return appsec.ErrUnavailable
 		}
+		// 配置或替换 API Key 表示该凭证应立即参与网关路由。
+		// 数据库唯一索引保证同一组织、同一服务商最多只有一个 ACTIVE 凭证。
+		r.Status = "ACTIVE"
 		r.UpdatedAt = time.Now().UTC().Truncate(time.Microsecond)
 		if err := w.UpdateResource(ctx, r); err != nil {
 			return err
 		}
-		return w.Audit(ctx, Audit{Event: operation.ResourceCredentialUpdate, Target: "RESOURCE", ID: id, Name: r.Name, After: map[string]bool{"credentialConfigured": true}}, meta)
+		return w.Audit(ctx, Audit{
+			Event:  operation.ResourceCredentialUpdate,
+			Target: "RESOURCE",
+			ID:     id,
+			Name:   r.Name,
+			Before: map[string]string{"status": beforeStatus},
+			After:  map[string]any{"credentialConfigured": true, "status": r.Status},
+		}, meta)
 	})
 }
 func (s *Service) SetResourceStatus(ctx context.Context, actor admin.Identity, id int64, status string, meta appsec.RequestMeta) error {

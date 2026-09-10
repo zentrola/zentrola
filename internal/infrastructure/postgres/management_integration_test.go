@@ -365,7 +365,10 @@ func TestStage3Integration(t *testing.T) {
 			t.Fatal("unrecoverable credential test accepted")
 		}
 		request("PUT", firstPath+"/credential", map[string]string{"credential": credential}, 200)
-		request("PATCH", firstPath+"/status", map[string]string{"status": "ACTIVE"}, 200)
+		recovered := stage3Data[mgmt.Resource](t, request("GET", firstPath, nil, 200))
+		if recovered.Status != "ACTIVE" {
+			t.Fatalf("replaced credential status=%q; want ACTIVE", recovered.Status)
+		}
 	})
 
 	t.Run("connection test releases transaction and detects replacement", func(t *testing.T) {
