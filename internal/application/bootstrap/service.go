@@ -80,7 +80,7 @@ var providerTemplates = [...]Provider{
 	},
 	{
 		Code:    "qwen-official",
-		NameZH:  "阿里云",
+		NameZH:  "通义千问",
 		NameEN:  "Alibaba Cloud",
 		Website: "https://qwen.ai",
 		Endpoints: []Endpoint{

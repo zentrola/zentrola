@@ -307,7 +307,7 @@ async function fixture(page: Page) {
         ],
         [
           'qwen-official',
-          '阿里云',
+          '通义千问',
           'Alibaba Cloud',
           'https://dashscope.aliyuncs.com/compatible-mode/v1',
           'https://qwen.ai',
@@ -1326,15 +1326,16 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
     (await providerSearch.locator('button').allTextContents()).slice(-2).map((text) => text.trim()),
   ).toEqual(['添加服务商', '初始化'])
   await providerSearch.getByRole('button', { name: '初始化', exact: true }).click()
-  await expect(page.getByRole('status')).toContainText(
+  await expect(page.locator('.toast-success')).toContainText(
     '已补充 6 个官方服务商，并同步 1 个预置名称或官网，共 7 个',
   )
+  await expect(page.locator('.provider-initialize-notice')).toHaveCount(0)
   await expect(page.getByRole('row').filter({ hasText: '月之暗面' })).toBeVisible()
   expect(state.providers.find((provider) => provider.code === 'kimi-official')?.website).toBe(
     'https://www.moonshot.cn',
   )
   await providerSearch.getByRole('button', { name: '初始化', exact: true }).click()
-  await expect(page.getByRole('status')).toContainText(
+  await expect(page.locator('.toast-success')).toContainText(
     '官方服务商的当前语言名称和官网已是最新，共 7 个',
   )
   expect(state.providers).toHaveLength(7)

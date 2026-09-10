@@ -54,7 +54,6 @@ const syncTarget = ref<{ provider: Provider; resource: Resource } | null>(null)
 const syncResult = ref<ModelSyncResult | null>(null)
 const credential = ref('')
 const validation = ref('')
-const initializeNotice = ref('')
 const activeConfigTab = ref<'models' | 'proxy'>('models')
 const modelConfigTab = ref<HTMLButtonElement | null>(null)
 const proxyConfigTab = ref<HTMLButtonElement | null>(null)
@@ -405,19 +404,19 @@ function reload() {
 }
 
 function initializeProviders() {
-  initializeNotice.value = ''
   actionError.value = ''
   void run(async () => {
     const result = await api<ProviderInitializeResult>('/providers/initialize', 'POST', {
       locale: i18n.global.locale.value,
     })
-    initializeNotice.value = t(
+    const message = t(
       result.created > 0 || result.updated > 0
         ? 'providers.initializeCompleted'
         : 'providers.initializeUnchanged',
       { created: result.created, updated: result.updated, total: result.total },
     )
     await load()
+    showSuccessToast(message)
   })
 }
 
@@ -625,9 +624,6 @@ onMounted(() => {
         </div>
       </template>
     </ListSearch>
-    <p v-if="initializeNotice" class="provider-initialize-notice notice" role="status">
-      {{ initializeNotice }}
-    </p>
     <p v-if="error || resourceError || modelError" class="alert error" role="alert">
       {{ error || resourceError || modelError
       }}<button class="text-button" @click="reload">
@@ -1221,9 +1217,6 @@ onMounted(() => {
   border-color: #dfe6ef;
   font-size: 12px;
 }
-.provider-initialize-notice {
-  margin: 0 22px 16px;
-}
 .panel table {
   min-width: 900px;
   table-layout: fixed;
@@ -1288,9 +1281,13 @@ onMounted(() => {
   border-color: var(--blue);
   background: #eaf2ff;
 }
-.provider-website-action,
+.provider-website-action {
+  border: 0;
+  background: transparent;
+}
 .provider-website-action:hover:not(:disabled) {
   border: 0;
+  background: #eaf2ff;
 }
 .provider-direct-action,
 .provider-direct-action:hover:not(:disabled) {

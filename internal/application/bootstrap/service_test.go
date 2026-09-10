@@ -25,7 +25,7 @@ func TestOfficialProviderTemplatesRemainAvailableForExplicitInitialization(t *te
 		"deepseek-official":      {"深度求索", "DeepSeek"},
 		"zhipu-official":         {"智谱 AI", "Zhipu AI"},
 		"kimi-official":          {"月之暗面", "Moonshot AI"},
-		"qwen-official":          {"阿里云", "Alibaba Cloud"},
+		"qwen-official":          {"通义千问", "Alibaba Cloud"},
 	}
 	for _, provider := range providers {
 		protocols, ok := want[provider.Code]
