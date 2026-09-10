@@ -8,6 +8,7 @@ require (
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/joho/godotenv v1.5.1
 	github.com/pressly/goose/v3 v3.28.0
+	github.com/redis/go-redis/v9 v9.22.0
 	github.com/rs/cors v1.11.1
 	github.com/swaggo/http-swagger/v2 v2.0.2
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.71.0
@@ -45,6 +46,7 @@ require (
 	github.com/urfave/cli/v2 v2.3.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel/metric v1.46.0 // indirect
+	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/mod v0.38.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect

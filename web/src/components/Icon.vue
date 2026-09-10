@@ -24,6 +24,8 @@ const paths: Record<string, string> = {
   refresh: 'M20 7a9 9 0 1 0 1 9M20 2v6h-6',
   copy: 'M9 8h10v12H9zM5 16H4V4h10v1',
   key: 'M11 11a4 4 0 1 1-8 0 4 4 0 0 1 8 0Zm0 0h11M18 11v3M21 11v2',
+  lock: 'M6 10V7a6 6 0 0 1 12 0v3M5 10h14v11H5V10Zm7 4v3',
+  'lock-open': 'M6 10V7a6 6 0 0 1 11.5-2M5 10h14v11H5V10Zm7 4v3',
   eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Zm13 0a3 3 0 1 1-6 0 3 3 0 0 1 6 0',
   logout: 'M9 4H3v16h6M13 8l4 4-4 4m-5-4h13',
   menu: 'M3 6h18M3 12h18M3 18h18',

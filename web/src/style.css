@@ -795,22 +795,29 @@ tbody tr:hover {
   background: currentColor;
 }
 .status.active,
-.status.success {
+.status.success,
+.status.healthy {
   color: #217653;
   background: #edf8f2;
 }
-.status.failed {
+.status.failed,
+.status.blocked {
   color: #b63f46;
   background: #fff0f0;
 }
 .status.revoked,
-.status.expired {
+.status.expired,
+.status.degraded {
   color: #9d6b35;
   background: #fbf4ea;
 }
 .status.cancelled {
   color: #836aa3;
   background: #f5f1f9;
+}
+.status.unavailable {
+  color: #b63f46;
+  background: #fff0f0;
 }
 .list-footer {
   display: flex;
@@ -1674,26 +1681,16 @@ tbody tr:hover {
   gap: 18px;
 }
 .dashboard-section-head p,
-.access-panel-head p,
-.ranking-head p {
+.access-panel-head p {
   margin-top: 5px;
   color: var(--muted);
   font-size: 12px;
 }
-.live-indicator {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  color: #557086;
+.dashboard-period {
+  color: var(--muted);
   font-size: 12px;
+  line-height: 1.5;
   white-space: nowrap;
-}
-.live-indicator i {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #3eaa7c;
-  box-shadow: 0 0 0 4px #3eaa7c18;
 }
 .metric-strip {
   display: grid;
@@ -1703,6 +1700,7 @@ tbody tr:hover {
   margin: 25px 0 0;
 }
 .metric-strip > div {
+  position: relative;
   min-width: 0;
   padding: 2px 24px;
   border-left: 1px solid var(--line);
@@ -1730,6 +1728,84 @@ tbody tr:hover {
 }
 .metric-strip .token-total dd {
   color: var(--blue);
+}
+.provider-health-badge {
+  position: absolute;
+  top: -5px;
+  right: 18px;
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  color: #728598;
+}
+.provider-health-badge i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 14%, transparent);
+}
+.provider-health-badge.is-healthy {
+  color: #287a58;
+}
+.provider-health-badge.is-degraded {
+  color: #c28626;
+}
+.provider-health-badge.is-unavailable {
+  color: #c4484f;
+}
+.provider-health-alert {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+  padding: 10px 12px;
+  border: 1px solid #eadcc8;
+  border-radius: 7px;
+  background: #fbf6ed;
+  color: #895c2f;
+  font-size: 12px;
+}
+.provider-health-alert.critical {
+  border-color: #f1d3d5;
+  background: #fff3f3;
+  color: #a5323c;
+}
+.provider-health-alert > svg {
+  flex: none;
+}
+.provider-health-alert > div {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: baseline;
+  gap: 8px;
+}
+.provider-health-alert strong {
+  flex: none;
+  font-weight: 600;
+}
+.provider-health-alert span {
+  overflow: hidden;
+  color: #806d59;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.provider-health-alert.critical span {
+  color: #97656a;
+}
+.provider-health-alert a {
+  flex: none;
+  color: currentColor;
+  font-weight: 600;
+  text-decoration: none;
+  text-underline-offset: 3px;
+  white-space: nowrap;
+}
+.provider-health-alert a:hover,
+.provider-health-alert a:focus-visible {
+  text-decoration: underline;
 }
 .access-panel {
   position: relative;
@@ -2160,7 +2236,7 @@ tbody tr:hover {
 }
 .ranking-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 18px;
 }
 .ranking-panel {
@@ -2253,7 +2329,11 @@ tbody tr:hover {
 .model-ranking .rank-track i {
   background: #42a07d;
 }
-.model-ranking .rank-content > small {
+.upstream-ranking .rank-track i {
+  background: #9b6bc5;
+}
+.model-ranking .rank-content > small,
+.upstream-ranking .rank-content > small {
   display: block;
   margin-top: 4px;
   color: #96a4b1;
@@ -2733,10 +2813,19 @@ tbody tr:hover {
   .dashboard-overview {
     grid-template-columns: 1fr;
   }
+  .ranking-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ranking-panel:first-child {
+    grid-column: 1 / -1;
+  }
 }
 @media (max-width: 800px) {
   .ranking-grid {
     grid-template-columns: 1fr;
+  }
+  .ranking-panel:first-child {
+    grid-column: auto;
   }
   .dashboard-metrics,
   .access-panel {
@@ -2781,6 +2870,18 @@ tbody tr:hover {
     padding: 18px 0 0;
     border-top: 1px solid var(--line);
     border-left: 0;
+  }
+  .provider-health-alert {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .provider-health-alert > div {
+    display: grid;
+    flex-basis: calc(100% - 30px);
+    gap: 3px;
+  }
+  .provider-health-alert a {
+    margin-left: 27px;
   }
   .rank-label {
     gap: 10px;

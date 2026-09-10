@@ -31,8 +31,17 @@ func (s *UsageStore) WriteBatch(ctx context.Context, events []domain.Event) erro
 		if e.ClientProtocol == "" {
 			e.ClientProtocol = "ANTHROPIC_MESSAGES"
 		}
-		if a := e.Attempt; a != nil {
-			attempts = append(attempts, map[string]any{"id": a.ID, "organization_id": e.OrganizationID, "request_id": e.RequestID, "client_protocol": e.ClientProtocol, "principal_id": e.PrincipalID, "provider_id": a.ProviderID, "provider_model_id": a.ProviderModelID, "provider_credential_id": a.ResourceID, "model_id": a.ModelID, "input_tokens": a.InputTokens, "output_tokens": a.OutputTokens, "cached_input_tokens": a.CachedInputTokens, "started_at": a.StartedAt, "completed_at": a.CompletedAt, "latency_ms": a.CompletedAt.Sub(a.StartedAt).Milliseconds(), "status": a.Status, "error_type": optionalError(a.ErrorType)})
+		all := append([]domain.Attempt(nil), e.Attempts...)
+		if e.Attempt != nil {
+			all = append(all, *e.Attempt)
+		}
+		for index := range all {
+			a := all[index]
+			attemptNo := a.AttemptNo
+			if attemptNo <= 0 {
+				attemptNo = int32(index + 1)
+			}
+			attempts = append(attempts, map[string]any{"id": a.ID, "organization_id": e.OrganizationID, "request_id": e.RequestID, "attempt_no": attemptNo, "client_protocol": e.ClientProtocol, "principal_id": e.PrincipalID, "provider_id": a.ProviderID, "provider_model_id": a.ProviderModelID, "provider_credential_id": a.ResourceID, "model_id": a.ModelID, "input_tokens": a.InputTokens, "output_tokens": a.OutputTokens, "cached_input_tokens": a.CachedInputTokens, "started_at": a.StartedAt, "completed_at": a.CompletedAt, "latency_ms": a.CompletedAt.Sub(a.StartedAt).Milliseconds(), "status": a.Status, "error_type": optionalError(a.ErrorType)})
 		}
 	}
 	if len(attempts) == 0 {
@@ -113,17 +122,22 @@ func (s *UsageStore) Dashboard(ctx context.Context, actor admin.Identity, from, 
 	if err != nil {
 		return app.Dashboard{}, appsec.ErrUnavailable
 	}
-	modelRows, err := q.UsageModelRanking(ctx, dbgen.UsageModelRankingParams(params))
+	clientModelRows, err := q.UsageClientModelRanking(ctx, dbgen.UsageClientModelRankingParams(params))
+	if err != nil {
+		return app.Dashboard{}, appsec.ErrUnavailable
+	}
+	upstreamModelRows, err := q.UsageUpstreamModelRanking(ctx, dbgen.UsageUpstreamModelRankingParams(params))
 	if err != nil {
 		return app.Dashboard{}, appsec.ErrUnavailable
 	}
 	result := app.Dashboard{
-		ActiveMemberCount: counts.ActiveMemberCount,
-		ModelCount:        counts.ModelCount,
-		ProviderCount:     counts.ProviderCount,
-		TotalTokens:       counts.TotalTokens,
-		TokenRanking:      make([]app.TokenRank, 0, len(tokenRows)),
-		ModelRanking:      make([]app.ModelRank, 0, len(modelRows)),
+		ActiveMemberCount:    counts.ActiveMemberCount,
+		ModelCount:           counts.ModelCount,
+		ProviderCount:        counts.ProviderCount,
+		TotalTokens:          counts.TotalTokens,
+		TokenRanking:         make([]app.TokenRank, 0, len(tokenRows)),
+		ClientModelRanking:   make([]app.ClientModelRank, 0, len(clientModelRows)),
+		UpstreamModelRanking: make([]app.UpstreamModelRank, 0, len(upstreamModelRows)),
 	}
 	for _, row := range tokenRows {
 		result.TokenRanking = append(result.TokenRanking, app.TokenRank{
@@ -132,11 +146,23 @@ func (s *UsageStore) Dashboard(ctx context.Context, actor admin.Identity, from, 
 			Tokens:      row.Tokens,
 		})
 	}
-	for _, row := range modelRows {
-		result.ModelRanking = append(result.ModelRanking, app.ModelRank{
-			UpstreamModelCode: row.UpstreamModelCode,
-			Requests:          row.Requests,
-			Tokens:            row.Tokens,
+	for _, row := range clientModelRows {
+		result.ClientModelRanking = append(result.ClientModelRanking, app.ClientModelRank{
+			ModelID:   row.ModelID,
+			ModelCode: row.ModelCode,
+			ModelName: row.ModelName,
+			Requests:  row.Requests,
+			Tokens:    row.Tokens,
+		})
+	}
+	for _, row := range upstreamModelRows {
+		result.UpstreamModelRanking = append(result.UpstreamModelRanking, app.UpstreamModelRank{
+			ProviderID:   row.ProviderID,
+			ProviderName: row.ProviderName,
+			ModelID:      row.ModelID,
+			ModelCode:    row.ModelCode,
+			Calls:        row.Calls,
+			Tokens:       row.Tokens,
 		})
 	}
 	if err = tx.Commit(ctx); err != nil {

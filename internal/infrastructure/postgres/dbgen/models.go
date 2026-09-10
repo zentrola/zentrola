@@ -336,8 +336,6 @@ type ProviderCredential struct {
 	CredentialNonce []byte
 	// 加密根密钥版本，不含 Master Key 本身
 	KeyVersion int32
-	// 最后调用时间；NULL=从未使用
-	LastActiveAt pgtype.Timestamptz
 	// 创建者引用：system、admin:<id> 或 principal:<id>
 	CreatedBy string
 	// 更新者引用：system、admin:<id> 或 principal:<id>
@@ -346,6 +344,18 @@ type ProviderCredential struct {
 	CreatedAt pgtype.Timestamptz
 	// 更新时间，UTC
 	UpdatedAt pgtype.Timestamptz
+	// 系统检测的运行状态：HEALTHY=可参与路由；BLOCKED=长期故障，等待管理员恢复
+	RuntimeStatus string
+	// 长期阻断原因；NULL=未阻断
+	BlockedReason *string
+	// 系统检测到长期阻断的时间；NULL=未阻断
+	BlockedAt pgtype.Timestamptz
+	// 最近一次导致长期阻断的上游错误时间
+	LastErrorAt pgtype.Timestamptz
+	// 最近一次导致长期阻断的上游 HTTP 状态；网络或本地错误为 NULL
+	LastHttpStatus *int32
+	// 最近一次导致长期阻断的规范化错误编码，不保存上游响应正文
+	LastErrorCode *string
 }
 
 // 服务商支持的协议及对应上游基础地址
@@ -400,7 +410,7 @@ type UsageRecord struct {
 	OrganizationID int64
 	// 所属请求标识
 	RequestID string
-	// 上游调用序号；MVP 固定为 1，不重试或 Failover
+	// 同一客户端请求的上游调用序号，从 1 开始；Failover 时逐次递增
 	AttemptNo int64
 	// 治理主体 ID
 	PrincipalID int64

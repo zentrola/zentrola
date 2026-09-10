@@ -357,7 +357,7 @@ func (q *Queries) HasAnyAdmin(ctx context.Context) (bool, error) {
 }
 
 const listResourcesForCredentialCheck = `-- name: ListResourcesForCredentialCheck :many
-SELECT id, is_deleted, status, organization_id, provider_id, resource_name, credential_ciphertext, credential_nonce, key_version, last_active_at, created_by, updated_by, created_at, updated_at FROM provider_credential WHERE is_deleted=false AND status='ACTIVE' ORDER BY id FOR UPDATE
+SELECT id, is_deleted, status, organization_id, provider_id, resource_name, credential_ciphertext, credential_nonce, key_version, created_by, updated_by, created_at, updated_at, runtime_status, blocked_reason, blocked_at, last_error_at, last_http_status, last_error_code FROM provider_credential WHERE is_deleted=false AND status='ACTIVE' ORDER BY id FOR UPDATE
 `
 
 func (q *Queries) ListResourcesForCredentialCheck(ctx context.Context) ([]ProviderCredential, error) {
@@ -379,11 +379,16 @@ func (q *Queries) ListResourcesForCredentialCheck(ctx context.Context) ([]Provid
 			&i.CredentialCiphertext,
 			&i.CredentialNonce,
 			&i.KeyVersion,
-			&i.LastActiveAt,
 			&i.CreatedBy,
 			&i.UpdatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RuntimeStatus,
+			&i.BlockedReason,
+			&i.BlockedAt,
+			&i.LastErrorAt,
+			&i.LastHttpStatus,
+			&i.LastErrorCode,
 		); err != nil {
 			return nil, err
 		}

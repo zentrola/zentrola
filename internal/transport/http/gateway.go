@@ -88,7 +88,7 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					a.InputTokens, a.OutputTokens, a.CachedInputTokens = observer.Tokens(trace.Status == usage.Success)
 				}
 			}
-			if trace.Attempt != nil {
+			if trace.Attempt != nil || len(trace.Attempts) > 0 {
 				_ = g.writer.Submit(*trace)
 			}
 		}()
@@ -322,10 +322,16 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func addUsageRouteFields(ctx context.Context, event *usage.Event) {
-	if event == nil || event.Attempt == nil {
+	if event == nil {
 		return
 	}
 	attempt := event.Attempt
+	if attempt == nil && len(event.Attempts) > 0 {
+		attempt = &event.Attempts[len(event.Attempts)-1]
+	}
+	if attempt == nil {
+		return
+	}
 	addAccessLogFields(ctx,
 		"model_id", attempt.ModelID,
 		"provider_id", attempt.ProviderID,

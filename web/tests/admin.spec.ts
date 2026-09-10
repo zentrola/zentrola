@@ -65,6 +65,7 @@ async function fixture(page: Page) {
       proxyEnabled: false,
       proxyUrl: null,
       proxyHeaders: [],
+      modelSyncSupported: true,
       createdAt: stamp,
       updatedAt: stamp,
     },
@@ -187,15 +188,37 @@ async function fixture(page: Page) {
           { principalId: longID, name: '林知远', tokens: 8200 },
           { principalId: '90071992547409932', name: '陈清和', tokens: 4640 },
         ],
-        modelRanking: [
+        clientModelRanking: [
           {
-            upstreamModelCode: 'deepseek-v4-flash-upstream',
+            modelId: '71',
+            modelCode: 'deepseek-v4-flash',
+            modelName: 'DeepSeek V4 Flash',
             requests: 18,
             tokens: 9100,
           },
           {
-            upstreamModelCode: 'claude-sonnet-upstream',
+            modelId: '72',
+            modelCode: 'claude-sonnet',
+            modelName: 'Claude Sonnet',
             requests: 7,
+            tokens: 3740,
+          },
+        ],
+        upstreamModelRanking: [
+          {
+            providerId: '81',
+            providerName: 'DeepSeek',
+            modelId: '71',
+            modelCode: 'deepseek-v4-flash',
+            calls: 20,
+            tokens: 9200,
+          },
+          {
+            providerId: '82',
+            providerName: 'Anthropic',
+            modelId: '72',
+            modelCode: 'claude-sonnet',
+            calls: 7,
             tokens: 3740,
           },
         ],
@@ -325,6 +348,7 @@ async function fixture(page: Page) {
           proxyEnabled: false,
           proxyUrl: null,
           proxyHeaders: [],
+          modelSyncSupported: code === 'deepseek-official',
           createdAt: stamp,
           updatedAt: stamp,
         })
@@ -351,6 +375,13 @@ async function fixture(page: Page) {
         createdAt: stamp,
         updatedAt: stamp,
         credentialConfigured: path === '/resources',
+        runtimeStatus: path === '/resources' ? 'HEALTHY' : undefined,
+        blockedReason: null,
+        blockedAt: null,
+        lastErrorAt: null,
+        lastHttpStatus: null,
+        lastErrorCode: null,
+        modelSyncSupported: path === '/providers' ? false : undefined,
       }
       if (conflict) return reply(null, 409, 'CONFLICT')
       const target =
@@ -601,8 +632,23 @@ async function signIn(page: Page, destination: 'home' | 'members' = 'members') {
   await expect(page.getByRole('heading', { name: '用户管理', exact: true })).toBeVisible()
 }
 const modal = (page: Page) => page.locator('dialog').last()
-test('首页展示本月指标、应用接入、配置脚本和双排行榜', async ({ page }) => {
-  await fixture(page)
+test('首页展示本月指标、应用接入、配置脚本和分项排行榜', async ({ page }) => {
+  const state = await fixture(page)
+  state.resources.push({
+    id: '88',
+    name: 'DeepSeek Key',
+    providerId: '81',
+    status: 'ACTIVE',
+    runtimeStatus: 'HEALTHY',
+    blockedReason: null,
+    blockedAt: null,
+    lastErrorAt: null,
+    lastHttpStatus: null,
+    lastErrorCode: null,
+    credentialConfigured: true,
+    createdAt: stamp,
+    updatedAt: stamp,
+  })
   const dashboardRequest = page.waitForRequest((request) =>
     new URL(request.url()).pathname.endsWith('/usage/dashboard'),
   )
@@ -621,7 +667,18 @@ test('首页展示本月指标、应用接入、配置脚本和双排行榜', as
 
   await expect(page.getByText('12,840', { exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: '本月概览', exact: true })).toBeVisible()
+  const expectedMonthLabel = await page.evaluate(() =>
+    new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long' }).format(new Date()),
+  )
+  await expect(page.locator('.dashboard-section-head > .dashboard-period')).toHaveText(
+    expectedMonthLabel,
+  )
   await expect(page.getByText('本月 Token 消耗', { exact: true })).toBeVisible()
+  await expect(
+    page.locator('.provider-total').getByRole('img', { name: '已启用服务商均可用' }),
+  ).toHaveClass(/is-healthy/)
+  await expect(page.getByText('最新统计', { exact: true })).toHaveCount(0)
+  await expect(page.locator('.provider-health-alert')).toHaveCount(0)
   await expect(
     page.getByText('激活用户数').locator('..').getByText('2', { exact: true }),
   ).toBeVisible()
@@ -648,15 +705,18 @@ test('首页展示本月指标、应用接入、配置脚本和双排行榜', as
       ),
   ).toBe(4)
   await expect(page.getByText('Token 消耗排行')).toBeVisible()
-  await expect(page.getByText('本月按用户统计', { exact: true })).toBeVisible()
-  await expect(page.getByText('模型使用排行')).toBeVisible()
-  await expect(page.getByText('本月按上游模型请求次数统计', { exact: true })).toBeVisible()
+  await expect(page.getByText('客户端模型排行')).toBeVisible()
+  await expect(page.getByText('上游模型调用排行')).toBeVisible()
   await expect(page.getByText('OpenAI', { exact: true })).toBeVisible()
   await expect(page.getByText('Anthropic', { exact: true })).toBeVisible()
   await expect(page.getByText('适用于 Codex 等 OpenAI 兼容客户端')).toBeVisible()
   await expect(page.getByText('适用于 Claude Code 等 Anthropic 兼容客户端')).toBeVisible()
   await expect(page.getByText('林知远', { exact: true })).toBeVisible()
-  await expect(page.getByText('deepseek-v4-flash-upstream', { exact: true })).toBeVisible()
+  await expect(page.getByText('DeepSeek V4 Flash', { exact: true })).toBeVisible()
+  await expect(
+    page.locator('.upstream-ranking').getByText('deepseek-v4-flash', { exact: true }),
+  ).toBeVisible()
+  await expect(page.getByText('20 次调用', { exact: true })).toBeVisible()
   await expect(page.getByText(/\/v1$/, { exact: true })).toBeVisible()
   await expect(page.getByText(/\/anthropic$/, { exact: true })).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
@@ -732,6 +792,98 @@ test('首页展示本月指标、应用接入、配置脚本和双排行榜', as
   await expect(modal(page)).toBeVisible()
   await page.screenshot({ path: '../.cache/web-visual/home-setup-mobile.png', fullPage: true })
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+})
+
+test('首页在启用服务商不可用时提醒管理员', async ({ page }) => {
+  const state = await fixture(page)
+  state.resources.push({
+    id: '88',
+    name: 'DeepSeek Key',
+    providerId: '81',
+    status: 'ACTIVE',
+    runtimeStatus: 'BLOCKED',
+    blockedReason: 'BILLING',
+    blockedAt: stamp,
+    lastErrorAt: stamp,
+    lastHttpStatus: 402,
+    lastErrorCode: 'UPSTREAM_BILLING_BLOCKED',
+    credentialConfigured: true,
+    createdAt: stamp,
+    updatedAt: stamp,
+  })
+
+  await signIn(page, 'home')
+
+  await expect(
+    page.locator('.provider-total').getByRole('img', { name: '已启用服务商均不可用' }),
+  ).toHaveClass(/is-unavailable/)
+  const alert = page.locator('.provider-health-alert')
+  await expect(alert).toContainText('DeepSeek 当前不可用')
+  await expect(alert).toContainText('余额或计费异常 · HTTP 402')
+  await expect(alert.getByRole('link', { name: '查看服务商' })).toHaveAttribute(
+    'href',
+    '#/providers',
+  )
+})
+
+test('首页用黄色角标表示部分启用服务商不可用', async ({ page }) => {
+  const state = await fixture(page)
+  state.providers.push({
+    id: '82',
+    name: 'Anthropic',
+    code: 'anthropic-official',
+    type: 'OFFICIAL',
+    status: 'ACTIVE',
+    website: null,
+    endpoints: [{ protocolType: 'ANTHROPIC', baseUrl: 'https://api.anthropic.com' }],
+    proxyEnabled: false,
+    proxyUrl: null,
+    proxyHeaders: [],
+    modelSyncSupported: false,
+    createdAt: stamp,
+    updatedAt: stamp,
+  })
+  state.resources.push(
+    {
+      id: '88',
+      name: 'DeepSeek Key',
+      providerId: '81',
+      status: 'ACTIVE',
+      runtimeStatus: 'HEALTHY',
+      blockedReason: null,
+      blockedAt: null,
+      lastErrorAt: null,
+      lastHttpStatus: null,
+      lastErrorCode: null,
+      credentialConfigured: true,
+      createdAt: stamp,
+      updatedAt: stamp,
+    },
+    {
+      id: '89',
+      name: 'Anthropic Key',
+      providerId: '82',
+      status: 'ACTIVE',
+      runtimeStatus: 'BLOCKED',
+      blockedReason: 'AUTHENTICATION',
+      blockedAt: stamp,
+      lastErrorAt: stamp,
+      lastHttpStatus: 401,
+      lastErrorCode: 'UPSTREAM_AUTH_FAILED',
+      credentialConfigured: true,
+      createdAt: stamp,
+      updatedAt: stamp,
+    },
+  )
+
+  await signIn(page, 'home')
+
+  await expect(
+    page.locator('.provider-total').getByRole('img', {
+      name: '1 / 2 个已启用服务商可用',
+    }),
+  ).toHaveClass(/is-degraded/)
+  await expect(page.locator('.provider-health-alert')).toContainText('Anthropic 当前不可用')
 })
 
 test('操作日志详情展示原始 JSON、差异高亮和追踪信息', async ({ page }) => {
@@ -1166,11 +1318,20 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   expect(state.providers).toHaveLength(7)
 
   const deepSeekRow = page.getByRole('row').filter({ hasText: '深度求索' })
-  await expect(page.getByRole('columnheader', { name: '配置密钥', exact: true })).toBeVisible()
-  await expect(deepSeekRow).toContainText('否')
-  await expect(
-    deepSeekRow.getByRole('button', { name: '配置 深度求索 的密钥', exact: true }),
-  ).toBeVisible()
+  await expect(page.getByRole('columnheader', { name: '密钥', exact: true })).toBeVisible()
+  const deepSeekCredential = deepSeekRow.getByRole('button', {
+    name: '深度求索 密钥未配置，点击添加',
+    exact: true,
+  })
+  await expect(deepSeekCredential).toBeVisible()
+  await expect(deepSeekCredential).toHaveClass(/is-missing/)
+  await expect(deepSeekCredential.locator('svg')).toHaveCount(1)
+  const deepSeekProxy = deepSeekRow.getByRole('img', {
+    name: '深度求索 未启用代理访问',
+    exact: true,
+  })
+  await expect(deepSeekProxy).toBeVisible()
+  await expect(deepSeekProxy.locator('svg')).toHaveCount(1)
   await expect(deepSeekRow.locator('td').last().getByRole('button')).toHaveText(['删除', '编辑'])
   await deepSeekRow.getByRole('button', { name: '编辑', exact: true }).click()
   await expect(modal(page).getByRole('tab', { name: '模型配置', exact: true })).toHaveAttribute(
@@ -1296,22 +1457,29 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   ])
   const row = page.getByRole('row').filter({ hasText: '阿里云百炼' })
   await expect(row).toContainText('dashscope.aliyuncs.com/compatible-mode/v1')
-  await expect(row).toContainText('否')
+  await expect(
+    row.getByRole('img', { name: '阿里云百炼 已启用代理访问', exact: true }),
+  ).toBeVisible()
   const createdStatus = row.getByRole('switch', { name: '阿里云百炼的启用状态' })
   await expect(createdStatus).toBeDisabled()
   await expect(createdStatus).toHaveAttribute('title', '请先配置服务商密钥，再启用服务商。')
-  await row.getByRole('button', { name: '配置 阿里云百炼 的密钥', exact: true }).click()
+  const missingCredential = row.getByRole('button', {
+    name: '阿里云百炼 密钥未配置，点击添加',
+    exact: true,
+  })
+  await expect(missingCredential).toHaveClass(/is-missing/)
+  await missingCredential.click()
   await dialog.getByLabel('API Key', { exact: true }).fill('aliyun-fixture-credential')
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expect(page.locator('dialog')).toHaveCount(0)
   await expect(page.locator('.toast-success')).toContainText('已保存')
+  await expect(
+    row.getByRole('button', { name: '同步 阿里云百炼 的官方模型', exact: true }),
+  ).toHaveCount(0)
   expect(state.modelSyncRequests).toHaveLength(0)
-  await row.getByRole('button', { name: '同步 阿里云百炼 的官方模型', exact: true }).click()
-  await expect(modal(page).getByRole('status')).toContainText('官方模型目录同步完成')
-  await expect(modal(page)).toContainText('发现模型')
-  expect(state.modelSyncRequests).toHaveLength(1)
-  await modal(page).getByRole('button', { name: '关闭', exact: true }).last().click()
-  await expect(row).toContainText('是')
+  await expect(
+    row.getByRole('button', { name: '阿里云百炼 密钥已配置，点击更新', exact: true }),
+  ).toHaveClass(/is-configured/)
   await expect(createdStatus).toBeEnabled()
   await expect(createdStatus).not.toHaveAttribute('title')
   const testCredential = row.getByRole('button', {
@@ -1388,6 +1556,36 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await expect(page.getByRole('row').filter({ hasText: '阿里云模型服务' })).toHaveCount(0)
   expect(state.providerMappings.has(created.id)).toBe(false)
   expect(state.resources.some((resource) => resource.providerId === created.id)).toBe(false)
+})
+
+test('服务商列表展示凭证聚合运行状态和错误原因', async ({ page }) => {
+  const state = await fixture(page)
+  state.resources.push({
+    id: '88',
+    providerId: '81',
+    name: 'DeepSeek API Key',
+    status: 'ACTIVE',
+    runtimeStatus: 'BLOCKED',
+    blockedReason: 'BILLING',
+    blockedAt: stamp,
+    lastErrorAt: stamp,
+    lastHttpStatus: 402,
+    lastErrorCode: 'UPSTREAM_BILLING_BLOCKED',
+    credentialConfigured: true,
+    createdAt: stamp,
+    updatedAt: stamp,
+  })
+  await signIn(page)
+  await page.getByRole('link', { name: '服务商', exact: true }).click()
+
+  await expect(page.getByRole('columnheader', { name: '运行状态', exact: true })).toBeVisible()
+  const row = page.getByRole('row').filter({ hasText: 'DeepSeek' })
+  await expect(row.getByText('已阻断', { exact: true })).toBeVisible()
+  await expect(row).toContainText('余额或计费异常 · HTTP 402')
+  await expect(row.locator('.provider-runtime .subline')).toHaveAttribute(
+    'title',
+    'UPSTREAM_BILLING_BLOCKED',
+  )
 })
 
 test('状态 switch 直接生效且危险操作仍需确认', async ({ page }) => {
@@ -1833,7 +2031,9 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
   await expect(page.getByRole('link', { name: '服务商凭证', exact: true })).toHaveCount(0)
   const providerRow = page.getByRole('row').filter({ hasText: 'DeepSeek' })
   await expect(providerRow.getByRole('link', { name: '在新页面打开 DeepSeek 官网' })).toHaveCount(0)
-  await providerRow.getByRole('button', { name: '配置 DeepSeek 的密钥', exact: true }).click()
+  await providerRow
+    .getByRole('button', { name: 'DeepSeek 密钥未配置，点击添加', exact: true })
+    .click()
   await modal(page).getByLabel('API Key', { exact: true }).fill('fixture-upstream-credential')
   await modal(page).getByRole('button', { name: '保存' }).click()
   await expect(page.locator('dialog')).toHaveCount(0)
@@ -1857,7 +2057,7 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
   await expect(modal(page).getByRole('status')).toContainText('上游认证失败')
   await modal(page).getByRole('button', { name: '关闭', exact: true }).last().click()
   const editCredential = providerRow.getByRole('button', {
-    name: '配置 DeepSeek 的密钥',
+    name: 'DeepSeek 密钥已配置，点击更新',
   })
   await expect(editCredential.locator('svg')).toHaveCount(1)
   await expect(providerRow.getByRole('button', { name: '更新 API Key' })).toHaveCount(0)
@@ -1872,7 +2072,7 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
       name: 'DeepSeek 服务商凭证的启用状态',
     }),
   ).toHaveCount(0)
-  await expect(providerRow.getByText('是', { exact: true })).toBeVisible()
+  await expect(editCredential).toHaveClass(/is-configured/)
 
   await page.getByRole('link', { name: '用户管理', exact: true }).click()
   await page

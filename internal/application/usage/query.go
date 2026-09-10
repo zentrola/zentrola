@@ -44,18 +44,29 @@ type TokenRank struct {
 	Name        string `json:"name"`
 	Tokens      int64  `json:"tokens"`
 }
-type ModelRank struct {
-	UpstreamModelCode string `json:"upstreamModelCode"`
-	Requests          int64  `json:"requests"`
-	Tokens            int64  `json:"tokens"`
+type ClientModelRank struct {
+	ModelID   int64  `json:"modelId,string"`
+	ModelCode string `json:"modelCode"`
+	ModelName string `json:"modelName"`
+	Requests  int64  `json:"requests"`
+	Tokens    int64  `json:"tokens"`
+}
+type UpstreamModelRank struct {
+	ProviderID   int64  `json:"providerId,string"`
+	ProviderName string `json:"providerName"`
+	ModelID      int64  `json:"modelId,string"`
+	ModelCode    string `json:"modelCode"`
+	Calls        int64  `json:"calls"`
+	Tokens       int64  `json:"tokens"`
 }
 type Dashboard struct {
-	ActiveMemberCount int64       `json:"activeMemberCount"`
-	ModelCount        int64       `json:"modelCount"`
-	ProviderCount     int64       `json:"providerCount"`
-	TotalTokens       int64       `json:"totalTokens"`
-	TokenRanking      []TokenRank `json:"tokenRanking"`
-	ModelRanking      []ModelRank `json:"modelRanking"`
+	ActiveMemberCount    int64               `json:"activeMemberCount"`
+	ModelCount           int64               `json:"modelCount"`
+	ProviderCount        int64               `json:"providerCount"`
+	TotalTokens          int64               `json:"totalTokens"`
+	TokenRanking         []TokenRank         `json:"tokenRanking"`
+	ClientModelRanking   []ClientModelRank   `json:"clientModelRanking"`
+	UpstreamModelRanking []UpstreamModelRank `json:"upstreamModelRanking"`
 }
 type QueryStore interface {
 	Query(context.Context, admin.Identity, Filter) (Page, error)

@@ -78,12 +78,17 @@ func TestStage5Integration(t *testing.T) {
 	management := mgmt.New(NewManagementStore(pool, ids), ids, cipher, nil)
 	sonnet := createActiveTestModel(t, ctx, management, actor, "claude-sonnet", "Claude Sonnet", []string{"TEXT", "IMAGE"})
 	opus := createActiveTestModel(t, ctx, management, actor, "claude-opus", "Claude Opus", []string{"TEXT", "IMAGE"})
-	provider := createActiveTestProvider(t, ctx, pool, management, actor, "Anthropic 测试服务商",
-		[]mgmt.ProviderEndpoint{{ProtocolType: "ANTHROPIC", BaseURL: "https://api.anthropic.com"}},
-		[]mgmt.ProviderMappingInput{
+	provider, err := management.CreateProvider(ctx, actor, mgmt.ProviderInput{
+		Name:      "Anthropic 测试服务商",
+		Endpoints: []mgmt.ProviderEndpoint{{ProtocolType: "ANTHROPIC", BaseURL: "https://api.anthropic.com"}},
+		Mappings: []mgmt.ProviderMappingInput{
 			{ModelID: sonnet.ID, UpstreamModelCode: "sonnet-test"},
 			{ModelID: opus.ID, UpstreamModelCode: "sonnet-test"},
-		})
+		},
+	}, appsec.RequestMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	member, err := management.CreateMember(ctx, actor, "Usage member", "", appsec.RequestMeta{})
 	if err != nil {
 		t.Fatal(err)
@@ -95,6 +100,9 @@ func TestStage5Integration(t *testing.T) {
 	modelID := sonnet.ID
 	resource, err := management.CreateResource(ctx, actor, provider.ID, "Usage resource", "secret-not-in-usage", appsec.RequestMeta{})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := management.SetProviderStatus(ctx, actor, provider.ID, "ACTIVE", appsec.RequestMeta{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := management.SetResourceStatus(ctx, actor, resource.ID, "ACTIVE", appsec.RequestMeta{}); err != nil {
@@ -255,7 +263,7 @@ func TestStage5Integration(t *testing.T) {
 		t.Fatal("count_tokens recorded as inference")
 	}
 	dashboard, err := app.NewQuery(store).Dashboard(ctx, actor, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
-	if err != nil || dashboard.ActiveMemberCount < 1 || dashboard.ModelCount < 1 || dashboard.ProviderCount < 1 || dashboard.TotalTokens != 58 || len(dashboard.TokenRanking) != 1 || dashboard.TokenRanking[0].PrincipalID != member.ID || len(dashboard.ModelRanking) != 1 || dashboard.ModelRanking[0].UpstreamModelCode != "sonnet-test" || dashboard.ModelRanking[0].Requests != 7 {
+	if err != nil || dashboard.ActiveMemberCount < 1 || dashboard.ModelCount < 1 || dashboard.ProviderCount < 1 || dashboard.TotalTokens != 58 || len(dashboard.TokenRanking) != 1 || dashboard.TokenRanking[0].PrincipalID != member.ID || len(dashboard.ClientModelRanking) != 1 || dashboard.ClientModelRanking[0].ModelID != sonnet.ID || dashboard.ClientModelRanking[0].Requests != 7 || len(dashboard.UpstreamModelRanking) != 1 || dashboard.UpstreamModelRanking[0].ProviderID != provider.ID || dashboard.UpstreamModelRanking[0].ModelID != sonnet.ID || dashboard.UpstreamModelRanking[0].ModelCode != "claude-sonnet" || dashboard.UpstreamModelRanking[0].Calls != 7 {
 		t.Fatalf("dashboard aggregation incorrect: result=%+v err=%v", dashboard, err)
 	}
 	var opusProviderModelID int64
@@ -286,8 +294,8 @@ func TestStage5Integration(t *testing.T) {
 		t.Fatal(err)
 	}
 	dashboard, err = app.NewQuery(store).Dashboard(ctx, actor, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
-	if err != nil || len(dashboard.ModelRanking) != 1 || dashboard.ModelRanking[0].UpstreamModelCode != "sonnet-test" || dashboard.ModelRanking[0].Requests != 8 || dashboard.ModelRanking[0].Tokens != 63 {
-		t.Fatalf("same upstream model code was not merged: result=%+v err=%v", dashboard.ModelRanking, err)
+	if err != nil || len(dashboard.ClientModelRanking) != 2 || dashboard.ClientModelRanking[0].ModelID != sonnet.ID || dashboard.ClientModelRanking[0].Requests != 7 || dashboard.ClientModelRanking[1].ModelID != opus.ID || dashboard.ClientModelRanking[1].Requests != 1 || len(dashboard.UpstreamModelRanking) != 2 || dashboard.UpstreamModelRanking[0].ModelID != sonnet.ID || dashboard.UpstreamModelRanking[0].ModelCode != "claude-sonnet" || dashboard.UpstreamModelRanking[0].Calls != 7 || dashboard.UpstreamModelRanking[0].Tokens != 58 || dashboard.UpstreamModelRanking[1].ModelID != opus.ID || dashboard.UpstreamModelRanking[1].ModelCode != "claude-opus" || dashboard.UpstreamModelRanking[1].Calls != 1 || dashboard.UpstreamModelRanking[1].Tokens != 5 {
+		t.Fatalf("logical models mapped to the same upstream code were not ranked separately: result=%+v err=%v", dashboard, err)
 	}
 	// 查询 API：组合过滤、分页、时间、认证、非法参数和组织边界。
 	dashboardRange := "?from=" + time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano) + "&to=" + time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)

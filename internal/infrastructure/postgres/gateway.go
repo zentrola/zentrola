@@ -3,8 +3,10 @@ package postgres
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	gw "github.com/zentrola/zentrola/internal/application/gateway"
 	appsec "github.com/zentrola/zentrola/internal/application/security"
@@ -16,85 +18,100 @@ type GatewayStore struct{ pool *pgxpool.Pool }
 
 func NewGatewayStore(pool *pgxpool.Pool) *GatewayStore { return &GatewayStore{pool: pool} }
 func (s *GatewayStore) Resolve(ctx context.Context, identity appsec.PrincipalIdentity, model string, protocols ...string) (gw.Route, error) {
+	routes, err := s.ResolveCandidates(ctx, identity, model, protocols...)
+	if err != nil {
+		return gw.Route{}, err
+	}
+	return routes[0], nil
+}
+
+func (s *GatewayStore) ResolveCandidates(ctx context.Context, identity appsec.PrincipalIdentity, model string, protocols ...string) ([]gw.Route, error) {
 	protocol := gw.AnthropicProtocol
 	if len(protocols) > 0 {
 		protocol = protocols[0]
 	}
 	if protocol != gw.AnthropicProtocol && protocol != gw.OpenAIProtocol && protocol != gw.OpenAIResponsesProtocol {
-		return gw.Route{}, gw.ErrInvalid
+		return nil, gw.ErrInvalid
 	}
-	endpointProtocols := gatewayEndpointProtocols(protocol)
+	preferredProtocol := gatewayEndpointProtocols(protocol)[0]
 	// 使用每次请求的一致性快照，不缓存身份、授权或路由，也不在网络转发期间占用连接。
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
-		return gw.Route{}, gw.ErrUnavailable
+		return nil, gw.ErrUnavailable
 	}
 	defer tx.Rollback(context.Background())
 	q := dbgen.New(tx)
 	active, err := q.GatewayIdentityActive(ctx, dbgen.GatewayIdentityActiveParams{AccessKeyID: identity.AccessKeyID, OrganizationID: identity.OrganizationID, PrincipalID: identity.ID})
 	if err != nil {
-		return gw.Route{}, gw.ErrUnavailable
+		return nil, gw.ErrUnavailable
 	}
 	if !active {
-		return gw.Route{}, gw.ErrAuthentication
+		return nil, gw.ErrAuthentication
 	}
 	m, err := q.GatewayModel(ctx, model)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return gw.Route{}, gw.ErrModelUnknown
+		return nil, gw.ErrModelUnknown
 	}
 	if err != nil {
-		return gw.Route{}, gw.ErrUnavailable
+		return nil, gw.ErrUnavailable
 	}
 	if m.Status != "ACTIVE" {
-		return gw.Route{ModelID: m.ID}, gw.ErrModelDisabled
+		return nil, gw.ErrModelDisabled
 	}
 	allowed, err := q.HasGroupModelPermission(ctx, dbgen.HasGroupModelPermissionParams{OrganizationID: identity.OrganizationID, PrincipalID: identity.ID, ModelID: m.ID})
 	if err != nil {
-		return gw.Route{ModelID: m.ID}, gw.ErrUnavailable
+		return nil, gw.ErrUnavailable
 	}
 	if !allowed {
-		return gw.Route{ModelID: m.ID}, gw.ErrPermission
+		return nil, gw.ErrPermission
 	}
-	var mappings []dbgen.GatewayMappingsRow
-	endpointProtocol := ""
-	for _, candidate := range endpointProtocols {
-		mappings, err = q.GatewayMappings(ctx, dbgen.GatewayMappingsParams{ModelID: m.ID, ProtocolType: candidate})
-		if err != nil {
-			return gw.Route{ModelID: m.ID}, gw.ErrUnavailable
-		}
-		if len(mappings) > 0 {
-			endpointProtocol = candidate
-			break
-		}
-	}
-	if len(mappings) == 0 {
-		return gw.Route{ModelID: m.ID}, gw.ErrRoute
-	}
-	mapping := mappings[0]
-	resources, err := q.GatewayResources(ctx, dbgen.GatewayResourcesParams{OrganizationID: identity.OrganizationID, ProviderID: mapping.ProviderID})
+	rows, err := q.GatewayCandidates(ctx, dbgen.GatewayCandidatesParams{
+		OrganizationID: identity.OrganizationID, ModelID: m.ID, PreferredProtocol: preferredProtocol,
+	})
 	if err != nil {
-		return gw.Route{ModelID: m.ID}, gw.ErrUnavailable
+		return nil, gw.ErrUnavailable
 	}
-	if len(resources) != 1 {
-		return gw.Route{ModelID: m.ID}, gw.ErrResource
+	if len(rows) == 0 {
+		routeExists, availabilityErr := q.GatewayRouteExists(ctx, m.ID)
+		if availabilityErr != nil {
+			return nil, gw.ErrUnavailable
+		}
+		if routeExists {
+			return nil, gw.ErrResource
+		}
+		return nil, gw.ErrRoute
 	}
-	r := resources[0]
+	// 一个服务商可以同时配置两类 Endpoint；每个映射只保留排序靠前的首选协议。
+	type candidateKey struct{ providerModelID, resourceID int64 }
+	seen := make(map[candidateKey]struct{}, len(rows))
+	routes := make([]gw.Route, 0, len(rows))
+	for _, row := range rows {
+		key := candidateKey{providerModelID: row.ProviderModelID, resourceID: row.ResourceID}
+		if _, duplicate := seen[key]; duplicate {
+			continue
+		}
+		seen[key] = struct{}{}
+		route := gw.Route{
+			ModelID: m.ID, ProviderID: row.ProviderID, ProviderModelID: row.ProviderModelID, ResourceID: row.ResourceID,
+			UpstreamModel: row.UpstreamModelCode, BaseURL: row.BaseUrl, EndpointProtocol: row.ProtocolType,
+			Credential:   catalog.SealedCredential{Ciphertext: row.CredentialCiphertext, Nonce: row.CredentialNonce, KeyVersion: row.KeyVersion},
+			ProxyEnabled: row.ProxyEnabled,
+		}
+		if row.ProxyUrlKeyVersion != nil {
+			route.ProxyURL = catalog.SealedCredential{Ciphertext: row.ProxyUrlCiphertext, Nonce: row.ProxyUrlNonce, KeyVersion: *row.ProxyUrlKeyVersion}
+		}
+		if row.ProxyHeadersKeyVersion != nil {
+			route.ProxyHeaders = catalog.SealedCredential{Ciphertext: row.ProxyHeadersCiphertext, Nonce: row.ProxyHeadersNonce, KeyVersion: *row.ProxyHeadersKeyVersion}
+		}
+		routes = append(routes, route)
+	}
 	if err := tx.Commit(ctx); err != nil {
-		return gw.Route{ModelID: m.ID}, gw.ErrUnavailable
+		return nil, gw.ErrUnavailable
 	}
-	route := gw.Route{
-		ModelID: m.ID, ProviderID: mapping.ProviderID, ProviderModelID: mapping.ID, ResourceID: r.ID,
-		UpstreamModel: mapping.UpstreamModelCode, BaseURL: mapping.BaseUrl, EndpointProtocol: endpointProtocol,
-		Credential:   catalog.SealedCredential{Ciphertext: r.CredentialCiphertext, Nonce: r.CredentialNonce, KeyVersion: r.KeyVersion},
-		ProxyEnabled: mapping.ProxyEnabled,
+	if len(routes) == 0 {
+		return nil, gw.ErrRoute
 	}
-	if mapping.ProxyUrlKeyVersion != nil {
-		route.ProxyURL = catalog.SealedCredential{Ciphertext: mapping.ProxyUrlCiphertext, Nonce: mapping.ProxyUrlNonce, KeyVersion: *mapping.ProxyUrlKeyVersion}
-	}
-	if mapping.ProxyHeadersKeyVersion != nil {
-		route.ProxyHeaders = catalog.SealedCredential{Ciphertext: mapping.ProxyHeadersCiphertext, Nonce: mapping.ProxyHeadersNonce, KeyVersion: *mapping.ProxyHeadersKeyVersion}
-	}
-	return route, nil
+	return routes, nil
 }
 
 func gatewayEndpointProtocols(protocol string) []string {
@@ -102,6 +119,28 @@ func gatewayEndpointProtocols(protocol string) []string {
 		return []string{gw.AnthropicEndpoint, gw.OpenAIEndpoint}
 	}
 	return []string{gw.OpenAIEndpoint, gw.AnthropicEndpoint}
+}
+
+func (s *GatewayStore) BlockResource(ctx context.Context, identity appsec.PrincipalIdentity, resourceID int64, block gw.ResourceBlock) error {
+	if identity.OrganizationID <= 0 || resourceID <= 0 || block.Reason == "" || block.ErrorCode == "" {
+		return gw.ErrInvalid
+	}
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	status := block.HTTPStatus
+	var httpStatus *int32
+	if status > 0 {
+		httpStatus = &status
+	}
+	reason, code := block.Reason, block.ErrorCode
+	_, err := dbgen.New(s.pool).BlockGatewayResource(ctx, dbgen.BlockGatewayResourceParams{
+		OrganizationID: identity.OrganizationID, ResourceID: resourceID,
+		BlockedReason: &reason, BlockedAt: pgtype.Timestamptz{Time: now, Valid: true},
+		HttpStatus: httpStatus, ErrorCode: &code,
+	})
+	if err != nil {
+		return gw.ErrUnavailable
+	}
+	return nil
 }
 
 func (s *GatewayStore) Models(ctx context.Context, identity appsec.PrincipalIdentity) ([]gw.Model, error) {

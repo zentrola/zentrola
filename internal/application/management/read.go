@@ -51,7 +51,14 @@ func (s *Service) Providers(ctx context.Context, a admin.Identity, p Page) (Page
 	if !validPage(p) {
 		return PageData[Provider]{}, appsec.ErrInvalidArgument
 	}
-	return readPage(ctx, s, a, func(r Reader) ([]Provider, error) { return r.Providers(ctx, p) }, func(r Reader) (int64, error) { return r.CountProviders(ctx) })
+	result, err := readPage(ctx, s, a, func(r Reader) ([]Provider, error) { return r.Providers(ctx, p) }, func(r Reader) (int64, error) { return r.CountProviders(ctx) })
+	if err != nil {
+		return PageData[Provider]{}, err
+	}
+	for index := range result.Items {
+		result.Items[index] = s.withProviderCapabilities(result.Items[index])
+	}
+	return result, nil
 }
 func (s *Service) Resources(ctx context.Context, a admin.Identity, p Page) (PageData[Resource], error) {
 	if !validPage(p) {
@@ -137,6 +144,6 @@ func (s *Service) Provider(ctx context.Context, a admin.Identity, id int64) (Pro
 			return ProviderDetail{}, err
 		}
 		mappings, err := r.ProviderMappings(ctx, id)
-		return ProviderDetail{Provider: provider, Mappings: mappings}, err
+		return ProviderDetail{Provider: s.withProviderCapabilities(provider), Mappings: mappings}, err
 	})
 }

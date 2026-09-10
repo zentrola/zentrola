@@ -69,7 +69,7 @@ Gateway 是 Zentrola 的基础设施层。产品重点是企业如何把模型�
                  Anthropic / DeepSeek / Future Provider
                               │
                               ▼
-                          PostgreSQL
+              PostgreSQL / Redis
 ```
 
 管理面与调用面相互隔离：
@@ -119,6 +119,7 @@ Zentrola 遵循 Client-native First 和 Thin Gateway 原则：客户端已经具
 - Anthropic Messages、Count Tokens、SSE 和原生 Tool Loop
 - OpenAI 与 Anthropic 上游协议双向兼容；优先使用同协议端点，未配置时转换请求和响应后使用另一协议端点
 - OpenAI Models、Chat Completions、SSE 和工具调用往返
+- 逻辑模型按 Provider Model 优先级选路；短期故障冷却后由客户请求单次探测，欠费、认证失效等长期故障自动阻断凭证并切换服务商
 - 按成员、逻辑模型和 Resource 记录 Usage
 - 查看主要 Operation Log
 
@@ -127,7 +128,7 @@ Zentrola 遵循 Client-native First 和 Thin Gateway 原则：客户端已经具
 - Claude Code 和 Codex 正式客户端的完整 E2E 验收
 - OpenAI Responses Native Path
 - APPLICATION Principal 与 App Key 管理闭环
-- 多 Provider Routing、Resource Health、Failover 和实时限流
+- 按延迟、成本等综合策略动态排序，以及实时限流
 - Cost、Budget、企业计费和账单
 - Enterprise Knowledge、Skill Registry 和 Managed MCP
 - SSO、OIDC、LDAP、SCIM、多组织和高可用部署
@@ -247,6 +248,11 @@ POSTGRES_PORT=5432
 POSTGRES_DB=zentrola
 POSTGRES_USER=zentrola
 POSTGRES_PASSWORD=请填写数据库密码
+
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+REDIS_DB=2
+REDIS_PASSWORD=请填写Redis密码
 
 ADMIN_JWT_SECRET=请填写至少包含32随机字节的Base64字符串
 
@@ -372,7 +378,7 @@ Admin Web 默认地址为 `http://127.0.0.1:9528`。程序读取同目录的 `.e
 
 首次启动只初始化基础组织，不创建服务商、模型或 Credential。“服务商”页面的“初始化”由管理员主动触发，会按当前界面语言同步官方服务商的预置中英文名称、官方网站及协议地址，其他已有配置保持不变，也不会访问厂商。管理员按以下顺序完成第一条治理链路：
 
-1. 在“服务商”中点击“初始化”，再为所需厂商填写 Provider Credential。保存后可通过服务商编码选择官方模型目录适配器并同步模型；当前支持 DeepSeek。同步会新增尚不存在的模型和上游映射，并按编码更新已有模型的官方名称；新模型默认停用，其他配置保持不变。
+1. 在“服务商”中点击“初始化”，再为所需厂商填写 Provider Credential。保存后可通过服务商编码选择官方模型目录适配器并同步模型；当前支持 DeepSeek 和智谱 AI。同步会新增尚不存在的模型和上游映射，并按编码更新已有模型的官方名称；新模型默认停用，其他配置保持不变。
 2. 在“模型”中检查同步结果，并启用准备开放给客户端的逻辑模型；必要时再调整服务商映射。
 3. 创建成员和 Group，将成员加入对应 Group。
 4. 为 Group 授权可用逻辑模型。
@@ -386,7 +392,9 @@ Admin Web 默认地址为 `http://127.0.0.1:9528`。程序读取同目录的 `.e
 
 Virtual Key 只负责识别 MEMBER Principal，实际权限来自成员所属 Group 的 Model Allowlist。
 
-Gateway 路由遵循“同协议优先、异协议兜底”：Anthropic 客户端优先使用 `ANTHROPIC` 端点，否则使用 `OPENAI` 端点；OpenAI 客户端顺序相反。异协议调用会转换普通响应、SSE、工具调用、停止原因、错误和 Usage，客户端始终收到其请求协议的格式。上游已经开始调用后不会因超时或错误切换协议重试，避免同一请求被执行两次。Anthropic `count_tokens` 没有等价的 OpenAI 上游接口，因此仅配置 `OPENAI` 端点时返回路由不可用，不生成估算值。
+Gateway 先按 Provider Model 的 `priority` 选择服务商，同一候选再遵循“同协议优先、异协议兜底”：Anthropic 客户端优先使用 `ANTHROPIC` 端点，OpenAI 客户端顺序相反。异协议调用会转换普通响应、SSE、工具调用、停止原因、错误和 Usage，客户端始终收到其请协议的格式。在尚未向客户端返回响应时，网络错误、超时、`429`、可重试的 `403/404` 或 `5xx` 最多触发一次备选服务商切换；响应已开始向客户端输出后不再重试。Anthropic `count_tokens` 没有等价的 OpenAI 上游接口，因此仅配置 `OPENAI` 端点时返回路由不可用，不生成估算值。
+
+短期冷却状态保存在 Redis，默认 60 秒。冷却到期后不会由后台定时请求上游；下一个客户请求通过 Redis 原子争抢唯一探测名额。Redis 不可用时路由 fail-open，不把 Redis 纳入就绪检查。欠费、认证失效、账号停用和凭证无法解密会把 `provider_credential.runtime_status` 设为 `BLOCKED`，不再参与后续路由；更换 API Key 或连接测试成功后恢复为 `HEALTHY`。每次实际上游尝试都使用独立 `attempt_no` 记录 Usage。
 
 ### Anthropic Compatible
 

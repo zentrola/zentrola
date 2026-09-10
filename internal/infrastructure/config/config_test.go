@@ -13,6 +13,9 @@ func TestConfigValidation(t *testing.T) {
 		{"origin path", "CORS_ALLOWED_ORIGINS", "http://localhost:5173/path", "CORS_ALLOWED_ORIGINS"},
 		{"unbounded shutdown", "SHUTDOWN_TIMEOUT", "0s", "SHUTDOWN_TIMEOUT"},
 		{"invalid pool", "POSTGRES_MAX_CONNS", "0", "POSTGRES_MAX_CONNS"},
+		{"invalid redis port", "REDIS_PORT", "0", "REDIS_PORT"},
+		{"invalid redis database", "REDIS_DB", "-1", "REDIS_DB"},
+		{"missing redis host", "REDIS_HOST", "", "REDIS_HOST"},
 		{"invalid port", "HTTP_ADDR", ":99999", "HTTP_ADDR"},
 		{"missing password", "POSTGRES_PASSWORD", "", "POSTGRES_PASSWORD"},
 		{"unknown log format", "LOG_FORMAT", "xml", "LOG_FORMAT"},
@@ -237,7 +240,27 @@ func TestLoadLayeredConfiguration(t *testing.T) {
 			if cfg.Postgres.MaxConns != 10 {
 				t.Fatal("missing settings must retain code defaults")
 			}
+			if cfg.Redis.Host != "127.0.0.1" || cfg.Redis.Port != 6379 || cfg.Redis.Database != 2 || cfg.Redis.Password != "" {
+				t.Fatalf("unexpected Redis defaults: %+v", cfg.Redis)
+			}
 		})
+	}
+}
+
+func TestRedisConfiguration(t *testing.T) {
+	values := map[string]string{
+		"POSTGRES_PASSWORD": "test-only",
+		"REDIS_HOST":        "redis.internal",
+		"REDIS_PORT":        "6380",
+		"REDIS_DB":          "2",
+		"REDIS_PASSWORD":    "redis-secret",
+	}
+	cfg, err := parse(func(key string) (string, bool) { value, ok := values[key]; return value, ok })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Redis.Host != "redis.internal" || cfg.Redis.Port != 6380 || cfg.Redis.Database != 2 || cfg.Redis.Password != "redis-secret" {
+		t.Fatalf("unexpected Redis configuration: %+v", cfg.Redis)
 	}
 }
 

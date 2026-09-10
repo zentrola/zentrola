@@ -14,7 +14,7 @@ import (
 func (s *SecurityHandlers) mountUsage(r chi.Router) {
 	// @Summary 首页统计
 	// @Tags 用量统计
-	// @Description 返回当前组织激活用户数、启用模型和服务商数量，以及指定时间范围内的 Token 汇总、用户 Token Top 10 与模型请求 Top 10。
+	// @Description 返回当前组织激活用户数、启用模型和服务商数量，以及指定时间范围内的 Token 汇总、用户 Token Top 10、客户端逻辑模型请求 Top 10 与上游模型调用 Top 10。
 	// @Produce json
 	// @Security AdminBearer
 	// @Param from query string true "起始时间 RFC3339"

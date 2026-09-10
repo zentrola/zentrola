@@ -5,6 +5,7 @@ import { useCollection, useAction, useListSearch, date, validText } from '../com
 import { t, i18n } from '../i18n'
 import type { Resource, Provider, ConnectionResult } from '../types'
 import Icon from '../components/Icon.vue'
+import Status from '../components/Status.vue'
 import StatusSwitch from '../components/StatusSwitch.vue'
 import Modal from '../components/Modal.vue'
 import PageHeader from '../components/PageHeader.vue'
@@ -127,6 +128,12 @@ function resultMessage(result: ConnectionResult) {
     ? t('resources.testPassed')
     : t(i18n.global.te(`errors.${result.code}`) ? `errors.${result.code}` : 'errors.UNKNOWN')
 }
+function runtimeReason(resource: Resource) {
+  if (!resource.blockedReason) return ''
+  const key = `resources.blockReasons.${resource.blockedReason}`
+  const reason = t(i18n.global.te(key) ? key : 'resources.blockReasons.UNKNOWN_PERMANENT')
+  return resource.lastHttpStatus ? `${reason} · HTTP ${resource.lastHttpStatus}` : reason
+}
 </script>
 <template>
   <PageHeader name="resources"
@@ -153,6 +160,7 @@ function resultMessage(result: ConnectionResult) {
             <th>{{ t('common.name') }}</th>
             <th>{{ t('resources.provider') }}</th>
             <th>{{ t('resources.credential') }}</th>
+            <th>{{ t('resources.runtimeStatus') }}</th>
             <th>{{ t('common.status') }}</th>
             <th class="align-right">{{ t('common.actions') }}</th>
           </tr>
@@ -169,6 +177,15 @@ function resultMessage(result: ConnectionResult) {
                 ><Icon name="shield" :size="15" />{{
                   t(resource.credentialConfigured ? 'resources.configured' : 'resources.missing')
                 }}</span
+              >
+            </td>
+            <td>
+              <Status :value="resource.runtimeStatus" />
+              <small
+                v-if="resource.runtimeStatus === 'BLOCKED'"
+                class="subline"
+                :title="resource.lastErrorCode || undefined"
+                >{{ runtimeReason(resource) }}</small
               >
             </td>
             <td>

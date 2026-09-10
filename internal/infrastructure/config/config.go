@@ -31,6 +31,7 @@ type Config struct {
 	LogFileMaxSizeMB  int
 	LogFileMaxBackups int
 	Postgres          Postgres
+	Redis             Redis
 	AutoMigrate       bool
 	CORS              CORS
 	Security          Security
@@ -66,6 +67,13 @@ type Postgres struct {
 	Password string
 	SSLMode  string
 	MaxConns int32
+}
+
+type Redis struct {
+	Host     string
+	Port     int
+	Database int
+	Password string
 }
 
 type CORS struct {
@@ -219,6 +227,13 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 		}
 		return value
 	}
+	nonNegativeInteger := func(key, fallback string, max int) int {
+		value, err := strconv.Atoi(get(key, fallback))
+		if err != nil || value < 0 || value > max {
+			problems = append(problems, fmt.Errorf("%s must be between 0 and %d", key, max))
+		}
+		return value
+	}
 	// LOG_FORMAT 是旧配置项，继续作为控制台格式的回退值，避免已有部署升级后改变行为。
 	legacyLogFormat := get("LOG_FORMAT", "text")
 	cfg := Config{
@@ -244,6 +259,12 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 			Password: get("POSTGRES_PASSWORD", ""),
 			SSLMode:  get("POSTGRES_SSLMODE", "disable"),
 			MaxConns: int32(integer("POSTGRES_MAX_CONNS", "10", 1000)),
+		},
+		Redis: Redis{
+			Host:     get("REDIS_HOST", "127.0.0.1"),
+			Port:     integer("REDIS_PORT", "6379", 65535),
+			Database: nonNegativeInteger("REDIS_DB", "2", 1000000),
+			Password: get("REDIS_PASSWORD", ""),
 		},
 		CORS: CORS{Enabled: boolean("CORS_ENABLED", "false")},
 		Usage: Usage{
@@ -292,6 +313,7 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 	for key, value := range map[string]string{
 		"POSTGRES_HOST": cfg.Postgres.Host, "POSTGRES_DB": cfg.Postgres.Database,
 		"POSTGRES_USER": cfg.Postgres.User, "POSTGRES_PASSWORD": cfg.Postgres.Password,
+		"REDIS_HOST": cfg.Redis.Host,
 	} {
 		if strings.TrimSpace(value) == "" {
 			problems = append(problems, fmt.Errorf("%s is required", key))

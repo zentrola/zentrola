@@ -13,6 +13,7 @@ const (
 const (
 	AnthropicOfficialCode = "anthropic-official"
 	DeepSeekOfficialCode  = "deepseek-official"
+	ZhipuOfficialCode     = "zhipu-official"
 	SonnetCode            = "claude-sonnet"
 	OpusCode              = "claude-opus"
 )

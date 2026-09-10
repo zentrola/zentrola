@@ -141,6 +141,36 @@ func TestTimerFlushAndSnapshot(t *testing.T) {
 		t.Fatal("timer did not flush")
 	}
 }
+func TestEveryFailoverAttemptGetsAnIDAndSequence(t *testing.T) {
+	received := make(chan []domain.Event, 1)
+	w := writerFor(t, storeFunc(func(_ context.Context, events []domain.Event) error {
+		copyEvents := append([]domain.Event(nil), events...)
+		copyEvents[0].Attempts = append([]domain.Attempt(nil), events[0].Attempts...)
+		if events[0].Attempt != nil {
+			attempt := *events[0].Attempt
+			copyEvents[0].Attempt = &attempt
+		}
+		received <- copyEvents
+		return nil
+	}), 10, 10)
+	event := domain.Event{
+		RequestID: "failover",
+		Attempts:  []domain.Attempt{{ResourceID: 100}},
+		Attempt:   &domain.Attempt{ResourceID: 200},
+	}
+	if err := w.Submit(event); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case events := <-received:
+		got := events[0]
+		if len(got.Attempts) != 1 || got.Attempts[0].ID <= 0 || got.Attempts[0].AttemptNo != 1 || got.Attempt == nil || got.Attempt.ID <= got.Attempts[0].ID || got.Attempt.AttemptNo != 2 {
+			t.Fatalf("attempts=%+v active=%+v", got.Attempts, got.Attempt)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timer did not flush failover attempts")
+	}
+}
 func TestConcurrentCloseAndTimeout(t *testing.T) {
 	w := writerFor(t, storeFunc(func(ctx context.Context, e []domain.Event) error {
 		select {

@@ -54,8 +54,14 @@ func NewDiscoverer(logger *slog.Logger) *Discoverer {
 		logger: logger,
 		adapters: map[string]adapter{
 			catalog.DeepSeekOfficialCode: deepSeekAdapter{},
+			catalog.ZhipuOfficialCode:    zhipuAdapter{},
 		},
 	}
+}
+
+func (d *Discoverer) Supports(providerCode string) bool {
+	_, ok := d.adapters[providerCode]
+	return ok
 }
 
 func (d *Discoverer) Discover(ctx context.Context, source mgmt.ModelDiscoverySource, credential []byte, proxy *catalog.OutboundProxy) (models []mgmt.DiscoveredModel, result mgmt.ConnectionResult) {

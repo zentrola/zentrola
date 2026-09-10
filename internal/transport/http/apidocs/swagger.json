@@ -4526,7 +4526,7 @@
                         "AdminBearer": []
                     }
                 ],
-                "description": "返回当前组织激活用户数、启用模型和服务商数量，以及指定时间范围内的 Token 汇总、用户 Token Top 10 与模型请求 Top 10。",
+                "description": "返回当前组织激活用户数、启用模型和服务商数量，以及指定时间范围内的 Token 汇总、用户 Token Top 10、客户端逻辑模型请求 Top 10 与上游模型调用 Top 10。",
                 "produces": [
                     "application/json"
                 ],
@@ -5923,6 +5923,9 @@
                     "type": "string",
                     "example": "0"
                 },
+                "modelSyncSupported": {
+                    "type": "boolean"
+                },
                 "name": {
                     "type": "string"
                 },
@@ -5976,6 +5979,9 @@
                     "items": {
                         "$ref": "#/definitions/management.ProviderMapping"
                     }
+                },
+                "modelSyncSupported": {
+                    "type": "boolean"
                 },
                 "name": {
                     "type": "string"
@@ -6173,6 +6179,12 @@
         "management.Resource": {
             "type": "object",
             "properties": {
+                "blockedAt": {
+                    "type": "string"
+                },
+                "blockedReason": {
+                    "type": "string"
+                },
                 "createdAt": {
                     "type": "string"
                 },
@@ -6183,12 +6195,24 @@
                     "type": "string",
                     "example": "0"
                 },
+                "lastErrorAt": {
+                    "type": "string"
+                },
+                "lastErrorCode": {
+                    "type": "string"
+                },
+                "lastHttpStatus": {
+                    "type": "integer"
+                },
                 "name": {
                     "type": "string"
                 },
                 "providerId": {
                     "type": "string",
                     "example": "0"
+                },
+                "runtimeStatus": {
+                    "type": "string"
                 },
                 "status": {
                     "type": "string"
@@ -6241,20 +6265,41 @@
                 }
             }
         },
+        "usage.ClientModelRank": {
+            "type": "object",
+            "properties": {
+                "modelCode": {
+                    "type": "string"
+                },
+                "modelId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "modelName": {
+                    "type": "string"
+                },
+                "requests": {
+                    "type": "integer"
+                },
+                "tokens": {
+                    "type": "integer"
+                }
+            }
+        },
         "usage.Dashboard": {
             "type": "object",
             "properties": {
                 "activeMemberCount": {
                     "type": "integer"
                 },
-                "modelCount": {
-                    "type": "integer"
-                },
-                "modelRanking": {
+                "clientModelRanking": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/usage.ModelRank"
+                        "$ref": "#/definitions/usage.ClientModelRank"
                     }
+                },
+                "modelCount": {
+                    "type": "integer"
                 },
                 "providerCount": {
                     "type": "integer"
@@ -6267,6 +6312,12 @@
                 },
                 "totalTokens": {
                     "type": "integer"
+                },
+                "upstreamModelRanking": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/usage.UpstreamModelRank"
+                    }
                 }
             }
         },
@@ -6290,20 +6341,6 @@
                 },
                 "writeErrors": {
                     "type": "integer"
-                }
-            }
-        },
-        "usage.ModelRank": {
-            "type": "object",
-            "properties": {
-                "requests": {
-                    "type": "integer"
-                },
-                "tokens": {
-                    "type": "integer"
-                },
-                "upstreamModelCode": {
-                    "type": "string"
                 }
             }
         },
@@ -6381,6 +6418,31 @@
                 "principalId": {
                     "type": "string",
                     "example": "0"
+                },
+                "tokens": {
+                    "type": "integer"
+                }
+            }
+        },
+        "usage.UpstreamModelRank": {
+            "type": "object",
+            "properties": {
+                "calls": {
+                    "type": "integer"
+                },
+                "modelCode": {
+                    "type": "string"
+                },
+                "modelId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "providerId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "providerName": {
+                    "type": "string"
                 },
                 "tokens": {
                     "type": "integer"

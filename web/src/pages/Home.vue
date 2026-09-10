@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { api, errorText, gatewayBaseUrl } from '../api'
+import { all, api, errorText, gatewayBaseUrl } from '../api'
 import { count } from '../composables'
-import { activeLocale, t } from '../i18n'
-import type { Dashboard } from '../types'
+import { activeLocale, i18n, t } from '../i18n'
+import type { Dashboard, Provider, Resource } from '../types'
 import Icon from '../components/Icon.vue'
 import Modal from '../components/Modal.vue'
 import PageHeader from '../components/PageHeader.vue'
@@ -13,8 +13,12 @@ type SetupMethod = 'script' | 'ccswitch'
 type SetupPlatform = 'unix' | 'windows'
 
 const summary = ref<Dashboard | null>(null)
+const healthProviders = ref<Provider[]>([])
+const healthResources = ref<Resource[]>([])
 const loading = ref(false)
 const error = ref('')
+const providerHealthLoading = ref(false)
+const providerHealthError = ref('')
 const copied = ref('')
 const setupProtocol = ref<AccessProtocol | null>(null)
 const setupMethod = ref<SetupMethod>('script')
@@ -32,8 +36,86 @@ const monthLabel = computed(() =>
 const maxTokens = computed(() =>
   Math.max(1, ...(summary.value?.tokenRanking.map((item) => item.tokens) ?? [])),
 )
-const maxRequests = computed(() =>
-  Math.max(1, ...(summary.value?.modelRanking.map((item) => item.requests) ?? [])),
+const maxClientRequests = computed(() =>
+  Math.max(1, ...(summary.value?.clientModelRanking.map((item) => item.requests) ?? [])),
+)
+const maxUpstreamCalls = computed(() =>
+  Math.max(1, ...(summary.value?.upstreamModelRanking.map((item) => item.calls) ?? [])),
+)
+const enabledHealthProviders = computed(() =>
+  healthProviders.value.filter((provider) => provider.status === 'ACTIVE'),
+)
+const providerHealthIssues = computed(() =>
+  enabledHealthProviders.value.flatMap((provider) => {
+    const configured = healthResources.value.filter(
+      (resource) => resource.providerId === provider.id,
+    )
+    if (!configured.length)
+      return [{ provider, reason: t('providers.runtimeReasons.UNCONFIGURED') }]
+
+    const active = configured.filter((resource) => resource.status === 'ACTIVE')
+    if (!active.length)
+      return [{ provider, reason: t('providers.runtimeReasons.CREDENTIAL_DISABLED') }]
+    if (active.some((resource) => resource.runtimeStatus !== 'BLOCKED')) return []
+
+    const blocked = [...active]
+      .filter((resource) => resource.runtimeStatus === 'BLOCKED')
+      .sort((left, right) => (right.lastErrorAt || '').localeCompare(left.lastErrorAt || ''))[0]
+    if (!blocked) return [{ provider, reason: t('providers.runtimeReasons.UNKNOWN') }]
+    const key = `resources.blockReasons.${blocked.blockedReason || 'UNKNOWN_PERMANENT'}`
+    const reason = t(i18n.global.te(key) ? key : 'resources.blockReasons.UNKNOWN_PERMANENT')
+    return [
+      {
+        provider,
+        reason: blocked.lastHttpStatus ? `${reason} · HTTP ${blocked.lastHttpStatus}` : reason,
+      },
+    ]
+  }),
+)
+const availableProviderCount = computed(
+  () => enabledHealthProviders.value.length - providerHealthIssues.value.length,
+)
+const providerHealthState = computed(() => {
+  if (providerHealthLoading.value) return 'loading'
+  if (providerHealthError.value) return 'unknown'
+  if (!enabledHealthProviders.value.length) return 'empty'
+  if (!providerHealthIssues.value.length) return 'healthy'
+  return availableProviderCount.value > 0 ? 'degraded' : 'unavailable'
+})
+const providerHealthSummary = computed(() => {
+  switch (providerHealthState.value) {
+    case 'loading':
+      return t('home.providerHealthChecking')
+    case 'unknown':
+      return t('home.providerHealthUnknown')
+    case 'empty':
+      return t('home.providerHealthEmpty')
+    case 'healthy':
+      return t('home.providerHealthHealthy')
+    case 'unavailable':
+      return t('home.providerHealthUnavailable')
+    default:
+      return t('home.providerHealthPartial', {
+        available: count(availableProviderCount.value),
+        total: count(enabledHealthProviders.value.length),
+      })
+  }
+})
+const providerHealthAlertTitle = computed(() =>
+  providerHealthIssues.value.length === 1
+    ? t('home.providerHealthSingleIssue', {
+        name: providerHealthIssues.value[0]?.provider.name || '',
+      })
+    : t('home.providerHealthMultipleIssues', {
+        count: count(providerHealthIssues.value.length),
+      }),
+)
+const providerHealthAlertDetail = computed(() =>
+  providerHealthIssues.value.length === 1
+    ? providerHealthIssues.value[0]?.reason || ''
+    : t('home.providerHealthAffected', {
+        names: providerHealthIssues.value.map((issue) => issue.provider.name).join('、'),
+      }),
 )
 const setupUrl = computed(() => (setupProtocol.value === 'anthropic' ? claudeUrl : codexUrl))
 const setupScripts = computed<Record<SetupPlatform, string>>(() => {
@@ -54,9 +136,7 @@ function monthQuery() {
   return new URLSearchParams({ from: from.toISOString(), to: to.toISOString() }).toString()
 }
 
-async function load() {
-  const current = ++revision
-  loading.value = true
+async function loadDashboard(current: number) {
   error.value = ''
   try {
     const result = await api<Dashboard>(`/usage/dashboard?${monthQuery()}`)
@@ -67,13 +147,42 @@ async function load() {
         providerCount: Number.isFinite(result.providerCount) ? result.providerCount : 0,
         totalTokens: Number.isFinite(result.totalTokens) ? result.totalTokens : 0,
         tokenRanking: Array.isArray(result.tokenRanking) ? result.tokenRanking : [],
-        modelRanking: Array.isArray(result.modelRanking) ? result.modelRanking : [],
+        clientModelRanking: Array.isArray(result.clientModelRanking)
+          ? result.clientModelRanking
+          : [],
+        upstreamModelRanking: Array.isArray(result.upstreamModelRanking)
+          ? result.upstreamModelRanking
+          : [],
       }
   } catch (e) {
     if (current === revision) error.value = errorText(e)
-  } finally {
-    if (current === revision) loading.value = false
   }
+}
+
+async function loadProviderHealth(current: number) {
+  providerHealthLoading.value = true
+  providerHealthError.value = ''
+  try {
+    const [providers, resources] = await Promise.all([
+      all<Provider>('/providers'),
+      all<Resource>('/resources'),
+    ])
+    if (current === revision) {
+      healthProviders.value = providers
+      healthResources.value = resources
+    }
+  } catch (e) {
+    if (current === revision) providerHealthError.value = errorText(e)
+  } finally {
+    if (current === revision) providerHealthLoading.value = false
+  }
+}
+
+async function load() {
+  const current = ++revision
+  loading.value = true
+  await Promise.all([loadDashboard(current), loadProviderHealth(current)])
+  if (current === revision) loading.value = false
 }
 
 async function copyAddress(name: string, value: string) {
@@ -154,9 +263,8 @@ onMounted(load)
       <div class="dashboard-section-head">
         <div>
           <h2>{{ t('home.monthOverview') }}</h2>
-          <p>{{ monthLabel }}</p>
         </div>
-        <span class="live-indicator"><i></i>{{ t('home.liveData') }}</span>
+        <span class="dashboard-period">{{ monthLabel }}</span>
       </div>
       <dl class="metric-strip">
         <div>
@@ -167,7 +275,16 @@ onMounted(load)
           <dt>{{ t('home.supportedModels') }}</dt>
           <dd>{{ summary ? count(summary.modelCount) : '—' }}</dd>
         </div>
-        <div>
+        <div class="provider-total">
+          <span
+            class="provider-health-badge"
+            :class="`is-${providerHealthState}`"
+            role="img"
+            :aria-label="providerHealthSummary"
+            :title="providerHealthSummary"
+          >
+            <i></i>
+          </span>
           <dt>{{ t('home.providers') }}</dt>
           <dd>{{ summary ? count(summary.providerCount) : '—' }}</dd>
         </div>
@@ -176,6 +293,19 @@ onMounted(load)
           <dd>{{ summary ? count(summary.totalTokens) : '—' }}</dd>
         </div>
       </dl>
+      <div
+        v-if="providerHealthIssues.length && !providerHealthLoading && !providerHealthError"
+        class="provider-health-alert"
+        :class="{ critical: availableProviderCount === 0 }"
+        role="alert"
+      >
+        <Icon name="alert" :size="17" />
+        <div>
+          <strong>{{ providerHealthAlertTitle }}</strong>
+          <span>{{ providerHealthAlertDetail }}</span>
+        </div>
+        <RouterLink to="/providers">{{ t('home.providerHealthViewProviders') }}</RouterLink>
+      </div>
     </section>
 
     <section class="access-panel" :aria-label="t('home.accessTitle')">
@@ -232,7 +362,6 @@ onMounted(load)
       <div class="ranking-head">
         <div>
           <h2>{{ t('home.tokenRanking') }}</h2>
-          <p>{{ t('home.tokenRankingHint') }}</p>
         </div>
         <span>Top 10</span>
       </div>
@@ -259,23 +388,55 @@ onMounted(load)
     <section class="ranking-panel">
       <div class="ranking-head">
         <div>
-          <h2>{{ t('home.modelRanking') }}</h2>
-          <p>{{ t('home.modelRankingHint') }}</p>
+          <h2>{{ t('home.clientModelRanking') }}</h2>
         </div>
         <span>Top 10</span>
       </div>
-      <ol v-if="summary?.modelRanking.length" class="ranking-list model-ranking">
-        <li v-for="(item, index) in summary.modelRanking" :key="item.upstreamModelCode">
+      <ol v-if="summary?.clientModelRanking.length" class="ranking-list model-ranking">
+        <li v-for="(item, index) in summary.clientModelRanking" :key="item.modelId">
           <span class="rank-number">{{ String(index + 1).padStart(2, '0') }}</span>
           <div class="rank-content">
             <div class="rank-label">
-              <strong class="model-name-regular">{{ item.upstreamModelCode }}</strong>
+              <strong :title="item.modelName">{{ item.modelName }}</strong>
               <span>{{ t('home.requestCount', { count: count(item.requests) }) }}</span>
             </div>
             <div class="rank-track">
-              <i :style="{ width: `${(item.requests / maxRequests) * 100}%` }"></i>
+              <i :style="{ width: `${(item.requests / maxClientRequests) * 100}%` }"></i>
             </div>
-            <small>{{ count(item.tokens) }} Token</small>
+            <small>{{ item.modelCode }} · {{ count(item.tokens) }} Token</small>
+          </div>
+        </li>
+      </ol>
+      <div v-else class="ranking-empty">
+        <Icon name="models" :size="28" />
+        <p>{{ t(loading ? 'common.loading' : 'home.noUsage') }}</p>
+      </div>
+    </section>
+
+    <section class="ranking-panel">
+      <div class="ranking-head">
+        <div>
+          <h2>{{ t('home.upstreamModelRanking') }}</h2>
+        </div>
+        <span>Top 10</span>
+      </div>
+      <ol v-if="summary?.upstreamModelRanking.length" class="ranking-list upstream-ranking">
+        <li
+          v-for="(item, index) in summary.upstreamModelRanking"
+          :key="`${item.providerId}:${item.modelId}`"
+        >
+          <span class="rank-number">{{ String(index + 1).padStart(2, '0') }}</span>
+          <div class="rank-content">
+            <div class="rank-label">
+              <strong class="model-name-regular" :title="item.modelCode">
+                {{ item.modelCode }}
+              </strong>
+              <span>{{ t('home.callCount', { count: count(item.calls) }) }}</span>
+            </div>
+            <div class="rank-track">
+              <i :style="{ width: `${(item.calls / maxUpstreamCalls) * 100}%` }"></i>
+            </div>
+            <small>{{ item.providerName }} · {{ count(item.tokens) }} Token</small>
           </div>
         </li>
       </ol>

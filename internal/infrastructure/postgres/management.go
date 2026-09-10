@@ -84,7 +84,7 @@ func managementError(err error) error {
 			return appsec.ErrInvalidArgument
 		}
 	}
-	for _, known := range []error{appsec.ErrInvalidArgument, appsec.ErrUnauthenticated, appsec.ErrNotFound, appsec.ErrUnavailable, mgmt.ErrConflict, mgmt.ErrCredential, mgmt.ErrProvider} {
+	for _, known := range []error{appsec.ErrInvalidArgument, appsec.ErrUnauthenticated, appsec.ErrNotFound, appsec.ErrUnavailable, mgmt.ErrConflict, mgmt.ErrCredential, mgmt.ErrProvider, mgmt.ErrProviderCredentialRequired} {
 		if errors.Is(err, known) {
 			return known
 		}
@@ -186,7 +186,13 @@ func (s *managementSession) providerEndpoints(ctx context.Context, providerID in
 	return result, nil
 }
 func resourceView(r dbgen.ManageResourcesRow) mgmt.Resource {
-	return mgmt.Resource{ID: r.ID, ProviderID: r.ProviderID, Name: r.ResourceName, Status: r.Status, CredentialConfigured: true, CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time}
+	return mgmt.Resource{
+		ID: r.ID, ProviderID: r.ProviderID, Name: r.ResourceName, Status: r.Status,
+		RuntimeStatus: r.RuntimeStatus, BlockedReason: r.BlockedReason,
+		BlockedAt: timePointer(r.BlockedAt), LastErrorAt: timePointer(r.LastErrorAt),
+		LastHTTPStatus: r.LastHttpStatus, LastErrorCode: r.LastErrorCode,
+		CredentialConfigured: true, CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time,
+	}
 }
 func keyView(r dbgen.ManageKeysRow) mgmt.Key {
 	return mgmt.Key{ID: r.ID, Name: r.Name, MaskedKey: r.MaskedKey, Status: r.Status, ExpiresAt: timePointer(r.ExpiresAt), RevokedAt: timePointer(r.RevokedAt), CreatedAt: r.CreatedAt.Time}
@@ -400,7 +406,13 @@ func (s *managementSession) Provider(ctx context.Context, id int64) (mgmt.Provid
 
 func (s *managementSession) Resource(ctx context.Context, id int64) (mgmt.ResourceRecord, error) {
 	r, err := s.q.ManageResource(ctx, dbgen.ManageResourceParams{OrganizationID: s.actor.OrganizationID, ID: id})
-	return mgmt.ResourceRecord{Resource: mgmt.Resource{ID: r.ID, ProviderID: r.ProviderID, Name: r.ResourceName, Status: r.Status, CredentialConfigured: true, CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time}, Sealed: catalog.SealedCredential{Ciphertext: r.CredentialCiphertext, Nonce: r.CredentialNonce, KeyVersion: r.KeyVersion}}, err
+	return mgmt.ResourceRecord{Resource: mgmt.Resource{
+		ID: r.ID, ProviderID: r.ProviderID, Name: r.ResourceName, Status: r.Status,
+		RuntimeStatus: r.RuntimeStatus, BlockedReason: r.BlockedReason,
+		BlockedAt: timePointer(r.BlockedAt), LastErrorAt: timePointer(r.LastErrorAt),
+		LastHTTPStatus: r.LastHttpStatus, LastErrorCode: r.LastErrorCode,
+		CredentialConfigured: true, CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time,
+	}, Sealed: catalog.SealedCredential{Ciphertext: r.CredentialCiphertext, Nonce: r.CredentialNonce, KeyVersion: r.KeyVersion}}, err
 }
 func (s *managementSession) CreateMember(ctx context.Context, m mgmt.Member) error {
 	return s.q.ManageCreateMember(ctx, dbgen.ManageCreateMemberParams{ID: m.ID, OrganizationID: s.actor.OrganizationID, Name: m.Name, Remark: m.Remark, CreatedBy: actorRef(s.actor.ID), CreatedAt: pgTime(m.CreatedAt)})
@@ -585,4 +597,10 @@ func (s *managementSession) CreateResource(ctx context.Context, r mgmt.ResourceR
 }
 func (s *managementSession) UpdateResource(ctx context.Context, r mgmt.ResourceRecord) error {
 	return s.q.ManageUpdateResource(ctx, dbgen.ManageUpdateResourceParams{OrganizationID: s.actor.OrganizationID, ID: r.ID, ResourceName: r.Name, CredentialCiphertext: r.Sealed.Ciphertext, CredentialNonce: r.Sealed.Nonce, KeyVersion: r.Sealed.KeyVersion, Status: r.Status, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(r.UpdatedAt)})
+}
+func (s *managementSession) RestoreResourceRuntime(ctx context.Context, id int64, at time.Time) error {
+	_, err := s.q.ManageRestoreResourceRuntime(ctx, dbgen.ManageRestoreResourceRuntimeParams{
+		OrganizationID: s.actor.OrganizationID, ID: id, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(at),
+	})
+	return err
 }

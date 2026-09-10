@@ -37,6 +37,11 @@ func New(store Store, ids shared.IDGenerator, cipher Cipher, tester ConnectionTe
 	return service
 }
 
+func (s *Service) withProviderCapabilities(provider Provider) Provider {
+	provider.ModelSyncSupported = s.discoverer != nil && s.discoverer.Supports(provider.Code)
+	return provider
+}
+
 func validText(s string, max int) bool {
 	return utf8.ValidString(s) && s == strings.TrimSpace(s) && s != "" && len(s) <= max && !strings.ContainsRune(s, 0)
 }
@@ -503,7 +508,7 @@ func (s *Service) CreateResource(ctx context.Context, actor admin.Identity, prov
 		return Resource{}, err
 	}
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	r := Resource{ID: id, ProviderID: providerID, Name: name, Status: "ACTIVE", CredentialConfigured: true, CreatedAt: now, UpdatedAt: now}
+	r := Resource{ID: id, ProviderID: providerID, Name: name, Status: "ACTIVE", RuntimeStatus: "HEALTHY", CredentialConfigured: true, CreatedAt: now, UpdatedAt: now}
 	plain := []byte(credential)
 	defer clear(plain)
 	sealed, err := s.cipher.Encrypt(plain, owner(actor, r))
@@ -634,6 +639,15 @@ func (s *Service) TestResource(ctx context.Context, actor admin.Identity, id int
 		if !current.UpdatedAt.Equal(resource.UpdatedAt) {
 			result.OK = false
 			result.Code = "RESOURCE_CHANGED"
+		}
+		if result.OK {
+			if restorer, ok := w.(interface {
+				RestoreResourceRuntime(context.Context, int64, time.Time) error
+			}); ok {
+				if err := restorer.RestoreResourceRuntime(auditCtx, id, time.Now().UTC().Truncate(time.Microsecond)); err != nil {
+					return err
+				}
+			}
 		}
 		code := ""
 		if !result.OK {

@@ -14,10 +14,12 @@ type Event struct {
 	Status                 Status
 	ErrorType              string
 	Attempt                *Attempt
+	Attempts               []Attempt
 }
 
 type Attempt struct {
 	ID                                               int64
+	AttemptNo                                        int32
 	ProviderID, ProviderModelID, ResourceID, ModelID int64
 	StartedAt, CompletedAt                           time.Time
 	Status                                           Status

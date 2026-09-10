@@ -399,7 +399,7 @@ func (s *Service) CreateProvider(ctx context.Context, actor admin.Identity, inpu
 		}
 		return w.Audit(ctx, Audit{Event: operation.ProviderCreate, Target: "PROVIDER", ID: id, Name: provider.Name, After: ProviderDetail{Provider: provider, Mappings: mappings}}, meta)
 	})
-	return provider, err
+	return s.withProviderCapabilities(provider), err
 }
 
 func (s *Service) UpdateProvider(ctx context.Context, actor admin.Identity, id int64, input ProviderInput, meta appsec.RequestMeta) (Provider, error) {
@@ -439,7 +439,7 @@ func (s *Service) UpdateProvider(ctx context.Context, actor admin.Identity, id i
 		}
 		return w.Audit(ctx, Audit{Event: operation.ProviderUpdate, Target: "PROVIDER", ID: id, Name: updated.Name, Before: ProviderDetail{Provider: current, Mappings: beforeMappings}, After: ProviderDetail{Provider: updated, Mappings: mappings}}, meta)
 	})
-	return updated, err
+	return s.withProviderCapabilities(updated), err
 }
 
 func (s *Service) SetProviderStatus(ctx context.Context, actor admin.Identity, id int64, status string, meta appsec.RequestMeta) error {

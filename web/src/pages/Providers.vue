@@ -19,6 +19,7 @@ import ListFooter from '../components/ListFooter.vue'
 import ListSearch from '../components/ListSearch.vue'
 import Modal from '../components/Modal.vue'
 import PageHeader from '../components/PageHeader.vue'
+import Status from '../components/Status.vue'
 import StatusSwitch from '../components/StatusSwitch.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 
@@ -267,6 +268,56 @@ function resourceFor(provider: Provider) {
   return resources.value.find((resource) => resource.providerId === provider.id)
 }
 
+function resourcesFor(provider: Provider) {
+  return resources.value.filter((resource) => resource.providerId === provider.id)
+}
+
+function blockedResourceReason(resource: Resource) {
+  const key = `resources.blockReasons.${resource.blockedReason || 'UNKNOWN_PERMANENT'}`
+  const reason = t(i18n.global.te(key) ? key : 'resources.blockReasons.UNKNOWN_PERMANENT')
+  return resource.lastHttpStatus ? `${reason} · HTTP ${resource.lastHttpStatus}` : reason
+}
+
+function providerRuntime(provider: Provider) {
+  const configured = resourcesFor(provider)
+  if (!configured.length) {
+    return {
+      status: 'UNCONFIGURED',
+      reason: t('providers.runtimeReasons.UNCONFIGURED'),
+      errorCode: '',
+    }
+  }
+
+  const active = configured.filter((resource) => resource.status === 'ACTIVE')
+  if (!active.length) {
+    return {
+      status: 'UNAVAILABLE',
+      reason: t('providers.runtimeReasons.CREDENTIAL_DISABLED'),
+      errorCode: '',
+    }
+  }
+
+  const healthy = active.filter((resource) => resource.runtimeStatus !== 'BLOCKED')
+  const blocked = active
+    .filter((resource) => resource.runtimeStatus === 'BLOCKED')
+    .sort((left, right) => (right.lastErrorAt || '').localeCompare(left.lastErrorAt || ''))
+
+  if (healthy.length && !blocked.length) {
+    return {
+      status: provider.status === 'ACTIVE' ? 'HEALTHY' : 'DISABLED',
+      reason: '',
+      errorCode: '',
+    }
+  }
+
+  const failed = blocked[0]
+  return {
+    status: healthy.length ? 'DEGRADED' : 'BLOCKED',
+    reason: failed ? blockedResourceReason(failed) : t('providers.runtimeReasons.UNKNOWN'),
+    errorCode: failed?.lastErrorCode || '',
+  }
+}
+
 async function loadResources() {
   resourceError.value = ''
   try {
@@ -366,7 +417,9 @@ function testConnection(provider: Provider) {
   testResult.value = null
   actionError.value = ''
   void run(async () => {
-    testResult.value = await api(`/resources/${resource.id}/test-connection`, 'POST')
+    const result = await api<ConnectionResult>(`/resources/${resource.id}/test-connection`, 'POST')
+    await loadResources()
+    testResult.value = result
   })
 }
 
@@ -515,8 +568,9 @@ onMounted(() => {
           <tr>
             <th>{{ t('providers.name') }}</th>
             <th>{{ t('common.status') }}</th>
-            <th>{{ t('providers.keyConfiguration') }}</th>
-            <th>{{ t('providers.proxyAccess') }}</th>
+            <th>{{ t('providers.runtimeStatus') }}</th>
+            <th class="credential-column">{{ t('providers.keyConfiguration') }}</th>
+            <th class="proxy-column">{{ t('providers.proxyAccess') }}</th>
             <th>{{ t('providers.endpoints') }}</th>
             <th class="align-right">{{ t('common.actions') }}</th>
           </tr>
@@ -550,7 +604,7 @@ onMounted(() => {
                     >
                       <Icon name="activity" :size="16" /></button
                     ><button
-                      v-if="resourceFor(provider)"
+                      v-if="provider.modelSyncSupported && resourceFor(provider)"
                       type="button"
                       class="provider-quick-action provider-direct-action"
                       :aria-label="t('providers.syncModelsFor', { name: provider.name })"
@@ -580,30 +634,65 @@ onMounted(() => {
                 @change="changeStatus(provider)"
               />
             </td>
-            <td>
-              <span
-                class="key-configuration"
-                :class="resourceFor(provider) ? 'is-configured' : 'is-missing'"
+            <td class="provider-runtime">
+              <Status :value="providerRuntime(provider).status" />
+              <small
+                v-if="providerRuntime(provider).reason"
+                class="subline"
+                :title="providerRuntime(provider).errorCode || providerRuntime(provider).reason"
+                >{{ providerRuntime(provider).reason }}</small
               >
-                <span>{{ t(resourceFor(provider) ? 'common.yes' : 'common.no') }}</span>
-                <button
-                  type="button"
-                  class="icon-button credential-edit"
-                  :disabled="busy"
-                  :aria-label="t('providers.configureKeyFor', { name: provider.name })"
-                  :title="t('providers.configureKey')"
-                  @click="configureCredential(provider)"
-                >
-                  <Icon name="edit" :size="15" />
-                </button>
-              </span>
             </td>
-            <td>
+            <td class="credential-column">
+              <button
+                type="button"
+                class="icon-button credential-status"
+                :class="resourceFor(provider) ? 'is-configured' : 'is-missing'"
+                :disabled="busy"
+                :aria-label="
+                  t(
+                    resourceFor(provider)
+                      ? 'providers.configuredKeyFor'
+                      : 'providers.missingKeyFor',
+                    { name: provider.name },
+                  )
+                "
+                :title="
+                  t(
+                    resourceFor(provider)
+                      ? 'providers.configuredKeyFor'
+                      : 'providers.missingKeyFor',
+                    { name: provider.name },
+                  )
+                "
+                @click="configureCredential(provider)"
+              >
+                <Icon :name="resourceFor(provider) ? 'lock' : 'lock-open'" :size="20" />
+              </button>
+            </td>
+            <td class="proxy-column">
               <span
                 class="proxy-access-state"
                 :class="provider.proxyEnabled ? 'is-enabled' : 'is-direct'"
+                role="img"
+                :aria-label="
+                  t(
+                    provider.proxyEnabled
+                      ? 'providers.proxyEnabledFor'
+                      : 'providers.proxyDisabledFor',
+                    { name: provider.name },
+                  )
+                "
+                :title="
+                  t(
+                    provider.proxyEnabled
+                      ? 'providers.proxyEnabledFor'
+                      : 'providers.proxyDisabledFor',
+                    { name: provider.name },
+                  )
+                "
               >
-                {{ t(provider.proxyEnabled ? 'common.yes' : 'common.no') }}
+                <Icon :name="provider.proxyEnabled ? 'check' : 'close'" :size="17" />
               </span>
             </td>
             <td>
@@ -1035,7 +1124,7 @@ onMounted(() => {
   margin: 0 22px 16px;
 }
 .panel table {
-  min-width: 860px;
+  min-width: 900px;
   table-layout: fixed;
 }
 .panel th,
@@ -1044,22 +1133,25 @@ onMounted(() => {
   padding-right: 14px;
 }
 .panel th:nth-child(1) {
-  width: 210px;
+  width: 150px;
 }
 .panel th:nth-child(2) {
-  width: 96px;
+  width: 65px;
 }
 .panel th:nth-child(3) {
-  width: 120px;
+  width: 125px;
 }
 .panel th:nth-child(4) {
-  width: 100px;
+  width: 56px;
 }
 .panel th:nth-child(5) {
-  width: 260px;
+  width: 58px;
 }
 .panel th:nth-child(6) {
-  width: 150px;
+  width: 210px;
+}
+.panel th:nth-child(7) {
+  width: 100px;
 }
 .endpoint {
   display: block;
@@ -1121,30 +1213,18 @@ onMounted(() => {
   font-size: 10px;
   font-weight: 600;
 }
-.key-configuration {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  font-size: 12px;
-  font-weight: 600;
+.credential-column {
+  text-align: center;
 }
-.key-configuration.is-configured {
-  color: #20714f;
-}
-.key-configuration.is-missing {
-  color: var(--muted);
-}
-.key-configuration > span {
-  display: inline-flex;
-  align-items: center;
-  white-space: nowrap;
+.proxy-column {
+  text-align: center;
 }
 .proxy-access-state {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  font-weight: 600;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
 }
 .proxy-access-state.is-enabled {
   color: #20714f;
@@ -1152,12 +1232,33 @@ onMounted(() => {
 .proxy-access-state.is-direct {
   color: var(--muted);
 }
-.credential-edit {
-  width: 24px;
-  height: 24px;
-  color: #60788d;
+.provider-runtime {
+  min-width: 125px;
 }
-.credential-edit:hover:not(:disabled) {
+.provider-runtime .subline {
+  max-width: 190px;
+  font-size: 11px;
+}
+.credential-status {
+  width: 32px;
+  height: 32px;
+  transition:
+    color 0.15s,
+    background-color 0.15s;
+}
+.credential-status.is-configured {
+  color: #20714f;
+  background: #eaf7f0;
+}
+.credential-status.is-configured:hover:not(:disabled) {
+  color: #155c3e;
+  background: #dcefe5;
+}
+.credential-status.is-missing {
+  color: #778b9e;
+  background: #f0f3f6;
+}
+.credential-status.is-missing:hover:not(:disabled) {
   background: #eaf1fb;
   color: #2463c4;
 }

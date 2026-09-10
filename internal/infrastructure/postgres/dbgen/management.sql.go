@@ -1510,7 +1510,7 @@ func (q *Queries) ManageRemoveMember(ctx context.Context, arg ManageRemoveMember
 }
 
 const manageResource = `-- name: ManageResource :one
-SELECT id, is_deleted, status, organization_id, provider_id, resource_name, credential_ciphertext, credential_nonce, key_version, last_active_at, created_by, updated_by, created_at, updated_at FROM provider_credential WHERE organization_id=$1 AND id=$2 AND is_deleted=false
+SELECT id, is_deleted, status, organization_id, provider_id, resource_name, credential_ciphertext, credential_nonce, key_version, created_by, updated_by, created_at, updated_at, runtime_status, blocked_reason, blocked_at, last_error_at, last_http_status, last_error_code FROM provider_credential WHERE organization_id=$1 AND id=$2 AND is_deleted=false
 `
 
 type ManageResourceParams struct {
@@ -1531,17 +1531,23 @@ func (q *Queries) ManageResource(ctx context.Context, arg ManageResourceParams) 
 		&i.CredentialCiphertext,
 		&i.CredentialNonce,
 		&i.KeyVersion,
-		&i.LastActiveAt,
 		&i.CreatedBy,
 		&i.UpdatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RuntimeStatus,
+		&i.BlockedReason,
+		&i.BlockedAt,
+		&i.LastErrorAt,
+		&i.LastHttpStatus,
+		&i.LastErrorCode,
 	)
 	return i, err
 }
 
 const manageResources = `-- name: ManageResources :many
-SELECT id,provider_id,resource_name,status,created_at,updated_at FROM provider_credential
+SELECT id,provider_id,resource_name,status,runtime_status,blocked_reason,blocked_at,
+       last_error_at,last_http_status,last_error_code,created_at,updated_at FROM provider_credential
 WHERE organization_id=$1 AND is_deleted=false AND (id<$2 OR $2=0) ORDER BY id DESC LIMIT $3
 `
 
@@ -1552,12 +1558,18 @@ type ManageResourcesParams struct {
 }
 
 type ManageResourcesRow struct {
-	ID           int64
-	ProviderID   int64
-	ResourceName string
-	Status       string
-	CreatedAt    pgtype.Timestamptz
-	UpdatedAt    pgtype.Timestamptz
+	ID             int64
+	ProviderID     int64
+	ResourceName   string
+	Status         string
+	RuntimeStatus  string
+	BlockedReason  *string
+	BlockedAt      pgtype.Timestamptz
+	LastErrorAt    pgtype.Timestamptz
+	LastHttpStatus *int32
+	LastErrorCode  *string
+	CreatedAt      pgtype.Timestamptz
+	UpdatedAt      pgtype.Timestamptz
 }
 
 func (q *Queries) ManageResources(ctx context.Context, arg ManageResourcesParams) ([]ManageResourcesRow, error) {
@@ -1574,6 +1586,12 @@ func (q *Queries) ManageResources(ctx context.Context, arg ManageResourcesParams
 			&i.ProviderID,
 			&i.ResourceName,
 			&i.Status,
+			&i.RuntimeStatus,
+			&i.BlockedReason,
+			&i.BlockedAt,
+			&i.LastErrorAt,
+			&i.LastHttpStatus,
+			&i.LastErrorCode,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -1585,6 +1603,33 @@ func (q *Queries) ManageResources(ctx context.Context, arg ManageResourcesParams
 		return nil, err
 	}
 	return items, nil
+}
+
+const manageRestoreResourceRuntime = `-- name: ManageRestoreResourceRuntime :execrows
+UPDATE provider_credential
+SET runtime_status='HEALTHY',blocked_reason=NULL,blocked_at=NULL,last_error_at=NULL,
+    last_http_status=NULL,last_error_code=NULL,updated_by=$3,updated_at=$4
+WHERE organization_id=$1 AND id=$2 AND is_deleted=false AND runtime_status='BLOCKED'
+`
+
+type ManageRestoreResourceRuntimeParams struct {
+	OrganizationID int64
+	ID             int64
+	UpdatedBy      string
+	UpdatedAt      pgtype.Timestamptz
+}
+
+func (q *Queries) ManageRestoreResourceRuntime(ctx context.Context, arg ManageRestoreResourceRuntimeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, manageRestoreResourceRuntime,
+		arg.OrganizationID,
+		arg.ID,
+		arg.UpdatedBy,
+		arg.UpdatedAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const manageRevokeMemberKeys = `-- name: ManageRevokeMemberKeys :exec
@@ -1784,7 +1829,14 @@ func (q *Queries) ManageUpdateProviderMapping(ctx context.Context, arg ManageUpd
 }
 
 const manageUpdateResource = `-- name: ManageUpdateResource :exec
-UPDATE provider_credential SET resource_name=$3,credential_ciphertext=$4,credential_nonce=$5,key_version=$6,status=$7,updated_by=$8,updated_at=$9
+UPDATE provider_credential SET resource_name=$3,credential_ciphertext=$4,credential_nonce=$5,key_version=$6,status=$7,
+runtime_status=CASE WHEN credential_ciphertext IS DISTINCT FROM $4 THEN 'HEALTHY' ELSE runtime_status END,
+blocked_reason=CASE WHEN credential_ciphertext IS DISTINCT FROM $4 THEN NULL ELSE blocked_reason END,
+blocked_at=CASE WHEN credential_ciphertext IS DISTINCT FROM $4 THEN NULL ELSE blocked_at END,
+last_error_at=CASE WHEN credential_ciphertext IS DISTINCT FROM $4 THEN NULL ELSE last_error_at END,
+last_http_status=CASE WHEN credential_ciphertext IS DISTINCT FROM $4 THEN NULL ELSE last_http_status END,
+last_error_code=CASE WHEN credential_ciphertext IS DISTINCT FROM $4 THEN NULL ELSE last_error_code END,
+updated_by=$8,updated_at=$9
 WHERE organization_id=$1 AND id=$2 AND is_deleted=false
 `
 

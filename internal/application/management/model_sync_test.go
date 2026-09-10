@@ -26,6 +26,10 @@ type syncDiscoverer struct {
 	source ModelDiscoverySource
 }
 
+func (d *syncDiscoverer) Supports(providerCode string) bool {
+	return providerCode == catalog.DeepSeekOfficialCode
+}
+
 func (d *syncDiscoverer) Discover(_ context.Context, source ModelDiscoverySource, _ []byte, _ *catalog.OutboundProxy) ([]DiscoveredModel, ConnectionResult) {
 	d.source = source
 	return d.models, d.result
@@ -47,6 +51,29 @@ type syncState struct {
 	models   []Model
 	mappings []ProviderMapping
 	audits   []Audit
+}
+
+type providerCapabilityReader struct {
+	Reader
+	providers []Provider
+}
+
+func (r *providerCapabilityReader) Providers(context.Context, Page) ([]Provider, error) {
+	return append([]Provider(nil), r.providers...), nil
+}
+
+func (r *providerCapabilityReader) CountProviders(context.Context) (int64, error) {
+	return int64(len(r.providers)), nil
+}
+
+type providerCapabilityStore struct{ reader *providerCapabilityReader }
+
+func (s providerCapabilityStore) Read(_ context.Context, _ admin.Identity, fn func(Reader) error) error {
+	return fn(s.reader)
+}
+
+func (providerCapabilityStore) Write(context.Context, admin.Identity, func(Writer) error) error {
+	return nil
 }
 
 func (s *syncState) Resource(context.Context, int64) (ResourceRecord, error) { return s.resource, nil }
@@ -145,6 +172,22 @@ func TestSyncResourceModelsAuditsUpstreamFailureWithoutWrites(t *testing.T) {
 	}
 	if len(state.models) != 0 || len(state.mappings) != 0 || len(state.audits) != 1 || state.audits[0].ErrorCode != "UPSTREAM_AUTH_FAILED" {
 		t.Fatalf("failed sync wrote catalog data or missed audit: %+v", state)
+	}
+}
+
+func TestProviderModelSyncCapabilityFollowsDiscovererSupport(t *testing.T) {
+	reader := &providerCapabilityReader{providers: []Provider{
+		{Code: catalog.DeepSeekOfficialCode},
+		{Code: "provider-custom"},
+	}}
+	service := New(providerCapabilityStore{reader: reader}, nil, nil, nil, WithModelDiscoverer(&syncDiscoverer{}))
+
+	result, err := service.Providers(context.Background(), admin.Identity{}, Page{Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 2 || !result.Items[0].ModelSyncSupported || result.Items[1].ModelSyncSupported {
+		t.Fatalf("unexpected model sync capabilities: %+v", result.Items)
 	}
 }
 

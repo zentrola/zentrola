@@ -1,0 +1,259 @@
+package gateway
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"io"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	appsec "github.com/zentrola/zentrola/internal/application/security"
+	"github.com/zentrola/zentrola/internal/domain/catalog"
+	"github.com/zentrola/zentrola/internal/domain/usage"
+)
+
+const defaultRouteCooldown = time.Minute
+
+func (s *Service) routes(ctx context.Context, identity appsec.PrincipalIdentity, model, protocol string) ([]Route, error) {
+	if store, ok := s.store.(CandidateStore); ok {
+		return store.ResolveCandidates(ctx, identity, model, protocol)
+	}
+	route, err := s.store.Resolve(ctx, identity, model, protocol)
+	if err != nil {
+		return nil, err
+	}
+	return []Route{route}, nil
+}
+
+func (s *Service) acquire(ctx context.Context, organizationID int64, route Route) bool {
+	if s.state == nil {
+		return true
+	}
+	allowed, err := s.state.Acquire(ctx, organizationID, route)
+	return err != nil || allowed
+}
+
+func (s *Service) nextRoute(ctx context.Context, organizationID int64, routes []Route, start int) int {
+	for index := start; index < len(routes); index++ {
+		if s.acquire(ctx, organizationID, routes[index]) {
+			return index
+		}
+	}
+	return -1
+}
+
+func (s *Service) forwardCandidates(ctx context.Context, identity appsec.PrincipalIdentity, request Request, parsed Parsed, routes []Route) (*Response, error) {
+	originalBody := request.Body
+	index := s.nextRoute(ctx, identity.OrganizationID, routes, 0)
+	if index < 0 {
+		return nil, ErrRoute
+	}
+	tries := 0
+	for index >= 0 && tries < s.maxTries {
+		tries++
+		route := routes[index]
+		if !validModel(route.UpstreamModel) {
+			next := s.nextRoute(ctx, identity.OrganizationID, routes, index+1)
+			if next < 0 || tries >= s.maxTries {
+				return nil, ErrRoute
+			}
+			index = next
+			continue
+		}
+		credential, err := s.cipher.Decrypt(route.Credential, catalog.CredentialOwner{OrganizationID: identity.OrganizationID, ProviderID: route.ProviderID, ResourceID: route.ResourceID})
+		if err != nil {
+			s.block(ctx, identity, route, ResourceBlock{Reason: "CREDENTIAL_UNRECOVERABLE", ErrorCode: "CREDENTIAL_UNRECOVERABLE"})
+			next := s.nextRoute(ctx, identity.OrganizationID, routes, index+1)
+			if next < 0 || tries >= s.maxTries {
+				return nil, ErrCredential
+			}
+			index = next
+			continue
+		}
+		route.Proxy, err = s.decryptProxy(route)
+		if err != nil {
+			clear(credential)
+			s.cooldown(ctx, identity.OrganizationID, route, defaultRouteCooldown)
+			next := s.nextRoute(ctx, identity.OrganizationID, routes, index+1)
+			if next < 0 || tries >= s.maxTries {
+				return nil, err
+			}
+			index = next
+			continue
+		}
+		request.Body = parsed.Rewrite(originalBody, route.UpstreamModel)
+		attempt := s.startAttempt(request.Trace, route)
+		response, openErr := s.upstream.Open(ctx, route, request, credential)
+		clear(credential)
+		if openErr != nil {
+			if errors.Is(openErr, ErrCredential) {
+				s.block(ctx, identity, route, ResourceBlock{Reason: "CREDENTIAL_UNRECOVERABLE", ErrorCode: "CREDENTIAL_UNRECOVERABLE"})
+			}
+			if localOpenError(openErr) {
+				s.discardAttempt(request.Trace, attempt)
+			} else {
+				s.failAttempt(request.Trace, attempt, failureCode(openErr))
+			}
+			if retryableOpenError(openErr) {
+				if !errors.Is(openErr, ErrRoute) && !errors.Is(openErr, ErrCredential) {
+					s.cooldown(ctx, identity.OrganizationID, route, defaultRouteCooldown)
+				}
+				next := s.nextRoute(ctx, identity.OrganizationID, routes, index+1)
+				if next >= 0 && tries < s.maxTries {
+					index = next
+					continue
+				}
+			}
+			return nil, openErr
+		}
+
+		decision := inspectResponse(response)
+		if decision.permanent != nil {
+			s.block(ctx, identity, route, *decision.permanent)
+		} else if decision.retry {
+			s.cooldown(ctx, identity.OrganizationID, route, decision.cooldown)
+		} else if s.state != nil {
+			_ = s.state.Healthy(ctx, identity.OrganizationID, route)
+		}
+		if decision.retry {
+			next := s.nextRoute(ctx, identity.OrganizationID, routes, index+1)
+			if next >= 0 && tries < s.maxTries {
+				s.failAttempt(request.Trace, attempt, "UPSTREAM_HTTP_"+strconv.Itoa(response.Status))
+				response.Body.Close()
+				index = next
+				continue
+			}
+		}
+		return response, nil
+	}
+	return nil, ErrUpstream
+}
+
+func (s *Service) startAttempt(event *usage.Event, route Route) *usage.Attempt {
+	if event == nil {
+		return nil
+	}
+	attempt := &usage.Attempt{
+		AttemptNo: int32(len(event.Attempts) + 1), ProviderID: route.ProviderID,
+		ProviderModelID: route.ProviderModelID, ResourceID: route.ResourceID,
+		ModelID: route.ModelID, StartedAt: time.Now().UTC(),
+	}
+	event.Attempt = attempt
+	return attempt
+}
+
+func (s *Service) failAttempt(event *usage.Event, attempt *usage.Attempt, code string) {
+	if event == nil || attempt == nil {
+		return
+	}
+	attempt.CompletedAt = time.Now().UTC()
+	attempt.Status = usage.Failed
+	attempt.ErrorType = code
+	event.Attempts = append(event.Attempts, *attempt)
+	event.Attempt = nil
+}
+
+func (s *Service) discardAttempt(event *usage.Event, attempt *usage.Attempt) {
+	if event != nil && event.Attempt == attempt {
+		event.Attempt = nil
+	}
+}
+
+func (s *Service) cooldown(ctx context.Context, organizationID int64, route Route, duration time.Duration) {
+	if s.state != nil {
+		_ = s.state.Cooldown(ctx, organizationID, route, duration)
+	}
+}
+
+func (s *Service) block(ctx context.Context, identity appsec.PrincipalIdentity, route Route, block ResourceBlock) {
+	if blocker, ok := s.store.(ResourceBlocker); ok {
+		_ = blocker.BlockResource(context.WithoutCancel(ctx), identity, route.ResourceID, block)
+	}
+}
+
+func retryableOpenError(err error) bool {
+	return errors.Is(err, ErrRoute) || errors.Is(err, ErrCredential) || errors.Is(err, ErrProxy) || errors.Is(err, ErrUpstream) || errors.Is(err, ErrTimeout)
+}
+
+func localOpenError(err error) bool {
+	return errors.Is(err, ErrRoute) || errors.Is(err, ErrInvalid) || errors.Is(err, ErrCredential) || errors.Is(err, ErrProxy)
+}
+
+func failureCode(err error) string {
+	var failure *Failure
+	if errors.As(err, &failure) {
+		return failure.Code
+	}
+	return "UPSTREAM_UNAVAILABLE"
+}
+
+type responseDecision struct {
+	retry     bool
+	cooldown  time.Duration
+	permanent *ResourceBlock
+}
+
+func inspectResponse(response *Response) responseDecision {
+	if response == nil || response.Body == nil {
+		return responseDecision{retry: true, cooldown: defaultRouteCooldown}
+	}
+	status := response.Status
+	if status < 400 {
+		return responseDecision{}
+	}
+	prefix, body := readResponsePrefix(response.Body, 64<<10)
+	response.Body = body
+	lower := strings.ToLower(string(prefix))
+	block := func(reason, code string) responseDecision {
+		return responseDecision{retry: true, permanent: &ResourceBlock{Reason: reason, ErrorCode: code, HTTPStatus: int32(status)}}
+	}
+	if status == http.StatusUnauthorized {
+		return block("AUTHENTICATION", "UPSTREAM_AUTHENTICATION_FAILED")
+	}
+	if status == http.StatusPaymentRequired || containsAny(lower, "insufficient_balance", "insufficient balance", "credit balance", "payment required", "billing_error", "billing error") {
+		return block("BILLING", "UPSTREAM_BILLING_BLOCKED")
+	}
+	if status == http.StatusForbidden && containsAny(lower, "account suspended", "account_suspended", "account disabled", "account_disabled") {
+		return block("ACCOUNT_SUSPENDED", "UPSTREAM_ACCOUNT_SUSPENDED")
+	}
+	if status == http.StatusTooManyRequests || status == http.StatusForbidden || status == http.StatusNotFound || status >= 500 {
+		return responseDecision{retry: true, cooldown: retryAfter(response.Headers)}
+	}
+	return responseDecision{}
+}
+
+func retryAfter(headers map[string][]string) time.Duration {
+	raw := strings.TrimSpace(http.Header(headers).Get("Retry-After"))
+	seconds, err := strconv.Atoi(raw)
+	if err == nil && seconds > 0 && seconds <= 3600 {
+		return time.Duration(seconds) * time.Second
+	}
+	return defaultRouteCooldown
+}
+
+func containsAny(value string, candidates ...string) bool {
+	for _, candidate := range candidates {
+		if strings.Contains(value, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+type prefixedBody struct {
+	io.Reader
+	closer io.Closer
+}
+
+func (body *prefixedBody) Close() error { return body.closer.Close() }
+
+func readResponsePrefix(source io.ReadCloser, limit int64) ([]byte, io.ReadCloser) {
+	prefix, err := io.ReadAll(io.LimitReader(source, limit))
+	if err != nil {
+		return nil, source
+	}
+	return prefix, &prefixedBody{Reader: io.MultiReader(bytes.NewReader(prefix), source), closer: source}
+}

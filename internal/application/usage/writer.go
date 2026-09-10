@@ -57,11 +57,10 @@ func NewWriter(store Store, ids shared.IDGenerator, logger *slog.Logger, opts Op
 	return w, nil
 }
 func (w *Writer) Submit(event domain.Event) error {
-	if event.Attempt == nil {
+	if event.Attempt == nil && len(event.Attempts) == 0 {
 		return nil
 	}
-	// 防止调用方在入队后修改指针；为上游调用生成一次 ID，所有写入尝试复用。
-	a := *event.Attempt
+	// 防止调用方在入队后修改指针；每次上游尝试拥有独立 ID。
 	clone := func(v *int64) *int64 {
 		if v == nil {
 			return nil
@@ -69,15 +68,36 @@ func (w *Writer) Submit(event domain.Event) error {
 		n := *v
 		return &n
 	}
-	a.InputTokens = clone(a.InputTokens)
-	a.OutputTokens = clone(a.OutputTokens)
-	a.CachedInputTokens = clone(a.CachedInputTokens)
-	event.Attempt = &a
-	var err error
-	event.Attempt.ID, err = w.ids.NextID(w.ctx)
-	if err != nil {
-		w.failure(event, "USAGE_ID_FAILED")
-		return errors.New("usage ID generation failed")
+	cloneAttempt := func(source domain.Attempt) (domain.Attempt, error) {
+		source.InputTokens = clone(source.InputTokens)
+		source.OutputTokens = clone(source.OutputTokens)
+		source.CachedInputTokens = clone(source.CachedInputTokens)
+		var err error
+		source.ID, err = w.ids.NextID(w.ctx)
+		return source, err
+	}
+	event.Attempts = append([]domain.Attempt(nil), event.Attempts...)
+	for index := range event.Attempts {
+		attempt, err := cloneAttempt(event.Attempts[index])
+		if err != nil {
+			w.failure(event, "USAGE_ID_FAILED")
+			return errors.New("usage ID generation failed")
+		}
+		if attempt.AttemptNo <= 0 {
+			attempt.AttemptNo = int32(index + 1)
+		}
+		event.Attempts[index] = attempt
+	}
+	if event.Attempt != nil {
+		attempt, err := cloneAttempt(*event.Attempt)
+		if err != nil {
+			w.failure(event, "USAGE_ID_FAILED")
+			return errors.New("usage ID generation failed")
+		}
+		if attempt.AttemptNo <= 0 {
+			attempt.AttemptNo = int32(len(event.Attempts) + 1)
+		}
+		event.Attempt = &attempt
 	}
 	w.mu.RLock()
 	if w.closed {

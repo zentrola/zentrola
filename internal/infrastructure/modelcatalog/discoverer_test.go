@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	mgmt "github.com/zentrola/zentrola/internal/application/management"
+	"github.com/zentrola/zentrola/internal/domain/catalog"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -41,6 +42,63 @@ func TestDiscoverDeepSeekModels(t *testing.T) {
 	}
 	if strings.Contains(output, "test-secret") {
 		t.Fatalf("discovery response log leaked credential: %s", output)
+	}
+}
+
+func TestDiscoverZhipuModels(t *testing.T) {
+	var logs bytes.Buffer
+	discoverer := NewDiscoverer(slog.New(slog.NewJSONHandler(&logs, nil)))
+	discoverer.client.Transport = roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Method != http.MethodGet || request.URL.String() != "https://open.bigmodel.cn/api/paas/v4/models" || request.Header.Get("Authorization") != "Bearer test-secret" || request.Header.Get("x-api-key") != "" {
+			t.Fatalf("invalid discovery request: %s %s", request.Method, request.URL.String())
+		}
+		body := `{"object":"list","data":[{"id":"glm-4.7","object":"model","created":1766332800,"owned_by":"z-ai"},{"id":"embedding-3","object":"model","owned_by":"organization-owner"},{"id":"glm-4.7","object":"model","created":1766332800,"owned_by":"z-ai"}]}`
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	})
+
+	models, result := discoverer.Discover(context.Background(), mgmt.ModelDiscoverySource{ProviderCode: catalog.ZhipuOfficialCode}, []byte("test-secret"), nil)
+	if !result.OK || result.Code != "OK" || len(models) != 2 || models[0].Code != "embedding-3" || models[0].Name != "Embedding 3" || models[1].Code != "glm-4.7" || models[1].Name != "GLM-4.7" {
+		t.Fatalf("unexpected discovery: %+v %+v", models, result)
+	}
+	output := logs.String()
+	for _, expected := range []string{"official model catalog response", `"provider_code":"zhipu-official"`, `"catalog_adapter":"zhipu"`, `"upstream_status":200`} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("discovery response log missing %q: %s", expected, output)
+		}
+	}
+	if strings.Contains(output, "test-secret") {
+		t.Fatalf("discovery response log leaked credential: %s", output)
+	}
+}
+
+func TestDiscovererReportsRegisteredProviderCapabilities(t *testing.T) {
+	discoverer := NewDiscoverer(nil)
+	if !discoverer.Supports(catalog.DeepSeekOfficialCode) {
+		t.Fatal("DeepSeek model catalog adapter should be reported as supported")
+	}
+	if !discoverer.Supports(catalog.ZhipuOfficialCode) {
+		t.Fatal("Zhipu model catalog adapter should be reported as supported")
+	}
+	if discoverer.Supports("provider-custom") {
+		t.Fatal("custom provider should not be reported as supported")
+	}
+}
+
+func TestDiscoverZhipuRejectsInvalidCatalog(t *testing.T) {
+	for _, body := range []string{
+		`{"object":"list","data":[{"id":"bad model\n","object":"model","owned_by":"zai"}]}`,
+		`{"object":"list","data":[{"id":"glm-4.7","object":"unknown","owned_by":"zai"}]}`,
+		`{"object":"list","data":[{"id":"glm-4.7","object":"unexpected","owned_by":"system"}]}`,
+		`{"object":"list"}`,
+	} {
+		discoverer := NewDiscoverer(nil)
+		discoverer.client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+		})
+		models, result := discoverer.Discover(context.Background(), mgmt.ModelDiscoverySource{ProviderCode: catalog.ZhipuOfficialCode}, []byte("test-secret"), nil)
+		if result.Code != "UPSTREAM_INVALID_RESPONSE" || result.OK || models != nil {
+			t.Fatalf("invalid catalog accepted: %q %+v %+v", body, models, result)
+		}
 	}
 }
 

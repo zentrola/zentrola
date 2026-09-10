@@ -174,7 +174,7 @@ func (q *Queries) GetProviderModel(ctx context.Context, id int64) (ProviderModel
 }
 
 const getResource = `-- name: GetResource :one
-SELECT id, is_deleted, status, organization_id, provider_id, resource_name, credential_ciphertext, credential_nonce, key_version, last_active_at, created_by, updated_by, created_at, updated_at FROM provider_credential WHERE organization_id = $1 AND id = $2 AND is_deleted = false
+SELECT id, is_deleted, status, organization_id, provider_id, resource_name, credential_ciphertext, credential_nonce, key_version, created_by, updated_by, created_at, updated_at, runtime_status, blocked_reason, blocked_at, last_error_at, last_http_status, last_error_code FROM provider_credential WHERE organization_id = $1 AND id = $2 AND is_deleted = false
 `
 
 type GetResourceParams struct {
@@ -196,11 +196,16 @@ func (q *Queries) GetResource(ctx context.Context, arg GetResourceParams) (Provi
 		&i.CredentialCiphertext,
 		&i.CredentialNonce,
 		&i.KeyVersion,
-		&i.LastActiveAt,
 		&i.CreatedBy,
 		&i.UpdatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RuntimeStatus,
+		&i.BlockedReason,
+		&i.BlockedAt,
+		&i.LastErrorAt,
+		&i.LastHttpStatus,
+		&i.LastErrorCode,
 	)
 	return i, err
 }

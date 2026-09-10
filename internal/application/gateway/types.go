@@ -4,7 +4,6 @@ package gateway
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"time"
 
@@ -64,6 +63,21 @@ type ModelStore interface {
 type Store interface {
 	Resolve(context.Context, appsec.PrincipalIdentity, string, ...string) (Route, error)
 }
+type CandidateStore interface {
+	ResolveCandidates(context.Context, appsec.PrincipalIdentity, string, ...string) ([]Route, error)
+}
+type ResourceBlock struct {
+	Reason, ErrorCode string
+	HTTPStatus        int32
+}
+type ResourceBlocker interface {
+	BlockResource(context.Context, appsec.PrincipalIdentity, int64, ResourceBlock) error
+}
+type RouteState interface {
+	Acquire(context.Context, int64, Route) (bool, error)
+	Cooldown(context.Context, int64, Route, time.Duration) error
+	Healthy(context.Context, int64, Route) error
+}
 type Cipher interface {
 	Decrypt(catalog.SealedCredential, catalog.CredentialOwner) ([]byte, error)
 	DecryptProviderProxy(catalog.SealedCredential, catalog.ProviderProxyOwner) ([]byte, error)
@@ -114,10 +128,27 @@ type Service struct {
 	store    Store
 	cipher   Cipher
 	upstream Upstream
+	state    RouteState
+	maxTries int
 }
 
-func New(store Store, cipher Cipher, upstream Upstream) *Service {
-	return &Service{store: store, cipher: cipher, upstream: upstream}
+type Option func(*Service)
+
+func WithRouteState(state RouteState) Option { return func(service *Service) { service.state = state } }
+func WithMaxAttempts(attempts int) Option {
+	return func(service *Service) {
+		if attempts > 0 {
+			service.maxTries = attempts
+		}
+	}
+}
+
+func New(store Store, cipher Cipher, upstream Upstream, options ...Option) *Service {
+	service := &Service{store: store, cipher: cipher, upstream: upstream, maxTries: 2}
+	for _, option := range options {
+		option(service)
+	}
+	return service
 }
 
 func (s *Service) Forward(ctx context.Context, identity appsec.PrincipalIdentity, request Request) (*Response, error) {
@@ -144,35 +175,14 @@ func (s *Service) Forward(ctx context.Context, identity appsec.PrincipalIdentity
 	if request.Path == "/v1/messages/count_tokens" && parsed.Stream {
 		return nil, ErrInvalid
 	}
-	route, err := s.store.Resolve(ctx, identity, parsed.Model, request.Protocol)
-	if request.Trace != nil {
-		request.Trace.ModelID = route.ModelID
-	}
+	routes, err := s.routes(ctx, identity, parsed.Model, request.Protocol)
 	if err != nil {
 		return nil, err
 	}
-	if !validModel(route.UpstreamModel) {
-		return nil, ErrRoute
+	if request.Trace != nil && len(routes) > 0 {
+		request.Trace.ModelID = routes[0].ModelID
 	}
-	credential, err := s.cipher.Decrypt(route.Credential, catalog.CredentialOwner{OrganizationID: identity.OrganizationID, ProviderID: route.ProviderID, ResourceID: route.ResourceID})
-	if err != nil {
-		return nil, ErrCredential
-	}
-	defer clear(credential)
-	route.Proxy, err = s.decryptProxy(route)
-	if err != nil {
-		return nil, err
-	}
-	request.Body = parsed.Rewrite(request.Body, route.UpstreamModel)
-	// HTTP 客户端须在 Open 返回前完成请求体发送；响应体由调用方及时关闭。
-	if request.Trace != nil {
-		request.Trace.Attempt = &usage.Attempt{ProviderID: route.ProviderID, ProviderModelID: route.ProviderModelID, ResourceID: route.ResourceID, ModelID: route.ModelID, StartedAt: time.Now().UTC()}
-	}
-	response, err := s.upstream.Open(ctx, route, request, credential)
-	if request.Trace != nil && (errors.Is(err, ErrRoute) || errors.Is(err, ErrInvalid) || errors.Is(err, ErrCredential) || errors.Is(err, ErrProxy)) {
-		request.Trace.Attempt = nil
-	}
-	return response, err
+	return s.forwardCandidates(ctx, identity, request, parsed, routes)
 }
 
 func (s *Service) Models(ctx context.Context, identity appsec.PrincipalIdentity) ([]Model, error) {

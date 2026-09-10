@@ -11,6 +11,119 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const blockGatewayResource = `-- name: BlockGatewayResource :execrows
+UPDATE provider_credential
+SET runtime_status='BLOCKED',blocked_reason=$1,blocked_at=$2,
+    last_error_at=$2,last_http_status=$3,
+    last_error_code=$4,updated_by='system',updated_at=$2
+WHERE organization_id=$5 AND id=$6
+  AND NOT is_deleted AND status='ACTIVE' AND runtime_status='HEALTHY'
+`
+
+type BlockGatewayResourceParams struct {
+	BlockedReason  *string
+	BlockedAt      pgtype.Timestamptz
+	HttpStatus     *int32
+	ErrorCode      *string
+	OrganizationID int64
+	ResourceID     int64
+}
+
+func (q *Queries) BlockGatewayResource(ctx context.Context, arg BlockGatewayResourceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, blockGatewayResource,
+		arg.BlockedReason,
+		arg.BlockedAt,
+		arg.HttpStatus,
+		arg.ErrorCode,
+		arg.OrganizationID,
+		arg.ResourceID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const gatewayCandidates = `-- name: GatewayCandidates :many
+SELECT pm.id AS provider_model_id,pm.provider_id,pm.upstream_model_code,pe.base_url,pe.protocol_type,
+       p.proxy_enabled,p.proxy_url_ciphertext,p.proxy_url_nonce,p.proxy_url_key_version,
+       p.proxy_headers_ciphertext,p.proxy_headers_nonce,p.proxy_headers_key_version,
+       r.id AS resource_id,r.credential_ciphertext,r.credential_nonce,r.key_version
+FROM provider_model pm
+JOIN provider p ON p.id=pm.provider_id
+JOIN provider_endpoint pe ON pe.provider_id=p.id AND pe.protocol_type IN ('OPENAI','ANTHROPIC')
+JOIN provider_credential r ON r.provider_id=p.id
+    AND r.organization_id=$1
+    AND NOT r.is_deleted AND r.status='ACTIVE' AND r.runtime_status='HEALTHY'
+WHERE pm.model_id=$2 AND NOT pm.is_deleted
+  AND NOT p.is_deleted AND p.status='ACTIVE'
+ORDER BY pm.priority,
+    CASE WHEN pe.protocol_type=$3 THEN 0 ELSE 1 END,
+    pm.id,r.id
+`
+
+type GatewayCandidatesParams struct {
+	OrganizationID    int64
+	ModelID           int64
+	PreferredProtocol string
+}
+
+type GatewayCandidatesRow struct {
+	ProviderModelID        int64
+	ProviderID             int64
+	UpstreamModelCode      string
+	BaseUrl                string
+	ProtocolType           string
+	ProxyEnabled           bool
+	ProxyUrlCiphertext     []byte
+	ProxyUrlNonce          []byte
+	ProxyUrlKeyVersion     *int32
+	ProxyHeadersCiphertext []byte
+	ProxyHeadersNonce      []byte
+	ProxyHeadersKeyVersion *int32
+	ResourceID             int64
+	CredentialCiphertext   []byte
+	CredentialNonce        []byte
+	KeyVersion             int32
+}
+
+func (q *Queries) GatewayCandidates(ctx context.Context, arg GatewayCandidatesParams) ([]GatewayCandidatesRow, error) {
+	rows, err := q.db.Query(ctx, gatewayCandidates, arg.OrganizationID, arg.ModelID, arg.PreferredProtocol)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GatewayCandidatesRow{}
+	for rows.Next() {
+		var i GatewayCandidatesRow
+		if err := rows.Scan(
+			&i.ProviderModelID,
+			&i.ProviderID,
+			&i.UpstreamModelCode,
+			&i.BaseUrl,
+			&i.ProtocolType,
+			&i.ProxyEnabled,
+			&i.ProxyUrlCiphertext,
+			&i.ProxyUrlNonce,
+			&i.ProxyUrlKeyVersion,
+			&i.ProxyHeadersCiphertext,
+			&i.ProxyHeadersNonce,
+			&i.ProxyHeadersKeyVersion,
+			&i.ResourceID,
+			&i.CredentialCiphertext,
+			&i.CredentialNonce,
+			&i.KeyVersion,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const gatewayIdentityActive = `-- name: GatewayIdentityActive :one
 SELECT EXISTS (SELECT 1 FROM principal_access_key k
 JOIN principal p ON p.id=k.principal_id AND p.organization_id=k.organization_id
@@ -33,69 +146,6 @@ func (q *Queries) GatewayIdentityActive(ctx context.Context, arg GatewayIdentity
 	return exists, err
 }
 
-const gatewayMappings = `-- name: GatewayMappings :many
-SELECT pm.id,pm.provider_id,pm.upstream_model_code,pe.base_url,
-       p.proxy_enabled,p.proxy_url_ciphertext,p.proxy_url_nonce,p.proxy_url_key_version,
-       p.proxy_headers_ciphertext,p.proxy_headers_nonce,p.proxy_headers_key_version
-FROM provider_model pm
-JOIN provider p ON p.id=pm.provider_id
-JOIN provider_endpoint pe ON pe.provider_id=p.id AND pe.protocol_type=$2
-WHERE pm.model_id=$1 AND NOT pm.is_deleted
-  AND NOT p.is_deleted AND p.status='ACTIVE'
-ORDER BY pm.priority,pm.id LIMIT 1
-`
-
-type GatewayMappingsParams struct {
-	ModelID      int64
-	ProtocolType string
-}
-
-type GatewayMappingsRow struct {
-	ID                     int64
-	ProviderID             int64
-	UpstreamModelCode      string
-	BaseUrl                string
-	ProxyEnabled           bool
-	ProxyUrlCiphertext     []byte
-	ProxyUrlNonce          []byte
-	ProxyUrlKeyVersion     *int32
-	ProxyHeadersCiphertext []byte
-	ProxyHeadersNonce      []byte
-	ProxyHeadersKeyVersion *int32
-}
-
-func (q *Queries) GatewayMappings(ctx context.Context, arg GatewayMappingsParams) ([]GatewayMappingsRow, error) {
-	rows, err := q.db.Query(ctx, gatewayMappings, arg.ModelID, arg.ProtocolType)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []GatewayMappingsRow{}
-	for rows.Next() {
-		var i GatewayMappingsRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.ProviderID,
-			&i.UpstreamModelCode,
-			&i.BaseUrl,
-			&i.ProxyEnabled,
-			&i.ProxyUrlCiphertext,
-			&i.ProxyUrlNonce,
-			&i.ProxyUrlKeyVersion,
-			&i.ProxyHeadersCiphertext,
-			&i.ProxyHeadersNonce,
-			&i.ProxyHeadersKeyVersion,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const gatewayModel = `-- name: GatewayModel :one
 SELECT id,status FROM model WHERE model_code=$1 AND NOT is_deleted
 `
@@ -112,48 +162,22 @@ func (q *Queries) GatewayModel(ctx context.Context, modelCode string) (GatewayMo
 	return i, err
 }
 
-const gatewayResources = `-- name: GatewayResources :many
-SELECT id, is_deleted, status, organization_id, provider_id, resource_name, credential_ciphertext, credential_nonce, key_version, last_active_at, created_by, updated_by, created_at, updated_at FROM provider_credential WHERE organization_id=$1 AND provider_id=$2 AND NOT is_deleted AND status='ACTIVE' ORDER BY id LIMIT 2
+const gatewayRouteExists = `-- name: GatewayRouteExists :one
+SELECT EXISTS(
+    SELECT 1
+    FROM provider_model pm
+    JOIN provider p ON p.id=pm.provider_id
+    JOIN provider_endpoint pe ON pe.provider_id=p.id AND pe.protocol_type IN ('OPENAI','ANTHROPIC')
+    WHERE pm.model_id=$1 AND NOT pm.is_deleted
+      AND NOT p.is_deleted AND p.status='ACTIVE'
+)
 `
 
-type GatewayResourcesParams struct {
-	OrganizationID int64
-	ProviderID     int64
-}
-
-func (q *Queries) GatewayResources(ctx context.Context, arg GatewayResourcesParams) ([]ProviderCredential, error) {
-	rows, err := q.db.Query(ctx, gatewayResources, arg.OrganizationID, arg.ProviderID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ProviderCredential{}
-	for rows.Next() {
-		var i ProviderCredential
-		if err := rows.Scan(
-			&i.ID,
-			&i.IsDeleted,
-			&i.Status,
-			&i.OrganizationID,
-			&i.ProviderID,
-			&i.ResourceName,
-			&i.CredentialCiphertext,
-			&i.CredentialNonce,
-			&i.KeyVersion,
-			&i.LastActiveAt,
-			&i.CreatedBy,
-			&i.UpdatedBy,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+func (q *Queries) GatewayRouteExists(ctx context.Context, modelID int64) (bool, error) {
+	row := q.db.QueryRow(ctx, gatewayRouteExists, modelID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const openAIModels = `-- name: OpenAIModels :many
@@ -162,7 +186,7 @@ JOIN provider_model pm ON pm.model_id=m.id AND NOT pm.is_deleted
 JOIN provider p ON p.id=pm.provider_id AND NOT p.is_deleted AND p.status='ACTIVE'
 JOIN provider_endpoint pe ON pe.provider_id=p.id AND pe.protocol_type IN ('OPENAI','ANTHROPIC')
 WHERE NOT m.is_deleted AND m.status='ACTIVE'
-AND EXISTS(SELECT 1 FROM provider_credential r WHERE r.provider_id=p.id AND r.organization_id=$1 AND NOT r.is_deleted AND r.status='ACTIVE')
+AND EXISTS(SELECT 1 FROM provider_credential r WHERE r.provider_id=p.id AND r.organization_id=$1 AND NOT r.is_deleted AND r.status='ACTIVE' AND r.runtime_status='HEALTHY')
 AND EXISTS(SELECT 1 FROM principal_group_membership pg JOIN principal_group g ON g.id=pg.group_id AND g.organization_id=pg.organization_id
 JOIN principal_group_model_permission gp ON gp.group_id=g.id AND gp.organization_id=g.organization_id
 WHERE pg.principal_id=$2 AND pg.organization_id=$1

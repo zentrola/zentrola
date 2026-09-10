@@ -39,6 +39,7 @@ export interface Provider {
   status: string
   website: string | null
   endpoints: ProviderEndpoint[]
+  modelSyncSupported: boolean
   proxyEnabled: boolean
   proxyUrl: string | null
   proxyHeaders: ProviderProxyHeader[]
@@ -77,6 +78,12 @@ export interface Resource {
   name: string
   providerId: string
   status: string
+  runtimeStatus: 'HEALTHY' | 'BLOCKED'
+  blockedReason: string | null
+  blockedAt: string | null
+  lastErrorAt: string | null
+  lastHttpStatus: number | null
+  lastErrorCode: string | null
   credentialConfigured: boolean
   createdAt: string
   updatedAt: string
@@ -134,9 +141,19 @@ export interface TokenRank {
   name: string
   tokens: number
 }
-export interface ModelRank {
-  upstreamModelCode: string
+export interface ClientModelRank {
+  modelId: string
+  modelCode: string
+  modelName: string
   requests: number
+  tokens: number
+}
+export interface UpstreamModelRank {
+  providerId: string
+  providerName: string
+  modelId: string
+  modelCode: string
+  calls: number
   tokens: number
 }
 export interface Dashboard {
@@ -145,7 +162,8 @@ export interface Dashboard {
   providerCount: number
   totalTokens: number
   tokenRanking: TokenRank[]
-  modelRanking: ModelRank[]
+  clientModelRanking: ClientModelRank[]
+  upstreamModelRanking: UpstreamModelRank[]
 }
 export interface Operation {
   id: string

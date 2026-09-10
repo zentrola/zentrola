@@ -17,6 +17,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/zentrola/zentrola/internal/application/bootstrap"
 	"github.com/zentrola/zentrola/internal/infrastructure/config"
@@ -93,8 +94,8 @@ VALUES (70,1,'admin','test-hash','Admin','ACTIVE','system','system',now(),now())
 			mustReject(t, ctx, tx, "23505", `INSERT INTO provider_model (id,provider_id,model_id,upstream_model_code,priority,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 53,41,model_id,upstream_model_code,100,false,created_by,updated_by,created_at,updated_at FROM provider_model WHERE id=50`)
 			mustExec(t, ctx, tx, `INSERT INTO provider_credential (id,organization_id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,created_by,updated_by,created_at,updated_at)
 VALUES (60,1,40,'Resource',decode(repeat('11',32),'hex'),decode(repeat('22',12),'hex'),1,'ACTIVE','system','system',now(),now())`)
-			mustReject(t, ctx, tx, "23505", `INSERT INTO provider_credential (id,organization_id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,last_active_at,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 61,organization_id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,last_active_at,false,created_by,updated_by,created_at,updated_at FROM provider_credential WHERE id=60`)
-			mustExec(t, ctx, tx, `INSERT INTO provider_credential (id,organization_id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,last_active_at,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 61,organization_id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,'DISABLED',last_active_at,false,created_by,updated_by,created_at,updated_at FROM provider_credential WHERE id=60`)
+			mustReject(t, ctx, tx, "23505", `INSERT INTO provider_credential (id,organization_id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 61,organization_id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,false,created_by,updated_by,created_at,updated_at FROM provider_credential WHERE id=60`)
+			mustExec(t, ctx, tx, `INSERT INTO provider_credential (id,organization_id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 61,organization_id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,'DISABLED',false,created_by,updated_by,created_at,updated_at FROM provider_credential WHERE id=60`)
 		})
 	})
 	t.Run("permission union and default deny", func(t *testing.T) {
@@ -142,6 +143,26 @@ VALUES (60,1,40,'Resource',decode(repeat('11',32),'hex'),decode(repeat('22',12),
 			mustReject(t, ctx, tx, "23514", `UPDATE provider_credential SET credential_nonce=decode('00','hex') WHERE id=60`)
 		})
 	})
+	t.Run("credential runtime block", func(t *testing.T) {
+		withFixture(t, ctx, pool, func(tx pgx.Tx) {
+			mustExec(t, ctx, tx, `INSERT INTO provider_credential (id,organization_id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,created_by,updated_by,created_at,updated_at) VALUES (60,1,40,'Resource',decode(repeat('00',32),'hex'),decode(repeat('00',12),'hex'),1,'ACTIVE','system','system',now(),now())`)
+			now := time.Now().UTC().Truncate(time.Microsecond)
+			reason, code, status := "BILLING", "UPSTREAM_BILLING_BLOCKED", int32(402)
+			changed, err := dbgen.New(tx).BlockGatewayResource(ctx, dbgen.BlockGatewayResourceParams{
+				OrganizationID: 1, ResourceID: 60, BlockedReason: &reason,
+				BlockedAt: pgtype.Timestamptz{Time: now, Valid: true}, HttpStatus: &status, ErrorCode: &code,
+			})
+			if err != nil || changed != 1 {
+				t.Fatalf("block changed=%d err=%v", changed, err)
+			}
+			var runtime, gotReason, gotCode string
+			var gotStatus int32
+			if err := tx.QueryRow(ctx, `SELECT runtime_status,blocked_reason,last_http_status,last_error_code FROM provider_credential WHERE id=60`).Scan(&runtime, &gotReason, &gotStatus, &gotCode); err != nil || runtime != "BLOCKED" || gotReason != reason || gotStatus != status || gotCode != code {
+				t.Fatalf("runtime=%s reason=%s status=%d code=%s err=%v", runtime, gotReason, gotStatus, gotCode, err)
+			}
+			mustReject(t, ctx, tx, "23514", `UPDATE provider_credential SET runtime_status='HEALTHY' WHERE id=60`)
+		})
+	})
 	t.Run("usage facts and append only audit", func(t *testing.T) {
 		withFixture(t, ctx, pool, func(tx pgx.Tx) {
 			mustExec(t, ctx, tx, `INSERT INTO usage_record (id,organization_id,request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,client_protocol,billing_unit,started_at,completed_at,latency_ms,status,created_at) VALUES (101,1,'req_test',1,10,40,50,60,30,'MODEL_GATEWAY','ANTHROPIC_MESSAGES','TOKEN',now(),now(),0,'SUCCESS',now())`)
@@ -150,7 +171,9 @@ VALUES (60,1,40,'Resource',decode(repeat('11',32),'hex'),decode(repeat('22',12),
 				t.Fatal("unknown usage/cost was falsified")
 			}
 			mustReject(t, ctx, tx, "23505", `INSERT INTO usage_record (id,organization_id,request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,input_tokens,output_tokens,cached_input_tokens,billing_unit,billing_quantity,cost_amount,cost_currency,started_at,completed_at,latency_ms,status,error_type,created_at,client_protocol) SELECT 102,organization_id,request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,input_tokens,output_tokens,cached_input_tokens,billing_unit,billing_quantity,cost_amount,cost_currency,started_at,completed_at,latency_ms,status,error_type,created_at,client_protocol FROM usage_record WHERE id=101`)
-			mustReject(t, ctx, tx, "23514", `UPDATE usage_record SET attempt_no=2 WHERE id=101`)
+			mustExec(t, ctx, tx, `UPDATE usage_record SET attempt_no=2 WHERE id=101`)
+			mustExec(t, ctx, tx, `INSERT INTO usage_record (id,organization_id,request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,input_tokens,output_tokens,cached_input_tokens,billing_unit,billing_quantity,cost_amount,cost_currency,started_at,completed_at,latency_ms,status,error_type,created_at,client_protocol) SELECT 102,organization_id,request_id,1,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,input_tokens,output_tokens,cached_input_tokens,billing_unit,billing_quantity,cost_amount,cost_currency,started_at,completed_at,latency_ms,status,error_type,created_at,client_protocol FROM usage_record WHERE id=101`)
+			mustReject(t, ctx, tx, "23514", `UPDATE usage_record SET attempt_no=0 WHERE id=102`)
 			mustExec(t, ctx, tx, `INSERT INTO operation_log (id,organization_id,operator_type,operator_id,operator_name,module,operation_type,target_type,target_id,result,created_at) VALUES (200,1,'ADMIN',70,'Admin','MEMBER','MEMBER_CREATE','PRINCIPAL',10,'SUCCESS',now())`)
 			for _, sql := range []string{`UPDATE operation_log SET operator_name='changed'`, `DELETE FROM operation_log`, `TRUNCATE operation_log`} {
 				mustReject(t, ctx, tx, "42501", sql)
@@ -173,7 +196,7 @@ ORDER BY c.relname,a.attnum`, schema)
 	nullable := map[string]string{
 		"provider":     "official_website,proxy_url_display,proxy_url_ciphertext,proxy_url_nonce,proxy_url_key_version,proxy_headers_ciphertext,proxy_headers_nonce,proxy_headers_key_version",
 		"organization": "remark", "admin_user": "locked_until,last_login_at", "principal": "remark", "principal_access_key": "expires_at,last_used_at,revoked_at",
-		"principal_group": "remark", "provider_credential": "last_active_at",
+		"principal_group": "remark", "provider_credential": "blocked_reason,blocked_at,last_error_at,last_http_status,last_error_code",
 		"usage_record":  "input_tokens,output_tokens,cached_input_tokens,billing_quantity,cost_amount,cost_currency,error_type",
 		"operation_log": "operator_id,target_id,target_name,request_id,request_method,request_path,ip_address,user_agent,error_code,before_data,after_data,remark",
 	}
@@ -235,6 +258,18 @@ ORDER BY c.relname,a.attnum`, schema)
 	for table := range tables {
 		if !expectedTables[table] {
 			t.Errorf("unexpected business table: %s", table)
+		}
+	}
+	credentialColumns := make(map[string]bool, len(columns["provider_credential"]))
+	for _, column := range columns["provider_credential"] {
+		credentialColumns[column] = true
+	}
+	if credentialColumns["last_active_at"] {
+		t.Error("provider_credential.last_active_at was not removed")
+	}
+	for _, column := range []string{"runtime_status", "blocked_reason", "blocked_at", "last_error_at", "last_http_status", "last_error_code"} {
+		if !credentialColumns[column] {
+			t.Errorf("provider_credential.%s is missing", column)
 		}
 	}
 	preferredRecordColumns := []string{"id", "is_deleted", "status"}

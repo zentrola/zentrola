@@ -29,6 +29,7 @@ import (
 	"github.com/zentrola/zentrola/internal/infrastructure/modelcatalog"
 	"github.com/zentrola/zentrola/internal/infrastructure/openai"
 	"github.com/zentrola/zentrola/internal/infrastructure/postgres"
+	"github.com/zentrola/zentrola/internal/infrastructure/redisstate"
 	cryptosec "github.com/zentrola/zentrola/internal/infrastructure/security"
 	"github.com/zentrola/zentrola/internal/infrastructure/telemetry"
 	httptransport "github.com/zentrola/zentrola/internal/transport/http"
@@ -279,7 +280,17 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 	openaiClient := openai.NewGatewayClient(cfg.Gateway.HeaderTimeout)
 	defer openaiClient.CloseIdleConnections()
 	compatibleUpstream := gateway.NewCompatibleUpstream(anthropicClient, openaiClient)
-	gatewayService := gateway.New(postgres.NewGatewayStore(pool), credentials, compatibleUpstream)
+	routeState := redisstate.New(cfg.Redis.Host, cfg.Redis.Port, cfg.Redis.Database, cfg.Redis.Password)
+	defer routeState.Close()
+	redisProbe, redisProbeCancel := context.WithTimeout(startup, time.Second)
+	if err := routeState.Ping(redisProbe); err != nil {
+		logger.Warn("route state Redis unavailable; cooldown state will fail open", "error_code", "REDIS_UNAVAILABLE")
+	}
+	redisProbeCancel()
+	gatewayService := gateway.New(
+		postgres.NewGatewayStore(pool), credentials, compatibleUpstream,
+		gateway.WithRouteState(routeState), gateway.WithMaxAttempts(2),
+	)
 	usageStore := postgres.NewUsageStore(pool)
 	usageWriter, err := usageapp.NewWriter(usageStore, ids, logger, usageapp.Options{QueueSize: cfg.Usage.QueueSize, BatchSize: cfg.Usage.BatchSize, FlushInterval: cfg.Usage.FlushInterval, WriteTimeout: cfg.Usage.WriteTimeout})
 	if err != nil {

@@ -70,6 +70,7 @@ type Provider struct {
 	Type               string                   `json:"type"`
 	Website            *string                  `json:"website"`
 	Endpoints          []ProviderEndpoint       `json:"endpoints"`
+	ModelSyncSupported bool                     `json:"modelSyncSupported"`
 	ProxyEnabled       bool                     `json:"proxyEnabled"`
 	ProxyURL           *string                  `json:"proxyUrl"`
 	ProxyHeaders       []ProviderProxyHeader    `json:"proxyHeaders"`
@@ -128,13 +129,19 @@ type ProviderInitializeResult struct {
 	Existing int `json:"existing"`
 }
 type Resource struct {
-	ID                   int64     `json:"id,string"`
-	ProviderID           int64     `json:"providerId,string"`
-	Name                 string    `json:"name"`
-	Status               string    `json:"status"`
-	CredentialConfigured bool      `json:"credentialConfigured"`
-	CreatedAt            time.Time `json:"createdAt"`
-	UpdatedAt            time.Time `json:"updatedAt"`
+	ID                   int64      `json:"id,string"`
+	ProviderID           int64      `json:"providerId,string"`
+	Name                 string     `json:"name"`
+	Status               string     `json:"status"`
+	RuntimeStatus        string     `json:"runtimeStatus"`
+	BlockedReason        *string    `json:"blockedReason"`
+	BlockedAt            *time.Time `json:"blockedAt"`
+	LastErrorAt          *time.Time `json:"lastErrorAt"`
+	LastHTTPStatus       *int32     `json:"lastHttpStatus"`
+	LastErrorCode        *string    `json:"lastErrorCode"`
+	CredentialConfigured bool       `json:"credentialConfigured"`
+	CreatedAt            time.Time  `json:"createdAt"`
+	UpdatedAt            time.Time  `json:"updatedAt"`
 }
 type ResourceRecord struct {
 	Resource
@@ -265,5 +272,6 @@ type ModelSyncResult struct {
 }
 
 type ModelDiscoverer interface {
+	Supports(providerCode string) bool
 	Discover(context.Context, ModelDiscoverySource, []byte, *catalog.OutboundProxy) ([]DiscoveredModel, ConnectionResult)
 }
