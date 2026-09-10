@@ -14,7 +14,7 @@ import (
 func (s *SecurityHandlers) mountUsage(r chi.Router) {
 	// @Summary 首页统计
 	// @Tags 用量统计
-	// @Description 返回当前组织激活用户数、启用模型和服务商数量，以及指定时间范围内的 Token 汇总、用户 Token Top 10、客户端逻辑模型请求 Top 10 与上游模型调用 Top 10。
+	// @Description 返回当前部署实例的激活用户数、启用模型和服务商数量，以及指定时间范围内的 Token 汇总、用户 Token Top 10、客户端逻辑模型请求 Top 10 与服务商调用 Top 10。
 	// @Produce json
 	// @Security AdminBearer
 	// @Param from query string true "起始时间 RFC3339"
@@ -39,7 +39,7 @@ func (s *SecurityHandlers) mountUsage(r chi.Router) {
 	})
 	// @Summary 用量记录
 	// @Tags 用量统计
-	// @Description 只查询当前组织；按 ID 倒序分页，最新记录在前；时间区间最长 366 天。
+	// @Description 查询当前部署实例；按 ID 倒序分页，最新记录在前；时间区间最长 366 天。
 	// @Produce json
 	// @Security AdminBearer
 	// @Param after query string false "上一页 nextCursor，默认从头查询"

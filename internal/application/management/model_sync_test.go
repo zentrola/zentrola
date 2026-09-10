@@ -130,7 +130,7 @@ func TestSyncResourceModelsCreatesMissingEntriesAndRefreshesExistingNames(t *tes
 	}
 	ids := &syncIDs{next: 100}
 	service := New(syncStore{state}, ids, syncCipher{}, nil, WithModelDiscoverer(discoverer))
-	actor := admin.Identity{ID: 1, OrganizationID: 2}
+	actor := admin.Identity{ID: 1}
 
 	result, err := service.SyncResourceModels(context.Background(), actor, 10, appsec.RequestMeta{})
 	if err != nil {
@@ -145,6 +145,11 @@ func TestSyncResourceModelsCreatesMissingEntriesAndRefreshesExistingNames(t *tes
 	if len(state.models) != 3 || state.models[0].Name != "Upstream name" || state.models[0].Status != "ACTIVE" || state.models[0].Remark != "保留说明" || len(state.models[0].InputModalities) != 2 || len(state.models[0].OutputModalities) != 1 || state.models[1].Name != "New Model" || state.models[1].Status != "DISABLED" || state.models[2].Name != "Deepseek v4 flash vision exp" || state.models[2].Status != "DISABLED" {
 		t.Fatalf("existing model metadata was not selectively updated or new model was enabled: %+v", state.models)
 	}
+	for _, model := range state.models {
+		if model.PublisherProviderID == nil || *model.PublisherProviderID != state.provider.ID || model.PublisherProviderName == nil || *model.PublisherProviderName != state.provider.Name {
+			t.Fatalf("model publisher was not synchronized: %+v", model)
+		}
+	}
 	if len(state.mappings) != 3 || state.mappings[0].UpstreamModelCode != "custom-existing" || state.mappings[0].Priority != 7 {
 		t.Fatalf("existing mapping was overwritten: %+v", state.mappings)
 	}
@@ -158,6 +163,30 @@ func TestSyncResourceModelsCreatesMissingEntriesAndRefreshesExistingNames(t *tes
 	}
 }
 
+func TestSyncResourceModelsBackfillsPublisherWhenOfficialNameIsUnchanged(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	state := &syncState{
+		resource: ResourceRecord{Resource: Resource{ID: 10, ProviderID: 20, Name: "Official key", UpdatedAt: now}},
+		provider: Provider{ID: 20, Code: catalog.DeepSeekOfficialCode, Name: "DeepSeek"},
+		models:   []Model{{ID: 30, Code: "deepseek-v4-pro", Name: "DeepSeek V4 Pro", Status: "DISABLED", InputModalities: []string{"TEXT"}, OutputModalities: []string{"TEXT"}}},
+		mappings: []ProviderMapping{{ID: 40, ProviderID: 20, ModelID: 30, UpstreamModelCode: "deepseek-v4-pro", Priority: 100}},
+	}
+	discoverer := &syncDiscoverer{
+		models: []DiscoveredModel{{Code: "deepseek-v4-pro", Name: "DeepSeek V4 Pro"}},
+		result: ConnectionResult{OK: true, Code: "OK", HTTPStatus: 200},
+	}
+	service := New(syncStore{state}, &syncIDs{}, syncCipher{}, nil, WithModelDiscoverer(discoverer))
+
+	result, err := service.SyncResourceModels(context.Background(), admin.Identity{ID: 1}, 10, appsec.RequestMeta{})
+	if err != nil || result.Updated != 1 || result.Created != 0 || result.Mapped != 0 {
+		t.Fatalf("unexpected publisher backfill result: %+v err=%v", result, err)
+	}
+	model := state.models[0]
+	if model.PublisherProviderID == nil || *model.PublisherProviderID != state.provider.ID || model.PublisherProviderName == nil || *model.PublisherProviderName != state.provider.Name {
+		t.Fatalf("publisher was not backfilled: %+v", model)
+	}
+}
+
 func TestSyncResourceModelsAuditsUpstreamFailureWithoutWrites(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	state := &syncState{
@@ -166,7 +195,7 @@ func TestSyncResourceModelsAuditsUpstreamFailureWithoutWrites(t *testing.T) {
 	}
 	discoverer := &syncDiscoverer{result: ConnectionResult{Code: "UPSTREAM_AUTH_FAILED", HTTPStatus: 401}}
 	service := New(syncStore{state}, &syncIDs{}, syncCipher{}, nil, WithModelDiscoverer(discoverer))
-	result, err := service.SyncResourceModels(context.Background(), admin.Identity{ID: 1, OrganizationID: 2}, 10, appsec.RequestMeta{})
+	result, err := service.SyncResourceModels(context.Background(), admin.Identity{ID: 1}, 10, appsec.RequestMeta{})
 	if err != nil || result.OK || result.Code != "UPSTREAM_AUTH_FAILED" {
 		t.Fatalf("unexpected failure result: %+v %v", result, err)
 	}

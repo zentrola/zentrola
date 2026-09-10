@@ -3,6 +3,7 @@ package security
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/binary"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -104,13 +105,13 @@ func TestCredentialAEAD(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	owner := CredentialOwner{OrganizationID: 1, ProviderID: 2, ResourceID: 3}
+	owner := CredentialOwner{ProviderID: 2, ResourceID: 3}
 	sealed, err := c.Encrypt([]byte("provider-secret"), owner)
 	if err != nil {
 		t.Fatal(err)
 	}
 	plain, err := c.Decrypt(sealed, owner)
-	if err != nil || string(plain) != "provider-secret" {
+	if err != nil || string(plain) != "provider-secret" || sealed.KeyVersion != 2 {
 		t.Fatal("round trip failed", err)
 	}
 	other, _ := decodeMaster(base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{2}, 32)), false)
@@ -118,8 +119,15 @@ func TestCredentialAEAD(t *testing.T) {
 	if _, err := wrong.Decrypt(sealed, owner); err == nil {
 		t.Fatal("wrong key accepted")
 	}
-	if _, err := c.Decrypt(sealed, CredentialOwner{OrganizationID: 1, ProviderID: 2, ResourceID: 4}); err == nil {
+	if _, err := c.Decrypt(sealed, CredentialOwner{ProviderID: 2, ResourceID: 4}); err == nil {
 		t.Fatal("ciphertext could be moved to a different resource")
+	}
+	legacyNonce := bytes.Repeat([]byte{9}, c.aead.NonceSize())
+	legacyCiphertext := binary.BigEndian.AppendUint64(nil, 91)
+	legacyCiphertext = append(legacyCiphertext, c.aead.Seal(nil, legacyNonce, []byte("legacy-provider-secret"), owner.LegacyAAD(91))...)
+	legacy, err := c.Decrypt(SealedCredential{Ciphertext: legacyCiphertext, Nonce: legacyNonce, KeyVersion: 1}, owner)
+	if err != nil || string(legacy) != "legacy-provider-secret" {
+		t.Fatal("migrated v1 credential could not be decrypted", err)
 	}
 	second, _ := c.Encrypt([]byte("provider-secret"), owner)
 	if bytes.Equal(sealed.Nonce, second.Nonce) || len(sealed.Nonce) != 12 {
@@ -133,7 +141,7 @@ func TestCredentialAEAD(t *testing.T) {
 	if _, err := c.Decrypt(sealed, owner); err == nil {
 		t.Fatal("invalid nonce accepted")
 	}
-	second.KeyVersion = 2
+	second.KeyVersion = 3
 	if _, err := c.Decrypt(second, owner); err == nil {
 		t.Fatal("unknown key version accepted")
 	}
@@ -172,12 +180,12 @@ func TestJWTValidation(t *testing.T) {
 	}
 	now := time.Now().UTC().Truncate(time.Second)
 	j.now = func() time.Time { return now }
-	full, expires, err := j.Issue(admin.Identity{ID: 101, OrganizationID: 201, CredentialVersion: 3})
+	full, expires, err := j.Issue(admin.Identity{ID: 101, CredentialVersion: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
 	identity, err := j.Verify(full)
-	if err != nil || identity.ID != 101 || identity.OrganizationID != 201 || identity.CredentialVersion != 3 {
+	if err != nil || identity.ID != 101 || identity.CredentialVersion != 3 {
 		t.Fatal("JWT round trip failed")
 	}
 	if !expires.Equal(now.Add(8 * time.Hour)) {
@@ -188,7 +196,7 @@ func TestJWTValidation(t *testing.T) {
 		t.Fatal("expired JWT accepted")
 	}
 	j.now = func() time.Time { return now }
-	claims := AdminClaims{OrganizationID: "201", Kind: "ADMIN", RegisteredClaims: jwt.RegisteredClaims{Issuer: adminIssuer, Subject: "101", Audience: jwt.ClaimStrings{adminAudience}, IssuedAt: jwt.NewNumericDate(now), ExpiresAt: jwt.NewNumericDate(expires), ID: "jti"}}
+	claims := AdminClaims{Kind: "ADMIN", RegisteredClaims: jwt.RegisteredClaims{Issuer: adminIssuer, Subject: "101", Audience: jwt.ClaimStrings{adminAudience}, IssuedAt: jwt.NewNumericDate(now), ExpiresAt: jwt.NewNumericDate(expires), ID: "jti"}}
 	// 升级前签发的 Token 没有凭证版本，兼容为 0；账号首次重置后不再匹配。
 	legacy, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"organization_id": "201", "kind": "ADMIN", "iss": adminIssuer, "sub": "101",

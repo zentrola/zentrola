@@ -22,7 +22,7 @@ async function fixture(context: BrowserContext) {
           state.meStatus,
           state.meStatus === 401 ? 'UNAUTHENTICATED' : 'SERVICE_UNAVAILABLE',
         )
-      return reply({ id: '1', organizationId: '2', username: 'admin', displayName: '管理员' })
+      return reply({ id: '1', username: 'admin', displayName: '管理员' })
     }
     return reply({ items: [], nextCursor: null, total: 0 })
   })

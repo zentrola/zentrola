@@ -472,7 +472,7 @@ func (s *Service) SetModelStatus(ctx context.Context, actor admin.Identity, id i
 }
 
 func owner(actor admin.Identity, r Resource) catalog.CredentialOwner {
-	return catalog.CredentialOwner{OrganizationID: actor.OrganizationID, ProviderID: r.ProviderID, ResourceID: r.ID}
+	return catalog.CredentialOwner{ProviderID: r.ProviderID, ResourceID: r.ID}
 }
 
 func (s *Service) decryptedProviderProxy(provider Provider) (*catalog.OutboundProxy, error) {
@@ -543,7 +543,7 @@ func (s *Service) UpdateCredential(ctx context.Context, actor admin.Identity, id
 			return appsec.ErrUnavailable
 		}
 		// 配置或替换 API Key 表示该凭证应立即参与网关路由。
-		// 数据库唯一索引保证同一组织、同一服务商最多只有一个 ACTIVE 凭证。
+		// 数据库唯一索引保证同一服务商最多只有一个 ACTIVE 凭证。
 		r.Status = "ACTIVE"
 		r.UpdatedAt = time.Now().UTC().Truncate(time.Microsecond)
 		if err := w.UpdateResource(ctx, r); err != nil {

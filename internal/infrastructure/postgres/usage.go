@@ -41,7 +41,7 @@ func (s *UsageStore) WriteBatch(ctx context.Context, events []domain.Event) erro
 			if attemptNo <= 0 {
 				attemptNo = int32(index + 1)
 			}
-			attempts = append(attempts, map[string]any{"id": a.ID, "organization_id": e.OrganizationID, "request_id": e.RequestID, "attempt_no": attemptNo, "client_protocol": e.ClientProtocol, "principal_id": e.PrincipalID, "provider_id": a.ProviderID, "provider_model_id": a.ProviderModelID, "provider_credential_id": a.ResourceID, "model_id": a.ModelID, "input_tokens": a.InputTokens, "output_tokens": a.OutputTokens, "cached_input_tokens": a.CachedInputTokens, "started_at": a.StartedAt, "completed_at": a.CompletedAt, "latency_ms": a.CompletedAt.Sub(a.StartedAt).Milliseconds(), "status": a.Status, "error_type": optionalError(a.ErrorType)})
+			attempts = append(attempts, map[string]any{"id": a.ID, "request_id": e.RequestID, "attempt_no": attemptNo, "client_protocol": e.ClientProtocol, "principal_id": e.PrincipalID, "provider_id": a.ProviderID, "provider_model_id": a.ProviderModelID, "provider_credential_id": a.ResourceID, "model_id": a.ModelID, "input_tokens": a.InputTokens, "output_tokens": a.OutputTokens, "cached_input_tokens": a.CachedInputTokens, "started_at": a.StartedAt, "completed_at": a.CompletedAt, "latency_ms": a.CompletedAt.Sub(a.StartedAt).Milliseconds(), "status": a.Status, "error_type": optionalError(a.ErrorType)})
 		}
 	}
 	if len(attempts) == 0 {
@@ -80,7 +80,7 @@ func (s *UsageStore) Query(ctx context.Context, actor admin.Identity, f app.Filt
 	if f.ProbeNext {
 		pageLimit++
 	}
-	rows, err := q.QueryUsage(ctx, dbgen.QueryUsageParams{OrganizationID: actor.OrganizationID, AfterID: f.After, FromTime: ts(f.From), ToTime: ts(f.To), PrincipalID: f.PrincipalID, ModelID: f.ModelID, ResourceID: f.ResourceID, PageLimit: pageLimit})
+	rows, err := q.QueryUsage(ctx, dbgen.QueryUsageParams{AfterID: f.After, FromTime: ts(f.From), ToTime: ts(f.To), PrincipalID: f.PrincipalID, ModelID: f.ModelID, ResourceID: f.ResourceID, PageLimit: pageLimit})
 	if err != nil {
 		return app.Page{}, appsec.ErrUnavailable
 	}
@@ -88,7 +88,7 @@ func (s *UsageStore) Query(ctx context.Context, actor admin.Identity, f app.Filt
 	for _, r := range rows {
 		result = append(result, app.Row{ID: r.ID, RequestID: r.RequestID, ClientProtocol: r.ClientProtocol, PrincipalID: r.PrincipalID, PrincipalName: r.PrincipalName, ModelID: r.ModelID, RequestAt: r.StartedAt.Time, CompletedAt: r.CompletedAt.Time, LatencyMS: r.LatencyMs, Status: r.Status, ErrorType: r.ErrorType, AttemptNo: r.AttemptNo, ProviderID: r.ProviderID, ProviderModelID: r.ProviderModelID, ResourceID: r.ResourceID, InputTokens: r.InputTokens, OutputTokens: r.OutputTokens, CachedInputTokens: r.CachedInputTokens})
 	}
-	total, err := q.CountUsage(ctx, dbgen.CountUsageParams{OrganizationID: actor.OrganizationID, FromTime: ts(f.From), ToTime: ts(f.To), PrincipalID: f.PrincipalID, ModelID: f.ModelID, ResourceID: f.ResourceID})
+	total, err := q.CountUsage(ctx, dbgen.CountUsageParams{FromTime: ts(f.From), ToTime: ts(f.To), PrincipalID: f.PrincipalID, ModelID: f.ModelID, ResourceID: f.ResourceID})
 	if err != nil {
 		return app.Page{}, appsec.ErrUnavailable
 	}
@@ -110,9 +110,8 @@ func (s *UsageStore) Dashboard(ctx context.Context, actor admin.Identity, from, 
 	}
 	ts := func(t time.Time) pgtype.Timestamptz { return pgtype.Timestamptz{Time: t, Valid: true} }
 	params := dbgen.UsageDashboardCountsParams{
-		OrganizationID: actor.OrganizationID,
-		FromTime:       ts(from),
-		ToTime:         ts(to),
+		FromTime: ts(from),
+		ToTime:   ts(to),
 	}
 	counts, err := q.UsageDashboardCounts(ctx, params)
 	if err != nil {
@@ -126,18 +125,18 @@ func (s *UsageStore) Dashboard(ctx context.Context, actor admin.Identity, from, 
 	if err != nil {
 		return app.Dashboard{}, appsec.ErrUnavailable
 	}
-	upstreamModelRows, err := q.UsageUpstreamModelRanking(ctx, dbgen.UsageUpstreamModelRankingParams(params))
+	providerRows, err := q.UsageProviderRanking(ctx, dbgen.UsageProviderRankingParams(params))
 	if err != nil {
 		return app.Dashboard{}, appsec.ErrUnavailable
 	}
 	result := app.Dashboard{
-		ActiveMemberCount:    counts.ActiveMemberCount,
-		ModelCount:           counts.ModelCount,
-		ProviderCount:        counts.ProviderCount,
-		TotalTokens:          counts.TotalTokens,
-		TokenRanking:         make([]app.TokenRank, 0, len(tokenRows)),
-		ClientModelRanking:   make([]app.ClientModelRank, 0, len(clientModelRows)),
-		UpstreamModelRanking: make([]app.UpstreamModelRank, 0, len(upstreamModelRows)),
+		ActiveMemberCount:  counts.ActiveMemberCount,
+		ModelCount:         counts.ModelCount,
+		ProviderCount:      counts.ProviderCount,
+		TotalTokens:        counts.TotalTokens,
+		TokenRanking:       make([]app.TokenRank, 0, len(tokenRows)),
+		ClientModelRanking: make([]app.ClientModelRank, 0, len(clientModelRows)),
+		ProviderRanking:    make([]app.ProviderRank, 0, len(providerRows)),
 	}
 	for _, row := range tokenRows {
 		result.TokenRanking = append(result.TokenRanking, app.TokenRank{
@@ -155,12 +154,10 @@ func (s *UsageStore) Dashboard(ctx context.Context, actor admin.Identity, from, 
 			Tokens:    row.Tokens,
 		})
 	}
-	for _, row := range upstreamModelRows {
-		result.UpstreamModelRanking = append(result.UpstreamModelRanking, app.UpstreamModelRank{
+	for _, row := range providerRows {
+		result.ProviderRanking = append(result.ProviderRanking, app.ProviderRank{
 			ProviderID:   row.ProviderID,
 			ProviderName: row.ProviderName,
-			ModelID:      row.ModelID,
-			ModelCode:    row.ModelCode,
 			Calls:        row.Calls,
 			Tokens:       row.Tokens,
 		})

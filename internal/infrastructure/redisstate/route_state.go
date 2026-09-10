@@ -56,17 +56,17 @@ func (s *State) Close() error {
 	return s.client.Close()
 }
 
-func (s *State) Acquire(ctx context.Context, organizationID int64, route gateway.Route) (bool, error) {
+func (s *State) Acquire(ctx context.Context, route gateway.Route) (bool, error) {
 	if s.redisUnavailable() {
 		return true, nil
 	}
 	now := time.Now().UnixMilli()
-	result, err := acquireScript.Run(ctx, s.client, []string{routeKey(organizationID, route.ResourceID)},
+	result, err := acquireScript.Run(ctx, s.client, []string{routeKey(route.ResourceID)},
 		now, probeLease.Milliseconds(), stateTTL.Milliseconds()).Int64()
 	return result == 1, s.record(err)
 }
 
-func (s *State) Cooldown(ctx context.Context, organizationID int64, route gateway.Route, duration time.Duration) error {
+func (s *State) Cooldown(ctx context.Context, route gateway.Route, duration time.Duration) error {
 	if s.redisUnavailable() {
 		return nil
 	}
@@ -74,14 +74,14 @@ func (s *State) Cooldown(ctx context.Context, organizationID int64, route gatewa
 		duration = time.Minute
 	}
 	retryAt := time.Now().Add(duration).UnixMilli()
-	return s.record(s.client.Set(ctx, routeKey(organizationID, route.ResourceID), retryAt, stateTTL).Err())
+	return s.record(s.client.Set(ctx, routeKey(route.ResourceID), retryAt, stateTTL).Err())
 }
 
-func (s *State) Healthy(ctx context.Context, organizationID int64, route gateway.Route) error {
+func (s *State) Healthy(ctx context.Context, route gateway.Route) error {
 	if s.redisUnavailable() {
 		return nil
 	}
-	return s.record(s.client.Del(ctx, routeKey(organizationID, route.ResourceID)).Err())
+	return s.record(s.client.Del(ctx, routeKey(route.ResourceID)).Err())
 }
 
 func (s *State) redisUnavailable() bool {
@@ -97,6 +97,6 @@ func (s *State) record(err error) error {
 	return nil
 }
 
-func routeKey(organizationID, resourceID int64) string {
-	return "zentrola:route:cooldown:" + strconv.FormatInt(organizationID, 10) + ":" + strconv.FormatInt(resourceID, 10)
+func routeKey(resourceID int64) string {
+	return "zentrola:route:cooldown:v2:" + strconv.FormatInt(resourceID, 10)
 }

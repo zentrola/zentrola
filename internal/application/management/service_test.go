@@ -123,7 +123,7 @@ func TestUpdateCredentialActivatesResource(t *testing.T) {
 
 	err := service.UpdateCredential(
 		context.Background(),
-		admin.Identity{OrganizationID: 1},
+		admin.Identity{ID: 1},
 		48,
 		"replacement-credential",
 		appsec.RequestMeta{},

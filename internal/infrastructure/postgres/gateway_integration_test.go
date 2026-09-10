@@ -19,7 +19,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zentrola/zentrola/internal/application/bootstrap"
 	gw "github.com/zentrola/zentrola/internal/application/gateway"
 	"github.com/zentrola/zentrola/internal/application/health"
 	mgmt "github.com/zentrola/zentrola/internal/application/management"
@@ -41,9 +40,6 @@ func (f gatewayOpenFunc) Open(ctx context.Context, r gw.Route, q gw.Request, c [
 func TestStage4Integration(t *testing.T) {
 	ctx, pool, _ := integrationDatabase(t)
 	ids := idgen.New(pool)
-	if err := bootstrap.New(NewBootstrapStore(pool), ids).Initialize(ctx); err != nil {
-		t.Fatal(err)
-	}
 	securityStore := NewSecurityStore(pool, ids)
 	passwords, err := cryptosec.NewPasswords(4)
 	if err != nil {
@@ -78,7 +74,7 @@ func TestStage4Integration(t *testing.T) {
 	management := mgmt.New(NewManagementStore(pool, ids), ids, cipher, nil)
 	sonnet := createActiveTestModel(t, ctx, management, actor, "claude-sonnet", "Claude Sonnet", []string{"TEXT", "IMAGE"})
 	opus := createActiveTestModel(t, ctx, management, actor, "claude-opus", "Claude Opus", []string{"TEXT", "IMAGE"})
-	provider := createActiveTestProvider(t, ctx, pool, management, actor, "Anthropic 测试服务商",
+	provider := createTestProvider(t, ctx, pool, management, actor, "Anthropic 测试服务商",
 		[]mgmt.ProviderEndpoint{{ProtocolType: "ANTHROPIC", BaseURL: "https://api.anthropic.com"}},
 		[]mgmt.ProviderMappingInput{
 			{ModelID: sonnet.ID, UpstreamModelCode: "sonnet-upstream"},
@@ -96,6 +92,9 @@ func TestStage4Integration(t *testing.T) {
 	const providerKey = "stage4-provider-secret"
 	resource, err := management.CreateResource(ctx, actor, provider.ID, "网关资源", providerKey, appsec.RequestMeta{})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := management.SetProviderStatus(ctx, actor, provider.ID, "ACTIVE", appsec.RequestMeta{}); err != nil {
 		t.Fatal(err)
 	}
 	keys := appsec.NewKeys(securityStore, ids)

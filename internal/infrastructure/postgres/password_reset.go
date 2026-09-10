@@ -28,19 +28,18 @@ func (s *SecurityStore) ResetPassword(ctx context.Context, username, hash string
 	if err != nil {
 		return appsec.ErrUnavailable
 	}
-	if row.Status != "ACTIVE" || !row.OrganizationActive {
+	if row.Status != "ACTIVE" {
 		return appsec.ErrNotFound
 	}
 	count, err := q.ResetAdminPassword(ctx, dbgen.ResetAdminPasswordParams{
-		UpdatedBy:      "system",
-		OrganizationID: row.OrganizationID, ID: row.ID, PasswordHash: hash, UpdatedAt: pgTime(time.Now().UTC()),
+		UpdatedBy: "system", ID: row.ID, PasswordHash: hash, UpdatedAt: pgTime(time.Now().UTC()),
 	})
 	if err != nil || count != 1 {
 		return appsec.ErrUnavailable
 	}
 	before, _ := json.Marshal(map[string]any{"failedLoginCount": row.FailedLoginCount, "lockedUntil": timePointer(row.LockedUntil)})
 	after := []byte(`{"failedLoginCount":0,"lockedUntil":null}`)
-	actor := admin.Identity{OrganizationID: row.OrganizationID, DisplayName: "system"}
+	actor := admin.Identity{DisplayName: "system"}
 	if err := s.appendLog(ctx, q, actor, "AUTH", operation.AdminPasswordReset, "ADMIN_USER", row.ID, row.Username,
 		"SUCCESS", "", appsec.RequestMeta{}, before, after, "CLI password reset"); err != nil {
 		return appsec.ErrUnavailable

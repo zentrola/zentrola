@@ -160,7 +160,7 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 	})
 	// @Summary 删除服务商
 	// @Tags 模型与资源
-	// @Description 逻辑删除服务商，并停用其模型映射和所有组织下的服务商密钥；历史用量和操作日志保留。
+	// @Description 逻辑删除服务商，并停用其模型映射和服务商密钥；历史用量和操作日志保留。
 	// @Produce json
 	// @Security AdminBearer
 	// @Param id path string true "服务商 ID"
@@ -202,7 +202,7 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 	}, func(v mgmt.Member) int64 { return v.ID }))
 	// @Summary 搜索成员候选项
 	// @Tags 成员管理
-	// @Description 按用户名模糊匹配当前组织成员，供实时自动完成使用。
+	// @Description 按用户名模糊匹配当前部署实例中的成员，供实时自动完成使用。
 	// @Produce json
 	// @Security AdminBearer
 	// @Param name query string true "用户名关键字"

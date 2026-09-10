@@ -17,7 +17,6 @@ const adminAudience = "zentrola-admin"
 
 type AdminClaims struct {
 	CredentialVersion int64  `json:"credential_version"`
-	OrganizationID    string `json:"organization_id"`
 	Kind              string `json:"kind"`
 	jwt.RegisteredClaims
 }
@@ -41,14 +40,14 @@ func (j *JWT) ValidateIndependentMaster(master *MasterKey) error {
 	return nil
 }
 func (j *JWT) Issue(identity admin.Identity) (string, time.Time, error) {
-	if identity.ID <= 0 || identity.OrganizationID <= 0 || identity.CredentialVersion < 0 {
+	if identity.ID <= 0 || identity.CredentialVersion < 0 {
 		return "", time.Time{}, errors.New("invalid admin identity")
 	}
 	now := j.now().UTC().Truncate(time.Second)
 	expires := now.Add(8 * time.Hour)
 	var entropy [16]byte
 	_, _ = rand.Read(entropy[:])
-	claims := AdminClaims{CredentialVersion: identity.CredentialVersion, OrganizationID: strconv.FormatInt(identity.OrganizationID, 10), Kind: "ADMIN", RegisteredClaims: jwt.RegisteredClaims{
+	claims := AdminClaims{CredentialVersion: identity.CredentialVersion, Kind: "ADMIN", RegisteredClaims: jwt.RegisteredClaims{
 		Issuer: adminIssuer, Subject: strconv.FormatInt(identity.ID, 10), Audience: jwt.ClaimStrings{adminAudience}, IssuedAt: jwt.NewNumericDate(now), ExpiresAt: jwt.NewNumericDate(expires), ID: base64.RawURLEncoding.EncodeToString(entropy[:]),
 	}}
 	encoded, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(j.key)
@@ -64,9 +63,8 @@ func (j *JWT) Verify(encoded string) (admin.Identity, error) {
 		return admin.Identity{}, errors.New("invalid admin token")
 	}
 	id, e1 := strconv.ParseInt(claims.Subject, 10, 64)
-	org, e2 := strconv.ParseInt(claims.OrganizationID, 10, 64)
-	if e1 != nil || e2 != nil || id <= 0 || org <= 0 || claims.CredentialVersion < 0 {
+	if e1 != nil || id <= 0 || claims.CredentialVersion < 0 {
 		return admin.Identity{}, errors.New("invalid admin token")
 	}
-	return admin.Identity{ID: id, OrganizationID: org, CredentialVersion: claims.CredentialVersion}, nil
+	return admin.Identity{ID: id, CredentialVersion: claims.CredentialVersion}, nil
 }

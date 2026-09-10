@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { all, api, errorText } from '../api'
 import { useAction, useCollection, useListSearch, validText } from '../composables'
 import { i18n, t } from '../i18n'
@@ -85,7 +86,21 @@ const mappingRows = computed(() =>
   })),
 )
 const selectedMappingCount = computed(() => mappingRows.value.filter((row) => row.mapping).length)
-const { keyword, query, visible, search, reset } = useListSearch(
+const route = useRoute()
+const router = useRouter()
+type RuntimeFilter = '' | 'HEALTHY' | 'ABNORMAL'
+function routeRuntimeFilter(value: unknown): RuntimeFilter {
+  return value === 'HEALTHY' || value === 'ABNORMAL' ? value : ''
+}
+const runtimeFilter = ref<RuntimeFilter>(routeRuntimeFilter(route.query.runtimeStatus))
+const appliedRuntimeFilter = ref<RuntimeFilter>(runtimeFilter.value)
+const {
+  keyword,
+  query,
+  visible: searchVisible,
+  search: searchKeyword,
+  reset: resetKeyword,
+} = useListSearch(
   items,
   (provider) =>
     `${provider.name} ${provider.code} ${provider.website ?? ''} ${provider.endpoints.map((endpoint) => endpoint.baseUrl).join(' ')}`,
@@ -318,6 +333,53 @@ function providerRuntime(provider: Provider) {
   }
 }
 
+function providerRuntimeAbnormal(provider: Provider) {
+  if (provider.status !== 'ACTIVE') return false
+  const configured = resourcesFor(provider)
+  if (!configured.length) return true
+  const active = configured.filter((resource) => resource.status === 'ACTIVE')
+  return !active.length || !active.some((resource) => resource.runtimeStatus !== 'BLOCKED')
+}
+
+const visible = computed(() =>
+  searchVisible.value.filter((provider) => {
+    if (!appliedRuntimeFilter.value) return true
+    const abnormal = providerRuntimeAbnormal(provider)
+    return appliedRuntimeFilter.value === 'ABNORMAL'
+      ? abnormal
+      : provider.status === 'ACTIVE' && !abnormal
+  }),
+)
+
+function syncRuntimeFilterQuery(value: RuntimeFilter) {
+  const nextQuery = { ...route.query }
+  if (value) nextQuery.runtimeStatus = value
+  else delete nextQuery.runtimeStatus
+  void router.replace({ query: nextQuery })
+}
+
+function search() {
+  searchKeyword()
+  appliedRuntimeFilter.value = runtimeFilter.value
+  syncRuntimeFilterQuery(runtimeFilter.value)
+}
+
+function reset() {
+  resetKeyword()
+  runtimeFilter.value = ''
+  appliedRuntimeFilter.value = ''
+  syncRuntimeFilterQuery('')
+}
+
+watch(
+  () => route.query.runtimeStatus,
+  (value) => {
+    const next = routeRuntimeFilter(value)
+    runtimeFilter.value = next
+    appliedRuntimeFilter.value = next
+  },
+)
+
 async function loadResources() {
   resourceError.value = ''
   try {
@@ -542,6 +604,16 @@ onMounted(() => {
       @search="search"
       @reset="reset"
     >
+      <template #filters>
+        <label class="provider-runtime-filter">
+          <span>{{ t('providers.runtimeStatus') }}</span>
+          <select v-model="runtimeFilter" :aria-label="t('providers.runtimeStatus')">
+            <option value="">{{ t('common.all') }}</option>
+            <option value="HEALTHY">{{ t('providers.runtimeHealthy') }}</option>
+            <option value="ABNORMAL">{{ t('providers.runtimeAbnormal') }}</option>
+          </select>
+        </label>
+      </template>
       <template #actions>
         <div class="provider-toolbar-actions">
           <button type="button" class="button primary" :disabled="busy" @click="openEdit()">
@@ -728,7 +800,17 @@ onMounted(() => {
     </div>
     <div v-if="!visible.length" class="empty-state">
       <Icon name="providers" :size="32" />
-      <p>{{ t(loading ? 'common.loading' : query ? 'common.noResults' : 'providers.empty') }}</p>
+      <p>
+        {{
+          t(
+            loading
+              ? 'common.loading'
+              : query || appliedRuntimeFilter
+                ? 'common.noResults'
+                : 'providers.empty',
+          )
+        }}
+      </p>
     </div>
     <ListFooter
       :cursor="cursor"
@@ -1119,6 +1201,25 @@ onMounted(() => {
   display: flex;
   gap: 8px;
   margin-left: auto;
+}
+.provider-runtime-filter {
+  display: flex;
+  flex: none;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: #485e72;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.provider-runtime-filter select {
+  width: 120px;
+  padding-top: 9px;
+  padding-bottom: 9px;
+  background: #fbfcfe;
+  border-color: #dfe6ef;
+  font-size: 12px;
 }
 .provider-initialize-notice {
   margin: 0 22px 16px;
@@ -1595,6 +1696,13 @@ onMounted(() => {
   text-align: center;
 }
 @media (max-width: 760px) {
+  .provider-runtime-filter {
+    width: 100%;
+  }
+  .provider-runtime-filter select {
+    flex: 1;
+    width: auto;
+  }
   .provider-toolbar-actions {
     width: 100%;
     margin-left: 0;

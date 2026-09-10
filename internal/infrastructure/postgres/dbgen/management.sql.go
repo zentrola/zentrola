@@ -15,18 +15,13 @@ const countManageGroupMembers = `-- name: CountManageGroupMembers :one
 SELECT COUNT(*)::bigint
 FROM principal p
 JOIN principal_group_membership g
-  ON g.principal_id=p.id AND g.organization_id=p.organization_id
-WHERE p.organization_id=$1 AND g.group_id=$2 AND g.is_deleted=false
+  ON g.principal_id=p.id
+WHERE g.group_id=$1 AND g.is_deleted=false
   AND p.is_deleted=false AND p.principal_type='MEMBER'
 `
 
-type CountManageGroupMembersParams struct {
-	OrganizationID int64
-	GroupID        int64
-}
-
-func (q *Queries) CountManageGroupMembers(ctx context.Context, arg CountManageGroupMembersParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countManageGroupMembers, arg.OrganizationID, arg.GroupID)
+func (q *Queries) CountManageGroupMembers(ctx context.Context, groupID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countManageGroupMembers, groupID)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -36,17 +31,12 @@ const countManageGroupModels = `-- name: CountManageGroupModels :one
 SELECT COUNT(*)::bigint
 FROM model m
 JOIN principal_group_model_permission g ON g.model_id=m.id
-WHERE g.organization_id=$1 AND g.group_id=$2
+WHERE g.group_id=$1
   AND g.is_deleted=false AND m.is_deleted=false
 `
 
-type CountManageGroupModelsParams struct {
-	OrganizationID int64
-	GroupID        int64
-}
-
-func (q *Queries) CountManageGroupModels(ctx context.Context, arg CountManageGroupModelsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countManageGroupModels, arg.OrganizationID, arg.GroupID)
+func (q *Queries) CountManageGroupModels(ctx context.Context, groupID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countManageGroupModels, groupID)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -54,18 +44,12 @@ func (q *Queries) CountManageGroupModels(ctx context.Context, arg CountManageGro
 
 const countManageGroups = `-- name: CountManageGroups :one
 SELECT COUNT(*)::bigint FROM principal_group
-WHERE organization_id=$1
-  AND is_deleted=false
-  AND ($2::text = '' OR status = $2::text)
+WHERE is_deleted=false
+  AND ($1::text = '' OR status = $1::text)
 `
 
-type CountManageGroupsParams struct {
-	OrganizationID int64
-	Status         string
-}
-
-func (q *Queries) CountManageGroups(ctx context.Context, arg CountManageGroupsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countManageGroups, arg.OrganizationID, arg.Status)
+func (q *Queries) CountManageGroups(ctx context.Context, status string) (int64, error) {
+	row := q.db.QueryRow(ctx, countManageGroups, status)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -73,16 +57,11 @@ func (q *Queries) CountManageGroups(ctx context.Context, arg CountManageGroupsPa
 
 const countManageKeys = `-- name: CountManageKeys :one
 SELECT COUNT(*)::bigint FROM principal_access_key
-WHERE organization_id=$1 AND principal_id=$2 AND is_deleted=false
+WHERE principal_id=$1 AND is_deleted=false
 `
 
-type CountManageKeysParams struct {
-	OrganizationID int64
-	PrincipalID    int64
-}
-
-func (q *Queries) CountManageKeys(ctx context.Context, arg CountManageKeysParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countManageKeys, arg.OrganizationID, arg.PrincipalID)
+func (q *Queries) CountManageKeys(ctx context.Context, principalID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countManageKeys, principalID)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -92,18 +71,13 @@ const countManageMemberGroups = `-- name: CountManageMemberGroups :one
 SELECT COUNT(*)::bigint
 FROM principal_group g
 JOIN principal_group_membership pg
-  ON pg.group_id=g.id AND pg.organization_id=g.organization_id
-WHERE g.organization_id=$1 AND pg.principal_id=$2
+  ON pg.group_id=g.id
+WHERE pg.principal_id=$1
   AND pg.is_deleted=false AND g.is_deleted=false
 `
 
-type CountManageMemberGroupsParams struct {
-	OrganizationID int64
-	PrincipalID    int64
-}
-
-func (q *Queries) CountManageMemberGroups(ctx context.Context, arg CountManageMemberGroupsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countManageMemberGroups, arg.OrganizationID, arg.PrincipalID)
+func (q *Queries) CountManageMemberGroups(ctx context.Context, principalID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countManageMemberGroups, principalID)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -111,19 +85,13 @@ func (q *Queries) CountManageMemberGroups(ctx context.Context, arg CountManageMe
 
 const countManageMemberSuggestions = `-- name: CountManageMemberSuggestions :one
 SELECT COUNT(*)::bigint FROM principal
-WHERE organization_id=$1
-  AND is_deleted=false
+WHERE is_deleted=false
   AND principal_type='MEMBER'
-  AND strpos(lower(name), lower($2::text)) > 0
+  AND strpos(lower(name), lower($1::text)) > 0
 `
 
-type CountManageMemberSuggestionsParams struct {
-	OrganizationID int64
-	MemberName     string
-}
-
-func (q *Queries) CountManageMemberSuggestions(ctx context.Context, arg CountManageMemberSuggestionsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countManageMemberSuggestions, arg.OrganizationID, arg.MemberName)
+func (q *Queries) CountManageMemberSuggestions(ctx context.Context, memberName string) (int64, error) {
+	row := q.db.QueryRow(ctx, countManageMemberSuggestions, memberName)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -131,12 +99,12 @@ func (q *Queries) CountManageMemberSuggestions(ctx context.Context, arg CountMan
 
 const countManageMembers = `-- name: CountManageMembers :one
 SELECT COUNT(*)::bigint FROM principal
-WHERE organization_id=$1 AND is_deleted=false AND principal_type='MEMBER'
+WHERE is_deleted=false AND principal_type='MEMBER'
 `
 
 // 分页总数不受 after cursor 影响；过滤口径必须与对应列表查询保持一致。
-func (q *Queries) CountManageMembers(ctx context.Context, organizationID int64) (int64, error) {
-	row := q.db.QueryRow(ctx, countManageMembers, organizationID)
+func (q *Queries) CountManageMembers(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countManageMembers)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -156,11 +124,11 @@ func (q *Queries) CountManageModels(ctx context.Context, status string) (int64, 
 }
 
 const countManageOperations = `-- name: CountManageOperations :one
-SELECT COUNT(*)::bigint FROM operation_log WHERE organization_id=$1
+SELECT COUNT(*)::bigint FROM operation_log
 `
 
-func (q *Queries) CountManageOperations(ctx context.Context, organizationID int64) (int64, error) {
-	row := q.db.QueryRow(ctx, countManageOperations, organizationID)
+func (q *Queries) CountManageOperations(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countManageOperations)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -179,52 +147,32 @@ func (q *Queries) CountManageProviders(ctx context.Context) (int64, error) {
 
 const countManageResources = `-- name: CountManageResources :one
 SELECT COUNT(*)::bigint FROM provider_credential
-WHERE organization_id=$1 AND is_deleted=false
+WHERE is_deleted=false
 `
 
-func (q *Queries) CountManageResources(ctx context.Context, organizationID int64) (int64, error) {
-	row := q.db.QueryRow(ctx, countManageResources, organizationID)
+func (q *Queries) CountManageResources(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countManageResources)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
 }
 
-const lockManagementOrganization = `-- name: LockManagementOrganization :one
-SELECT o.id FROM organization o JOIN admin_user a ON a.organization_id=o.id
-WHERE o.id=$1 AND a.id=$2 AND o.is_deleted=false AND o.status='ACTIVE'
-AND a.is_deleted=false AND a.status='ACTIVE' FOR UPDATE OF o FOR SHARE OF a
-`
-
-type LockManagementOrganizationParams struct {
-	ID   int64
-	ID_2 int64
-}
-
-func (q *Queries) LockManagementOrganization(ctx context.Context, arg LockManagementOrganizationParams) (int64, error) {
-	row := q.db.QueryRow(ctx, lockManagementOrganization, arg.ID, arg.ID_2)
-	var id int64
-	err := row.Scan(&id)
-	return id, err
-}
-
 const manageAddMember = `-- name: ManageAddMember :exec
-INSERT INTO principal_group_membership(id,organization_id,group_id,principal_id,created_by,updated_by,created_at,updated_at)
-VALUES($1,$2,$3,$4,$5,$5,$6,$6)
+INSERT INTO principal_group_membership(id,group_id,principal_id,created_by,updated_by,created_at,updated_at)
+VALUES($1,$2,$3,$4,$4,$5,$5)
 `
 
 type ManageAddMemberParams struct {
-	ID             int64
-	OrganizationID int64
-	GroupID        int64
-	PrincipalID    int64
-	CreatedBy      string
-	CreatedAt      pgtype.Timestamptz
+	ID          int64
+	GroupID     int64
+	PrincipalID int64
+	CreatedBy   string
+	CreatedAt   pgtype.Timestamptz
 }
 
 func (q *Queries) ManageAddMember(ctx context.Context, arg ManageAddMemberParams) error {
 	_, err := q.db.Exec(ctx, manageAddMember,
 		arg.ID,
-		arg.OrganizationID,
 		arg.GroupID,
 		arg.PrincipalID,
 		arg.CreatedBy,
@@ -234,24 +182,22 @@ func (q *Queries) ManageAddMember(ctx context.Context, arg ManageAddMemberParams
 }
 
 const manageCreateGroup = `-- name: ManageCreateGroup :exec
-INSERT INTO principal_group(id,organization_id,group_code,group_name,remark,status,created_by,updated_by,created_at,updated_at)
-VALUES($1,$2,$3,$4,$5,'ACTIVE',$6,$6,$7,$7)
+INSERT INTO principal_group(id,group_code,group_name,remark,status,created_by,updated_by,created_at,updated_at)
+VALUES($1,$2,$3,$4,'ACTIVE',$5,$5,$6,$6)
 `
 
 type ManageCreateGroupParams struct {
-	ID             int64
-	OrganizationID int64
-	GroupCode      string
-	GroupName      string
-	Remark         *string
-	CreatedBy      string
-	CreatedAt      pgtype.Timestamptz
+	ID        int64
+	GroupCode string
+	GroupName string
+	Remark    *string
+	CreatedBy string
+	CreatedAt pgtype.Timestamptz
 }
 
 func (q *Queries) ManageCreateGroup(ctx context.Context, arg ManageCreateGroupParams) error {
 	_, err := q.db.Exec(ctx, manageCreateGroup,
 		arg.ID,
-		arg.OrganizationID,
 		arg.GroupCode,
 		arg.GroupName,
 		arg.Remark,
@@ -262,23 +208,21 @@ func (q *Queries) ManageCreateGroup(ctx context.Context, arg ManageCreateGroupPa
 }
 
 const manageCreateMember = `-- name: ManageCreateMember :exec
-INSERT INTO principal(id,organization_id,principal_type,name,remark,status,created_by,updated_by,created_at,updated_at)
-VALUES($1,$2,'MEMBER',$3,$4,'DISABLED',$5,$5,$6,$6)
+INSERT INTO principal(id,principal_type,name,remark,status,created_by,updated_by,created_at,updated_at)
+VALUES($1,'MEMBER',$2,$3,'DISABLED',$4,$4,$5,$5)
 `
 
 type ManageCreateMemberParams struct {
-	ID             int64
-	OrganizationID int64
-	Name           string
-	Remark         *string
-	CreatedBy      string
-	CreatedAt      pgtype.Timestamptz
+	ID        int64
+	Name      string
+	Remark    *string
+	CreatedBy string
+	CreatedAt pgtype.Timestamptz
 }
 
 func (q *Queries) ManageCreateMember(ctx context.Context, arg ManageCreateMemberParams) error {
 	_, err := q.db.Exec(ctx, manageCreateMember,
 		arg.ID,
-		arg.OrganizationID,
 		arg.Name,
 		arg.Remark,
 		arg.CreatedBy,
@@ -288,19 +232,20 @@ func (q *Queries) ManageCreateMember(ctx context.Context, arg ManageCreateMember
 }
 
 const manageCreateModel = `-- name: ManageCreateModel :exec
-INSERT INTO model(id,model_code,display_name,input_modalities,output_modalities,remark,status,created_by,updated_by,created_at,updated_at)
-VALUES($1,$2,$3,$4,$5,$6,'DISABLED',$7,$7,$8,$8)
+INSERT INTO model(id,model_code,display_name,input_modalities,output_modalities,remark,status,publisher_provider_id,created_by,updated_by,created_at,updated_at)
+VALUES($1,$2,$3,$4,$5,$6,'DISABLED',$7,$8,$8,$9,$9)
 `
 
 type ManageCreateModelParams struct {
-	ID               int64
-	ModelCode        string
-	DisplayName      string
-	InputModalities  []byte
-	OutputModalities []byte
-	Remark           string
-	CreatedBy        string
-	CreatedAt        pgtype.Timestamptz
+	ID                  int64
+	ModelCode           string
+	DisplayName         string
+	InputModalities     []byte
+	OutputModalities    []byte
+	Remark              string
+	PublisherProviderID *int64
+	CreatedBy           string
+	CreatedAt           pgtype.Timestamptz
 }
 
 func (q *Queries) ManageCreateModel(ctx context.Context, arg ManageCreateModelParams) error {
@@ -311,6 +256,7 @@ func (q *Queries) ManageCreateModel(ctx context.Context, arg ManageCreateModelPa
 		arg.InputModalities,
 		arg.OutputModalities,
 		arg.Remark,
+		arg.PublisherProviderID,
 		arg.CreatedBy,
 		arg.CreatedAt,
 	)
@@ -394,13 +340,12 @@ func (q *Queries) ManageCreateProviderMapping(ctx context.Context, arg ManageCre
 }
 
 const manageCreateResource = `-- name: ManageCreateResource :exec
-INSERT INTO provider_credential(id,organization_id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,created_by,updated_by,created_at,updated_at)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10,$10)
+INSERT INTO provider_credential(id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,created_by,updated_by,created_at,updated_at)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$8,$9,$9)
 `
 
 type ManageCreateResourceParams struct {
 	ID                   int64
-	OrganizationID       int64
 	ProviderID           int64
 	ResourceName         string
 	CredentialCiphertext []byte
@@ -414,7 +359,6 @@ type ManageCreateResourceParams struct {
 func (q *Queries) ManageCreateResource(ctx context.Context, arg ManageCreateResourceParams) error {
 	_, err := q.db.Exec(ctx, manageCreateResource,
 		arg.ID,
-		arg.OrganizationID,
 		arg.ProviderID,
 		arg.ResourceName,
 		arg.CredentialCiphertext,
@@ -428,112 +372,82 @@ func (q *Queries) ManageCreateResource(ctx context.Context, arg ManageCreateReso
 }
 
 const manageDeleteGroup = `-- name: ManageDeleteGroup :exec
-UPDATE principal_group SET is_deleted=true,status='DISABLED',updated_by=$3,updated_at=$4
-WHERE organization_id=$1 AND id=$2 AND is_deleted=false
+UPDATE principal_group SET is_deleted=true,status='DISABLED',updated_by=$2,updated_at=$3
+WHERE id=$1 AND is_deleted=false
 `
 
 type ManageDeleteGroupParams struct {
-	OrganizationID int64
-	ID             int64
-	UpdatedBy      string
-	UpdatedAt      pgtype.Timestamptz
+	ID        int64
+	UpdatedBy string
+	UpdatedAt pgtype.Timestamptz
 }
 
 func (q *Queries) ManageDeleteGroup(ctx context.Context, arg ManageDeleteGroupParams) error {
-	_, err := q.db.Exec(ctx, manageDeleteGroup,
-		arg.OrganizationID,
-		arg.ID,
-		arg.UpdatedBy,
-		arg.UpdatedAt,
-	)
+	_, err := q.db.Exec(ctx, manageDeleteGroup, arg.ID, arg.UpdatedBy, arg.UpdatedAt)
 	return err
 }
 
 const manageDeleteGroupMembers = `-- name: ManageDeleteGroupMembers :exec
-UPDATE principal_group_membership SET is_deleted=true,updated_by=$3,updated_at=$4
-WHERE organization_id=$1 AND group_id=$2 AND is_deleted=false
+UPDATE principal_group_membership SET is_deleted=true,updated_by=$2,updated_at=$3
+WHERE group_id=$1 AND is_deleted=false
 `
 
 type ManageDeleteGroupMembersParams struct {
-	OrganizationID int64
-	GroupID        int64
-	UpdatedBy      string
-	UpdatedAt      pgtype.Timestamptz
+	GroupID   int64
+	UpdatedBy string
+	UpdatedAt pgtype.Timestamptz
 }
 
 func (q *Queries) ManageDeleteGroupMembers(ctx context.Context, arg ManageDeleteGroupMembersParams) error {
-	_, err := q.db.Exec(ctx, manageDeleteGroupMembers,
-		arg.OrganizationID,
-		arg.GroupID,
-		arg.UpdatedBy,
-		arg.UpdatedAt,
-	)
+	_, err := q.db.Exec(ctx, manageDeleteGroupMembers, arg.GroupID, arg.UpdatedBy, arg.UpdatedAt)
 	return err
 }
 
 const manageDeleteGroupModels = `-- name: ManageDeleteGroupModels :exec
-UPDATE principal_group_model_permission SET is_deleted=true,updated_by=$3,updated_at=$4
-WHERE organization_id=$1 AND group_id=$2 AND is_deleted=false
+UPDATE principal_group_model_permission SET is_deleted=true,updated_by=$2,updated_at=$3
+WHERE group_id=$1 AND is_deleted=false
 `
 
 type ManageDeleteGroupModelsParams struct {
-	OrganizationID int64
-	GroupID        int64
-	UpdatedBy      string
-	UpdatedAt      pgtype.Timestamptz
+	GroupID   int64
+	UpdatedBy string
+	UpdatedAt pgtype.Timestamptz
 }
 
 func (q *Queries) ManageDeleteGroupModels(ctx context.Context, arg ManageDeleteGroupModelsParams) error {
-	_, err := q.db.Exec(ctx, manageDeleteGroupModels,
-		arg.OrganizationID,
-		arg.GroupID,
-		arg.UpdatedBy,
-		arg.UpdatedAt,
-	)
+	_, err := q.db.Exec(ctx, manageDeleteGroupModels, arg.GroupID, arg.UpdatedBy, arg.UpdatedAt)
 	return err
 }
 
 const manageDeleteMember = `-- name: ManageDeleteMember :exec
-UPDATE principal SET is_deleted=true,status='DISABLED',updated_by=$3,updated_at=$4
-WHERE organization_id=$1 AND id=$2 AND is_deleted=false AND principal_type='MEMBER'
+UPDATE principal SET is_deleted=true,status='DISABLED',updated_by=$2,updated_at=$3
+WHERE id=$1 AND is_deleted=false AND principal_type='MEMBER'
 `
 
 type ManageDeleteMemberParams struct {
-	OrganizationID int64
-	ID             int64
-	UpdatedBy      string
-	UpdatedAt      pgtype.Timestamptz
+	ID        int64
+	UpdatedBy string
+	UpdatedAt pgtype.Timestamptz
 }
 
 func (q *Queries) ManageDeleteMember(ctx context.Context, arg ManageDeleteMemberParams) error {
-	_, err := q.db.Exec(ctx, manageDeleteMember,
-		arg.OrganizationID,
-		arg.ID,
-		arg.UpdatedBy,
-		arg.UpdatedAt,
-	)
+	_, err := q.db.Exec(ctx, manageDeleteMember, arg.ID, arg.UpdatedBy, arg.UpdatedAt)
 	return err
 }
 
 const manageDeleteMemberGroups = `-- name: ManageDeleteMemberGroups :exec
-UPDATE principal_group_membership SET is_deleted=true,updated_by=$3,updated_at=$4
-WHERE organization_id=$1 AND principal_id=$2 AND is_deleted=false
+UPDATE principal_group_membership SET is_deleted=true,updated_by=$2,updated_at=$3
+WHERE principal_id=$1 AND is_deleted=false
 `
 
 type ManageDeleteMemberGroupsParams struct {
-	OrganizationID int64
-	PrincipalID    int64
-	UpdatedBy      string
-	UpdatedAt      pgtype.Timestamptz
+	PrincipalID int64
+	UpdatedBy   string
+	UpdatedAt   pgtype.Timestamptz
 }
 
 func (q *Queries) ManageDeleteMemberGroups(ctx context.Context, arg ManageDeleteMemberGroupsParams) error {
-	_, err := q.db.Exec(ctx, manageDeleteMemberGroups,
-		arg.OrganizationID,
-		arg.PrincipalID,
-		arg.UpdatedBy,
-		arg.UpdatedAt,
-	)
+	_, err := q.db.Exec(ctx, manageDeleteMemberGroups, arg.PrincipalID, arg.UpdatedBy, arg.UpdatedAt)
 	return err
 }
 
@@ -629,23 +543,21 @@ func (q *Queries) ManageDeleteProviderResources(ctx context.Context, arg ManageD
 }
 
 const manageGrantModel = `-- name: ManageGrantModel :exec
-INSERT INTO principal_group_model_permission(id,organization_id,group_id,model_id,created_by,updated_by,created_at,updated_at)
-VALUES($1,$2,$3,$4,$5,$5,$6,$6)
+INSERT INTO principal_group_model_permission(id,group_id,model_id,created_by,updated_by,created_at,updated_at)
+VALUES($1,$2,$3,$4,$4,$5,$5)
 `
 
 type ManageGrantModelParams struct {
-	ID             int64
-	OrganizationID int64
-	GroupID        int64
-	ModelID        int64
-	CreatedBy      string
-	CreatedAt      pgtype.Timestamptz
+	ID        int64
+	GroupID   int64
+	ModelID   int64
+	CreatedBy string
+	CreatedAt pgtype.Timestamptz
 }
 
 func (q *Queries) ManageGrantModel(ctx context.Context, arg ManageGrantModelParams) error {
 	_, err := q.db.Exec(ctx, manageGrantModel,
 		arg.ID,
-		arg.OrganizationID,
 		arg.GroupID,
 		arg.ModelID,
 		arg.CreatedBy,
@@ -655,22 +567,16 @@ func (q *Queries) ManageGrantModel(ctx context.Context, arg ManageGrantModelPara
 }
 
 const manageGroup = `-- name: ManageGroup :one
-SELECT id, is_deleted, status, organization_id, group_code, group_name, remark, created_by, updated_by, created_at, updated_at FROM principal_group WHERE organization_id=$1 AND id=$2 AND is_deleted=false
+SELECT id, is_deleted, status, group_code, group_name, remark, created_by, updated_by, created_at, updated_at FROM principal_group WHERE id=$1 AND is_deleted=false
 `
 
-type ManageGroupParams struct {
-	OrganizationID int64
-	ID             int64
-}
-
-func (q *Queries) ManageGroup(ctx context.Context, arg ManageGroupParams) (PrincipalGroup, error) {
-	row := q.db.QueryRow(ctx, manageGroup, arg.OrganizationID, arg.ID)
+func (q *Queries) ManageGroup(ctx context.Context, id int64) (PrincipalGroup, error) {
+	row := q.db.QueryRow(ctx, manageGroup, id)
 	var i PrincipalGroup
 	err := row.Scan(
 		&i.ID,
 		&i.IsDeleted,
 		&i.Status,
-		&i.OrganizationID,
 		&i.GroupCode,
 		&i.GroupName,
 		&i.Remark,
@@ -683,24 +589,18 @@ func (q *Queries) ManageGroup(ctx context.Context, arg ManageGroupParams) (Princ
 }
 
 const manageGroupMembers = `-- name: ManageGroupMembers :many
-SELECT p.id, p.is_deleted, p.status, p.organization_id, p.principal_type, p.name, p.remark, p.created_by, p.updated_by, p.created_at, p.updated_at FROM principal p JOIN principal_group_membership g ON g.principal_id=p.id AND g.organization_id=p.organization_id
-WHERE p.organization_id=$1 AND g.group_id=$2 AND g.is_deleted=false AND p.is_deleted=false AND p.principal_type='MEMBER' AND (p.id<$3 OR $3=0) ORDER BY p.id DESC LIMIT $4
+SELECT p.id, p.is_deleted, p.status, p.principal_type, p.name, p.remark, p.created_by, p.updated_by, p.created_at, p.updated_at FROM principal p JOIN principal_group_membership g ON g.principal_id=p.id
+WHERE g.group_id=$1 AND g.is_deleted=false AND p.is_deleted=false AND p.principal_type='MEMBER' AND (p.id<$2 OR $2=0) ORDER BY p.id DESC LIMIT $3
 `
 
 type ManageGroupMembersParams struct {
-	OrganizationID int64
-	GroupID        int64
-	ID             int64
-	Limit          int32
+	GroupID int64
+	ID      int64
+	Limit   int32
 }
 
 func (q *Queries) ManageGroupMembers(ctx context.Context, arg ManageGroupMembersParams) ([]Principal, error) {
-	rows, err := q.db.Query(ctx, manageGroupMembers,
-		arg.OrganizationID,
-		arg.GroupID,
-		arg.ID,
-		arg.Limit,
-	)
+	rows, err := q.db.Query(ctx, manageGroupMembers, arg.GroupID, arg.ID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -712,7 +612,6 @@ func (q *Queries) ManageGroupMembers(ctx context.Context, arg ManageGroupMembers
 			&i.ID,
 			&i.IsDeleted,
 			&i.Status,
-			&i.OrganizationID,
 			&i.PrincipalType,
 			&i.Name,
 			&i.Remark,
@@ -732,31 +631,45 @@ func (q *Queries) ManageGroupMembers(ctx context.Context, arg ManageGroupMembers
 }
 
 const manageGroupModels = `-- name: ManageGroupModels :many
-SELECT m.id, m.is_deleted, m.status, m.model_code, m.display_name, m.input_modalities, m.output_modalities, m.remark, m.created_by, m.updated_by, m.created_at, m.updated_at FROM model m JOIN principal_group_model_permission g ON g.model_id=m.id
-WHERE g.organization_id=$1 AND g.group_id=$2 AND g.is_deleted=false AND m.is_deleted=false AND (m.id<$3 OR $3=0) ORDER BY m.id DESC LIMIT $4
+SELECT m.id, m.is_deleted, m.status, m.model_code, m.display_name, m.input_modalities, m.output_modalities, m.remark, m.created_by, m.updated_by, m.created_at, m.updated_at, m.publisher_provider_id,p.provider_name AS publisher_provider_name
+FROM model m
+JOIN principal_group_model_permission g ON g.model_id=m.id
+LEFT JOIN provider p ON p.id=m.publisher_provider_id
+WHERE g.group_id=$1 AND g.is_deleted=false AND m.is_deleted=false AND (m.id<$2 OR $2=0) ORDER BY m.id DESC LIMIT $3
 `
 
 type ManageGroupModelsParams struct {
-	OrganizationID int64
-	GroupID        int64
-	ID             int64
-	Limit          int32
+	GroupID int64
+	ID      int64
+	Limit   int32
 }
 
-func (q *Queries) ManageGroupModels(ctx context.Context, arg ManageGroupModelsParams) ([]Model, error) {
-	rows, err := q.db.Query(ctx, manageGroupModels,
-		arg.OrganizationID,
-		arg.GroupID,
-		arg.ID,
-		arg.Limit,
-	)
+type ManageGroupModelsRow struct {
+	ID                    int64
+	IsDeleted             bool
+	Status                string
+	ModelCode             string
+	DisplayName           string
+	InputModalities       []byte
+	OutputModalities      []byte
+	Remark                string
+	CreatedBy             string
+	UpdatedBy             string
+	CreatedAt             pgtype.Timestamptz
+	UpdatedAt             pgtype.Timestamptz
+	PublisherProviderID   *int64
+	PublisherProviderName *string
+}
+
+func (q *Queries) ManageGroupModels(ctx context.Context, arg ManageGroupModelsParams) ([]ManageGroupModelsRow, error) {
+	rows, err := q.db.Query(ctx, manageGroupModels, arg.GroupID, arg.ID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Model{}
+	items := []ManageGroupModelsRow{}
 	for rows.Next() {
-		var i Model
+		var i ManageGroupModelsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.IsDeleted,
@@ -770,6 +683,8 @@ func (q *Queries) ManageGroupModels(ctx context.Context, arg ManageGroupModelsPa
 			&i.UpdatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PublisherProviderID,
+			&i.PublisherProviderName,
 		); err != nil {
 			return nil, err
 		}
@@ -782,21 +697,19 @@ func (q *Queries) ManageGroupModels(ctx context.Context, arg ManageGroupModelsPa
 }
 
 const manageGroupStatus = `-- name: ManageGroupStatus :exec
-UPDATE principal_group SET status=$3,updated_by=$4,updated_at=$5
-WHERE organization_id=$1 AND id=$2 AND is_deleted=false
+UPDATE principal_group SET status=$2,updated_by=$3,updated_at=$4
+WHERE id=$1 AND is_deleted=false
 `
 
 type ManageGroupStatusParams struct {
-	OrganizationID int64
-	ID             int64
-	Status         string
-	UpdatedBy      string
-	UpdatedAt      pgtype.Timestamptz
+	ID        int64
+	Status    string
+	UpdatedBy string
+	UpdatedAt pgtype.Timestamptz
 }
 
 func (q *Queries) ManageGroupStatus(ctx context.Context, arg ManageGroupStatusParams) error {
 	_, err := q.db.Exec(ctx, manageGroupStatus,
-		arg.OrganizationID,
 		arg.ID,
 		arg.Status,
 		arg.UpdatedBy,
@@ -806,29 +719,22 @@ func (q *Queries) ManageGroupStatus(ctx context.Context, arg ManageGroupStatusPa
 }
 
 const manageGroups = `-- name: ManageGroups :many
-SELECT id, is_deleted, status, organization_id, group_code, group_name, remark, created_by, updated_by, created_at, updated_at FROM principal_group
-WHERE organization_id=$1
-  AND is_deleted=false
-  AND ($2::text = '' OR status = $2::text)
-  AND (id<$3 OR $3=0)
+SELECT id, is_deleted, status, group_code, group_name, remark, created_by, updated_by, created_at, updated_at FROM principal_group
+WHERE is_deleted=false
+  AND ($1::text = '' OR status = $1::text)
+  AND (id<$2 OR $2=0)
 ORDER BY id DESC
-LIMIT $4
+LIMIT $3
 `
 
 type ManageGroupsParams struct {
-	OrganizationID int64
-	Status         string
-	AfterID        int64
-	PageLimit      int32
+	Status    string
+	AfterID   int64
+	PageLimit int32
 }
 
 func (q *Queries) ManageGroups(ctx context.Context, arg ManageGroupsParams) ([]PrincipalGroup, error) {
-	rows, err := q.db.Query(ctx, manageGroups,
-		arg.OrganizationID,
-		arg.Status,
-		arg.AfterID,
-		arg.PageLimit,
-	)
+	rows, err := q.db.Query(ctx, manageGroups, arg.Status, arg.AfterID, arg.PageLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -840,7 +746,6 @@ func (q *Queries) ManageGroups(ctx context.Context, arg ManageGroupsParams) ([]P
 			&i.ID,
 			&i.IsDeleted,
 			&i.Status,
-			&i.OrganizationID,
 			&i.GroupCode,
 			&i.GroupName,
 			&i.Remark,
@@ -861,14 +766,13 @@ func (q *Queries) ManageGroups(ctx context.Context, arg ManageGroupsParams) ([]P
 
 const manageKeys = `-- name: ManageKeys :many
 SELECT id,name,masked_key,status,expires_at,revoked_at,created_at FROM principal_access_key
-WHERE organization_id=$1 AND principal_id=$2 AND is_deleted=false AND (id<$3 OR $3=0) ORDER BY id DESC LIMIT $4
+WHERE principal_id=$1 AND is_deleted=false AND (id<$2 OR $2=0) ORDER BY id DESC LIMIT $3
 `
 
 type ManageKeysParams struct {
-	OrganizationID int64
-	PrincipalID    int64
-	ID             int64
-	Limit          int32
+	PrincipalID int64
+	ID          int64
+	Limit       int32
 }
 
 type ManageKeysRow struct {
@@ -882,12 +786,7 @@ type ManageKeysRow struct {
 }
 
 func (q *Queries) ManageKeys(ctx context.Context, arg ManageKeysParams) ([]ManageKeysRow, error) {
-	rows, err := q.db.Query(ctx, manageKeys,
-		arg.OrganizationID,
-		arg.PrincipalID,
-		arg.ID,
-		arg.Limit,
-	)
+	rows, err := q.db.Query(ctx, manageKeys, arg.PrincipalID, arg.ID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -915,22 +814,16 @@ func (q *Queries) ManageKeys(ctx context.Context, arg ManageKeysParams) ([]Manag
 }
 
 const manageMember = `-- name: ManageMember :one
-SELECT id, is_deleted, status, organization_id, principal_type, name, remark, created_by, updated_by, created_at, updated_at FROM principal WHERE organization_id=$1 AND id=$2 AND is_deleted=false AND principal_type='MEMBER'
+SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at FROM principal WHERE id=$1 AND is_deleted=false AND principal_type='MEMBER'
 `
 
-type ManageMemberParams struct {
-	OrganizationID int64
-	ID             int64
-}
-
-func (q *Queries) ManageMember(ctx context.Context, arg ManageMemberParams) (Principal, error) {
-	row := q.db.QueryRow(ctx, manageMember, arg.OrganizationID, arg.ID)
+func (q *Queries) ManageMember(ctx context.Context, id int64) (Principal, error) {
+	row := q.db.QueryRow(ctx, manageMember, id)
 	var i Principal
 	err := row.Scan(
 		&i.ID,
 		&i.IsDeleted,
 		&i.Status,
-		&i.OrganizationID,
 		&i.PrincipalType,
 		&i.Name,
 		&i.Remark,
@@ -943,24 +836,18 @@ func (q *Queries) ManageMember(ctx context.Context, arg ManageMemberParams) (Pri
 }
 
 const manageMemberGroups = `-- name: ManageMemberGroups :many
-SELECT g.id, g.is_deleted, g.status, g.organization_id, g.group_code, g.group_name, g.remark, g.created_by, g.updated_by, g.created_at, g.updated_at FROM principal_group g JOIN principal_group_membership pg ON pg.group_id=g.id AND pg.organization_id=g.organization_id
-WHERE g.organization_id=$1 AND pg.principal_id=$2 AND pg.is_deleted=false AND g.is_deleted=false AND (g.id<$3 OR $3=0) ORDER BY g.id DESC LIMIT $4
+SELECT g.id, g.is_deleted, g.status, g.group_code, g.group_name, g.remark, g.created_by, g.updated_by, g.created_at, g.updated_at FROM principal_group g JOIN principal_group_membership pg ON pg.group_id=g.id
+WHERE pg.principal_id=$1 AND pg.is_deleted=false AND g.is_deleted=false AND (g.id<$2 OR $2=0) ORDER BY g.id DESC LIMIT $3
 `
 
 type ManageMemberGroupsParams struct {
-	OrganizationID int64
-	PrincipalID    int64
-	ID             int64
-	Limit          int32
+	PrincipalID int64
+	ID          int64
+	Limit       int32
 }
 
 func (q *Queries) ManageMemberGroups(ctx context.Context, arg ManageMemberGroupsParams) ([]PrincipalGroup, error) {
-	rows, err := q.db.Query(ctx, manageMemberGroups,
-		arg.OrganizationID,
-		arg.PrincipalID,
-		arg.ID,
-		arg.Limit,
-	)
+	rows, err := q.db.Query(ctx, manageMemberGroups, arg.PrincipalID, arg.ID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -972,7 +859,6 @@ func (q *Queries) ManageMemberGroups(ctx context.Context, arg ManageMemberGroups
 			&i.ID,
 			&i.IsDeleted,
 			&i.Status,
-			&i.OrganizationID,
 			&i.GroupCode,
 			&i.GroupName,
 			&i.Remark,
@@ -992,20 +878,18 @@ func (q *Queries) ManageMemberGroups(ctx context.Context, arg ManageMemberGroups
 }
 
 const manageMemberStatus = `-- name: ManageMemberStatus :exec
-UPDATE principal SET status=$3,updated_by=$4,updated_at=$5 WHERE organization_id=$1 AND id=$2 AND is_deleted=false AND principal_type='MEMBER'
+UPDATE principal SET status=$2,updated_by=$3,updated_at=$4 WHERE id=$1 AND is_deleted=false AND principal_type='MEMBER'
 `
 
 type ManageMemberStatusParams struct {
-	OrganizationID int64
-	ID             int64
-	Status         string
-	UpdatedBy      string
-	UpdatedAt      pgtype.Timestamptz
+	ID        int64
+	Status    string
+	UpdatedBy string
+	UpdatedAt pgtype.Timestamptz
 }
 
 func (q *Queries) ManageMemberStatus(ctx context.Context, arg ManageMemberStatusParams) error {
 	_, err := q.db.Exec(ctx, manageMemberStatus,
-		arg.OrganizationID,
 		arg.ID,
 		arg.Status,
 		arg.UpdatedBy,
@@ -1015,30 +899,23 @@ func (q *Queries) ManageMemberStatus(ctx context.Context, arg ManageMemberStatus
 }
 
 const manageMemberSuggestions = `-- name: ManageMemberSuggestions :many
-SELECT id, is_deleted, status, organization_id, principal_type, name, remark, created_by, updated_by, created_at, updated_at FROM principal
-WHERE organization_id=$1
-  AND is_deleted=false
+SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at FROM principal
+WHERE is_deleted=false
   AND principal_type='MEMBER'
-  AND strpos(lower(name), lower($2::text)) > 0
-  AND (id<$3 OR $3=0)
+  AND strpos(lower(name), lower($1::text)) > 0
+  AND (id<$2 OR $2=0)
 ORDER BY id DESC
-LIMIT $4
+LIMIT $3
 `
 
 type ManageMemberSuggestionsParams struct {
-	OrganizationID int64
-	MemberName     string
-	AfterID        int64
-	PageLimit      int32
+	MemberName string
+	AfterID    int64
+	PageLimit  int32
 }
 
 func (q *Queries) ManageMemberSuggestions(ctx context.Context, arg ManageMemberSuggestionsParams) ([]Principal, error) {
-	rows, err := q.db.Query(ctx, manageMemberSuggestions,
-		arg.OrganizationID,
-		arg.MemberName,
-		arg.AfterID,
-		arg.PageLimit,
-	)
+	rows, err := q.db.Query(ctx, manageMemberSuggestions, arg.MemberName, arg.AfterID, arg.PageLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -1050,7 +927,6 @@ func (q *Queries) ManageMemberSuggestions(ctx context.Context, arg ManageMemberS
 			&i.ID,
 			&i.IsDeleted,
 			&i.Status,
-			&i.OrganizationID,
 			&i.PrincipalType,
 			&i.Name,
 			&i.Remark,
@@ -1070,17 +946,16 @@ func (q *Queries) ManageMemberSuggestions(ctx context.Context, arg ManageMemberS
 }
 
 const manageMembers = `-- name: ManageMembers :many
-SELECT id, is_deleted, status, organization_id, principal_type, name, remark, created_by, updated_by, created_at, updated_at FROM principal WHERE organization_id=$1 AND is_deleted=false AND principal_type='MEMBER' AND (id<$2 OR $2=0) ORDER BY id DESC LIMIT $3
+SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at FROM principal WHERE is_deleted=false AND principal_type='MEMBER' AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2
 `
 
 type ManageMembersParams struct {
-	OrganizationID int64
-	ID             int64
-	Limit          int32
+	ID    int64
+	Limit int32
 }
 
 func (q *Queries) ManageMembers(ctx context.Context, arg ManageMembersParams) ([]Principal, error) {
-	rows, err := q.db.Query(ctx, manageMembers, arg.OrganizationID, arg.ID, arg.Limit)
+	rows, err := q.db.Query(ctx, manageMembers, arg.ID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -1092,7 +967,6 @@ func (q *Queries) ManageMembers(ctx context.Context, arg ManageMembersParams) ([
 			&i.ID,
 			&i.IsDeleted,
 			&i.Status,
-			&i.OrganizationID,
 			&i.PrincipalType,
 			&i.Name,
 			&i.Remark,
@@ -1112,29 +986,48 @@ func (q *Queries) ManageMembers(ctx context.Context, arg ManageMembersParams) ([
 }
 
 const manageMembershipExists = `-- name: ManageMembershipExists :one
-SELECT EXISTS(SELECT 1 FROM principal_group_membership WHERE organization_id=$1 AND group_id=$2 AND principal_id=$3 AND is_deleted=false)
+SELECT EXISTS(SELECT 1 FROM principal_group_membership WHERE group_id=$1 AND principal_id=$2 AND is_deleted=false)
 `
 
 type ManageMembershipExistsParams struct {
-	OrganizationID int64
-	GroupID        int64
-	PrincipalID    int64
+	GroupID     int64
+	PrincipalID int64
 }
 
 func (q *Queries) ManageMembershipExists(ctx context.Context, arg ManageMembershipExistsParams) (bool, error) {
-	row := q.db.QueryRow(ctx, manageMembershipExists, arg.OrganizationID, arg.GroupID, arg.PrincipalID)
+	row := q.db.QueryRow(ctx, manageMembershipExists, arg.GroupID, arg.PrincipalID)
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
 }
 
 const manageModel = `-- name: ManageModel :one
-SELECT id, is_deleted, status, model_code, display_name, input_modalities, output_modalities, remark, created_by, updated_by, created_at, updated_at FROM model WHERE id=$1 AND is_deleted=false
+SELECT m.id, m.is_deleted, m.status, m.model_code, m.display_name, m.input_modalities, m.output_modalities, m.remark, m.created_by, m.updated_by, m.created_at, m.updated_at, m.publisher_provider_id,p.provider_name AS publisher_provider_name
+FROM model m
+LEFT JOIN provider p ON p.id=m.publisher_provider_id
+WHERE m.id=$1 AND m.is_deleted=false
 `
 
-func (q *Queries) ManageModel(ctx context.Context, id int64) (Model, error) {
+type ManageModelRow struct {
+	ID                    int64
+	IsDeleted             bool
+	Status                string
+	ModelCode             string
+	DisplayName           string
+	InputModalities       []byte
+	OutputModalities      []byte
+	Remark                string
+	CreatedBy             string
+	UpdatedBy             string
+	CreatedAt             pgtype.Timestamptz
+	UpdatedAt             pgtype.Timestamptz
+	PublisherProviderID   *int64
+	PublisherProviderName *string
+}
+
+func (q *Queries) ManageModel(ctx context.Context, id int64) (ManageModelRow, error) {
 	row := q.db.QueryRow(ctx, manageModel, id)
-	var i Model
+	var i ManageModelRow
 	err := row.Scan(
 		&i.ID,
 		&i.IsDeleted,
@@ -1148,6 +1041,8 @@ func (q *Queries) ManageModel(ctx context.Context, id int64) (Model, error) {
 		&i.UpdatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PublisherProviderID,
+		&i.PublisherProviderName,
 	)
 	return i, err
 }
@@ -1174,11 +1069,13 @@ func (q *Queries) ManageModelStatus(ctx context.Context, arg ManageModelStatusPa
 }
 
 const manageModels = `-- name: ManageModels :many
-SELECT id, is_deleted, status, model_code, display_name, input_modalities, output_modalities, remark, created_by, updated_by, created_at, updated_at FROM model
-WHERE is_deleted=false
-  AND ($1::text = '' OR status = $1::text)
-  AND (id<$2 OR $2=0)
-ORDER BY id DESC
+SELECT m.id, m.is_deleted, m.status, m.model_code, m.display_name, m.input_modalities, m.output_modalities, m.remark, m.created_by, m.updated_by, m.created_at, m.updated_at, m.publisher_provider_id,p.provider_name AS publisher_provider_name
+FROM model m
+LEFT JOIN provider p ON p.id=m.publisher_provider_id
+WHERE m.is_deleted=false
+  AND ($1::text = '' OR m.status = $1::text)
+  AND (m.id<$2 OR $2=0)
+ORDER BY m.id DESC
 LIMIT $3
 `
 
@@ -1188,15 +1085,32 @@ type ManageModelsParams struct {
 	PageLimit int32
 }
 
-func (q *Queries) ManageModels(ctx context.Context, arg ManageModelsParams) ([]Model, error) {
+type ManageModelsRow struct {
+	ID                    int64
+	IsDeleted             bool
+	Status                string
+	ModelCode             string
+	DisplayName           string
+	InputModalities       []byte
+	OutputModalities      []byte
+	Remark                string
+	CreatedBy             string
+	UpdatedBy             string
+	CreatedAt             pgtype.Timestamptz
+	UpdatedAt             pgtype.Timestamptz
+	PublisherProviderID   *int64
+	PublisherProviderName *string
+}
+
+func (q *Queries) ManageModels(ctx context.Context, arg ManageModelsParams) ([]ManageModelsRow, error) {
 	rows, err := q.db.Query(ctx, manageModels, arg.Status, arg.AfterID, arg.PageLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Model{}
+	items := []ManageModelsRow{}
 	for rows.Next() {
-		var i Model
+		var i ManageModelsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.IsDeleted,
@@ -1210,6 +1124,8 @@ func (q *Queries) ManageModels(ctx context.Context, arg ManageModelsParams) ([]M
 			&i.UpdatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PublisherProviderID,
+			&i.PublisherProviderName,
 		); err != nil {
 			return nil, err
 		}
@@ -1223,13 +1139,12 @@ func (q *Queries) ManageModels(ctx context.Context, arg ManageModelsParams) ([]M
 
 const manageOperations = `-- name: ManageOperations :many
 SELECT id,operator_name,operation_type,target_type,target_id,request_id,result,error_code,before_data,after_data,created_at
-FROM operation_log WHERE organization_id=$1 AND (id<$2 OR $2=0) ORDER BY id DESC LIMIT $3
+FROM operation_log WHERE (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2
 `
 
 type ManageOperationsParams struct {
-	OrganizationID int64
-	ID             int64
-	Limit          int32
+	ID    int64
+	Limit int32
 }
 
 type ManageOperationsRow struct {
@@ -1247,7 +1162,7 @@ type ManageOperationsRow struct {
 }
 
 func (q *Queries) ManageOperations(ctx context.Context, arg ManageOperationsParams) ([]ManageOperationsRow, error) {
-	rows, err := q.db.Query(ctx, manageOperations, arg.OrganizationID, arg.ID, arg.Limit)
+	rows, err := q.db.Query(ctx, manageOperations, arg.ID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -1279,17 +1194,16 @@ func (q *Queries) ManageOperations(ctx context.Context, arg ManageOperationsPara
 }
 
 const managePermissionExists = `-- name: ManagePermissionExists :one
-SELECT EXISTS(SELECT 1 FROM principal_group_model_permission WHERE organization_id=$1 AND group_id=$2 AND model_id=$3 AND is_deleted=false)
+SELECT EXISTS(SELECT 1 FROM principal_group_model_permission WHERE group_id=$1 AND model_id=$2 AND is_deleted=false)
 `
 
 type ManagePermissionExistsParams struct {
-	OrganizationID int64
-	GroupID        int64
-	ModelID        int64
+	GroupID int64
+	ModelID int64
 }
 
 func (q *Queries) ManagePermissionExists(ctx context.Context, arg ManagePermissionExistsParams) (bool, error) {
-	row := q.db.QueryRow(ctx, managePermissionExists, arg.OrganizationID, arg.GroupID, arg.ModelID)
+	row := q.db.QueryRow(ctx, managePermissionExists, arg.GroupID, arg.ModelID)
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
@@ -1330,17 +1244,12 @@ func (q *Queries) ManageProvider(ctx context.Context, id int64) (Provider, error
 const manageProviderCredentialConfigured = `-- name: ManageProviderCredentialConfigured :one
 SELECT EXISTS(
     SELECT 1 FROM provider_credential
-    WHERE organization_id=$1 AND provider_id=$2 AND is_deleted=false
+    WHERE provider_id=$1 AND is_deleted=false
 )
 `
 
-type ManageProviderCredentialConfiguredParams struct {
-	OrganizationID int64
-	ProviderID     int64
-}
-
-func (q *Queries) ManageProviderCredentialConfigured(ctx context.Context, arg ManageProviderCredentialConfiguredParams) (bool, error) {
-	row := q.db.QueryRow(ctx, manageProviderCredentialConfigured, arg.OrganizationID, arg.ProviderID)
+func (q *Queries) ManageProviderCredentialConfigured(ctx context.Context, providerID int64) (bool, error) {
+	row := q.db.QueryRow(ctx, manageProviderCredentialConfigured, providerID)
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
@@ -1487,20 +1396,18 @@ func (q *Queries) ManageProviders(ctx context.Context, arg ManageProvidersParams
 }
 
 const manageRemoveMember = `-- name: ManageRemoveMember :exec
-UPDATE principal_group_membership SET is_deleted=true,updated_by=$4,updated_at=$5 WHERE organization_id=$1 AND group_id=$2 AND principal_id=$3 AND is_deleted=false
+UPDATE principal_group_membership SET is_deleted=true,updated_by=$3,updated_at=$4 WHERE group_id=$1 AND principal_id=$2 AND is_deleted=false
 `
 
 type ManageRemoveMemberParams struct {
-	OrganizationID int64
-	GroupID        int64
-	PrincipalID    int64
-	UpdatedBy      string
-	UpdatedAt      pgtype.Timestamptz
+	GroupID     int64
+	PrincipalID int64
+	UpdatedBy   string
+	UpdatedAt   pgtype.Timestamptz
 }
 
 func (q *Queries) ManageRemoveMember(ctx context.Context, arg ManageRemoveMemberParams) error {
 	_, err := q.db.Exec(ctx, manageRemoveMember,
-		arg.OrganizationID,
 		arg.GroupID,
 		arg.PrincipalID,
 		arg.UpdatedBy,
@@ -1510,22 +1417,16 @@ func (q *Queries) ManageRemoveMember(ctx context.Context, arg ManageRemoveMember
 }
 
 const manageResource = `-- name: ManageResource :one
-SELECT id, is_deleted, status, organization_id, provider_id, resource_name, credential_ciphertext, credential_nonce, key_version, created_by, updated_by, created_at, updated_at, runtime_status, blocked_reason, blocked_at, last_error_at, last_http_status, last_error_code FROM provider_credential WHERE organization_id=$1 AND id=$2 AND is_deleted=false
+SELECT id, is_deleted, status, provider_id, resource_name, credential_ciphertext, credential_nonce, key_version, created_by, updated_by, created_at, updated_at, runtime_status, blocked_reason, blocked_at, last_error_at, last_http_status, last_error_code FROM provider_credential WHERE id=$1 AND is_deleted=false
 `
 
-type ManageResourceParams struct {
-	OrganizationID int64
-	ID             int64
-}
-
-func (q *Queries) ManageResource(ctx context.Context, arg ManageResourceParams) (ProviderCredential, error) {
-	row := q.db.QueryRow(ctx, manageResource, arg.OrganizationID, arg.ID)
+func (q *Queries) ManageResource(ctx context.Context, id int64) (ProviderCredential, error) {
+	row := q.db.QueryRow(ctx, manageResource, id)
 	var i ProviderCredential
 	err := row.Scan(
 		&i.ID,
 		&i.IsDeleted,
 		&i.Status,
-		&i.OrganizationID,
 		&i.ProviderID,
 		&i.ResourceName,
 		&i.CredentialCiphertext,
@@ -1548,13 +1449,12 @@ func (q *Queries) ManageResource(ctx context.Context, arg ManageResourceParams) 
 const manageResources = `-- name: ManageResources :many
 SELECT id,provider_id,resource_name,status,runtime_status,blocked_reason,blocked_at,
        last_error_at,last_http_status,last_error_code,created_at,updated_at FROM provider_credential
-WHERE organization_id=$1 AND is_deleted=false AND (id<$2 OR $2=0) ORDER BY id DESC LIMIT $3
+WHERE is_deleted=false AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2
 `
 
 type ManageResourcesParams struct {
-	OrganizationID int64
-	ID             int64
-	Limit          int32
+	ID    int64
+	Limit int32
 }
 
 type ManageResourcesRow struct {
@@ -1573,7 +1473,7 @@ type ManageResourcesRow struct {
 }
 
 func (q *Queries) ManageResources(ctx context.Context, arg ManageResourcesParams) ([]ManageResourcesRow, error) {
-	rows, err := q.db.Query(ctx, manageResources, arg.OrganizationID, arg.ID, arg.Limit)
+	rows, err := q.db.Query(ctx, manageResources, arg.ID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -1608,24 +1508,18 @@ func (q *Queries) ManageResources(ctx context.Context, arg ManageResourcesParams
 const manageRestoreResourceRuntime = `-- name: ManageRestoreResourceRuntime :execrows
 UPDATE provider_credential
 SET runtime_status='HEALTHY',blocked_reason=NULL,blocked_at=NULL,last_error_at=NULL,
-    last_http_status=NULL,last_error_code=NULL,updated_by=$3,updated_at=$4
-WHERE organization_id=$1 AND id=$2 AND is_deleted=false AND runtime_status='BLOCKED'
+    last_http_status=NULL,last_error_code=NULL,updated_by=$2,updated_at=$3
+WHERE id=$1 AND is_deleted=false AND runtime_status='BLOCKED'
 `
 
 type ManageRestoreResourceRuntimeParams struct {
-	OrganizationID int64
-	ID             int64
-	UpdatedBy      string
-	UpdatedAt      pgtype.Timestamptz
+	ID        int64
+	UpdatedBy string
+	UpdatedAt pgtype.Timestamptz
 }
 
 func (q *Queries) ManageRestoreResourceRuntime(ctx context.Context, arg ManageRestoreResourceRuntimeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, manageRestoreResourceRuntime,
-		arg.OrganizationID,
-		arg.ID,
-		arg.UpdatedBy,
-		arg.UpdatedAt,
-	)
+	result, err := q.db.Exec(ctx, manageRestoreResourceRuntime, arg.ID, arg.UpdatedBy, arg.UpdatedAt)
 	if err != nil {
 		return 0, err
 	}
@@ -1633,42 +1527,34 @@ func (q *Queries) ManageRestoreResourceRuntime(ctx context.Context, arg ManageRe
 }
 
 const manageRevokeMemberKeys = `-- name: ManageRevokeMemberKeys :exec
-UPDATE principal_access_key SET status='REVOKED',revoked_at=$4,updated_by=$3,updated_at=$4
-WHERE organization_id=$1 AND principal_id=$2 AND is_deleted=false AND status<>'REVOKED'
+UPDATE principal_access_key SET status='REVOKED',revoked_at=$3,updated_by=$2,updated_at=$3
+WHERE principal_id=$1 AND is_deleted=false AND status<>'REVOKED'
 `
 
 type ManageRevokeMemberKeysParams struct {
-	OrganizationID int64
-	PrincipalID    int64
-	UpdatedBy      string
-	RevokedAt      pgtype.Timestamptz
+	PrincipalID int64
+	UpdatedBy   string
+	RevokedAt   pgtype.Timestamptz
 }
 
 func (q *Queries) ManageRevokeMemberKeys(ctx context.Context, arg ManageRevokeMemberKeysParams) error {
-	_, err := q.db.Exec(ctx, manageRevokeMemberKeys,
-		arg.OrganizationID,
-		arg.PrincipalID,
-		arg.UpdatedBy,
-		arg.RevokedAt,
-	)
+	_, err := q.db.Exec(ctx, manageRevokeMemberKeys, arg.PrincipalID, arg.UpdatedBy, arg.RevokedAt)
 	return err
 }
 
 const manageRevokeModel = `-- name: ManageRevokeModel :exec
-UPDATE principal_group_model_permission SET is_deleted=true,updated_by=$4,updated_at=$5 WHERE organization_id=$1 AND group_id=$2 AND model_id=$3 AND is_deleted=false
+UPDATE principal_group_model_permission SET is_deleted=true,updated_by=$3,updated_at=$4 WHERE group_id=$1 AND model_id=$2 AND is_deleted=false
 `
 
 type ManageRevokeModelParams struct {
-	OrganizationID int64
-	GroupID        int64
-	ModelID        int64
-	UpdatedBy      string
-	UpdatedAt      pgtype.Timestamptz
+	GroupID   int64
+	ModelID   int64
+	UpdatedBy string
+	UpdatedAt pgtype.Timestamptz
 }
 
 func (q *Queries) ManageRevokeModel(ctx context.Context, arg ManageRevokeModelParams) error {
 	_, err := q.db.Exec(ctx, manageRevokeModel,
-		arg.OrganizationID,
 		arg.GroupID,
 		arg.ModelID,
 		arg.UpdatedBy,
@@ -1678,22 +1564,20 @@ func (q *Queries) ManageRevokeModel(ctx context.Context, arg ManageRevokeModelPa
 }
 
 const manageUpdateGroup = `-- name: ManageUpdateGroup :exec
-UPDATE principal_group SET group_name=$3,remark=$4,updated_by=$5,updated_at=$6
-WHERE organization_id=$1 AND id=$2 AND is_deleted=false
+UPDATE principal_group SET group_name=$2,remark=$3,updated_by=$4,updated_at=$5
+WHERE id=$1 AND is_deleted=false
 `
 
 type ManageUpdateGroupParams struct {
-	OrganizationID int64
-	ID             int64
-	GroupName      string
-	Remark         *string
-	UpdatedBy      string
-	UpdatedAt      pgtype.Timestamptz
+	ID        int64
+	GroupName string
+	Remark    *string
+	UpdatedBy string
+	UpdatedAt pgtype.Timestamptz
 }
 
 func (q *Queries) ManageUpdateGroup(ctx context.Context, arg ManageUpdateGroupParams) error {
 	_, err := q.db.Exec(ctx, manageUpdateGroup,
-		arg.OrganizationID,
 		arg.ID,
 		arg.GroupName,
 		arg.Remark,
@@ -1704,22 +1588,20 @@ func (q *Queries) ManageUpdateGroup(ctx context.Context, arg ManageUpdateGroupPa
 }
 
 const manageUpdateMember = `-- name: ManageUpdateMember :exec
-UPDATE principal SET name=$3,remark=$4,updated_by=$5,updated_at=$6
-WHERE organization_id=$1 AND id=$2 AND is_deleted=false AND principal_type='MEMBER'
+UPDATE principal SET name=$2,remark=$3,updated_by=$4,updated_at=$5
+WHERE id=$1 AND is_deleted=false AND principal_type='MEMBER'
 `
 
 type ManageUpdateMemberParams struct {
-	OrganizationID int64
-	ID             int64
-	Name           string
-	Remark         *string
-	UpdatedBy      string
-	UpdatedAt      pgtype.Timestamptz
+	ID        int64
+	Name      string
+	Remark    *string
+	UpdatedBy string
+	UpdatedAt pgtype.Timestamptz
 }
 
 func (q *Queries) ManageUpdateMember(ctx context.Context, arg ManageUpdateMemberParams) error {
 	_, err := q.db.Exec(ctx, manageUpdateMember,
-		arg.OrganizationID,
 		arg.ID,
 		arg.Name,
 		arg.Remark,
@@ -1730,19 +1612,20 @@ func (q *Queries) ManageUpdateMember(ctx context.Context, arg ManageUpdateMember
 }
 
 const manageUpdateModel = `-- name: ManageUpdateModel :exec
-UPDATE model SET model_code=$2,display_name=$3,input_modalities=$4,output_modalities=$5,remark=$6,updated_by=$7,updated_at=$8
+UPDATE model SET model_code=$2,display_name=$3,input_modalities=$4,output_modalities=$5,remark=$6,publisher_provider_id=$7,updated_by=$8,updated_at=$9
 WHERE id=$1 AND is_deleted=false
 `
 
 type ManageUpdateModelParams struct {
-	ID               int64
-	ModelCode        string
-	DisplayName      string
-	InputModalities  []byte
-	OutputModalities []byte
-	Remark           string
-	UpdatedBy        string
-	UpdatedAt        pgtype.Timestamptz
+	ID                  int64
+	ModelCode           string
+	DisplayName         string
+	InputModalities     []byte
+	OutputModalities    []byte
+	Remark              string
+	PublisherProviderID *int64
+	UpdatedBy           string
+	UpdatedAt           pgtype.Timestamptz
 }
 
 func (q *Queries) ManageUpdateModel(ctx context.Context, arg ManageUpdateModelParams) error {
@@ -1753,6 +1636,7 @@ func (q *Queries) ManageUpdateModel(ctx context.Context, arg ManageUpdateModelPa
 		arg.InputModalities,
 		arg.OutputModalities,
 		arg.Remark,
+		arg.PublisherProviderID,
 		arg.UpdatedBy,
 		arg.UpdatedAt,
 	)
@@ -1829,19 +1713,18 @@ func (q *Queries) ManageUpdateProviderMapping(ctx context.Context, arg ManageUpd
 }
 
 const manageUpdateResource = `-- name: ManageUpdateResource :exec
-UPDATE provider_credential SET resource_name=$3,credential_ciphertext=$4,credential_nonce=$5,key_version=$6,status=$7,
-runtime_status=CASE WHEN credential_ciphertext IS DISTINCT FROM $4 THEN 'HEALTHY' ELSE runtime_status END,
-blocked_reason=CASE WHEN credential_ciphertext IS DISTINCT FROM $4 THEN NULL ELSE blocked_reason END,
-blocked_at=CASE WHEN credential_ciphertext IS DISTINCT FROM $4 THEN NULL ELSE blocked_at END,
-last_error_at=CASE WHEN credential_ciphertext IS DISTINCT FROM $4 THEN NULL ELSE last_error_at END,
-last_http_status=CASE WHEN credential_ciphertext IS DISTINCT FROM $4 THEN NULL ELSE last_http_status END,
-last_error_code=CASE WHEN credential_ciphertext IS DISTINCT FROM $4 THEN NULL ELSE last_error_code END,
-updated_by=$8,updated_at=$9
-WHERE organization_id=$1 AND id=$2 AND is_deleted=false
+UPDATE provider_credential SET resource_name=$2,credential_ciphertext=$3,credential_nonce=$4,key_version=$5,status=$6,
+runtime_status=CASE WHEN credential_ciphertext IS DISTINCT FROM $3 THEN 'HEALTHY' ELSE runtime_status END,
+blocked_reason=CASE WHEN credential_ciphertext IS DISTINCT FROM $3 THEN NULL ELSE blocked_reason END,
+blocked_at=CASE WHEN credential_ciphertext IS DISTINCT FROM $3 THEN NULL ELSE blocked_at END,
+last_error_at=CASE WHEN credential_ciphertext IS DISTINCT FROM $3 THEN NULL ELSE last_error_at END,
+last_http_status=CASE WHEN credential_ciphertext IS DISTINCT FROM $3 THEN NULL ELSE last_http_status END,
+last_error_code=CASE WHEN credential_ciphertext IS DISTINCT FROM $3 THEN NULL ELSE last_error_code END,
+updated_by=$7,updated_at=$8
+WHERE id=$1 AND is_deleted=false
 `
 
 type ManageUpdateResourceParams struct {
-	OrganizationID       int64
 	ID                   int64
 	ResourceName         string
 	CredentialCiphertext []byte
@@ -1854,7 +1737,6 @@ type ManageUpdateResourceParams struct {
 
 func (q *Queries) ManageUpdateResource(ctx context.Context, arg ManageUpdateResourceParams) error {
 	_, err := q.db.Exec(ctx, manageUpdateResource,
-		arg.OrganizationID,
 		arg.ID,
 		arg.ResourceName,
 		arg.CredentialCiphertext,

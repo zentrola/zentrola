@@ -70,19 +70,15 @@ func (s *SecurityStore) createInitial(ctx context.Context, username string, hash
 	if err != nil {
 		return err
 	}
-	org, err := q.GetActiveOrganization(ctx)
-	if err != nil {
-		return appsec.ErrUnavailable
-	}
 	id, err := s.ids.NextID(ctx)
 	if err != nil {
 		return appsec.ErrUnavailable
 	}
-	if err := q.CreateInitialAdmin(ctx, dbgen.CreateInitialAdminParams{ID: id, OrganizationID: org.ID, Username: username, PasswordHash: passwordHash, CreatedAt: pgTime(time.Now().UTC())}); err != nil {
+	if err := q.CreateInitialAdmin(ctx, dbgen.CreateInitialAdminParams{ID: id, Username: username, PasswordHash: passwordHash, CreatedAt: pgTime(time.Now().UTC())}); err != nil {
 		return appsec.ErrUnavailable
 	}
 	if !idempotent {
-		actor := admin.Identity{OrganizationID: org.ID, DisplayName: "system"}
+		actor := admin.Identity{DisplayName: "system"}
 		after, _ := json.Marshal(map[string]string{"username": username, "status": "ACTIVE"})
 		if err := s.appendLog(ctx, q, actor, "AUTH", operation.AdminInitialize, "ADMIN_USER", id, username, "SUCCESS", "", meta, nil, after, ""); err != nil {
 			return appsec.ErrUnavailable
@@ -93,15 +89,15 @@ func (s *SecurityStore) createInitial(ctx context.Context, username string, hash
 	}
 	return nil
 }
-func (s *SecurityStore) GetActive(ctx context.Context, org, id int64) (admin.Identity, error) {
-	row, err := dbgen.New(s.pool).GetActiveAdmin(ctx, dbgen.GetActiveAdminParams{OrganizationID: org, ID: id})
+func (s *SecurityStore) GetActive(ctx context.Context, id int64) (admin.Identity, error) {
+	row, err := dbgen.New(s.pool).GetActiveAdmin(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return admin.Identity{}, appsec.ErrUnauthenticated
 	}
 	if err != nil {
 		return admin.Identity{}, appsec.ErrUnavailable
 	}
-	return admin.Identity{ID: row.ID, OrganizationID: row.OrganizationID, Username: row.Username, DisplayName: row.DisplayName, CredentialVersion: row.CredentialVersion}, nil
+	return admin.Identity{ID: row.ID, Username: row.Username, DisplayName: row.DisplayName, CredentialVersion: row.CredentialVersion}, nil
 }
 func (s *SecurityStore) Attempt(ctx context.Context, username string, meta appsec.RequestMeta, evaluate func(*admin.Account) admin.LoginDecision) (admin.Identity, error) {
 	tx, err := s.pool.Begin(ctx)
@@ -119,12 +115,12 @@ func (s *SecurityStore) Attempt(ctx context.Context, username string, meta appse
 	if err != nil {
 		return admin.Identity{}, appsec.ErrUnavailable
 	}
-	account := admin.Account{Identity: admin.Identity{ID: row.ID, OrganizationID: row.OrganizationID, Username: row.Username, DisplayName: row.DisplayName, CredentialVersion: row.CredentialVersion}, PasswordHash: row.PasswordHash,
-		Active: row.Status == "ACTIVE" && row.OrganizationActive, FailedLogins: row.FailedLoginCount, LockedUntil: timePointer(row.LockedUntil), LastLoginAt: timePointer(row.LastLoginAt)}
+	account := admin.Account{Identity: admin.Identity{ID: row.ID, Username: row.Username, DisplayName: row.DisplayName, CredentialVersion: row.CredentialVersion}, PasswordHash: row.PasswordHash,
+		Active: row.Status == "ACTIVE", FailedLogins: row.FailedLoginCount, LockedUntil: timePointer(row.LockedUntil), LastLoginAt: timePointer(row.LastLoginAt)}
 	decision := evaluate(&account)
 	state := decision.State
 	now := time.Now().UTC()
-	if err := q.SaveAdminLoginState(ctx, dbgen.SaveAdminLoginStateParams{OrganizationID: row.OrganizationID, ID: row.ID, FailedLoginCount: state.FailedLogins, LockedUntil: nullableTime(state.LockedUntil), LastLoginAt: nullableTime(state.LastLoginAt), UpdatedBy: actorRef(row.ID), UpdatedAt: pgTime(now)}); err != nil {
+	if err := q.SaveAdminLoginState(ctx, dbgen.SaveAdminLoginStateParams{ID: row.ID, FailedLoginCount: state.FailedLogins, LockedUntil: nullableTime(state.LockedUntil), LastLoginAt: nullableTime(state.LastLoginAt), UpdatedBy: actorRef(row.ID), UpdatedAt: pgTime(now)}); err != nil {
 		return admin.Identity{}, appsec.ErrUnavailable
 	}
 	before, _ := json.Marshal(map[string]any{"failedLoginCount": account.FailedLogins, "lockedUntil": account.LockedUntil})
@@ -162,15 +158,12 @@ func (s *SecurityStore) Create(ctx context.Context, actor admin.Identity, key ap
 	if err := validateActor(ctx, q, actor); err != nil {
 		return err
 	}
-	if key.OrganizationID != actor.OrganizationID {
-		return appsec.ErrNotFound
-	}
-	if _, err := q.GetMemberForKey(ctx, dbgen.GetMemberForKeyParams{OrganizationID: actor.OrganizationID, ID: key.PrincipalID}); errors.Is(err, pgx.ErrNoRows) {
+	if _, err := q.GetMemberForKey(ctx, key.PrincipalID); errors.Is(err, pgx.ErrNoRows) {
 		return appsec.ErrNotFound
 	} else if err != nil {
 		return appsec.ErrUnavailable
 	}
-	if err := q.CreateAccessKey(ctx, dbgen.CreateAccessKeyParams{ID: key.ID, OrganizationID: key.OrganizationID, PrincipalID: key.PrincipalID, KeyHash: key.Hash, MaskedKey: key.MaskedKey, Name: key.Name, ExpiresAt: nullableTime(key.ExpiresAt), CreatedBy: actorRef(actor.ID), CreatedAt: pgTime(key.CreatedAt)}); err != nil {
+	if err := q.CreateAccessKey(ctx, dbgen.CreateAccessKeyParams{ID: key.ID, PrincipalID: key.PrincipalID, KeyHash: key.Hash, MaskedKey: key.MaskedKey, Name: key.Name, ExpiresAt: nullableTime(key.ExpiresAt), CreatedBy: actorRef(actor.ID), CreatedAt: pgTime(key.CreatedAt)}); err != nil {
 		return appsec.ErrUnavailable
 	}
 	after, _ := json.Marshal(map[string]any{"status": "ACTIVE", "principalId": strconv.FormatInt(key.PrincipalID, 10), "maskedKey": key.MaskedKey})
@@ -193,7 +186,7 @@ func (s *SecurityStore) Revoke(ctx context.Context, actor admin.Identity, keyID 
 	if err := validateActor(ctx, q, actor); err != nil {
 		return err
 	}
-	row, err := q.GetKeyForRevoke(ctx, dbgen.GetKeyForRevokeParams{OrganizationID: actor.OrganizationID, ID: keyID})
+	row, err := q.GetKeyForRevoke(ctx, keyID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return appsec.ErrNotFound
 	}
@@ -206,7 +199,7 @@ func (s *SecurityStore) Revoke(ctx context.Context, actor admin.Identity, keyID 
 		}
 		return nil
 	}
-	if err := q.RevokeAccessKey(ctx, dbgen.RevokeAccessKeyParams{OrganizationID: actor.OrganizationID, ID: keyID, RevokedAt: pgTime(time.Now().UTC()), UpdatedBy: actorRef(actor.ID)}); err != nil {
+	if err := q.RevokeAccessKey(ctx, dbgen.RevokeAccessKeyParams{ID: keyID, RevokedAt: pgTime(time.Now().UTC()), UpdatedBy: actorRef(actor.ID)}); err != nil {
 		return appsec.ErrUnavailable
 	}
 	before, _ := json.Marshal(map[string]string{"status": row.Status})
@@ -226,7 +219,7 @@ func (s *SecurityStore) Authenticate(ctx context.Context, hash []byte, now time.
 	if err != nil {
 		return appsec.PrincipalIdentity{}, appsec.ErrUnavailable
 	}
-	return appsec.PrincipalIdentity{ID: row.PrincipalID, OrganizationID: row.OrganizationID, AccessKeyID: row.ID}, nil
+	return appsec.PrincipalIdentity{ID: row.PrincipalID, AccessKeyID: row.ID}, nil
 }
 
 // RecoverCredentials 只处理不可解密的现有资源。根密钥丢失后新生成 Key 时不尝试解密旧密文。
@@ -245,7 +238,7 @@ func (s *SecurityStore) RecoverCredentials(ctx context.Context, cipher *cryptose
 	disabled := 0
 	for _, r := range resources {
 		if !newMaster {
-			plain, err := cipher.Decrypt(cryptosec.SealedCredential{Ciphertext: r.CredentialCiphertext, Nonce: r.CredentialNonce, KeyVersion: r.KeyVersion}, cryptosec.CredentialOwner{OrganizationID: r.OrganizationID, ProviderID: r.ProviderID, ResourceID: r.ID})
+			plain, err := cipher.Decrypt(cryptosec.SealedCredential{Ciphertext: r.CredentialCiphertext, Nonce: r.CredentialNonce, KeyVersion: r.KeyVersion}, cryptosec.CredentialOwner{ProviderID: r.ProviderID, ResourceID: r.ID})
 			clear(plain)
 			if err == nil {
 				continue
@@ -254,7 +247,7 @@ func (s *SecurityStore) RecoverCredentials(ctx context.Context, cipher *cryptose
 		if err := q.DisableUnrecoverableResource(ctx, dbgen.DisableUnrecoverableResourceParams{ID: r.ID, UpdatedAt: pgTime(time.Now().UTC())}); err != nil {
 			return 0, appsec.ErrUnavailable
 		}
-		actor := admin.Identity{OrganizationID: r.OrganizationID, DisplayName: "system"}
+		actor := admin.Identity{DisplayName: "system"}
 		if err := s.appendLog(ctx, q, actor, "RESOURCE", operation.ResourceStatusChange, "RESOURCE", r.ID, r.ResourceName, "SUCCESS", "", appsec.RequestMeta{}, []byte(`{"status":"ACTIVE"}`), []byte(`{"status":"DISABLED"}`), "CREDENTIAL_UNRECOVERABLE"); err != nil {
 			return 0, appsec.ErrUnavailable
 		}
@@ -267,7 +260,7 @@ func (s *SecurityStore) RecoverCredentials(ctx context.Context, cipher *cryptose
 }
 
 func validateActor(ctx context.Context, q *dbgen.Queries, actor admin.Identity) error {
-	_, err := q.GetActiveAdmin(ctx, dbgen.GetActiveAdminParams{OrganizationID: actor.OrganizationID, ID: actor.ID})
+	_, err := q.GetActiveAdmin(ctx, actor.ID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return appsec.ErrUnauthenticated
 	}
@@ -291,7 +284,7 @@ func (s *SecurityStore) appendLog(ctx context.Context, q *dbgen.Queries, actor a
 	if parsed, err := netip.ParseAddr(meta.IP); err == nil {
 		ip = &parsed
 	}
-	return q.AppendSecurityOperation(ctx, dbgen.AppendSecurityOperationParams{ID: id, OrganizationID: actor.OrganizationID, OperatorType: operatorType, OperatorID: operatorID, OperatorName: actor.DisplayName,
+	return q.AppendSecurityOperation(ctx, dbgen.AppendSecurityOperationParams{ID: id, OperatorType: operatorType, OperatorID: operatorID, OperatorName: actor.DisplayName,
 		Module: module, OperationType: string(event), TargetType: target, TargetID: &targetID, TargetName: optional(targetName, 128), RequestID: optional(meta.RequestID, 64), RequestMethod: optional(meta.Method, 16), RequestPath: optional(meta.Path, 2048), IpAddress: ip, UserAgent: optional(meta.UserAgent, 1024), Result: result, ErrorCode: optional(code, 64), BeforeData: before, AfterData: after, Remark: optional(remark, 2000), CreatedAt: pgTime(time.Now().UTC())})
 }
 func actorRef(id int64) string              { return "admin:" + strconv.FormatInt(id, 10) }

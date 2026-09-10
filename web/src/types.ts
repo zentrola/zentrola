@@ -5,7 +5,6 @@ export interface Page<T> {
 }
 export interface Identity {
   id: string
-  organizationId: string
   username: string
   displayName: string
 }
@@ -27,6 +26,8 @@ export interface Model {
   inputModalities: Modality[]
   outputModalities: Modality[]
   remark: string
+  publisherProviderId: string | null
+  publisherProviderName: string | null
   createdAt: string
   updatedAt: string
 }
@@ -148,11 +149,9 @@ export interface ClientModelRank {
   requests: number
   tokens: number
 }
-export interface UpstreamModelRank {
+export interface ProviderRank {
   providerId: string
   providerName: string
-  modelId: string
-  modelCode: string
   calls: number
   tokens: number
 }
@@ -163,7 +162,7 @@ export interface Dashboard {
   totalTokens: number
   tokenRanking: TokenRank[]
   clientModelRanking: ClientModelRank[]
-  upstreamModelRanking: UpstreamModelRank[]
+  providerRanking: ProviderRank[]
 }
 export interface Operation {
   id: string

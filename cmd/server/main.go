@@ -15,7 +15,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/zentrola/zentrola/internal/application/bootstrap"
 	"github.com/zentrola/zentrola/internal/application/gateway"
 	"github.com/zentrola/zentrola/internal/application/health"
 	"github.com/zentrola/zentrola/internal/application/management"
@@ -229,11 +228,6 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 		reset := appsec.NewPasswordReset(postgres.NewSecurityStore(pool, ids), passwords)
 		return resetPassword(startup, output, command.username, reset.Reset)
 	}
-	bootstrapService := bootstrap.New(postgres.NewBootstrapStore(pool), ids)
-	if err := bootstrapService.Initialize(startup); err != nil {
-		return err
-	}
-	logger.Info("database bootstrap complete")
 	master, err := cryptosec.LoadMasterKey(cfg.Security.MasterKey, cfg.Security.ExternalMasterKeyPath, cfg.Security.MasterKeyPath)
 	if err != nil {
 		return err
@@ -312,7 +306,6 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 	readiness := health.New(
 		health.Check{Name: "postgres", Run: pool.Ping},
 		health.Check{Name: "master_key", Run: master.Check},
-		health.Check{Name: "bootstrap", Run: bootstrapService.Check},
 		health.Check{Name: "admin", Run: adminService.Check},
 	)
 	var active sync.WaitGroup

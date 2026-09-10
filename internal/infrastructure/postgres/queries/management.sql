@@ -1,108 +1,109 @@
--- name: LockManagementOrganization :one
-SELECT o.id FROM organization o JOIN admin_user a ON a.organization_id=o.id
-WHERE o.id=$1 AND a.id=$2 AND o.is_deleted=false AND o.status='ACTIVE'
-AND a.is_deleted=false AND a.status='ACTIVE' FOR UPDATE OF o FOR SHARE OF a;
-
 -- name: ManageMembers :many
-SELECT * FROM principal WHERE organization_id=$1 AND is_deleted=false AND principal_type='MEMBER' AND (id<$2 OR $2=0) ORDER BY id DESC LIMIT $3;
+SELECT * FROM principal WHERE is_deleted=false AND principal_type='MEMBER' AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2;
 -- name: ManageMemberSuggestions :many
 SELECT * FROM principal
-WHERE organization_id=sqlc.arg(organization_id)
-  AND is_deleted=false
+WHERE is_deleted=false
   AND principal_type='MEMBER'
   AND strpos(lower(name), lower(sqlc.arg(member_name)::text)) > 0
   AND (id<sqlc.arg(after_id) OR sqlc.arg(after_id)=0)
 ORDER BY id DESC
 LIMIT sqlc.arg(page_limit);
 -- name: ManageMember :one
-SELECT * FROM principal WHERE organization_id=$1 AND id=$2 AND is_deleted=false AND principal_type='MEMBER';
+SELECT * FROM principal WHERE id=$1 AND is_deleted=false AND principal_type='MEMBER';
 -- name: ManageCreateMember :exec
-INSERT INTO principal(id,organization_id,principal_type,name,remark,status,created_by,updated_by,created_at,updated_at)
-VALUES($1,$2,'MEMBER',$3,$4,'DISABLED',$5,$5,$6,$6);
+INSERT INTO principal(id,principal_type,name,remark,status,created_by,updated_by,created_at,updated_at)
+VALUES($1,'MEMBER',$2,$3,'DISABLED',$4,$4,$5,$5);
 -- name: ManageUpdateMember :exec
-UPDATE principal SET name=$3,remark=$4,updated_by=$5,updated_at=$6
-WHERE organization_id=$1 AND id=$2 AND is_deleted=false AND principal_type='MEMBER';
+UPDATE principal SET name=$2,remark=$3,updated_by=$4,updated_at=$5
+WHERE id=$1 AND is_deleted=false AND principal_type='MEMBER';
 -- name: ManageMemberStatus :exec
-UPDATE principal SET status=$3,updated_by=$4,updated_at=$5 WHERE organization_id=$1 AND id=$2 AND is_deleted=false AND principal_type='MEMBER';
+UPDATE principal SET status=$2,updated_by=$3,updated_at=$4 WHERE id=$1 AND is_deleted=false AND principal_type='MEMBER';
 
 -- name: ManageDeleteMember :exec
-UPDATE principal SET is_deleted=true,status='DISABLED',updated_by=$3,updated_at=$4
-WHERE organization_id=$1 AND id=$2 AND is_deleted=false AND principal_type='MEMBER';
+UPDATE principal SET is_deleted=true,status='DISABLED',updated_by=$2,updated_at=$3
+WHERE id=$1 AND is_deleted=false AND principal_type='MEMBER';
 -- name: ManageDeleteMemberGroups :exec
-UPDATE principal_group_membership SET is_deleted=true,updated_by=$3,updated_at=$4
-WHERE organization_id=$1 AND principal_id=$2 AND is_deleted=false;
+UPDATE principal_group_membership SET is_deleted=true,updated_by=$2,updated_at=$3
+WHERE principal_id=$1 AND is_deleted=false;
 -- name: ManageRevokeMemberKeys :exec
-UPDATE principal_access_key SET status='REVOKED',revoked_at=$4,updated_by=$3,updated_at=$4
-WHERE organization_id=$1 AND principal_id=$2 AND is_deleted=false AND status<>'REVOKED';
+UPDATE principal_access_key SET status='REVOKED',revoked_at=$3,updated_by=$2,updated_at=$3
+WHERE principal_id=$1 AND is_deleted=false AND status<>'REVOKED';
 
 -- name: ManageGroups :many
 SELECT * FROM principal_group
-WHERE organization_id=sqlc.arg(organization_id)
-  AND is_deleted=false
-  AND (sqlc.arg(status)::text = '' OR status = sqlc.arg(status)::text)
-  AND (id<sqlc.arg(after_id) OR sqlc.arg(after_id)=0)
-ORDER BY id DESC
-LIMIT sqlc.arg(page_limit);
--- name: ManageGroup :one
-SELECT * FROM principal_group WHERE organization_id=$1 AND id=$2 AND is_deleted=false;
--- name: ManageCreateGroup :exec
-INSERT INTO principal_group(id,organization_id,group_code,group_name,remark,status,created_by,updated_by,created_at,updated_at)
-VALUES($1,$2,$3,$4,$5,'ACTIVE',$6,$6,$7,$7);
--- name: ManageUpdateGroup :exec
-UPDATE principal_group SET group_name=$3,remark=$4,updated_by=$5,updated_at=$6
-WHERE organization_id=$1 AND id=$2 AND is_deleted=false;
--- name: ManageGroupStatus :exec
-UPDATE principal_group SET status=$3,updated_by=$4,updated_at=$5
-WHERE organization_id=$1 AND id=$2 AND is_deleted=false;
--- name: ManageDeleteGroup :exec
-UPDATE principal_group SET is_deleted=true,status='DISABLED',updated_by=$3,updated_at=$4
-WHERE organization_id=$1 AND id=$2 AND is_deleted=false;
--- name: ManageDeleteGroupMembers :exec
-UPDATE principal_group_membership SET is_deleted=true,updated_by=$3,updated_at=$4
-WHERE organization_id=$1 AND group_id=$2 AND is_deleted=false;
--- name: ManageDeleteGroupModels :exec
-UPDATE principal_group_model_permission SET is_deleted=true,updated_by=$3,updated_at=$4
-WHERE organization_id=$1 AND group_id=$2 AND is_deleted=false;
--- name: ManageGroupMembers :many
-SELECT p.* FROM principal p JOIN principal_group_membership g ON g.principal_id=p.id AND g.organization_id=p.organization_id
-WHERE p.organization_id=$1 AND g.group_id=$2 AND g.is_deleted=false AND p.is_deleted=false AND p.principal_type='MEMBER' AND (p.id<$3 OR $3=0) ORDER BY p.id DESC LIMIT $4;
--- name: ManageMemberGroups :many
-SELECT g.* FROM principal_group g JOIN principal_group_membership pg ON pg.group_id=g.id AND pg.organization_id=g.organization_id
-WHERE g.organization_id=$1 AND pg.principal_id=$2 AND pg.is_deleted=false AND g.is_deleted=false AND (g.id<$3 OR $3=0) ORDER BY g.id DESC LIMIT $4;
--- name: ManageGroupModels :many
-SELECT m.* FROM model m JOIN principal_group_model_permission g ON g.model_id=m.id
-WHERE g.organization_id=$1 AND g.group_id=$2 AND g.is_deleted=false AND m.is_deleted=false AND (m.id<$3 OR $3=0) ORDER BY m.id DESC LIMIT $4;
--- name: ManageMembershipExists :one
-SELECT EXISTS(SELECT 1 FROM principal_group_membership WHERE organization_id=$1 AND group_id=$2 AND principal_id=$3 AND is_deleted=false);
--- name: ManageAddMember :exec
-INSERT INTO principal_group_membership(id,organization_id,group_id,principal_id,created_by,updated_by,created_at,updated_at)
-VALUES($1,$2,$3,$4,$5,$5,$6,$6);
--- name: ManageRemoveMember :exec
-UPDATE principal_group_membership SET is_deleted=true,updated_by=$4,updated_at=$5 WHERE organization_id=$1 AND group_id=$2 AND principal_id=$3 AND is_deleted=false;
--- name: ManagePermissionExists :one
-SELECT EXISTS(SELECT 1 FROM principal_group_model_permission WHERE organization_id=$1 AND group_id=$2 AND model_id=$3 AND is_deleted=false);
--- name: ManageGrantModel :exec
-INSERT INTO principal_group_model_permission(id,organization_id,group_id,model_id,created_by,updated_by,created_at,updated_at)
-VALUES($1,$2,$3,$4,$5,$5,$6,$6);
--- name: ManageRevokeModel :exec
-UPDATE principal_group_model_permission SET is_deleted=true,updated_by=$4,updated_at=$5 WHERE organization_id=$1 AND group_id=$2 AND model_id=$3 AND is_deleted=false;
-
--- name: ManageModels :many
-SELECT * FROM model
 WHERE is_deleted=false
   AND (sqlc.arg(status)::text = '' OR status = sqlc.arg(status)::text)
   AND (id<sqlc.arg(after_id) OR sqlc.arg(after_id)=0)
 ORDER BY id DESC
 LIMIT sqlc.arg(page_limit);
+-- name: ManageGroup :one
+SELECT * FROM principal_group WHERE id=$1 AND is_deleted=false;
+-- name: ManageCreateGroup :exec
+INSERT INTO principal_group(id,group_code,group_name,remark,status,created_by,updated_by,created_at,updated_at)
+VALUES($1,$2,$3,$4,'ACTIVE',$5,$5,$6,$6);
+-- name: ManageUpdateGroup :exec
+UPDATE principal_group SET group_name=$2,remark=$3,updated_by=$4,updated_at=$5
+WHERE id=$1 AND is_deleted=false;
+-- name: ManageGroupStatus :exec
+UPDATE principal_group SET status=$2,updated_by=$3,updated_at=$4
+WHERE id=$1 AND is_deleted=false;
+-- name: ManageDeleteGroup :exec
+UPDATE principal_group SET is_deleted=true,status='DISABLED',updated_by=$2,updated_at=$3
+WHERE id=$1 AND is_deleted=false;
+-- name: ManageDeleteGroupMembers :exec
+UPDATE principal_group_membership SET is_deleted=true,updated_by=$2,updated_at=$3
+WHERE group_id=$1 AND is_deleted=false;
+-- name: ManageDeleteGroupModels :exec
+UPDATE principal_group_model_permission SET is_deleted=true,updated_by=$2,updated_at=$3
+WHERE group_id=$1 AND is_deleted=false;
+-- name: ManageGroupMembers :many
+SELECT p.* FROM principal p JOIN principal_group_membership g ON g.principal_id=p.id
+WHERE g.group_id=$1 AND g.is_deleted=false AND p.is_deleted=false AND p.principal_type='MEMBER' AND (p.id<$2 OR $2=0) ORDER BY p.id DESC LIMIT $3;
+-- name: ManageMemberGroups :many
+SELECT g.* FROM principal_group g JOIN principal_group_membership pg ON pg.group_id=g.id
+WHERE pg.principal_id=$1 AND pg.is_deleted=false AND g.is_deleted=false AND (g.id<$2 OR $2=0) ORDER BY g.id DESC LIMIT $3;
+-- name: ManageGroupModels :many
+SELECT m.*,p.provider_name AS publisher_provider_name
+FROM model m
+JOIN principal_group_model_permission g ON g.model_id=m.id
+LEFT JOIN provider p ON p.id=m.publisher_provider_id
+WHERE g.group_id=$1 AND g.is_deleted=false AND m.is_deleted=false AND (m.id<$2 OR $2=0) ORDER BY m.id DESC LIMIT $3;
+-- name: ManageMembershipExists :one
+SELECT EXISTS(SELECT 1 FROM principal_group_membership WHERE group_id=$1 AND principal_id=$2 AND is_deleted=false);
+-- name: ManageAddMember :exec
+INSERT INTO principal_group_membership(id,group_id,principal_id,created_by,updated_by,created_at,updated_at)
+VALUES($1,$2,$3,$4,$4,$5,$5);
+-- name: ManageRemoveMember :exec
+UPDATE principal_group_membership SET is_deleted=true,updated_by=$3,updated_at=$4 WHERE group_id=$1 AND principal_id=$2 AND is_deleted=false;
+-- name: ManagePermissionExists :one
+SELECT EXISTS(SELECT 1 FROM principal_group_model_permission WHERE group_id=$1 AND model_id=$2 AND is_deleted=false);
+-- name: ManageGrantModel :exec
+INSERT INTO principal_group_model_permission(id,group_id,model_id,created_by,updated_by,created_at,updated_at)
+VALUES($1,$2,$3,$4,$4,$5,$5);
+-- name: ManageRevokeModel :exec
+UPDATE principal_group_model_permission SET is_deleted=true,updated_by=$3,updated_at=$4 WHERE group_id=$1 AND model_id=$2 AND is_deleted=false;
+
+-- name: ManageModels :many
+SELECT m.*,p.provider_name AS publisher_provider_name
+FROM model m
+LEFT JOIN provider p ON p.id=m.publisher_provider_id
+WHERE m.is_deleted=false
+  AND (sqlc.arg(status)::text = '' OR m.status = sqlc.arg(status)::text)
+  AND (m.id<sqlc.arg(after_id) OR sqlc.arg(after_id)=0)
+ORDER BY m.id DESC
+LIMIT sqlc.arg(page_limit);
 -- name: ManageModel :one
-SELECT * FROM model WHERE id=$1 AND is_deleted=false;
+SELECT m.*,p.provider_name AS publisher_provider_name
+FROM model m
+LEFT JOIN provider p ON p.id=m.publisher_provider_id
+WHERE m.id=$1 AND m.is_deleted=false;
 -- name: ManageModelStatus :exec
 UPDATE model SET status=$2,updated_by=$3,updated_at=$4 WHERE id=$1 AND is_deleted=false;
 -- name: ManageCreateModel :exec
-INSERT INTO model(id,model_code,display_name,input_modalities,output_modalities,remark,status,created_by,updated_by,created_at,updated_at)
-VALUES($1,$2,$3,$4,$5,$6,'DISABLED',$7,$7,$8,$8);
+INSERT INTO model(id,model_code,display_name,input_modalities,output_modalities,remark,status,publisher_provider_id,created_by,updated_by,created_at,updated_at)
+VALUES($1,$2,$3,$4,$5,$6,'DISABLED',$7,$8,$8,$9,$9);
 -- name: ManageUpdateModel :exec
-UPDATE model SET model_code=$2,display_name=$3,input_modalities=$4,output_modalities=$5,remark=$6,updated_by=$7,updated_at=$8
+UPDATE model SET model_code=$2,display_name=$3,input_modalities=$4,output_modalities=$5,remark=$6,publisher_provider_id=$7,updated_by=$8,updated_at=$9
 WHERE id=$1 AND is_deleted=false;
 -- name: ManageProviders :many
 SELECT * FROM provider WHERE is_deleted=false AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2;
@@ -111,7 +112,7 @@ SELECT * FROM provider WHERE id=$1 AND is_deleted=false;
 -- name: ManageProviderCredentialConfigured :one
 SELECT EXISTS(
     SELECT 1 FROM provider_credential
-    WHERE organization_id=$1 AND provider_id=$2 AND is_deleted=false
+    WHERE provider_id=$1 AND is_deleted=false
 );
 -- name: ManageProviderEndpoints :many
 SELECT * FROM provider_endpoint WHERE provider_id=$1 ORDER BY protocol_type;
@@ -168,52 +169,50 @@ WHERE id=$1 AND provider_id=$2 AND is_deleted=false;
 -- name: ManageResources :many
 SELECT id,provider_id,resource_name,status,runtime_status,blocked_reason,blocked_at,
        last_error_at,last_http_status,last_error_code,created_at,updated_at FROM provider_credential
-WHERE organization_id=$1 AND is_deleted=false AND (id<$2 OR $2=0) ORDER BY id DESC LIMIT $3;
+WHERE is_deleted=false AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2;
 -- name: ManageResource :one
-SELECT * FROM provider_credential WHERE organization_id=$1 AND id=$2 AND is_deleted=false;
+SELECT * FROM provider_credential WHERE id=$1 AND is_deleted=false;
 -- name: ManageCreateResource :exec
-INSERT INTO provider_credential(id,organization_id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,created_by,updated_by,created_at,updated_at)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10,$10);
+INSERT INTO provider_credential(id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,created_by,updated_by,created_at,updated_at)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$8,$9,$9);
 -- name: ManageUpdateResource :exec
-UPDATE provider_credential SET resource_name=$3,credential_ciphertext=$4,credential_nonce=$5,key_version=$6,status=$7,
-runtime_status=CASE WHEN credential_ciphertext IS DISTINCT FROM $4 THEN 'HEALTHY' ELSE runtime_status END,
-blocked_reason=CASE WHEN credential_ciphertext IS DISTINCT FROM $4 THEN NULL ELSE blocked_reason END,
-blocked_at=CASE WHEN credential_ciphertext IS DISTINCT FROM $4 THEN NULL ELSE blocked_at END,
-last_error_at=CASE WHEN credential_ciphertext IS DISTINCT FROM $4 THEN NULL ELSE last_error_at END,
-last_http_status=CASE WHEN credential_ciphertext IS DISTINCT FROM $4 THEN NULL ELSE last_http_status END,
-last_error_code=CASE WHEN credential_ciphertext IS DISTINCT FROM $4 THEN NULL ELSE last_error_code END,
-updated_by=$8,updated_at=$9
-WHERE organization_id=$1 AND id=$2 AND is_deleted=false;
+UPDATE provider_credential SET resource_name=$2,credential_ciphertext=$3,credential_nonce=$4,key_version=$5,status=$6,
+runtime_status=CASE WHEN credential_ciphertext IS DISTINCT FROM $3 THEN 'HEALTHY' ELSE runtime_status END,
+blocked_reason=CASE WHEN credential_ciphertext IS DISTINCT FROM $3 THEN NULL ELSE blocked_reason END,
+blocked_at=CASE WHEN credential_ciphertext IS DISTINCT FROM $3 THEN NULL ELSE blocked_at END,
+last_error_at=CASE WHEN credential_ciphertext IS DISTINCT FROM $3 THEN NULL ELSE last_error_at END,
+last_http_status=CASE WHEN credential_ciphertext IS DISTINCT FROM $3 THEN NULL ELSE last_http_status END,
+last_error_code=CASE WHEN credential_ciphertext IS DISTINCT FROM $3 THEN NULL ELSE last_error_code END,
+updated_by=$7,updated_at=$8
+WHERE id=$1 AND is_deleted=false;
 
 -- name: ManageRestoreResourceRuntime :execrows
 UPDATE provider_credential
 SET runtime_status='HEALTHY',blocked_reason=NULL,blocked_at=NULL,last_error_at=NULL,
-    last_http_status=NULL,last_error_code=NULL,updated_by=$3,updated_at=$4
-WHERE organization_id=$1 AND id=$2 AND is_deleted=false AND runtime_status='BLOCKED';
+    last_http_status=NULL,last_error_code=NULL,updated_by=$2,updated_at=$3
+WHERE id=$1 AND is_deleted=false AND runtime_status='BLOCKED';
 
 -- name: ManageKeys :many
 SELECT id,name,masked_key,status,expires_at,revoked_at,created_at FROM principal_access_key
-WHERE organization_id=$1 AND principal_id=$2 AND is_deleted=false AND (id<$3 OR $3=0) ORDER BY id DESC LIMIT $4;
+WHERE principal_id=$1 AND is_deleted=false AND (id<$2 OR $2=0) ORDER BY id DESC LIMIT $3;
 -- name: ManageOperations :many
 SELECT id,operator_name,operation_type,target_type,target_id,request_id,result,error_code,before_data,after_data,created_at
-FROM operation_log WHERE organization_id=$1 AND (id<$2 OR $2=0) ORDER BY id DESC LIMIT $3;
+FROM operation_log WHERE (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2;
 
 -- 分页总数不受 after cursor 影响；过滤口径必须与对应列表查询保持一致。
 -- name: CountManageMembers :one
 SELECT COUNT(*)::bigint FROM principal
-WHERE organization_id=$1 AND is_deleted=false AND principal_type='MEMBER';
+WHERE is_deleted=false AND principal_type='MEMBER';
 
 -- name: CountManageMemberSuggestions :one
 SELECT COUNT(*)::bigint FROM principal
-WHERE organization_id=sqlc.arg(organization_id)
-  AND is_deleted=false
+WHERE is_deleted=false
   AND principal_type='MEMBER'
   AND strpos(lower(name), lower(sqlc.arg(member_name)::text)) > 0;
 
 -- name: CountManageGroups :one
 SELECT COUNT(*)::bigint FROM principal_group
-WHERE organization_id=sqlc.arg(organization_id)
-  AND is_deleted=false
+WHERE is_deleted=false
   AND (sqlc.arg(status)::text = '' OR status = sqlc.arg(status)::text);
 
 -- name: CountManageModels :one
@@ -226,34 +225,34 @@ SELECT COUNT(*)::bigint FROM provider WHERE is_deleted=false;
 
 -- name: CountManageResources :one
 SELECT COUNT(*)::bigint FROM provider_credential
-WHERE organization_id=$1 AND is_deleted=false;
+WHERE is_deleted=false;
 
 -- name: CountManageKeys :one
 SELECT COUNT(*)::bigint FROM principal_access_key
-WHERE organization_id=$1 AND principal_id=$2 AND is_deleted=false;
+WHERE principal_id=$1 AND is_deleted=false;
 
 -- name: CountManageOperations :one
-SELECT COUNT(*)::bigint FROM operation_log WHERE organization_id=$1;
+SELECT COUNT(*)::bigint FROM operation_log;
 
 -- name: CountManageGroupMembers :one
 SELECT COUNT(*)::bigint
 FROM principal p
 JOIN principal_group_membership g
-  ON g.principal_id=p.id AND g.organization_id=p.organization_id
-WHERE p.organization_id=$1 AND g.group_id=$2 AND g.is_deleted=false
+  ON g.principal_id=p.id
+WHERE g.group_id=$1 AND g.is_deleted=false
   AND p.is_deleted=false AND p.principal_type='MEMBER';
 
 -- name: CountManageMemberGroups :one
 SELECT COUNT(*)::bigint
 FROM principal_group g
 JOIN principal_group_membership pg
-  ON pg.group_id=g.id AND pg.organization_id=g.organization_id
-WHERE g.organization_id=$1 AND pg.principal_id=$2
+  ON pg.group_id=g.id
+WHERE pg.principal_id=$1
   AND pg.is_deleted=false AND g.is_deleted=false;
 
 -- name: CountManageGroupModels :one
 SELECT COUNT(*)::bigint
 FROM model m
 JOIN principal_group_model_permission g ON g.model_id=m.id
-WHERE g.organization_id=$1 AND g.group_id=$2
+WHERE g.group_id=$1
   AND g.is_deleted=false AND m.is_deleted=false;

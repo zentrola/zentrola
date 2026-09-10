@@ -18,8 +18,6 @@ type AdminUser struct {
 	IsDeleted bool
 	// 状态：ACTIVE=启用；DISABLED=停用
 	Status string
-	// 所属组织 ID
-	OrganizationID int64
 	// 管理员用户名
 	Username string
 	// 密码慢 Hash；不保存明文
@@ -44,7 +42,7 @@ type AdminUser struct {
 	UpdatedAt pgtype.Timestamptz
 }
 
-// 平台稳定逻辑模型；与供应方解耦
+// 平台稳定逻辑模型；发布厂商仅用于归属展示，与调用供应方映射解耦
 type Model struct {
 	// 主键，由应用侧生成的正数 64-bit ID
 	ID int64
@@ -70,14 +68,14 @@ type Model struct {
 	CreatedAt pgtype.Timestamptz
 	// 更新时间，UTC
 	UpdatedAt pgtype.Timestamptz
+	// 模型发布厂商对应的服务商 ID；手工创建且尚未由官方目录同步时为空
+	PublisherProviderID *int64
 }
 
 // 管理员与系统操作日志；Append Only，普通操作禁止更新和删除
 type OperationLog struct {
 	// 主键，由应用侧生成的正数 64-bit ID
 	ID int64
-	// 所属组织 ID
-	OrganizationID int64
 	// 操作人类型：ADMIN=管理员；SYSTEM=系统
 	OperatorType string
 	// 管理员 ID；NULL=系统操作
@@ -118,30 +116,6 @@ type OperationLog struct {
 	CreatedAt pgtype.Timestamptz
 }
 
-// 组织；P0-MVP 仅支持单组织
-type Organization struct {
-	// 主键，由应用侧生成的正数 64-bit ID
-	ID int64
-	// 逻辑删除标识；删除后不可恢复
-	IsDeleted bool
-	// 状态：ACTIVE=启用；DISABLED=停用
-	Status string
-	// 组织业务编码
-	OrganizationCode string
-	// 组织名称
-	OrganizationName string
-	// 备注；NULL=未设置
-	Remark *string
-	// 创建者引用：system、admin:<id> 或 principal:<id>
-	CreatedBy string
-	// 更新者引用：system、admin:<id> 或 principal:<id>
-	UpdatedBy string
-	// 创建时间，UTC
-	CreatedAt pgtype.Timestamptz
-	// 更新时间，UTC
-	UpdatedAt pgtype.Timestamptz
-}
-
 // 统一治理主体；MVP 仅建设 MEMBER 流程
 type Principal struct {
 	// 主键，由应用侧生成的正数 64-bit ID
@@ -150,8 +124,6 @@ type Principal struct {
 	IsDeleted bool
 	// 状态：ACTIVE=启用；DISABLED=停用
 	Status string
-	// 所属组织 ID
-	OrganizationID int64
 	// 主体类型：MEMBER=成员；APPLICATION=应用，仅预留类型
 	PrincipalType string
 	// 主体名称
@@ -176,8 +148,6 @@ type PrincipalAccessKey struct {
 	IsDeleted bool
 	// 凭证状态：ACTIVE=启用；DISABLED=停用；REVOKED=已撤销
 	Status string
-	// 所属组织 ID
-	OrganizationID int64
 	// 所属治理主体 ID
 	PrincipalID int64
 	// 完整 Access Key 的 SHA-256 摘要，32 bytes
@@ -210,8 +180,6 @@ type PrincipalGroup struct {
 	IsDeleted bool
 	// 状态：ACTIVE=启用；DISABLED=停用
 	Status string
-	// 所属组织 ID
-	OrganizationID int64
 	// 分组业务编码
 	GroupCode string
 	// 分组名称
@@ -234,8 +202,6 @@ type PrincipalGroupMembership struct {
 	ID int64
 	// 逻辑删除标识；删除后不可恢复
 	IsDeleted bool
-	// 所属组织 ID
-	OrganizationID int64
 	// 治理主体 ID
 	PrincipalID int64
 	// 分组 ID
@@ -256,8 +222,6 @@ type PrincipalGroupModelPermission struct {
 	ID int64
 	// 逻辑删除标识；删除后不可恢复
 	IsDeleted bool
-	// 所属组织 ID
-	OrganizationID int64
 	// 被授权分组 ID
 	GroupID int64
 	// 被授权逻辑模型 ID
@@ -272,7 +236,7 @@ type PrincipalGroupModelPermission struct {
 	UpdatedAt pgtype.Timestamptz
 }
 
-// 模型服务供应方；不保存组织调用凭证
+// 模型服务供应方；不保存企业调用凭证
 type Provider struct {
 	// 主键，由应用侧生成的正数 64-bit ID
 	ID int64
@@ -316,7 +280,7 @@ type Provider struct {
 	UpdatedAt pgtype.Timestamptz
 }
 
-// 组织持有的供应方调用凭证；归属于 Provider
+// 企业持有的供应方调用凭证；归属于 Provider
 type ProviderCredential struct {
 	// 主键，由应用侧生成的正数 64-bit ID
 	ID int64
@@ -324,8 +288,6 @@ type ProviderCredential struct {
 	IsDeleted bool
 	// 状态：ACTIVE=启用；DISABLED=停用
 	Status string
-	// 所属组织 ID
-	OrganizationID int64
 	// 资源所属供应方 ID，不归属于 Provider Model
 	ProviderID int64
 	// 资源名称
@@ -334,7 +296,7 @@ type ProviderCredential struct {
 	CredentialCiphertext []byte
 	// AES-GCM 随机 Nonce，12 bytes；每次加密重新生成
 	CredentialNonce []byte
-	// 加密根密钥版本，不含 Master Key 本身
+	// 资源凭证密文格式版本：1=含旧 AAD 上下文；2=无组织或实例依赖
 	KeyVersion int32
 	// 创建者引用：system、admin:<id> 或 principal:<id>
 	CreatedBy string
@@ -406,8 +368,6 @@ type UsageRecord struct {
 	ID int64
 	// 调用最终状态：SUCCESS=成功；FAILED=失败；CANCELLED=客户端取消
 	Status string
-	// 所属组织 ID
-	OrganizationID int64
 	// 所属请求标识
 	RequestID string
 	// 同一客户端请求的上游调用序号，从 1 开始；Failover 时逐次递增

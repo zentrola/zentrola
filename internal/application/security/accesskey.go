@@ -47,7 +47,7 @@ func (s *Keys) Create(ctx context.Context, actor admin.Identity, principalID int
 		return CreatedKey{}, ErrUnavailable
 	}
 	maskedKey := full[:len(keyMarker)+keyPrefixChars] + keyMask + full[len(full)-keySuffixChars:]
-	row := KeyRecord{ID: id, OrganizationID: actor.OrganizationID, PrincipalID: principalID, Hash: digest[:], MaskedKey: maskedKey, Name: name, ExpiresAt: expires, CreatedAt: now}
+	row := KeyRecord{ID: id, PrincipalID: principalID, Hash: digest[:], MaskedKey: maskedKey, Name: name, ExpiresAt: expires, CreatedAt: now}
 	if err := s.store.Create(ctx, actor, row, meta); err != nil {
 		return CreatedKey{}, err
 	}

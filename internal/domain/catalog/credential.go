@@ -8,13 +8,13 @@ type SealedCredential struct {
 	KeyVersion        int32
 }
 
-type CredentialOwner struct{ OrganizationID, ProviderID, ResourceID int64 }
+type CredentialOwner struct{ ProviderID, ResourceID int64 }
 
 func (o CredentialOwner) Valid() bool {
-	return o.OrganizationID > 0 && o.ProviderID > 0 && o.ResourceID > 0
+	return o.ProviderID > 0 && o.ResourceID > 0
 }
 
-// ProviderProxyOwner 为全局服务商代理秘密提供独立 AAD，避免与组织资源凭证混用。
+// ProviderProxyOwner 为服务商代理秘密提供独立 AAD，避免与资源凭证混用。
 type ProviderProxyOwner struct {
 	ProviderID int64
 	Field      string
@@ -35,8 +35,15 @@ type OutboundProxy struct {
 }
 
 func (o CredentialOwner) AAD() []byte {
+	data := []byte("zentrola:resource:v2:")
+	data = binary.BigEndian.AppendUint64(data, uint64(o.ProviderID))
+	return binary.BigEndian.AppendUint64(data, uint64(o.ResourceID))
+}
+
+// LegacyAAD 仅用于解密从 organization 架构迁移的 v1 资源凭据。
+func (o CredentialOwner) LegacyAAD(organizationID int64) []byte {
 	data := []byte("zentrola:resource:v1:")
-	data = binary.BigEndian.AppendUint64(data, uint64(o.OrganizationID))
+	data = binary.BigEndian.AppendUint64(data, uint64(organizationID))
 	data = binary.BigEndian.AppendUint64(data, uint64(o.ProviderID))
 	return binary.BigEndian.AppendUint64(data, uint64(o.ResourceID))
 }

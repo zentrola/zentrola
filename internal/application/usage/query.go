@@ -51,22 +51,20 @@ type ClientModelRank struct {
 	Requests  int64  `json:"requests"`
 	Tokens    int64  `json:"tokens"`
 }
-type UpstreamModelRank struct {
+type ProviderRank struct {
 	ProviderID   int64  `json:"providerId,string"`
 	ProviderName string `json:"providerName"`
-	ModelID      int64  `json:"modelId,string"`
-	ModelCode    string `json:"modelCode"`
 	Calls        int64  `json:"calls"`
 	Tokens       int64  `json:"tokens"`
 }
 type Dashboard struct {
-	ActiveMemberCount    int64               `json:"activeMemberCount"`
-	ModelCount           int64               `json:"modelCount"`
-	ProviderCount        int64               `json:"providerCount"`
-	TotalTokens          int64               `json:"totalTokens"`
-	TokenRanking         []TokenRank         `json:"tokenRanking"`
-	ClientModelRanking   []ClientModelRank   `json:"clientModelRanking"`
-	UpstreamModelRanking []UpstreamModelRank `json:"upstreamModelRanking"`
+	ActiveMemberCount  int64             `json:"activeMemberCount"`
+	ModelCount         int64             `json:"modelCount"`
+	ProviderCount      int64             `json:"providerCount"`
+	TotalTokens        int64             `json:"totalTokens"`
+	TokenRanking       []TokenRank       `json:"tokenRanking"`
+	ClientModelRanking []ClientModelRank `json:"clientModelRanking"`
+	ProviderRanking    []ProviderRank    `json:"providerRanking"`
 }
 type QueryStore interface {
 	Query(context.Context, admin.Identity, Filter) (Page, error)
@@ -76,7 +74,7 @@ type QueryService struct{ store QueryStore }
 
 func NewQuery(store QueryStore) *QueryService { return &QueryService{store} }
 func (s *QueryService) Query(ctx context.Context, a admin.Identity, f Filter) (Page, error) {
-	if a.ID <= 0 || a.OrganizationID <= 0 {
+	if a.ID <= 0 {
 		return Page{}, appsec.ErrUnauthenticated
 	}
 	if f.After < 0 || f.Limit < 1 || f.Limit > 100 || f.From.IsZero() || !f.To.After(f.From) || f.To.Sub(f.From) > 366*24*time.Hour {
@@ -91,7 +89,7 @@ func (s *QueryService) Query(ctx context.Context, a admin.Identity, f Filter) (P
 }
 
 func (s *QueryService) Dashboard(ctx context.Context, a admin.Identity, from, to time.Time) (Dashboard, error) {
-	if a.ID <= 0 || a.OrganizationID <= 0 {
+	if a.ID <= 0 {
 		return Dashboard{}, appsec.ErrUnauthenticated
 	}
 	if from.IsZero() || !to.After(from) || to.Sub(from) > 366*24*time.Hour {

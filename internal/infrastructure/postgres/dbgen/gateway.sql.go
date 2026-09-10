@@ -16,17 +16,16 @@ UPDATE provider_credential
 SET runtime_status='BLOCKED',blocked_reason=$1,blocked_at=$2,
     last_error_at=$2,last_http_status=$3,
     last_error_code=$4,updated_by='system',updated_at=$2
-WHERE organization_id=$5 AND id=$6
+WHERE id=$5
   AND NOT is_deleted AND status='ACTIVE' AND runtime_status='HEALTHY'
 `
 
 type BlockGatewayResourceParams struct {
-	BlockedReason  *string
-	BlockedAt      pgtype.Timestamptz
-	HttpStatus     *int32
-	ErrorCode      *string
-	OrganizationID int64
-	ResourceID     int64
+	BlockedReason *string
+	BlockedAt     pgtype.Timestamptz
+	HttpStatus    *int32
+	ErrorCode     *string
+	ResourceID    int64
 }
 
 func (q *Queries) BlockGatewayResource(ctx context.Context, arg BlockGatewayResourceParams) (int64, error) {
@@ -35,7 +34,6 @@ func (q *Queries) BlockGatewayResource(ctx context.Context, arg BlockGatewayReso
 		arg.BlockedAt,
 		arg.HttpStatus,
 		arg.ErrorCode,
-		arg.OrganizationID,
 		arg.ResourceID,
 	)
 	if err != nil {
@@ -53,17 +51,15 @@ FROM provider_model pm
 JOIN provider p ON p.id=pm.provider_id
 JOIN provider_endpoint pe ON pe.provider_id=p.id AND pe.protocol_type IN ('OPENAI','ANTHROPIC')
 JOIN provider_credential r ON r.provider_id=p.id
-    AND r.organization_id=$1
     AND NOT r.is_deleted AND r.status='ACTIVE' AND r.runtime_status='HEALTHY'
-WHERE pm.model_id=$2 AND NOT pm.is_deleted
+WHERE pm.model_id=$1 AND NOT pm.is_deleted
   AND NOT p.is_deleted AND p.status='ACTIVE'
 ORDER BY pm.priority,
-    CASE WHEN pe.protocol_type=$3 THEN 0 ELSE 1 END,
+    CASE WHEN pe.protocol_type=$2 THEN 0 ELSE 1 END,
     pm.id,r.id
 `
 
 type GatewayCandidatesParams struct {
-	OrganizationID    int64
 	ModelID           int64
 	PreferredProtocol string
 }
@@ -88,7 +84,7 @@ type GatewayCandidatesRow struct {
 }
 
 func (q *Queries) GatewayCandidates(ctx context.Context, arg GatewayCandidatesParams) ([]GatewayCandidatesRow, error) {
-	rows, err := q.db.Query(ctx, gatewayCandidates, arg.OrganizationID, arg.ModelID, arg.PreferredProtocol)
+	rows, err := q.db.Query(ctx, gatewayCandidates, arg.ModelID, arg.PreferredProtocol)
 	if err != nil {
 		return nil, err
 	}
@@ -126,21 +122,19 @@ func (q *Queries) GatewayCandidates(ctx context.Context, arg GatewayCandidatesPa
 
 const gatewayIdentityActive = `-- name: GatewayIdentityActive :one
 SELECT EXISTS (SELECT 1 FROM principal_access_key k
-JOIN principal p ON p.id=k.principal_id AND p.organization_id=k.organization_id
-JOIN organization o ON o.id=k.organization_id
-WHERE k.id=$1 AND k.organization_id=$2 AND k.principal_id=$3
+JOIN principal p ON p.id=k.principal_id
+WHERE k.id=$1 AND k.principal_id=$2
 AND NOT k.is_deleted AND k.status='ACTIVE' AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>now())
-AND NOT p.is_deleted AND p.status='ACTIVE' AND p.principal_type='MEMBER' AND NOT o.is_deleted AND o.status='ACTIVE')
+AND NOT p.is_deleted AND p.status='ACTIVE' AND p.principal_type='MEMBER')
 `
 
 type GatewayIdentityActiveParams struct {
-	AccessKeyID    int64
-	OrganizationID int64
-	PrincipalID    int64
+	AccessKeyID int64
+	PrincipalID int64
 }
 
 func (q *Queries) GatewayIdentityActive(ctx context.Context, arg GatewayIdentityActiveParams) (bool, error) {
-	row := q.db.QueryRow(ctx, gatewayIdentityActive, arg.AccessKeyID, arg.OrganizationID, arg.PrincipalID)
+	row := q.db.QueryRow(ctx, gatewayIdentityActive, arg.AccessKeyID, arg.PrincipalID)
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
@@ -186,18 +180,13 @@ JOIN provider_model pm ON pm.model_id=m.id AND NOT pm.is_deleted
 JOIN provider p ON p.id=pm.provider_id AND NOT p.is_deleted AND p.status='ACTIVE'
 JOIN provider_endpoint pe ON pe.provider_id=p.id AND pe.protocol_type IN ('OPENAI','ANTHROPIC')
 WHERE NOT m.is_deleted AND m.status='ACTIVE'
-AND EXISTS(SELECT 1 FROM provider_credential r WHERE r.provider_id=p.id AND r.organization_id=$1 AND NOT r.is_deleted AND r.status='ACTIVE' AND r.runtime_status='HEALTHY')
-AND EXISTS(SELECT 1 FROM principal_group_membership pg JOIN principal_group g ON g.id=pg.group_id AND g.organization_id=pg.organization_id
-JOIN principal_group_model_permission gp ON gp.group_id=g.id AND gp.organization_id=g.organization_id
-WHERE pg.principal_id=$2 AND pg.organization_id=$1
+AND EXISTS(SELECT 1 FROM provider_credential r WHERE r.provider_id=p.id AND NOT r.is_deleted AND r.status='ACTIVE' AND r.runtime_status='HEALTHY')
+AND EXISTS(SELECT 1 FROM principal_group_membership pg JOIN principal_group g ON g.id=pg.group_id
+JOIN principal_group_model_permission gp ON gp.group_id=g.id
+WHERE pg.principal_id=$1
 AND NOT pg.is_deleted AND NOT g.is_deleted AND g.status='ACTIVE' AND NOT gp.is_deleted AND gp.model_id=m.id)
 ORDER BY m.model_code,CASE pe.protocol_type WHEN 'OPENAI' THEN 0 ELSE 1 END,pm.priority,pm.id
 `
-
-type OpenAIModelsParams struct {
-	OrganizationID int64
-	PrincipalID    int64
-}
 
 type OpenAIModelsRow struct {
 	ModelCode    string
@@ -205,8 +194,8 @@ type OpenAIModelsRow struct {
 	ProviderCode string
 }
 
-func (q *Queries) OpenAIModels(ctx context.Context, arg OpenAIModelsParams) ([]OpenAIModelsRow, error) {
-	rows, err := q.db.Query(ctx, openAIModels, arg.OrganizationID, arg.PrincipalID)
+func (q *Queries) OpenAIModels(ctx context.Context, principalID int64) ([]OpenAIModelsRow, error) {
+	rows, err := q.db.Query(ctx, openAIModels, principalID)
 	if err != nil {
 		return nil, err
 	}

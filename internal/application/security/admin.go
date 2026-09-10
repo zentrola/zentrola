@@ -121,7 +121,7 @@ func (s *AdminService) ChangePassword(ctx context.Context, actor admin.Identity,
 		}
 		return err
 	}
-	if verified.ID != actor.ID || verified.OrganizationID != actor.OrganizationID || verified.CredentialVersion != actor.CredentialVersion {
+	if verified.ID != actor.ID || verified.CredentialVersion != actor.CredentialVersion {
 		return ErrUnauthenticated
 	}
 	hash, err := s.passwords.Hash(next)
@@ -136,7 +136,7 @@ func (s *AdminService) Authenticate(ctx context.Context, token string) (admin.Id
 	if err != nil {
 		return admin.Identity{}, ErrUnauthenticated
 	}
-	identity, err := s.store.GetActive(ctx, claims.OrganizationID, claims.ID)
+	identity, err := s.store.GetActive(ctx, claims.ID)
 	if err != nil {
 		return admin.Identity{}, err
 	}

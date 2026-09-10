@@ -13,39 +13,37 @@ import (
 )
 
 const appendSecurityOperation = `-- name: AppendSecurityOperation :exec
-INSERT INTO operation_log (id,organization_id,operator_type,operator_id,operator_name,module,operation_type,target_type,target_id,target_name,
+INSERT INTO operation_log (id,operator_type,operator_id,operator_name,module,operation_type,target_type,target_id,target_name,
 request_id,request_method,request_path,ip_address,user_agent,result,error_code,before_data,after_data,remark,created_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
 `
 
 type AppendSecurityOperationParams struct {
-	ID             int64
-	OrganizationID int64
-	OperatorType   string
-	OperatorID     *int64
-	OperatorName   string
-	Module         string
-	OperationType  string
-	TargetType     string
-	TargetID       *int64
-	TargetName     *string
-	RequestID      *string
-	RequestMethod  *string
-	RequestPath    *string
-	IpAddress      *netip.Addr
-	UserAgent      *string
-	Result         string
-	ErrorCode      *string
-	BeforeData     []byte
-	AfterData      []byte
-	Remark         *string
-	CreatedAt      pgtype.Timestamptz
+	ID            int64
+	OperatorType  string
+	OperatorID    *int64
+	OperatorName  string
+	Module        string
+	OperationType string
+	TargetType    string
+	TargetID      *int64
+	TargetName    *string
+	RequestID     *string
+	RequestMethod *string
+	RequestPath   *string
+	IpAddress     *netip.Addr
+	UserAgent     *string
+	Result        string
+	ErrorCode     *string
+	BeforeData    []byte
+	AfterData     []byte
+	Remark        *string
+	CreatedAt     pgtype.Timestamptz
 }
 
 func (q *Queries) AppendSecurityOperation(ctx context.Context, arg AppendSecurityOperationParams) error {
 	_, err := q.db.Exec(ctx, appendSecurityOperation,
 		arg.ID,
-		arg.OrganizationID,
 		arg.OperatorType,
 		arg.OperatorID,
 		arg.OperatorName,
@@ -70,13 +68,11 @@ func (q *Queries) AppendSecurityOperation(ctx context.Context, arg AppendSecurit
 }
 
 const authenticateAccessKey = `-- name: AuthenticateAccessKey :one
-SELECT k.id,k.organization_id,k.principal_id FROM principal_access_key k
-JOIN principal p ON p.id=k.principal_id AND p.organization_id=k.organization_id
-JOIN organization o ON o.id=k.organization_id
+SELECT k.id,k.principal_id FROM principal_access_key k
+JOIN principal p ON p.id=k.principal_id
 WHERE k.key_hash=$1 AND k.is_deleted=false AND k.status='ACTIVE' AND k.revoked_at IS NULL
 AND (k.expires_at IS NULL OR k.expires_at > $2::timestamptz)
 AND p.is_deleted=false AND p.status='ACTIVE' AND p.principal_type='MEMBER'
-AND o.is_deleted=false AND o.status='ACTIVE'
 `
 
 type AuthenticateAccessKeyParams struct {
@@ -85,39 +81,36 @@ type AuthenticateAccessKeyParams struct {
 }
 
 type AuthenticateAccessKeyRow struct {
-	ID             int64
-	OrganizationID int64
-	PrincipalID    int64
+	ID          int64
+	PrincipalID int64
 }
 
 func (q *Queries) AuthenticateAccessKey(ctx context.Context, arg AuthenticateAccessKeyParams) (AuthenticateAccessKeyRow, error) {
 	row := q.db.QueryRow(ctx, authenticateAccessKey, arg.KeyHash, arg.Now)
 	var i AuthenticateAccessKeyRow
-	err := row.Scan(&i.ID, &i.OrganizationID, &i.PrincipalID)
+	err := row.Scan(&i.ID, &i.PrincipalID)
 	return i, err
 }
 
 const createAccessKey = `-- name: CreateAccessKey :exec
-INSERT INTO principal_access_key (id,organization_id,principal_id,key_hash,masked_key,name,status,expires_at,created_by,updated_by,created_at,updated_at)
-VALUES ($1,$2,$3,$4,$5,$6,'ACTIVE',$7,$8,$8,$9,$9)
+INSERT INTO principal_access_key (id,principal_id,key_hash,masked_key,name,status,expires_at,created_by,updated_by,created_at,updated_at)
+VALUES ($1,$2,$3,$4,$5,'ACTIVE',$6,$7,$7,$8,$8)
 `
 
 type CreateAccessKeyParams struct {
-	ID             int64
-	OrganizationID int64
-	PrincipalID    int64
-	KeyHash        []byte
-	MaskedKey      string
-	Name           string
-	ExpiresAt      pgtype.Timestamptz
-	CreatedBy      string
-	CreatedAt      pgtype.Timestamptz
+	ID          int64
+	PrincipalID int64
+	KeyHash     []byte
+	MaskedKey   string
+	Name        string
+	ExpiresAt   pgtype.Timestamptz
+	CreatedBy   string
+	CreatedAt   pgtype.Timestamptz
 }
 
 func (q *Queries) CreateAccessKey(ctx context.Context, arg CreateAccessKeyParams) error {
 	_, err := q.db.Exec(ctx, createAccessKey,
 		arg.ID,
-		arg.OrganizationID,
 		arg.PrincipalID,
 		arg.KeyHash,
 		arg.MaskedKey,
@@ -130,22 +123,20 @@ func (q *Queries) CreateAccessKey(ctx context.Context, arg CreateAccessKeyParams
 }
 
 const createInitialAdmin = `-- name: CreateInitialAdmin :exec
-INSERT INTO admin_user (id,organization_id,username,password_hash,display_name,status,created_by,updated_by,created_at,updated_at)
-VALUES ($1,$2,$3,$4,$3,'ACTIVE','system','system',$5,$5)
+INSERT INTO admin_user (id,username,password_hash,display_name,status,created_by,updated_by,created_at,updated_at)
+VALUES ($1,$2,$3,$2,'ACTIVE','system','system',$4,$4)
 `
 
 type CreateInitialAdminParams struct {
-	ID             int64
-	OrganizationID int64
-	Username       string
-	PasswordHash   string
-	CreatedAt      pgtype.Timestamptz
+	ID           int64
+	Username     string
+	PasswordHash string
+	CreatedAt    pgtype.Timestamptz
 }
 
 func (q *Queries) CreateInitialAdmin(ctx context.Context, arg CreateInitialAdminParams) error {
 	_, err := q.db.Exec(ctx, createInitialAdmin,
 		arg.ID,
-		arg.OrganizationID,
 		arg.Username,
 		arg.PasswordHash,
 		arg.CreatedAt,
@@ -168,30 +159,22 @@ func (q *Queries) DisableUnrecoverableResource(ctx context.Context, arg DisableU
 }
 
 const getActiveAdmin = `-- name: GetActiveAdmin :one
-SELECT a.id,a.organization_id,a.username,a.display_name,a.credential_version FROM admin_user a JOIN organization o ON o.id=a.organization_id
-WHERE a.organization_id=$1 AND a.id=$2 AND a.is_deleted=false AND a.status='ACTIVE'
-AND o.is_deleted=false AND o.status='ACTIVE'
+SELECT id,username,display_name,credential_version FROM admin_user
+WHERE id=$1 AND is_deleted=false AND status='ACTIVE'
 `
-
-type GetActiveAdminParams struct {
-	OrganizationID int64
-	ID             int64
-}
 
 type GetActiveAdminRow struct {
 	ID                int64
-	OrganizationID    int64
 	Username          string
 	DisplayName       string
 	CredentialVersion int64
 }
 
-func (q *Queries) GetActiveAdmin(ctx context.Context, arg GetActiveAdminParams) (GetActiveAdminRow, error) {
-	row := q.db.QueryRow(ctx, getActiveAdmin, arg.OrganizationID, arg.ID)
+func (q *Queries) GetActiveAdmin(ctx context.Context, id int64) (GetActiveAdminRow, error) {
+	row := q.db.QueryRow(ctx, getActiveAdmin, id)
 	var i GetActiveAdminRow
 	err := row.Scan(
 		&i.ID,
-		&i.OrganizationID,
 		&i.Username,
 		&i.DisplayName,
 		&i.CredentialVersion,
@@ -199,62 +182,19 @@ func (q *Queries) GetActiveAdmin(ctx context.Context, arg GetActiveAdminParams) 
 	return i, err
 }
 
-const getActiveOrganization = `-- name: GetActiveOrganization :one
-SELECT id, is_deleted, status, organization_code, organization_name, remark, created_by, updated_by, created_at, updated_at FROM organization WHERE is_deleted=false AND status='ACTIVE'
-`
-
-func (q *Queries) GetActiveOrganization(ctx context.Context) (Organization, error) {
-	row := q.db.QueryRow(ctx, getActiveOrganization)
-	var i Organization
-	err := row.Scan(
-		&i.ID,
-		&i.IsDeleted,
-		&i.Status,
-		&i.OrganizationCode,
-		&i.OrganizationName,
-		&i.Remark,
-		&i.CreatedBy,
-		&i.UpdatedBy,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
 const getAdminForLogin = `-- name: GetAdminForLogin :one
-SELECT a.id, a.is_deleted, a.status, a.organization_id, a.username, a.password_hash, a.display_name, a.failed_login_count, a.locked_until, a.last_login_at, a.credential_version, a.created_by, a.updated_by, a.created_at, a.updated_at, (o.status='ACTIVE') AS organization_active
-FROM admin_user a JOIN organization o ON o.id=a.organization_id
-WHERE a.username=$1 AND a.is_deleted=false AND o.is_deleted=false
-FOR UPDATE OF a
+SELECT id, is_deleted, status, username, password_hash, display_name, failed_login_count, locked_until, last_login_at, credential_version, created_by, updated_by, created_at, updated_at FROM admin_user
+WHERE username=$1 AND is_deleted=false
+FOR UPDATE
 `
 
-type GetAdminForLoginRow struct {
-	ID                 int64
-	IsDeleted          bool
-	Status             string
-	OrganizationID     int64
-	Username           string
-	PasswordHash       string
-	DisplayName        string
-	FailedLoginCount   int64
-	LockedUntil        pgtype.Timestamptz
-	LastLoginAt        pgtype.Timestamptz
-	CredentialVersion  int64
-	CreatedBy          string
-	UpdatedBy          string
-	CreatedAt          pgtype.Timestamptz
-	UpdatedAt          pgtype.Timestamptz
-	OrganizationActive bool
-}
-
-func (q *Queries) GetAdminForLogin(ctx context.Context, username string) (GetAdminForLoginRow, error) {
+func (q *Queries) GetAdminForLogin(ctx context.Context, username string) (AdminUser, error) {
 	row := q.db.QueryRow(ctx, getAdminForLogin, username)
-	var i GetAdminForLoginRow
+	var i AdminUser
 	err := row.Scan(
 		&i.ID,
 		&i.IsDeleted,
 		&i.Status,
-		&i.OrganizationID,
 		&i.Username,
 		&i.PasswordHash,
 		&i.DisplayName,
@@ -266,28 +206,21 @@ func (q *Queries) GetAdminForLogin(ctx context.Context, username string) (GetAdm
 		&i.UpdatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.OrganizationActive,
 	)
 	return i, err
 }
 
 const getKeyForRevoke = `-- name: GetKeyForRevoke :one
-SELECT id, is_deleted, status, organization_id, principal_id, key_hash, masked_key, name, expires_at, last_used_at, revoked_at, created_by, updated_by, created_at, updated_at FROM principal_access_key WHERE organization_id=$1 AND id=$2 AND is_deleted=false FOR UPDATE
+SELECT id, is_deleted, status, principal_id, key_hash, masked_key, name, expires_at, last_used_at, revoked_at, created_by, updated_by, created_at, updated_at FROM principal_access_key WHERE id=$1 AND is_deleted=false FOR UPDATE
 `
 
-type GetKeyForRevokeParams struct {
-	OrganizationID int64
-	ID             int64
-}
-
-func (q *Queries) GetKeyForRevoke(ctx context.Context, arg GetKeyForRevokeParams) (PrincipalAccessKey, error) {
-	row := q.db.QueryRow(ctx, getKeyForRevoke, arg.OrganizationID, arg.ID)
+func (q *Queries) GetKeyForRevoke(ctx context.Context, id int64) (PrincipalAccessKey, error) {
+	row := q.db.QueryRow(ctx, getKeyForRevoke, id)
 	var i PrincipalAccessKey
 	err := row.Scan(
 		&i.ID,
 		&i.IsDeleted,
 		&i.Status,
-		&i.OrganizationID,
 		&i.PrincipalID,
 		&i.KeyHash,
 		&i.MaskedKey,
@@ -304,24 +237,17 @@ func (q *Queries) GetKeyForRevoke(ctx context.Context, arg GetKeyForRevokeParams
 }
 
 const getMemberForKey = `-- name: GetMemberForKey :one
-SELECT p.id, p.is_deleted, p.status, p.organization_id, p.principal_type, p.name, p.remark, p.created_by, p.updated_by, p.created_at, p.updated_at FROM principal p JOIN organization o ON o.id=p.organization_id
-WHERE p.organization_id=$1 AND p.id=$2 AND p.principal_type='MEMBER' AND p.is_deleted=false
-AND o.status='ACTIVE' AND o.is_deleted=false FOR UPDATE OF p
+SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at FROM principal
+WHERE id=$1 AND principal_type='MEMBER' AND is_deleted=false FOR UPDATE
 `
 
-type GetMemberForKeyParams struct {
-	OrganizationID int64
-	ID             int64
-}
-
-func (q *Queries) GetMemberForKey(ctx context.Context, arg GetMemberForKeyParams) (Principal, error) {
-	row := q.db.QueryRow(ctx, getMemberForKey, arg.OrganizationID, arg.ID)
+func (q *Queries) GetMemberForKey(ctx context.Context, id int64) (Principal, error) {
+	row := q.db.QueryRow(ctx, getMemberForKey, id)
 	var i Principal
 	err := row.Scan(
 		&i.ID,
 		&i.IsDeleted,
 		&i.Status,
-		&i.OrganizationID,
 		&i.PrincipalType,
 		&i.Name,
 		&i.Remark,
@@ -334,8 +260,7 @@ func (q *Queries) GetMemberForKey(ctx context.Context, arg GetMemberForKeyParams
 }
 
 const hasActiveAdmin = `-- name: HasActiveAdmin :one
-SELECT EXISTS (SELECT 1 FROM admin_user a JOIN organization o ON o.id=a.organization_id
-WHERE a.is_deleted=false AND a.status='ACTIVE' AND o.is_deleted=false AND o.status='ACTIVE')
+SELECT EXISTS (SELECT 1 FROM admin_user WHERE is_deleted=false AND status='ACTIVE')
 `
 
 func (q *Queries) HasActiveAdmin(ctx context.Context) (bool, error) {
@@ -357,7 +282,7 @@ func (q *Queries) HasAnyAdmin(ctx context.Context) (bool, error) {
 }
 
 const listResourcesForCredentialCheck = `-- name: ListResourcesForCredentialCheck :many
-SELECT id, is_deleted, status, organization_id, provider_id, resource_name, credential_ciphertext, credential_nonce, key_version, created_by, updated_by, created_at, updated_at, runtime_status, blocked_reason, blocked_at, last_error_at, last_http_status, last_error_code FROM provider_credential WHERE is_deleted=false AND status='ACTIVE' ORDER BY id FOR UPDATE
+SELECT id, is_deleted, status, provider_id, resource_name, credential_ciphertext, credential_nonce, key_version, created_by, updated_by, created_at, updated_at, runtime_status, blocked_reason, blocked_at, last_error_at, last_http_status, last_error_code FROM provider_credential WHERE is_deleted=false AND status='ACTIVE' ORDER BY id FOR UPDATE
 `
 
 func (q *Queries) ListResourcesForCredentialCheck(ctx context.Context) ([]ProviderCredential, error) {
@@ -373,7 +298,6 @@ func (q *Queries) ListResourcesForCredentialCheck(ctx context.Context) ([]Provid
 			&i.ID,
 			&i.IsDeleted,
 			&i.Status,
-			&i.OrganizationID,
 			&i.ProviderID,
 			&i.ResourceName,
 			&i.CredentialCiphertext,
@@ -401,22 +325,20 @@ func (q *Queries) ListResourcesForCredentialCheck(ctx context.Context) ([]Provid
 }
 
 const resetAdminPassword = `-- name: ResetAdminPassword :execrows
-UPDATE admin_user SET password_hash=$3,failed_login_count=0,locked_until=NULL,
-credential_version=credential_version+1,updated_by=$5,updated_at=$4
-WHERE organization_id=$1 AND id=$2 AND is_deleted=false AND status='ACTIVE'
+UPDATE admin_user SET password_hash=$2,failed_login_count=0,locked_until=NULL,
+credential_version=credential_version+1,updated_by=$4,updated_at=$3
+WHERE id=$1 AND is_deleted=false AND status='ACTIVE'
 `
 
 type ResetAdminPasswordParams struct {
-	OrganizationID int64
-	ID             int64
-	PasswordHash   string
-	UpdatedAt      pgtype.Timestamptz
-	UpdatedBy      string
+	ID           int64
+	PasswordHash string
+	UpdatedAt    pgtype.Timestamptz
+	UpdatedBy    string
 }
 
 func (q *Queries) ResetAdminPassword(ctx context.Context, arg ResetAdminPasswordParams) (int64, error) {
 	result, err := q.db.Exec(ctx, resetAdminPassword,
-		arg.OrganizationID,
 		arg.ID,
 		arg.PasswordHash,
 		arg.UpdatedAt,
@@ -429,34 +351,27 @@ func (q *Queries) ResetAdminPassword(ctx context.Context, arg ResetAdminPassword
 }
 
 const revokeAccessKey = `-- name: RevokeAccessKey :exec
-UPDATE principal_access_key SET status='REVOKED',revoked_at=$3,updated_by=$4,updated_at=$3
-WHERE organization_id=$1 AND id=$2 AND is_deleted=false
+UPDATE principal_access_key SET status='REVOKED',revoked_at=$2,updated_by=$3,updated_at=$2
+WHERE id=$1 AND is_deleted=false
 `
 
 type RevokeAccessKeyParams struct {
-	OrganizationID int64
-	ID             int64
-	RevokedAt      pgtype.Timestamptz
-	UpdatedBy      string
+	ID        int64
+	RevokedAt pgtype.Timestamptz
+	UpdatedBy string
 }
 
 func (q *Queries) RevokeAccessKey(ctx context.Context, arg RevokeAccessKeyParams) error {
-	_, err := q.db.Exec(ctx, revokeAccessKey,
-		arg.OrganizationID,
-		arg.ID,
-		arg.RevokedAt,
-		arg.UpdatedBy,
-	)
+	_, err := q.db.Exec(ctx, revokeAccessKey, arg.ID, arg.RevokedAt, arg.UpdatedBy)
 	return err
 }
 
 const saveAdminLoginState = `-- name: SaveAdminLoginState :exec
-UPDATE admin_user SET failed_login_count=$3,locked_until=$4,last_login_at=$5,updated_by=$6,updated_at=$7
-WHERE organization_id=$1 AND id=$2 AND is_deleted=false
+UPDATE admin_user SET failed_login_count=$2,locked_until=$3,last_login_at=$4,updated_by=$5,updated_at=$6
+WHERE id=$1 AND is_deleted=false
 `
 
 type SaveAdminLoginStateParams struct {
-	OrganizationID   int64
 	ID               int64
 	FailedLoginCount int64
 	LockedUntil      pgtype.Timestamptz
@@ -467,7 +382,6 @@ type SaveAdminLoginStateParams struct {
 
 func (q *Queries) SaveAdminLoginState(ctx context.Context, arg SaveAdminLoginStateParams) error {
 	_, err := q.db.Exec(ctx, saveAdminLoginState,
-		arg.OrganizationID,
 		arg.ID,
 		arg.FailedLoginCount,
 		arg.LockedUntil,

@@ -41,7 +41,7 @@ func (s *GatewayStore) ResolveCandidates(ctx context.Context, identity appsec.Pr
 	}
 	defer tx.Rollback(context.Background())
 	q := dbgen.New(tx)
-	active, err := q.GatewayIdentityActive(ctx, dbgen.GatewayIdentityActiveParams{AccessKeyID: identity.AccessKeyID, OrganizationID: identity.OrganizationID, PrincipalID: identity.ID})
+	active, err := q.GatewayIdentityActive(ctx, dbgen.GatewayIdentityActiveParams{AccessKeyID: identity.AccessKeyID, PrincipalID: identity.ID})
 	if err != nil {
 		return nil, gw.ErrUnavailable
 	}
@@ -58,7 +58,7 @@ func (s *GatewayStore) ResolveCandidates(ctx context.Context, identity appsec.Pr
 	if m.Status != "ACTIVE" {
 		return nil, gw.ErrModelDisabled
 	}
-	allowed, err := q.HasGroupModelPermission(ctx, dbgen.HasGroupModelPermissionParams{OrganizationID: identity.OrganizationID, PrincipalID: identity.ID, ModelID: m.ID})
+	allowed, err := q.HasGroupModelPermission(ctx, dbgen.HasGroupModelPermissionParams{PrincipalID: identity.ID, ModelID: m.ID})
 	if err != nil {
 		return nil, gw.ErrUnavailable
 	}
@@ -66,7 +66,7 @@ func (s *GatewayStore) ResolveCandidates(ctx context.Context, identity appsec.Pr
 		return nil, gw.ErrPermission
 	}
 	rows, err := q.GatewayCandidates(ctx, dbgen.GatewayCandidatesParams{
-		OrganizationID: identity.OrganizationID, ModelID: m.ID, PreferredProtocol: preferredProtocol,
+		ModelID: m.ID, PreferredProtocol: preferredProtocol,
 	})
 	if err != nil {
 		return nil, gw.ErrUnavailable
@@ -122,7 +122,7 @@ func gatewayEndpointProtocols(protocol string) []string {
 }
 
 func (s *GatewayStore) BlockResource(ctx context.Context, identity appsec.PrincipalIdentity, resourceID int64, block gw.ResourceBlock) error {
-	if identity.OrganizationID <= 0 || resourceID <= 0 || block.Reason == "" || block.ErrorCode == "" {
+	if identity.ID <= 0 || resourceID <= 0 || block.Reason == "" || block.ErrorCode == "" {
 		return gw.ErrInvalid
 	}
 	now := time.Now().UTC().Truncate(time.Microsecond)
@@ -133,7 +133,7 @@ func (s *GatewayStore) BlockResource(ctx context.Context, identity appsec.Princi
 	}
 	reason, code := block.Reason, block.ErrorCode
 	_, err := dbgen.New(s.pool).BlockGatewayResource(ctx, dbgen.BlockGatewayResourceParams{
-		OrganizationID: identity.OrganizationID, ResourceID: resourceID,
+		ResourceID:    resourceID,
 		BlockedReason: &reason, BlockedAt: pgtype.Timestamptz{Time: now, Valid: true},
 		HttpStatus: httpStatus, ErrorCode: &code,
 	})
@@ -150,14 +150,14 @@ func (s *GatewayStore) Models(ctx context.Context, identity appsec.PrincipalIden
 	}
 	defer tx.Rollback(context.Background())
 	q := dbgen.New(tx)
-	active, err := q.GatewayIdentityActive(ctx, dbgen.GatewayIdentityActiveParams{AccessKeyID: identity.AccessKeyID, OrganizationID: identity.OrganizationID, PrincipalID: identity.ID})
+	active, err := q.GatewayIdentityActive(ctx, dbgen.GatewayIdentityActiveParams{AccessKeyID: identity.AccessKeyID, PrincipalID: identity.ID})
 	if err != nil {
 		return nil, gw.ErrUnavailable
 	}
 	if !active {
 		return nil, gw.ErrAuthentication
 	}
-	rows, err := q.OpenAIModels(ctx, dbgen.OpenAIModelsParams{OrganizationID: identity.OrganizationID, PrincipalID: identity.ID})
+	rows, err := q.OpenAIModels(ctx, identity.ID)
 	if err != nil {
 		return nil, gw.ErrUnavailable
 	}

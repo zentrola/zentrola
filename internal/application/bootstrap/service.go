@@ -1,18 +1,5 @@
-// Package bootstrap 编排首次数据库基础组织初始化，不承担服务商、管理员认证或 Credential 初始化。
+// Package bootstrap 保存管理员可显式安装的官方服务商模板。
 package bootstrap
-
-import (
-	"context"
-	"errors"
-	"time"
-
-	"github.com/zentrola/zentrola/internal/domain/shared"
-)
-
-type Seed struct {
-	OrganizationID int64
-	CreatedAt      time.Time
-}
 
 type Provider struct {
 	Code      string
@@ -111,41 +98,4 @@ func OfficialProviderTemplates() []Provider {
 		result[index].Endpoints = append([]Endpoint(nil), template.Endpoints...)
 	}
 	return result
-}
-
-type Store interface {
-	// InitializeOnce 必须在同一数据库事务内检查并写入，不能更新已有业务数据。
-	InitializeOnce(context.Context, Seed) error
-	Initialized(context.Context) (bool, error)
-}
-
-type Service struct {
-	store Store
-	ids   shared.IDGenerator
-}
-
-func New(store Store, ids shared.IDGenerator) *Service {
-	return &Service{store: store, ids: ids}
-}
-
-func (s *Service) Initialize(ctx context.Context) error {
-	organizationID, err := s.ids.NextID(ctx)
-	if err != nil {
-		return errors.New("cannot generate bootstrap organization ID")
-	}
-	return s.store.InitializeOnce(ctx, Seed{
-		OrganizationID: organizationID,
-		CreatedAt:      time.Now().UTC(),
-	})
-}
-
-func (s *Service) Check(ctx context.Context) error {
-	initialized, err := s.store.Initialized(ctx)
-	if err != nil {
-		return err
-	}
-	if !initialized {
-		return errors.New("bootstrap not initialized")
-	}
-	return nil
 }

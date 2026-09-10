@@ -4,7 +4,6 @@ import "time"
 
 // Event 不持有 Prompt、响应文本、Credential 或数据库连接。
 type Event struct {
-	OrganizationID         int64
 	RequestID              string
 	TraceID, SpanID        string
 	ClientProtocol         string

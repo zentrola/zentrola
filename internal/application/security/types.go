@@ -26,7 +26,7 @@ func (e *AccountLockedError) Error() string { return "account temporarily locked
 func (e *AccountLockedError) Unwrap() error { return ErrUnauthenticated }
 
 type RequestMeta struct{ RequestID, Method, Path, IP, UserAgent string }
-type PrincipalIdentity struct{ ID, OrganizationID, AccessKeyID int64 }
+type PrincipalIdentity struct{ ID, AccessKeyID int64 }
 
 type Passwords interface {
 	Hash(string) (string, error)
@@ -40,7 +40,7 @@ type Tokens interface {
 type AdminStore interface {
 	ChangePassword(context.Context, admin.Identity, string, RequestMeta) error
 	Attempt(context.Context, string, RequestMeta, func(*admin.Account) admin.LoginDecision) (admin.Identity, error)
-	GetActive(context.Context, int64, int64) (admin.Identity, error)
+	GetActive(context.Context, int64) (admin.Identity, error)
 	EnsureInitial(context.Context, string, func() (string, error)) error
 	CreateFirstAdmin(context.Context, string, func() (string, error), RequestMeta) error
 	HasAnyAdmin(context.Context) (bool, error)
@@ -48,11 +48,11 @@ type AdminStore interface {
 }
 
 type KeyRecord struct {
-	ID, OrganizationID, PrincipalID int64
-	Hash                            []byte
-	MaskedKey, Name                 string
-	ExpiresAt                       *time.Time
-	CreatedAt                       time.Time
+	ID, PrincipalID int64
+	Hash            []byte
+	MaskedKey, Name string
+	ExpiresAt       *time.Time
+	CreatedAt       time.Time
 }
 type KeyStore interface {
 	Create(context.Context, admin.Identity, KeyRecord, RequestMeta) error

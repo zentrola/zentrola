@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zentrola/zentrola/internal/application/bootstrap"
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	"github.com/zentrola/zentrola/internal/domain/admin"
 	"github.com/zentrola/zentrola/internal/infrastructure/idgen"
@@ -18,9 +17,6 @@ import (
 func TestAdminPasswordChangeIntegration(t *testing.T) {
 	ctx, pool, _ := integrationDatabase(t)
 	ids := idgen.New(pool)
-	if err := bootstrap.New(NewBootstrapStore(pool), ids).Initialize(ctx); err != nil {
-		t.Fatal(err)
-	}
 	passwords, err := cryptosec.NewPasswords(4)
 	if err != nil {
 		t.Fatal(err)

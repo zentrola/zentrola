@@ -16,7 +16,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zentrola/zentrola/internal/application/bootstrap"
 	"github.com/zentrola/zentrola/internal/application/health"
 	mgmt "github.com/zentrola/zentrola/internal/application/management"
 	appsec "github.com/zentrola/zentrola/internal/application/security"
@@ -67,9 +66,6 @@ func stage3Data[T any](t *testing.T, rec *httptest.ResponseRecorder) T {
 func TestStage3Integration(t *testing.T) {
 	ctx, pool, _ := integrationDatabase(t)
 	ids := idgen.New(pool)
-	if err := bootstrap.New(NewBootstrapStore(pool), ids).Initialize(ctx); err != nil {
-		t.Fatal(err)
-	}
 	securityStore := NewSecurityStore(pool, ids)
 	passwords, err := cryptosec.NewPasswords(4)
 	if err != nil {
@@ -149,7 +145,7 @@ func TestStage3Integration(t *testing.T) {
 		Items []mgmt.Provider `json:"items"`
 	}](t, request("GET", "/api/v1/providers", nil, 200)).Items
 	if len(models) != 0 || len(providers) != 0 {
-		t.Fatal("bootstrap must not create models or providers")
+		t.Fatal("startup must not create models or providers")
 	}
 	model := stage3Data[mgmt.Model](t, request("POST", "/api/v1/models", mgmt.ModelInput{
 		Code: "management-base-model", Name: "管理端基础模型", InputModalities: []string{"TEXT"}, OutputModalities: []string{"TEXT"},
@@ -212,7 +208,7 @@ func TestStage3Integration(t *testing.T) {
 	q := dbgen.New(pool)
 	allowed := func(want bool) {
 		t.Helper()
-		ok, err := q.HasGroupModelPermission(ctx, dbgen.HasGroupModelPermissionParams{OrganizationID: actor.OrganizationID, PrincipalID: member.ID, ModelID: model.ID})
+		ok, err := q.HasGroupModelPermission(ctx, dbgen.HasGroupModelPermissionParams{PrincipalID: member.ID, ModelID: model.ID})
 		if err != nil || ok != want {
 			t.Fatalf("permission=%v want=%v err=%v", ok, want, err)
 		}
@@ -384,7 +380,7 @@ func TestStage3Integration(t *testing.T) {
 		}
 	})
 
-	t.Run("validation pagination and organization boundaries", func(t *testing.T) {
+	t.Run("validation pagination and authorization boundaries", func(t *testing.T) {
 		request("POST", "/api/v1/groups", map[string]string{"code": "engineering", "name": "重复"}, 409)
 		request("POST", "/api/v1/members", map[string]string{"name": " ", "organizationId": "1"}, 400)
 		request("POST", "/api/v1/resources", map[string]string{"providerId": sid(provider.ID), "name": "bad", "credential": "key\nheader"}, 400)
@@ -441,20 +437,10 @@ func TestStage3Integration(t *testing.T) {
 		} {
 			assertDescending(path)
 		}
-		foreignID, _ := ids.NextID(ctx)
-		if _, err := pool.Exec(ctx, "INSERT INTO principal(id,organization_id,principal_type,name,status,created_by,updated_by,created_at,updated_at) VALUES($1,$2,'MEMBER','foreign','ACTIVE','system','system',now(),now())", foreignID, actor.OrganizationID+1); err != nil {
-			t.Fatal(err)
-		}
-		foreignPath := "/api/v1/members/" + sid(foreignID)
-		request("GET", foreignPath, nil, 404)
-		request("DELETE", foreignPath, nil, 404)
-		request("PATCH", foreignPath+"/status", map[string]string{"status": "DISABLED"}, 404)
-		request("PUT", groupPath+"/members/"+sid(foreignID), nil, 404)
-		request("POST", foreignPath+"/keys", map[string]string{"name": "foreign key"}, 404)
 		badActor := actor
-		badActor.OrganizationID++
+		badActor.ID = 0
 		if _, err := service.Members(ctx, badActor, mgmt.Page{Limit: 50}); !errors.Is(err, appsec.ErrUnauthenticated) {
-			t.Fatal("forged organization accepted")
+			t.Fatal("invalid administrator accepted")
 		}
 		if _, err := pool.Exec(ctx, "UPDATE principal_group SET is_deleted=true WHERE id=$1", group.ID); err != nil {
 			t.Fatal(err)
@@ -655,9 +641,8 @@ func TestStage3Integration(t *testing.T) {
 		permission := func(want bool) {
 			t.Helper()
 			ok, err := q.HasGroupModelPermission(ctx, dbgen.HasGroupModelPermissionParams{
-				OrganizationID: actor.OrganizationID,
-				PrincipalID:    linkedMember.ID,
-				ModelID:        model.ID,
+				PrincipalID: linkedMember.ID,
+				ModelID:     model.ID,
 			})
 			if err != nil || ok != want {
 				t.Fatalf("deleted group permission=%v want=%v err=%v", ok, want, err)

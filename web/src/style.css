@@ -1727,12 +1727,20 @@ tbody tr:hover {
   font-variant-numeric: tabular-nums;
 }
 .metric-strip .token-total dd {
+  max-width: 100%;
+  overflow: hidden;
   color: var(--blue);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.provider-metric-label {
+  position: relative;
+  display: inline-flex;
 }
 .provider-health-badge {
   position: absolute;
-  top: -5px;
-  right: 18px;
+  top: -10px;
+  right: -22px;
   display: grid;
   width: 18px;
   height: 18px;
@@ -2329,11 +2337,11 @@ tbody tr:hover {
 .model-ranking .rank-track i {
   background: #42a07d;
 }
-.upstream-ranking .rank-track i {
+.provider-ranking .rank-track i {
   background: #9b6bc5;
 }
 .model-ranking .rank-content > small,
-.upstream-ranking .rank-content > small {
+.provider-ranking .rank-content > small {
   display: block;
   margin-top: 4px;
   color: #96a4b1;

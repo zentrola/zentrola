@@ -14,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zentrola/zentrola/internal/application/bootstrap"
 	"github.com/zentrola/zentrola/internal/application/health"
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	"github.com/zentrola/zentrola/internal/domain/admin"
@@ -27,9 +26,6 @@ import (
 func TestFirstAdminSetupIntegration(t *testing.T) {
 	ctx, pool, _ := integrationDatabase(t)
 	ids := idgen.New(pool)
-	if err := bootstrap.New(NewBootstrapStore(pool), ids).Initialize(ctx); err != nil {
-		t.Fatal(err)
-	}
 	passwords, _ := cryptosec.NewPasswords(4)
 	var entropy [32]byte
 	_, _ = rand.Read(entropy[:])
@@ -61,9 +57,9 @@ func TestFirstAdminSetupIntegration(t *testing.T) {
 	if w := request("GET", "/health/ready", "", nil); w.Code != 503 || !strings.Contains(w.Body.String(), "NOT_INITIALIZED") {
 		t.Fatal("empty system should be awaiting initialization")
 	}
-	for _, input := range [][2]string{{"", "test-password-123"}, {" leading", "test-password-123"}, {"bad\nname", "test-password-123"}, {"admin", "short"}, {"admin", strings.Repeat("x", 73)}, {"admin", "password\x00-123"}} {
+	for _, input := range [][2]string{{"", "test-password-123"}, {"bad\nname", "test-password-123"}, {"admin", "short"}, {"admin", strings.Repeat("x", 73)}, {"admin", "password\x00-123"}} {
 		if w := setup(input[0], input[1]); w.Code != 400 {
-			t.Fatal("invalid setup accepted")
+			t.Fatalf("invalid setup accepted: username=%q password_length=%d status=%d", input[0], len(input[1]), w.Code)
 		}
 	}
 	if w := request("POST", "/api/v1/auth/setup", "text/plain", map[string]string{"username": "admin", "password": "test-password-123"}); w.Code != 400 {

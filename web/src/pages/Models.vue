@@ -77,7 +77,7 @@ const statusTarget = ref<Model | null>(null)
 const { keyword, query, visible, search, reset } = useListSearch(
   items,
   (model) =>
-    `${model.name} ${model.code} ${model.id} ${model.remark ?? ''} ${[...(model.inputModalities ?? []), ...(model.outputModalities ?? [])].map((value) => t(`models.${value}`)).join(' ')}`,
+    `${model.name} ${model.code} ${model.id} ${model.publisherProviderName ?? ''} ${model.remark ?? ''} ${[...(model.inputModalities ?? []), ...(model.outputModalities ?? [])].map((value) => t(`models.${value}`)).join(' ')}`,
   load,
 )
 onMounted(() => load())
@@ -123,6 +123,7 @@ function changeStatus(model: Model) {
         <thead>
           <tr>
             <th>{{ t('models.name') }}</th>
+            <th>{{ t('models.publisher') }}</th>
             <th>{{ t('common.status') }}</th>
             <th>{{ t('models.input') }}</th>
             <th>{{ t('models.output') }}</th>
@@ -141,6 +142,7 @@ function changeStatus(model: Model) {
                 </div>
               </div>
             </td>
+            <td>{{ model.publisherProviderName || '-' }}</td>
             <td>
               <StatusSwitch
                 :value="model.status"

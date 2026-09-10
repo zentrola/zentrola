@@ -26,7 +26,7 @@ test('后端锁定提示、账号切换、刷新重查和倒计时到期重试',
       return route.fulfill({
         json: {
           code: 'OK',
-          data: { id: '1', organizationId: '2', username: 'owner', displayName: 'owner' },
+          data: { id: '1', username: 'owner', displayName: 'owner' },
         },
       })
     return route.fulfill({ json: { code: 'OK', data: { items: [], nextCursor: null, total: 0 } } })

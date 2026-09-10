@@ -10,7 +10,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 	"unicode"
@@ -19,9 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/zentrola/zentrola/internal/application/bootstrap"
 	"github.com/zentrola/zentrola/internal/infrastructure/config"
-	"github.com/zentrola/zentrola/internal/infrastructure/idgen"
 	"github.com/zentrola/zentrola/internal/infrastructure/postgres/dbgen"
 )
 
@@ -78,30 +75,29 @@ func TestStage1Integration(t *testing.T) {
 	t.Run("schema conventions", func(t *testing.T) { checkSchema(t, ctx, pool, schema) })
 	t.Run("partial indexes and cardinalities", func(t *testing.T) {
 		withFixture(t, ctx, pool, func(tx pgx.Tx) {
-			mustExec(t, ctx, tx, `INSERT INTO admin_user (id,organization_id,username,password_hash,display_name,status,created_by,updated_by,created_at,updated_at)
-VALUES (70,1,'admin','test-hash','Admin','ACTIVE','system','system',now(),now())`)
-			mustReject(t, ctx, tx, "23505", `INSERT INTO admin_user (id,organization_id,username,password_hash,display_name,status,failed_login_count,locked_until,last_login_at,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 71,organization_id,username,password_hash,display_name,status,failed_login_count,locked_until,last_login_at,is_deleted,created_by,updated_by,created_at,updated_at FROM admin_user WHERE id=70`)
+			mustExec(t, ctx, tx, `INSERT INTO admin_user (id,username,password_hash,display_name,status,created_by,updated_by,created_at,updated_at)
+VALUES (70,'admin','test-hash','Admin','ACTIVE','system','system',now(),now())`)
+			mustReject(t, ctx, tx, "23505", `INSERT INTO admin_user (id,username,password_hash,display_name,status,failed_login_count,locked_until,last_login_at,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 71,username,password_hash,display_name,status,failed_login_count,locked_until,last_login_at,is_deleted,created_by,updated_by,created_at,updated_at FROM admin_user WHERE id=70`)
 			mustExec(t, ctx, tx, `UPDATE admin_user SET is_deleted=true WHERE id=70`)
-			mustExec(t, ctx, tx, `INSERT INTO admin_user (id,organization_id,username,password_hash,display_name,status,failed_login_count,locked_until,last_login_at,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 71,organization_id,username,password_hash,display_name,status,failed_login_count,locked_until,last_login_at,false,created_by,updated_by,created_at,updated_at FROM admin_user WHERE id=70`)
-			mustExec(t, ctx, tx, `INSERT INTO principal_group_membership (id,organization_id,principal_id,group_id,created_by,updated_by,created_at,updated_at) VALUES (80,1,10,20,'system','system',now(),now()), (81,1,10,21,'system','system',now(),now())`)
-			mustReject(t, ctx, tx, "23505", `INSERT INTO principal_group_membership (id,organization_id,principal_id,group_id,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 82,organization_id,principal_id,group_id,is_deleted,created_by,updated_by,created_at,updated_at FROM principal_group_membership WHERE id=80`)
+			mustExec(t, ctx, tx, `INSERT INTO admin_user (id,username,password_hash,display_name,status,failed_login_count,locked_until,last_login_at,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 71,username,password_hash,display_name,status,failed_login_count,locked_until,last_login_at,false,created_by,updated_by,created_at,updated_at FROM admin_user WHERE id=70`)
+			mustExec(t, ctx, tx, `INSERT INTO principal_group_membership (id,principal_id,group_id,created_by,updated_by,created_at,updated_at) VALUES (80,10,20,'system','system',now(),now()), (81,10,21,'system','system',now(),now())`)
+			mustReject(t, ctx, tx, "23505", `INSERT INTO principal_group_membership (id,principal_id,group_id,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 82,principal_id,group_id,is_deleted,created_by,updated_by,created_at,updated_at FROM principal_group_membership WHERE id=80`)
 			mustExec(t, ctx, tx, `UPDATE principal_group_membership SET is_deleted=true WHERE id=80`)
-			mustExec(t, ctx, tx, `INSERT INTO principal_group_membership (id,organization_id,principal_id,group_id,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 82,organization_id,principal_id,group_id,false,created_by,updated_by,created_at,updated_at FROM principal_group_membership WHERE id=80`)
-			mustReject(t, ctx, tx, "23505", `INSERT INTO organization (id,organization_code,organization_name,status,created_by,updated_by,created_at,updated_at) VALUES (2,'second','Second','ACTIVE','system','system',now(),now())`)
+			mustExec(t, ctx, tx, `INSERT INTO principal_group_membership (id,principal_id,group_id,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 82,principal_id,group_id,false,created_by,updated_by,created_at,updated_at FROM principal_group_membership WHERE id=80`)
 			mustExec(t, ctx, tx, `INSERT INTO provider (id,provider_code,provider_name,provider_type,status,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 41,'second-provider',provider_name,provider_type,status,false,created_by,updated_by,created_at,updated_at FROM provider WHERE id=40`)
 			mustExec(t, ctx, tx, `INSERT INTO provider_endpoint(provider_id,protocol_type,base_url,created_by,updated_by,created_at,updated_at) VALUES(41,'ANTHROPIC','https://second.example.com','system','system',now(),now())`)
 			mustExec(t, ctx, tx, `INSERT INTO provider_model (id,provider_id,model_id,upstream_model_code,priority,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 52,41,model_id,upstream_model_code,100,false,created_by,updated_by,created_at,updated_at FROM provider_model WHERE id=50`)
 			mustReject(t, ctx, tx, "23505", `INSERT INTO provider_model (id,provider_id,model_id,upstream_model_code,priority,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 53,41,model_id,upstream_model_code,100,false,created_by,updated_by,created_at,updated_at FROM provider_model WHERE id=50`)
-			mustExec(t, ctx, tx, `INSERT INTO provider_credential (id,organization_id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,created_by,updated_by,created_at,updated_at)
-VALUES (60,1,40,'Resource',decode(repeat('11',32),'hex'),decode(repeat('22',12),'hex'),1,'ACTIVE','system','system',now(),now())`)
-			mustReject(t, ctx, tx, "23505", `INSERT INTO provider_credential (id,organization_id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 61,organization_id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,false,created_by,updated_by,created_at,updated_at FROM provider_credential WHERE id=60`)
-			mustExec(t, ctx, tx, `INSERT INTO provider_credential (id,organization_id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 61,organization_id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,'DISABLED',false,created_by,updated_by,created_at,updated_at FROM provider_credential WHERE id=60`)
+			mustExec(t, ctx, tx, `INSERT INTO provider_credential (id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,created_by,updated_by,created_at,updated_at)
+VALUES (60,40,'Resource',decode(repeat('11',32),'hex'),decode(repeat('22',12),'hex'),1,'ACTIVE','system','system',now(),now())`)
+			mustReject(t, ctx, tx, "23505", `INSERT INTO provider_credential (id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 61,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,false,created_by,updated_by,created_at,updated_at FROM provider_credential WHERE id=60`)
+			mustExec(t, ctx, tx, `INSERT INTO provider_credential (id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,is_deleted,created_by,updated_by,created_at,updated_at) SELECT 61,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,'DISABLED',false,created_by,updated_by,created_at,updated_at FROM provider_credential WHERE id=60`)
 		})
 	})
 	t.Run("permission union and default deny", func(t *testing.T) {
 		withFixture(t, ctx, pool, func(tx pgx.Tx) {
 			q := dbgen.New(tx)
-			args := dbgen.HasGroupModelPermissionParams{OrganizationID: 1, PrincipalID: 10, ModelID: 30}
+			args := dbgen.HasGroupModelPermissionParams{PrincipalID: 10, ModelID: 30}
 			assertPermission := func(want bool) {
 				t.Helper()
 				got, err := q.HasGroupModelPermission(ctx, args)
@@ -110,15 +106,15 @@ VALUES (60,1,40,'Resource',decode(repeat('11',32),'hex'),decode(repeat('22',12),
 				}
 			}
 			assertPermission(false)
-			mustExec(t, ctx, tx, `INSERT INTO principal_group_membership (id,organization_id,principal_id,group_id,created_by,updated_by,created_at,updated_at) VALUES (80,1,10,20,'system','system',now(),now()),(81,1,10,21,'system','system',now(),now())`)
+			mustExec(t, ctx, tx, `INSERT INTO principal_group_membership (id,principal_id,group_id,created_by,updated_by,created_at,updated_at) VALUES (80,10,20,'system','system',now(),now()),(81,10,21,'system','system',now(),now())`)
 			assertPermission(false)
-			mustExec(t, ctx, tx, `INSERT INTO principal_group_model_permission (id,organization_id,group_id,model_id,created_by,updated_by,created_at,updated_at) VALUES (90,1,21,30,'system','system',now(),now())`)
+			mustExec(t, ctx, tx, `INSERT INTO principal_group_model_permission (id,group_id,model_id,created_by,updated_by,created_at,updated_at) VALUES (90,21,30,'system','system',now(),now())`)
 			assertPermission(true)
 			mustExec(t, ctx, tx, `UPDATE principal_group SET status='DISABLED' WHERE id=21`)
 			assertPermission(false)
 			mustExec(t, ctx, tx, `UPDATE principal_group SET status='ACTIVE' WHERE id=21; UPDATE principal_group_membership SET is_deleted=true WHERE group_id=21`)
 			assertPermission(false)
-			mustExec(t, ctx, tx, `UPDATE principal_group_membership SET is_deleted=false WHERE group_id=21; UPDATE principal_group_model_permission SET organization_id=2`)
+			mustExec(t, ctx, tx, `UPDATE principal_group_membership SET is_deleted=false WHERE group_id=21; UPDATE principal_group_model_permission SET is_deleted=true`)
 			assertPermission(false)
 		})
 	})
@@ -131,8 +127,8 @@ VALUES (60,1,40,'Resource',decode(repeat('11',32),'hex'),decode(repeat('22',12),
 			aead, _ := cipher.NewGCM(block)
 			plain := []byte("test-only-provider-credential")
 			sealed := aead.Seal(nil, nonce, plain, nil)
-			mustExec(t, ctx, tx, `INSERT INTO provider_credential (id,organization_id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,created_by,updated_by,created_at,updated_at) VALUES (60,1,40,'Resource',$1,$2,7,'ACTIVE','system','system',now(),now())`, sealed, nonce)
-			row, err := dbgen.New(tx).GetResource(ctx, dbgen.GetResourceParams{OrganizationID: 1, ID: 60})
+			mustExec(t, ctx, tx, `INSERT INTO provider_credential (id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,created_by,updated_by,created_at,updated_at) VALUES (60,40,'Resource',$1,$2,7,'ACTIVE','system','system',now(),now())`, sealed, nonce)
+			row, err := dbgen.New(tx).GetResource(ctx, 60)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -143,13 +139,23 @@ VALUES (60,1,40,'Resource',decode(repeat('11',32),'hex'),decode(repeat('22',12),
 			mustReject(t, ctx, tx, "23514", `UPDATE provider_credential SET credential_nonce=decode('00','hex') WHERE id=60`)
 		})
 	})
+	t.Run("model publisher round trip", func(t *testing.T) {
+		withFixture(t, ctx, pool, func(tx pgx.Tx) {
+			mustExec(t, ctx, tx, `UPDATE model SET publisher_provider_id=40 WHERE id=30`)
+			row, err := dbgen.New(tx).ManageModel(ctx, 30)
+			if err != nil || row.PublisherProviderID == nil || *row.PublisherProviderID != 40 || row.PublisherProviderName == nil || *row.PublisherProviderName != "Anthropic" {
+				t.Fatalf("publisher id=%v name=%v err=%v", row.PublisherProviderID, row.PublisherProviderName, err)
+			}
+			mustReject(t, ctx, tx, "23514", `UPDATE model SET publisher_provider_id=0 WHERE id=30`)
+		})
+	})
 	t.Run("credential runtime block", func(t *testing.T) {
 		withFixture(t, ctx, pool, func(tx pgx.Tx) {
-			mustExec(t, ctx, tx, `INSERT INTO provider_credential (id,organization_id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,created_by,updated_by,created_at,updated_at) VALUES (60,1,40,'Resource',decode(repeat('00',32),'hex'),decode(repeat('00',12),'hex'),1,'ACTIVE','system','system',now(),now())`)
+			mustExec(t, ctx, tx, `INSERT INTO provider_credential (id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,created_by,updated_by,created_at,updated_at) VALUES (60,40,'Resource',decode(repeat('00',32),'hex'),decode(repeat('00',12),'hex'),1,'ACTIVE','system','system',now(),now())`)
 			now := time.Now().UTC().Truncate(time.Microsecond)
 			reason, code, status := "BILLING", "UPSTREAM_BILLING_BLOCKED", int32(402)
 			changed, err := dbgen.New(tx).BlockGatewayResource(ctx, dbgen.BlockGatewayResourceParams{
-				OrganizationID: 1, ResourceID: 60, BlockedReason: &reason,
+				ResourceID: 60, BlockedReason: &reason,
 				BlockedAt: pgtype.Timestamptz{Time: now, Valid: true}, HttpStatus: &status, ErrorCode: &code,
 			})
 			if err != nil || changed != 1 {
@@ -165,22 +171,21 @@ VALUES (60,1,40,'Resource',decode(repeat('11',32),'hex'),decode(repeat('22',12),
 	})
 	t.Run("usage facts and append only audit", func(t *testing.T) {
 		withFixture(t, ctx, pool, func(tx pgx.Tx) {
-			mustExec(t, ctx, tx, `INSERT INTO usage_record (id,organization_id,request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,client_protocol,billing_unit,started_at,completed_at,latency_ms,status,created_at) VALUES (101,1,'req_test',1,10,40,50,60,30,'MODEL_GATEWAY','ANTHROPIC_MESSAGES','TOKEN',now(),now(),0,'SUCCESS',now())`)
+			mustExec(t, ctx, tx, `INSERT INTO usage_record (id,request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,client_protocol,billing_unit,started_at,completed_at,latency_ms,status,created_at) VALUES (101,'req_test',1,10,40,50,60,30,'MODEL_GATEWAY','ANTHROPIC_MESSAGES','TOKEN',now(),now(),0,'SUCCESS',now())`)
 			var unknown bool
 			if err := tx.QueryRow(ctx, `SELECT input_tokens IS NULL AND cost_amount IS NULL AND cost_currency IS NULL FROM usage_record WHERE id=101`).Scan(&unknown); err != nil || !unknown {
 				t.Fatal("unknown usage/cost was falsified")
 			}
-			mustReject(t, ctx, tx, "23505", `INSERT INTO usage_record (id,organization_id,request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,input_tokens,output_tokens,cached_input_tokens,billing_unit,billing_quantity,cost_amount,cost_currency,started_at,completed_at,latency_ms,status,error_type,created_at,client_protocol) SELECT 102,organization_id,request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,input_tokens,output_tokens,cached_input_tokens,billing_unit,billing_quantity,cost_amount,cost_currency,started_at,completed_at,latency_ms,status,error_type,created_at,client_protocol FROM usage_record WHERE id=101`)
+			mustReject(t, ctx, tx, "23505", `INSERT INTO usage_record (id,request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,input_tokens,output_tokens,cached_input_tokens,billing_unit,billing_quantity,cost_amount,cost_currency,started_at,completed_at,latency_ms,status,error_type,created_at,client_protocol) SELECT 102,request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,input_tokens,output_tokens,cached_input_tokens,billing_unit,billing_quantity,cost_amount,cost_currency,started_at,completed_at,latency_ms,status,error_type,created_at,client_protocol FROM usage_record WHERE id=101`)
 			mustExec(t, ctx, tx, `UPDATE usage_record SET attempt_no=2 WHERE id=101`)
-			mustExec(t, ctx, tx, `INSERT INTO usage_record (id,organization_id,request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,input_tokens,output_tokens,cached_input_tokens,billing_unit,billing_quantity,cost_amount,cost_currency,started_at,completed_at,latency_ms,status,error_type,created_at,client_protocol) SELECT 102,organization_id,request_id,1,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,input_tokens,output_tokens,cached_input_tokens,billing_unit,billing_quantity,cost_amount,cost_currency,started_at,completed_at,latency_ms,status,error_type,created_at,client_protocol FROM usage_record WHERE id=101`)
+			mustExec(t, ctx, tx, `INSERT INTO usage_record (id,request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,input_tokens,output_tokens,cached_input_tokens,billing_unit,billing_quantity,cost_amount,cost_currency,started_at,completed_at,latency_ms,status,error_type,created_at,client_protocol) SELECT 102,request_id,1,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,input_tokens,output_tokens,cached_input_tokens,billing_unit,billing_quantity,cost_amount,cost_currency,started_at,completed_at,latency_ms,status,error_type,created_at,client_protocol FROM usage_record WHERE id=101`)
 			mustReject(t, ctx, tx, "23514", `UPDATE usage_record SET attempt_no=0 WHERE id=102`)
-			mustExec(t, ctx, tx, `INSERT INTO operation_log (id,organization_id,operator_type,operator_id,operator_name,module,operation_type,target_type,target_id,result,created_at) VALUES (200,1,'ADMIN',70,'Admin','MEMBER','MEMBER_CREATE','PRINCIPAL',10,'SUCCESS',now())`)
+			mustExec(t, ctx, tx, `INSERT INTO operation_log (id,operator_type,operator_id,operator_name,module,operation_type,target_type,target_id,result,created_at) VALUES (200,'ADMIN',70,'Admin','MEMBER','MEMBER_CREATE','PRINCIPAL',10,'SUCCESS',now())`)
 			for _, sql := range []string{`UPDATE operation_log SET operator_name='changed'`, `DELETE FROM operation_log`, `TRUNCATE operation_log`} {
 				mustReject(t, ctx, tx, "42501", sql)
 			}
 		})
 	})
-	t.Run("bootstrap atomicity and preservation", func(t *testing.T) { checkBootstrap(t, ctx, pool) })
 }
 
 func checkSchema(t *testing.T, ctx context.Context, pool *pgxpool.Pool, schema string) {
@@ -194,8 +199,9 @@ ORDER BY c.relname,a.attnum`, schema)
 	}
 	defer rows.Close()
 	nullable := map[string]string{
-		"provider":     "official_website,proxy_url_display,proxy_url_ciphertext,proxy_url_nonce,proxy_url_key_version,proxy_headers_ciphertext,proxy_headers_nonce,proxy_headers_key_version",
-		"organization": "remark", "admin_user": "locked_until,last_login_at", "principal": "remark", "principal_access_key": "expires_at,last_used_at,revoked_at",
+		"provider":   "official_website,proxy_url_display,proxy_url_ciphertext,proxy_url_nonce,proxy_url_key_version,proxy_headers_ciphertext,proxy_headers_nonce,proxy_headers_key_version",
+		"model":      "publisher_provider_id",
+		"admin_user": "locked_until,last_login_at", "principal": "remark", "principal_access_key": "expires_at,last_used_at,revoked_at",
 		"principal_group": "remark", "provider_credential": "blocked_reason,blocked_at,last_error_at,last_http_status,last_error_code",
 		"usage_record":  "input_tokens,output_tokens,cached_input_tokens,billing_quantity,cost_amount,cost_currency,error_type",
 		"operation_log": "operator_id,target_id,target_name,request_id,request_method,request_path,ip_address,user_agent,error_code,before_data,after_data,remark",
@@ -243,7 +249,7 @@ ORDER BY c.relname,a.attnum`, schema)
 		t.Fatal(err)
 	}
 	expectedTables := map[string]bool{
-		"organization": true, "admin_user": true, "principal": true,
+		"admin_user": true, "principal": true,
 		"principal_access_key": true, "principal_group": true,
 		"principal_group_membership": true, "principal_group_model_permission": true,
 		"provider": true, "provider_endpoint": true, "provider_model": true,
@@ -259,6 +265,10 @@ ORDER BY c.relname,a.attnum`, schema)
 		if !expectedTables[table] {
 			t.Errorf("unexpected business table: %s", table)
 		}
+	}
+	var organizationColumnCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.columns WHERE table_schema=$1 AND column_name='organization_id'`, schema).Scan(&organizationColumnCount); err != nil || organizationColumnCount != 0 {
+		t.Fatal("organization_id column remains", err)
 	}
 	credentialColumns := make(map[string]bool, len(columns["provider_credential"]))
 	for _, column := range columns["provider_credential"] {
@@ -311,9 +321,8 @@ func withFixture(t *testing.T, ctx context.Context, pool *pgxpool.Pool, run func
 		t.Fatal(err)
 	}
 	defer tx.Rollback(context.Background())
-	mustExec(t, ctx, tx, `INSERT INTO organization (id,organization_code,organization_name,status,created_by,updated_by,created_at,updated_at) VALUES (1,'test','Test','ACTIVE','system','system',now(),now());
-INSERT INTO principal (id,organization_id,principal_type,name,status,created_by,updated_by,created_at,updated_at) VALUES (10,1,'MEMBER','Member','ACTIVE','system','system',now(),now());
-INSERT INTO principal_group (id,organization_id,group_code,group_name,status,created_by,updated_by,created_at,updated_at) VALUES (20,1,'first','First','ACTIVE','system','system',now(),now()),(21,1,'second','Second','ACTIVE','system','system',now(),now());
+	mustExec(t, ctx, tx, `INSERT INTO principal (id,principal_type,name,status,created_by,updated_by,created_at,updated_at) VALUES (10,'MEMBER','Member','ACTIVE','system','system',now(),now());
+INSERT INTO principal_group (id,group_code,group_name,status,created_by,updated_by,created_at,updated_at) VALUES (20,'first','First','ACTIVE','system','system',now(),now()),(21,'second','Second','ACTIVE','system','system',now(),now());
 INSERT INTO model (id,model_code,display_name,input_modalities,output_modalities,status,created_by,updated_by,created_at,updated_at) VALUES (30,'sonnet','Sonnet','["TEXT","IMAGE"]','["TEXT"]','ACTIVE','system','system',now(),now()),(31,'opus','Opus','["TEXT","IMAGE"]','["TEXT"]','ACTIVE','system','system',now(),now());
 INSERT INTO provider (id,provider_code,provider_name,provider_type,status,created_by,updated_by,created_at,updated_at) VALUES (40,'anthropic','Anthropic','OFFICIAL','ACTIVE','system','system',now(),now());
 INSERT INTO provider_endpoint(provider_id,protocol_type,base_url,created_by,updated_by,created_at,updated_at) VALUES(40,'ANTHROPIC','https://api.anthropic.com','system','system',now(),now());
@@ -339,46 +348,5 @@ func mustReject(t *testing.T, ctx context.Context, tx pgx.Tx, code, sql string, 
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) || pgErr.Code != code {
 		t.Fatalf("want PostgreSQL error %s, got %v", code, err)
-	}
-}
-
-func checkBootstrap(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
-	t.Helper()
-	store := NewBootstrapStore(pool)
-	err := store.InitializeOnce(ctx, bootstrap.Seed{OrganizationID: 0, CreatedAt: time.Now().UTC()})
-	if err == nil {
-		t.Fatal("invalid bootstrap unexpectedly succeeded")
-	}
-	var count int
-	if err := pool.QueryRow(ctx, "SELECT count(*) FROM organization").Scan(&count); err != nil || count != 0 {
-		t.Fatal("partial bootstrap committed", err)
-	}
-	ids := idgen.New(pool)
-	service := bootstrap.New(store, ids)
-	var wg sync.WaitGroup
-	for range 4 {
-		wg.Go(func() {
-			if err := service.Initialize(ctx); err != nil {
-				t.Error(err)
-			}
-		})
-	}
-	wg.Wait()
-	if err := service.Check(ctx); err != nil {
-		t.Fatal(err)
-	}
-	for table, want := range map[string]int{"organization": 1, "provider": 0, "provider_endpoint": 0, "model": 0, "provider_model": 0, "provider_credential": 0, "admin_user": 0} {
-		if err := pool.QueryRow(ctx, "SELECT count(*) FROM "+pgx.Identifier{table}.Sanitize()).Scan(&count); err != nil || count != want {
-			t.Fatalf("%s count=%d want=%d err=%v", table, count, want, err)
-		}
-	}
-	if _, err := pool.Exec(ctx, `UPDATE organization SET is_deleted=true`); err != nil {
-		t.Fatal(err)
-	}
-	if err := service.Initialize(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM organization WHERE is_deleted=false`).Scan(&count); err != nil || count != 0 {
-		t.Fatal("bootstrap resurrected a deleted organization", err)
 	}
 }

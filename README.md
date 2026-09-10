@@ -131,7 +131,7 @@ Zentrola 遵循 Client-native First 和 Thin Gateway 原则：客户端已经具
 - 按延迟、成本等综合策略动态排序，以及实时限流
 - Cost、Budget、企业计费和账单
 - Enterprise Knowledge、Skill Registry 和 Managed MCP
-- SSO、OIDC、LDAP、SCIM、多组织和高可用部署
+- SSO、OIDC、LDAP、SCIM 和高可用部署
 
 Provider 端点按 `OPENAI` 和 `ANTHROPIC` 两类上游协议保存；其中 `ANTHROPIC` 即 Claude Code 使用的 Anthropic Messages 兼容协议。Gateway 客户端入口分别处理 OpenAI Chat Completions、OpenAI Responses 和 Anthropic Messages；路由优先选择与客户端相同的上游协议，缺少同协议端点时才转换为另一协议，并将响应转换回客户端原协议。正式 Codex 客户端的完整 E2E 仍需单独实现和验收。
 
@@ -376,7 +376,7 @@ Admin Web 默认地址为 `http://127.0.0.1:9528`。程序读取同目录的 `.e
 
 首次打开 Admin Web 时创建首位管理员。系统不提供默认用户名或密码，创建成功后初始化入口自动关闭。
 
-首次启动只初始化基础组织，不创建服务商、模型或 Credential。“服务商”页面的“初始化”由管理员主动触发，会按当前界面语言同步官方服务商的预置中英文名称、官方网站及协议地址，其他已有配置保持不变，也不会访问厂商。管理员按以下顺序完成第一条治理链路：
+服务启动不创建任何业务数据。“服务商”页面的“初始化”由管理员主动触发，会按当前界面语言同步官方服务商的预置中英文名称、官方网站及协议地址，其他已有配置保持不变，也不会访问厂商。管理员按以下顺序完成第一条治理链路：
 
 1. 在“服务商”中点击“初始化”，再为所需厂商填写 Provider Credential。保存后可通过服务商编码选择官方模型目录适配器并同步模型；当前支持 DeepSeek 和智谱 AI。同步会新增尚不存在的模型和上游映射，并按编码更新已有模型的官方名称；新模型默认停用，其他配置保持不变。
 2. 在“模型”中检查同步结果，并启用准备开放给客户端的逻辑模型；必要时再调整服务商映射。

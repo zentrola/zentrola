@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { all, api, errorText, gatewayBaseUrl } from '../api'
-import { count } from '../composables'
+import { compactCount, count } from '../composables'
 import { activeLocale, i18n, t } from '../i18n'
 import type { Dashboard, Provider, Resource } from '../types'
 import Icon from '../components/Icon.vue'
@@ -39,8 +39,8 @@ const maxTokens = computed(() =>
 const maxClientRequests = computed(() =>
   Math.max(1, ...(summary.value?.clientModelRanking.map((item) => item.requests) ?? [])),
 )
-const maxUpstreamCalls = computed(() =>
-  Math.max(1, ...(summary.value?.upstreamModelRanking.map((item) => item.calls) ?? [])),
+const maxProviderCalls = computed(() =>
+  Math.max(1, ...(summary.value?.providerRanking.map((item) => item.calls) ?? [])),
 )
 const enabledHealthProviders = computed(() =>
   healthProviders.value.filter((provider) => provider.status === 'ACTIVE'),
@@ -150,9 +150,7 @@ async function loadDashboard(current: number) {
         clientModelRanking: Array.isArray(result.clientModelRanking)
           ? result.clientModelRanking
           : [],
-        upstreamModelRanking: Array.isArray(result.upstreamModelRanking)
-          ? result.upstreamModelRanking
-          : [],
+        providerRanking: Array.isArray(result.providerRanking) ? result.providerRanking : [],
       }
   } catch (e) {
     if (current === revision) error.value = errorText(e)
@@ -276,21 +274,28 @@ onMounted(load)
           <dd>{{ summary ? count(summary.modelCount) : '—' }}</dd>
         </div>
         <div class="provider-total">
-          <span
-            class="provider-health-badge"
-            :class="`is-${providerHealthState}`"
-            role="img"
-            :aria-label="providerHealthSummary"
-            :title="providerHealthSummary"
-          >
-            <i></i>
-          </span>
-          <dt>{{ t('home.providers') }}</dt>
+          <div class="provider-metric-label">
+            <dt>{{ t('home.providers') }}</dt>
+            <span
+              class="provider-health-badge"
+              :class="`is-${providerHealthState}`"
+              role="img"
+              :aria-label="providerHealthSummary"
+              :title="providerHealthSummary"
+            >
+              <i></i>
+            </span>
+          </div>
           <dd>{{ summary ? count(summary.providerCount) : '—' }}</dd>
         </div>
         <div class="token-total">
           <dt>{{ t('home.monthTokens') }}</dt>
-          <dd>{{ summary ? count(summary.totalTokens) : '—' }}</dd>
+          <dd
+            :title="summary ? count(summary.totalTokens) : undefined"
+            :aria-label="summary ? count(summary.totalTokens) : undefined"
+          >
+            {{ summary ? compactCount(summary.totalTokens) : '—' }}
+          </dd>
         </div>
       </dl>
       <div
@@ -304,7 +309,9 @@ onMounted(load)
           <strong>{{ providerHealthAlertTitle }}</strong>
           <span>{{ providerHealthAlertDetail }}</span>
         </div>
-        <RouterLink to="/providers">{{ t('home.providerHealthViewProviders') }}</RouterLink>
+        <RouterLink :to="{ path: '/providers', query: { runtimeStatus: 'ABNORMAL' } }">
+          {{ t('home.providerHealthViewProviders') }}
+        </RouterLink>
       </div>
     </section>
 
@@ -365,13 +372,18 @@ onMounted(load)
         </div>
         <span>Top 10</span>
       </div>
-      <ol v-if="summary?.tokenRanking.length" class="ranking-list">
+      <ol v-if="summary?.tokenRanking.length" class="ranking-list token-ranking">
         <li v-for="(item, index) in summary.tokenRanking" :key="item.principalId">
           <span class="rank-number">{{ String(index + 1).padStart(2, '0') }}</span>
           <div class="rank-content">
             <div class="rank-label">
-              <strong>{{ item.name }}</strong
-              ><span>{{ count(item.tokens) }} Token</span>
+              <strong>{{ item.name }}</strong>
+              <span
+                :title="`${count(item.tokens)} Token`"
+                :aria-label="`${count(item.tokens)} Token`"
+              >
+                {{ compactCount(item.tokens) }} Token
+              </span>
             </div>
             <div class="rank-track">
               <i :style="{ width: `${(item.tokens / maxTokens) * 100}%` }"></i>
@@ -403,7 +415,12 @@ onMounted(load)
             <div class="rank-track">
               <i :style="{ width: `${(item.requests / maxClientRequests) * 100}%` }"></i>
             </div>
-            <small>{{ item.modelCode }} · {{ count(item.tokens) }} Token</small>
+            <small
+              :title="`${count(item.tokens)} Token`"
+              :aria-label="`${count(item.tokens)} Token`"
+            >
+              {{ item.modelCode }} · {{ compactCount(item.tokens) }} Token
+            </small>
           </div>
         </li>
       </ol>
@@ -416,27 +433,27 @@ onMounted(load)
     <section class="ranking-panel">
       <div class="ranking-head">
         <div>
-          <h2>{{ t('home.upstreamModelRanking') }}</h2>
+          <h2>{{ t('home.providerRanking') }}</h2>
         </div>
         <span>Top 10</span>
       </div>
-      <ol v-if="summary?.upstreamModelRanking.length" class="ranking-list upstream-ranking">
-        <li
-          v-for="(item, index) in summary.upstreamModelRanking"
-          :key="`${item.providerId}:${item.modelId}`"
-        >
+      <ol v-if="summary?.providerRanking.length" class="ranking-list provider-ranking">
+        <li v-for="(item, index) in summary.providerRanking" :key="item.providerId">
           <span class="rank-number">{{ String(index + 1).padStart(2, '0') }}</span>
           <div class="rank-content">
             <div class="rank-label">
-              <strong class="model-name-regular" :title="item.modelCode">
-                {{ item.modelCode }}
-              </strong>
+              <strong :title="item.providerName">{{ item.providerName }}</strong>
               <span>{{ t('home.callCount', { count: count(item.calls) }) }}</span>
             </div>
             <div class="rank-track">
-              <i :style="{ width: `${(item.calls / maxUpstreamCalls) * 100}%` }"></i>
+              <i :style="{ width: `${(item.calls / maxProviderCalls) * 100}%` }"></i>
             </div>
-            <small>{{ item.providerName }} · {{ count(item.tokens) }} Token</small>
+            <small
+              :title="`${count(item.tokens)} Token`"
+              :aria-label="`${count(item.tokens)} Token`"
+            >
+              {{ compactCount(item.tokens) }} Token
+            </small>
           </div>
         </li>
       </ol>

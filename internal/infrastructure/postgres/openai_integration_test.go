@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zentrola/zentrola/internal/application/bootstrap"
 	gw "github.com/zentrola/zentrola/internal/application/gateway"
 	"github.com/zentrola/zentrola/internal/application/health"
 	mgmt "github.com/zentrola/zentrola/internal/application/management"
@@ -31,9 +30,6 @@ import (
 func TestOpenAIIntegration(t *testing.T) {
 	ctx, pool, _ := integrationDatabase(t)
 	ids := idgen.New(pool)
-	if err := bootstrap.New(NewBootstrapStore(pool), ids).Initialize(ctx); err != nil {
-		t.Fatal(err)
-	}
 	securityStore := NewSecurityStore(pool, ids)
 	passwords, _ := cryptosec.NewPasswords(4)
 	entropy := make([]byte, 32)
@@ -60,7 +56,7 @@ func TestOpenAIIntegration(t *testing.T) {
 	flash := createActiveTestModel(t, ctx, management, actor, "deepseek-v4-flash", "DeepSeek V4 Flash", []string{"TEXT"})
 	pro := createActiveTestModel(t, ctx, management, actor, "deepseek-v4-pro", "DeepSeek V4 Pro", []string{"TEXT"})
 	claude := createActiveTestModel(t, ctx, management, actor, "claude-sonnet", "Claude Sonnet", []string{"TEXT", "IMAGE"})
-	provider := createActiveTestProvider(t, ctx, pool, management, actor, "DeepSeek 测试服务商",
+	provider := createTestProvider(t, ctx, pool, management, actor, "DeepSeek 测试服务商",
 		[]mgmt.ProviderEndpoint{
 			{ProtocolType: "ANTHROPIC", BaseURL: "https://api.deepseek.com/anthropic"},
 			{ProtocolType: "OPENAI", BaseURL: "https://api.deepseek.com"},
@@ -69,7 +65,7 @@ func TestOpenAIIntegration(t *testing.T) {
 			{ModelID: flash.ID, UpstreamModelCode: "deepseek-v4-flash"},
 			{ModelID: pro.ID, UpstreamModelCode: "deepseek-v4-pro"},
 		})
-	anthropicProvider := createActiveTestProvider(t, ctx, pool, management, actor, "Anthropic 测试服务商",
+	anthropicProvider := createTestProvider(t, ctx, pool, management, actor, "Anthropic 测试服务商",
 		[]mgmt.ProviderEndpoint{{ProtocolType: "ANTHROPIC", BaseURL: "https://api.anthropic.com"}},
 		[]mgmt.ProviderMappingInput{{ModelID: claude.ID, UpstreamModelCode: "claude-sonnet"}})
 	member, err := management.CreateMember(ctx, actor, "OpenAI integration", "", appsec.RequestMeta{})
@@ -85,11 +81,17 @@ func TestOpenAIIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := management.SetProviderStatus(ctx, actor, provider.ID, "ACTIVE", appsec.RequestMeta{}); err != nil {
+		t.Fatal(err)
+	}
 	if err := management.SetResourceStatus(ctx, actor, resource.ID, "ACTIVE", appsec.RequestMeta{}); err != nil {
 		t.Fatal(err)
 	}
 	anthropicResource, err := management.CreateResource(ctx, actor, anthropicProvider.ID, "Anthropic resource", "anthropic-upstream-secret", appsec.RequestMeta{})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := management.SetProviderStatus(ctx, actor, anthropicProvider.ID, "ACTIVE", appsec.RequestMeta{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := management.SetResourceStatus(ctx, actor, anthropicResource.ID, "ACTIVE", appsec.RequestMeta{}); err != nil {

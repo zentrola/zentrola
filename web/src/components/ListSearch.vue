@@ -23,6 +23,7 @@ const inputID = useId()
         :disabled="loading"
       />
     </div>
+    <slot name="filters" />
     <div class="list-search-actions">
       <button class="button primary" :disabled="loading">
         <Icon name="search" :size="16" />{{ t('common.searchAction') }}

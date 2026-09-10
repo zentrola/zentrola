@@ -145,6 +145,20 @@ export function dateOnly(value: string | null | undefined) {
 export function count(value: number | null) {
   return value === null ? '-' : new Intl.NumberFormat(activeLocale.value).format(value)
 }
+export function compactCount(value: number | null) {
+  if (value === null) return '-'
+  const absolute = Math.abs(value)
+  if (absolute < 1000) return count(value)
+
+  const units = ['K', 'M', 'B', 'T', 'P', 'E']
+  let unitIndex = Math.min(Math.floor(Math.log10(absolute) / 3) - 1, units.length - 1)
+  let scaled = value / 1000 ** (unitIndex + 1)
+  if (Math.abs(scaled) >= 999.5 && unitIndex < units.length - 1) {
+    unitIndex++
+    scaled /= 1000
+  }
+  return `${new Intl.NumberFormat(activeLocale.value, { maximumFractionDigits: 1 }).format(scaled)}${units[unitIndex]}`
+}
 export function validText(value: string, bytes: number, required = true) {
   return (
     (!required && value === '') ||

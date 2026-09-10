@@ -24,7 +24,7 @@ test('空系统创建首位管理员，校验确认密码后切换为登录', as
         expiresAt: new Date(Date.now() + 3600000).toISOString(),
       })
     if (path.endsWith('/me'))
-      return reply({ id: '1', organizationId: '2', username: 'owner', displayName: 'owner' })
+      return reply({ id: '1', username: 'owner', displayName: 'owner' })
     return reply({ items: [], nextCursor: null, total: 0 })
   })
   await page.goto('/')

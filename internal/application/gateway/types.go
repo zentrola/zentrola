@@ -74,9 +74,9 @@ type ResourceBlocker interface {
 	BlockResource(context.Context, appsec.PrincipalIdentity, int64, ResourceBlock) error
 }
 type RouteState interface {
-	Acquire(context.Context, int64, Route) (bool, error)
-	Cooldown(context.Context, int64, Route, time.Duration) error
-	Healthy(context.Context, int64, Route) error
+	Acquire(context.Context, Route) (bool, error)
+	Cooldown(context.Context, Route, time.Duration) error
+	Healthy(context.Context, Route) error
 }
 type Cipher interface {
 	Decrypt(catalog.SealedCredential, catalog.CredentialOwner) ([]byte, error)
@@ -152,7 +152,7 @@ func New(store Store, cipher Cipher, upstream Upstream, options ...Option) *Serv
 }
 
 func (s *Service) Forward(ctx context.Context, identity appsec.PrincipalIdentity, request Request) (*Response, error) {
-	if identity.ID <= 0 || identity.OrganizationID <= 0 || identity.AccessKeyID <= 0 {
+	if identity.ID <= 0 || identity.AccessKeyID <= 0 {
 		return nil, ErrAuthentication
 	}
 	if request.Protocol == "" {
@@ -186,7 +186,7 @@ func (s *Service) Forward(ctx context.Context, identity appsec.PrincipalIdentity
 }
 
 func (s *Service) Models(ctx context.Context, identity appsec.PrincipalIdentity) ([]Model, error) {
-	if identity.ID <= 0 || identity.OrganizationID <= 0 || identity.AccessKeyID <= 0 {
+	if identity.ID <= 0 || identity.AccessKeyID <= 0 {
 		return nil, ErrAuthentication
 	}
 	store, ok := s.store.(ModelStore)

@@ -160,7 +160,7 @@ Use --config <path> to select a config file. The default is .env.`)
 func resetPassword(ctx context.Context, output io.Writer, username string, reset func(context.Context, string) (string, error)) error {
 	password, err := reset(ctx, username)
 	if errors.Is(err, appsec.ErrNotFound) {
-		return errors.New("active administrator not found; check the username and organization status")
+		return errors.New("active administrator not found; check the username and administrator status")
 	}
 	if err != nil {
 		return errors.New("password reset failed; check the database, migrations, and audit log")

@@ -59,16 +59,16 @@ type failoverState struct {
 	healthy   []int64
 }
 
-func (s *failoverState) Acquire(_ context.Context, _ int64, route Route) (bool, error) {
+func (s *failoverState) Acquire(_ context.Context, route Route) (bool, error) {
 	return !s.blocked[route.ResourceID], nil
 }
 
-func (s *failoverState) Cooldown(_ context.Context, _ int64, route Route, _ time.Duration) error {
+func (s *failoverState) Cooldown(_ context.Context, route Route, _ time.Duration) error {
 	s.cooldowns = append(s.cooldowns, route.ResourceID)
 	return nil
 }
 
-func (s *failoverState) Healthy(_ context.Context, _ int64, route Route) error {
+func (s *failoverState) Healthy(_ context.Context, route Route) error {
 	s.healthy = append(s.healthy, route.ResourceID)
 	return nil
 }
@@ -82,7 +82,7 @@ func testRoutes() []Route {
 
 func testForward(t *testing.T, service *Service, trace *usage.Event) (*Response, error) {
 	t.Helper()
-	return service.Forward(context.Background(), appsec.PrincipalIdentity{ID: 1, OrganizationID: 2, AccessKeyID: 3}, Request{
+	return service.Forward(context.Background(), appsec.PrincipalIdentity{ID: 1, AccessKeyID: 3}, Request{
 		Path: "/v1/messages", Protocol: AnthropicProtocol, Body: []byte(`{"model":"claude-opus-5"}`), Trace: trace,
 	})
 }

@@ -74,9 +74,9 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	identity, _ := r.Context().Value(principalIdentityKey{}).(appsec.PrincipalIdentity)
 	var trace *usage.Event
 	var observer *gw.UsageObserver
-	if path == inferencePath && r.Method == http.MethodPost && identity.ID > 0 && g.writer != nil {
+	if path == inferencePath && r.Method == http.MethodPost && identity.ID > 0 {
 		traceID, spanID := logging.TraceIDs(r.Context())
-		trace = &usage.Event{OrganizationID: identity.OrganizationID, PrincipalID: identity.ID, RequestID: logging.RequestID(r.Context()), TraceID: traceID, SpanID: spanID, RequestAt: time.Now().UTC(), Status: usage.Failed, ErrorType: "INVALID_REQUEST"}
+		trace = &usage.Event{PrincipalID: identity.ID, RequestID: logging.RequestID(r.Context()), TraceID: traceID, SpanID: spanID, RequestAt: time.Now().UTC(), Status: usage.Failed, ErrorType: "INVALID_REQUEST"}
 		trace.ClientProtocol = protocol
 		defer func() {
 			trace.CompletedAt = time.Now().UTC()
@@ -88,7 +88,7 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					a.InputTokens, a.OutputTokens, a.CachedInputTokens = observer.Tokens(trace.Status == usage.Success)
 				}
 			}
-			if trace.Attempt != nil || len(trace.Attempts) > 0 {
+			if g.writer != nil && (trace.Attempt != nil || len(trace.Attempts) > 0) {
 				_ = g.writer.Submit(*trace)
 			}
 		}()
@@ -216,7 +216,6 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			attributes = append(attributes,
 				"protocol", protocol,
 				"path", path,
-				"organization_id", identity.OrganizationID,
 				"principal_id", identity.ID,
 				"access_key_id", identity.AccessKeyID,
 			)

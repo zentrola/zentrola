@@ -61,7 +61,7 @@ func TestInitializeOfficialProvidersCreatesMissingTemplatesAndSynchronizesLocali
 	}
 	state := &providerInitializationState{providers: []Provider{existing}}
 	service := New(providerInitializationStore{state}, &providerInitIDs{next: 100}, nil, nil)
-	actor := admin.Identity{ID: 1, OrganizationID: 2}
+	actor := admin.Identity{ID: 1}
 
 	result, err := service.InitializeOfficialProviders(context.Background(), actor, ProviderInitializeInput{Locale: "zh-CN"}, appsec.RequestMeta{})
 	if err != nil {
@@ -98,7 +98,7 @@ func TestInitializeOfficialProvidersRejectsUnsupportedLocale(t *testing.T) {
 	service := New(providerInitializationStore{state}, &providerInitIDs{}, nil, nil)
 	_, err := service.InitializeOfficialProviders(
 		context.Background(),
-		admin.Identity{ID: 1, OrganizationID: 2},
+		admin.Identity{ID: 1},
 		ProviderInitializeInput{Locale: "fr-FR"},
 		appsec.RequestMeta{},
 	)

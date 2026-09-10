@@ -27,11 +27,11 @@ func (s *SecurityStore) ChangePassword(ctx context.Context, actor admin.Identity
 		return appsec.ErrUnavailable
 	}
 	// 与登录及 CLI 重置共用行锁，拒绝验证旧密码之后发生的并发凭证变更。
-	if row.ID != actor.ID || row.OrganizationID != actor.OrganizationID || row.CredentialVersion != actor.CredentialVersion || row.Status != "ACTIVE" || !row.OrganizationActive {
+	if row.ID != actor.ID || row.CredentialVersion != actor.CredentialVersion || row.Status != "ACTIVE" {
 		return appsec.ErrUnauthenticated
 	}
 	count, err := q.ResetAdminPassword(ctx, dbgen.ResetAdminPasswordParams{
-		OrganizationID: actor.OrganizationID, ID: actor.ID, PasswordHash: hash,
+		ID: actor.ID, PasswordHash: hash,
 		UpdatedAt: pgTime(time.Now().UTC()), UpdatedBy: actorRef(actor.ID),
 	})
 	if err != nil || count != 1 {

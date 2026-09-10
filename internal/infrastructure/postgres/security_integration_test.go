@@ -16,7 +16,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zentrola/zentrola/internal/application/bootstrap"
 	"github.com/zentrola/zentrola/internal/application/health"
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	"github.com/zentrola/zentrola/internal/domain/admin"
@@ -31,9 +30,6 @@ import (
 func TestStage2Integration(t *testing.T) {
 	ctx, pool, _ := integrationDatabase(t)
 	ids := idgen.New(pool)
-	if err := bootstrap.New(NewBootstrapStore(pool), ids).Initialize(ctx); err != nil {
-		t.Fatal(err)
-	}
 	store := NewSecurityStore(pool, ids)
 	passwords, err := cryptosec.NewPasswords(4)
 	if err != nil {
@@ -137,7 +133,7 @@ func TestStage2Integration(t *testing.T) {
 			}
 			lockedUntil = body.Data.LockedUntil
 		}
-		row, err := dbgen.New(pool).GetAdminByUsername(ctx, dbgen.GetAdminByUsernameParams{OrganizationID: actor.OrganizationID, Username: username})
+		row, err := dbgen.New(pool).GetAdminForLogin(ctx, username)
 		if err != nil || row.FailedLoginCount != 5 || !row.LockedUntil.Valid {
 			t.Fatal("lockout state not persisted", err)
 		}
@@ -145,7 +141,7 @@ func TestStage2Integration(t *testing.T) {
 			t.Fatal(err)
 		}
 		decodeLogin(login(username, password))
-		row, err = dbgen.New(pool).GetAdminByUsername(ctx, dbgen.GetAdminByUsernameParams{OrganizationID: actor.OrganizationID, Username: username})
+		row, err = dbgen.New(pool).GetAdminForLogin(ctx, username)
 		if err != nil || row.FailedLoginCount != 0 || row.LockedUntil.Valid || !row.LastLoginAt.Valid {
 			t.Fatal("successful login did not reset state", err)
 		}
@@ -161,7 +157,7 @@ func TestStage2Integration(t *testing.T) {
 			})
 		}
 		wg.Wait()
-		row, err := dbgen.New(pool).GetAdminByUsername(ctx, dbgen.GetAdminByUsernameParams{OrganizationID: actor.OrganizationID, Username: username})
+		row, err := dbgen.New(pool).GetAdminForLogin(ctx, username)
 		if err != nil || row.FailedLoginCount != 5 || !row.LockedUntil.Valid {
 			t.Fatal("concurrent failures lost lockout state", err)
 		}
@@ -183,7 +179,7 @@ func TestStage2Integration(t *testing.T) {
 	})
 
 	principalID, _ := ids.NextID(ctx)
-	if _, err := pool.Exec(ctx, `INSERT INTO principal (id,organization_id,principal_type,name,status,created_by,updated_by,created_at,updated_at) VALUES ($1,$2,'MEMBER','Test Member','ACTIVE','system','system',now(),now())`, principalID, actor.OrganizationID); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO principal (id,principal_type,name,status,created_by,updated_by,created_at,updated_at) VALUES ($1,'MEMBER','Test Member','ACTIVE','system','system',now(),now())`, principalID); err != nil {
 		t.Fatal(err)
 	}
 	var issued appsec.CreatedKey
@@ -248,9 +244,9 @@ func TestStage2Integration(t *testing.T) {
 			t.Fatal("revoke is not idempotent")
 		}
 		foreign := actor
-		foreign.OrganizationID++
-		if _, err := keys.Create(ctx, foreign, principalID, "Cross Org", nil, appsec.RequestMeta{}); err == nil {
-			t.Fatal("cross-organization key creation accepted")
+		foreign.ID = 0
+		if _, err := keys.Create(ctx, foreign, principalID, "Invalid Actor", nil, appsec.RequestMeta{}); err == nil {
+			t.Fatal("invalid administrator key creation accepted")
 		}
 	})
 	t.Run("credential recovery preserves admin access", func(t *testing.T) {
@@ -260,9 +256,9 @@ func TestStage2Integration(t *testing.T) {
 		}
 		c, _ := cryptosec.NewCredentials(master)
 		resourceID, _ := ids.NextID(ctx)
-		owner := cryptosec.CredentialOwner{OrganizationID: actor.OrganizationID, ProviderID: providerID, ResourceID: resourceID}
+		owner := cryptosec.CredentialOwner{ProviderID: providerID, ResourceID: resourceID}
 		sealed, _ := c.Encrypt([]byte("test-provider-secret"), owner)
-		if _, err := pool.Exec(ctx, `INSERT INTO provider_credential (id,organization_id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,created_by,updated_by,created_at,updated_at) VALUES ($1,$2,$3,'Test Resource',$4,$5,1,'ACTIVE','system','system',now(),now())`, resourceID, actor.OrganizationID, providerID, sealed.Ciphertext, sealed.Nonce); err != nil {
+		if _, err := pool.Exec(ctx, `INSERT INTO provider_credential (id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,created_by,updated_by,created_at,updated_at) VALUES ($1,$2,'Test Resource',$3,$4,$5,'ACTIVE','system','system',now(),now())`, resourceID, providerID, sealed.Ciphertext, sealed.Nonce, sealed.KeyVersion); err != nil {
 			t.Fatal(err)
 		}
 		if n, err := store.RecoverCredentials(ctx, c, false); err != nil || n != 0 {

@@ -10,7 +10,7 @@ import (
 )
 
 const getAccessKeyByHash = `-- name: GetAccessKeyByHash :one
-SELECT id, is_deleted, status, organization_id, principal_id, key_hash, masked_key, name, expires_at, last_used_at, revoked_at, created_by, updated_by, created_at, updated_at FROM principal_access_key WHERE key_hash = $1 AND is_deleted = false
+SELECT id, is_deleted, status, principal_id, key_hash, masked_key, name, expires_at, last_used_at, revoked_at, created_by, updated_by, created_at, updated_at FROM principal_access_key WHERE key_hash = $1 AND is_deleted = false
 `
 
 // 这里只定位凭证；完整认证和撤销/过期判断在阶段 2/4 实现。
@@ -21,7 +21,6 @@ func (q *Queries) GetAccessKeyByHash(ctx context.Context, keyHash []byte) (Princ
 		&i.ID,
 		&i.IsDeleted,
 		&i.Status,
-		&i.OrganizationID,
 		&i.PrincipalID,
 		&i.KeyHash,
 		&i.MaskedKey,
@@ -38,22 +37,16 @@ func (q *Queries) GetAccessKeyByHash(ctx context.Context, keyHash []byte) (Princ
 }
 
 const getAdminByUsername = `-- name: GetAdminByUsername :one
-SELECT id, is_deleted, status, organization_id, username, password_hash, display_name, failed_login_count, locked_until, last_login_at, credential_version, created_by, updated_by, created_at, updated_at FROM admin_user WHERE organization_id = $1 AND username = $2 AND is_deleted = false
+SELECT id, is_deleted, status, username, password_hash, display_name, failed_login_count, locked_until, last_login_at, credential_version, created_by, updated_by, created_at, updated_at FROM admin_user WHERE username = $1 AND is_deleted = false
 `
 
-type GetAdminByUsernameParams struct {
-	OrganizationID int64
-	Username       string
-}
-
-func (q *Queries) GetAdminByUsername(ctx context.Context, arg GetAdminByUsernameParams) (AdminUser, error) {
-	row := q.db.QueryRow(ctx, getAdminByUsername, arg.OrganizationID, arg.Username)
+func (q *Queries) GetAdminByUsername(ctx context.Context, username string) (AdminUser, error) {
+	row := q.db.QueryRow(ctx, getAdminByUsername, username)
 	var i AdminUser
 	err := row.Scan(
 		&i.ID,
 		&i.IsDeleted,
 		&i.Status,
-		&i.OrganizationID,
 		&i.Username,
 		&i.PasswordHash,
 		&i.DisplayName,
@@ -69,45 +62,17 @@ func (q *Queries) GetAdminByUsername(ctx context.Context, arg GetAdminByUsername
 	return i, err
 }
 
-const getOrganization = `-- name: GetOrganization :one
-SELECT id, is_deleted, status, organization_code, organization_name, remark, created_by, updated_by, created_at, updated_at FROM organization WHERE id = $1 AND is_deleted = false
-`
-
-func (q *Queries) GetOrganization(ctx context.Context, id int64) (Organization, error) {
-	row := q.db.QueryRow(ctx, getOrganization, id)
-	var i Organization
-	err := row.Scan(
-		&i.ID,
-		&i.IsDeleted,
-		&i.Status,
-		&i.OrganizationCode,
-		&i.OrganizationName,
-		&i.Remark,
-		&i.CreatedBy,
-		&i.UpdatedBy,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
 const getPrincipal = `-- name: GetPrincipal :one
-SELECT id, is_deleted, status, organization_id, principal_type, name, remark, created_by, updated_by, created_at, updated_at FROM principal WHERE organization_id = $1 AND id = $2 AND is_deleted = false
+SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at FROM principal WHERE id = $1 AND is_deleted = false
 `
 
-type GetPrincipalParams struct {
-	OrganizationID int64
-	ID             int64
-}
-
-func (q *Queries) GetPrincipal(ctx context.Context, arg GetPrincipalParams) (Principal, error) {
-	row := q.db.QueryRow(ctx, getPrincipal, arg.OrganizationID, arg.ID)
+func (q *Queries) GetPrincipal(ctx context.Context, id int64) (Principal, error) {
+	row := q.db.QueryRow(ctx, getPrincipal, id)
 	var i Principal
 	err := row.Scan(
 		&i.ID,
 		&i.IsDeleted,
 		&i.Status,
-		&i.OrganizationID,
 		&i.PrincipalType,
 		&i.Name,
 		&i.Remark,
@@ -174,23 +139,17 @@ func (q *Queries) GetProviderModel(ctx context.Context, id int64) (ProviderModel
 }
 
 const getResource = `-- name: GetResource :one
-SELECT id, is_deleted, status, organization_id, provider_id, resource_name, credential_ciphertext, credential_nonce, key_version, created_by, updated_by, created_at, updated_at, runtime_status, blocked_reason, blocked_at, last_error_at, last_http_status, last_error_code FROM provider_credential WHERE organization_id = $1 AND id = $2 AND is_deleted = false
+SELECT id, is_deleted, status, provider_id, resource_name, credential_ciphertext, credential_nonce, key_version, created_by, updated_by, created_at, updated_at, runtime_status, blocked_reason, blocked_at, last_error_at, last_http_status, last_error_code FROM provider_credential WHERE id = $1 AND is_deleted = false
 `
 
-type GetResourceParams struct {
-	OrganizationID int64
-	ID             int64
-}
-
 // 包含加密凭证，仅供内部 Repository 使用，禁止直接序列化为 API 响应。
-func (q *Queries) GetResource(ctx context.Context, arg GetResourceParams) (ProviderCredential, error) {
-	row := q.db.QueryRow(ctx, getResource, arg.OrganizationID, arg.ID)
+func (q *Queries) GetResource(ctx context.Context, id int64) (ProviderCredential, error) {
+	row := q.db.QueryRow(ctx, getResource, id)
 	var i ProviderCredential
 	err := row.Scan(
 		&i.ID,
 		&i.IsDeleted,
 		&i.Status,
-		&i.OrganizationID,
 		&i.ProviderID,
 		&i.ResourceName,
 		&i.CredentialCiphertext,
@@ -213,48 +172,40 @@ func (q *Queries) GetResource(ctx context.Context, arg GetResourceParams) (Provi
 const hasGroupModelPermission = `-- name: HasGroupModelPermission :one
 SELECT EXISTS (
   SELECT 1 FROM principal p
-  JOIN organization o ON o.id = p.organization_id
-  JOIN principal_group_membership pg ON pg.principal_id = p.id AND pg.organization_id = p.organization_id
-  JOIN principal_group g ON g.id = pg.group_id AND g.organization_id = p.organization_id
-  JOIN principal_group_model_permission permission ON permission.group_id = g.id AND permission.organization_id = p.organization_id
+  JOIN principal_group_membership pg ON pg.principal_id = p.id
+  JOIN principal_group g ON g.id = pg.group_id
+  JOIN principal_group_model_permission permission ON permission.group_id = g.id
   JOIN model m ON m.id = permission.model_id
-  WHERE p.organization_id = $1 AND p.id = $2 AND m.id = $3
+  WHERE p.id = $1 AND m.id = $2
     AND p.principal_type = 'MEMBER' AND p.status = 'ACTIVE' AND p.is_deleted = false
-    AND o.status = 'ACTIVE' AND o.is_deleted = false
     AND pg.is_deleted = false AND g.status = 'ACTIVE' AND g.is_deleted = false
     AND permission.is_deleted = false AND m.status = 'ACTIVE' AND m.is_deleted = false
 )
 `
 
 type HasGroupModelPermissionParams struct {
-	OrganizationID int64
-	PrincipalID    int64
-	ModelID        int64
+	PrincipalID int64
+	ModelID     int64
 }
 
 // Default Deny：没有匹配的显式有效授权即返回 false；多组通过 EXISTS 取并集。
 func (q *Queries) HasGroupModelPermission(ctx context.Context, arg HasGroupModelPermissionParams) (bool, error) {
-	row := q.db.QueryRow(ctx, hasGroupModelPermission, arg.OrganizationID, arg.PrincipalID, arg.ModelID)
+	row := q.db.QueryRow(ctx, hasGroupModelPermission, arg.PrincipalID, arg.ModelID)
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
 }
 
 const listGroupsForPrincipal = `-- name: ListGroupsForPrincipal :many
-SELECT g.id, g.is_deleted, g.status, g.organization_id, g.group_code, g.group_name, g.remark, g.created_by, g.updated_by, g.created_at, g.updated_at FROM principal_group g
-JOIN principal_group_membership pg ON pg.group_id = g.id AND pg.organization_id = g.organization_id
-WHERE pg.organization_id = $1 AND pg.principal_id = $2
+SELECT g.id, g.is_deleted, g.status, g.group_code, g.group_name, g.remark, g.created_by, g.updated_by, g.created_at, g.updated_at FROM principal_group g
+JOIN principal_group_membership pg ON pg.group_id = g.id
+WHERE pg.principal_id = $1
   AND pg.is_deleted = false AND g.is_deleted = false AND g.status = 'ACTIVE'
 ORDER BY g.id
 `
 
-type ListGroupsForPrincipalParams struct {
-	OrganizationID int64
-	PrincipalID    int64
-}
-
-func (q *Queries) ListGroupsForPrincipal(ctx context.Context, arg ListGroupsForPrincipalParams) ([]PrincipalGroup, error) {
-	rows, err := q.db.Query(ctx, listGroupsForPrincipal, arg.OrganizationID, arg.PrincipalID)
+func (q *Queries) ListGroupsForPrincipal(ctx context.Context, principalID int64) ([]PrincipalGroup, error) {
+	rows, err := q.db.Query(ctx, listGroupsForPrincipal, principalID)
 	if err != nil {
 		return nil, err
 	}
@@ -266,7 +217,6 @@ func (q *Queries) ListGroupsForPrincipal(ctx context.Context, arg ListGroupsForP
 			&i.ID,
 			&i.IsDeleted,
 			&i.Status,
-			&i.OrganizationID,
 			&i.GroupCode,
 			&i.GroupName,
 			&i.Remark,
@@ -286,7 +236,7 @@ func (q *Queries) ListGroupsForPrincipal(ctx context.Context, arg ListGroupsForP
 }
 
 const listModels = `-- name: ListModels :many
-SELECT id, is_deleted, status, model_code, display_name, input_modalities, output_modalities, remark, created_by, updated_by, created_at, updated_at FROM model WHERE is_deleted = false ORDER BY id
+SELECT id, is_deleted, status, model_code, display_name, input_modalities, output_modalities, remark, created_by, updated_by, created_at, updated_at, publisher_provider_id FROM model WHERE is_deleted = false ORDER BY id
 `
 
 func (q *Queries) ListModels(ctx context.Context) ([]Model, error) {
@@ -311,6 +261,7 @@ func (q *Queries) ListModels(ctx context.Context) ([]Model, error) {
 			&i.UpdatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PublisherProviderID,
 		); err != nil {
 			return nil, err
 		}

@@ -45,15 +45,17 @@ type Group struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 type Model struct {
-	ID               int64     `json:"id,string"`
-	Code             string    `json:"code"`
-	Name             string    `json:"name"`
-	Status           string    `json:"status"`
-	InputModalities  []string  `json:"inputModalities"`
-	OutputModalities []string  `json:"outputModalities"`
-	Remark           string    `json:"remark"`
-	CreatedAt        time.Time `json:"createdAt"`
-	UpdatedAt        time.Time `json:"updatedAt"`
+	ID                    int64     `json:"id,string"`
+	Code                  string    `json:"code"`
+	Name                  string    `json:"name"`
+	Status                string    `json:"status"`
+	InputModalities       []string  `json:"inputModalities"`
+	OutputModalities      []string  `json:"outputModalities"`
+	Remark                string    `json:"remark"`
+	PublisherProviderID   *int64    `json:"publisherProviderId,string"`
+	PublisherProviderName *string   `json:"publisherProviderName"`
+	CreatedAt             time.Time `json:"createdAt"`
+	UpdatedAt             time.Time `json:"updatedAt"`
 }
 
 type ModelInput struct {

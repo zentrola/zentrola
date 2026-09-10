@@ -2084,7 +2084,7 @@
                         "AdminBearer": []
                     }
                 ],
-                "description": "按用户名模糊匹配当前组织成员，供实时自动完成使用。",
+                "description": "按用户名模糊匹配当前部署实例中的成员，供实时自动完成使用。",
                 "produces": [
                     "application/json"
                 ],
@@ -3643,7 +3643,7 @@
                         "AdminBearer": []
                     }
                 ],
-                "description": "逻辑删除服务商，并停用其模型映射和所有组织下的服务商密钥；历史用量和操作日志保留。",
+                "description": "逻辑删除服务商，并停用其模型映射和服务商密钥；历史用量和操作日志保留。",
                 "produces": [
                     "application/json"
                 ],
@@ -4412,7 +4412,7 @@
                         "AdminBearer": []
                     }
                 ],
-                "description": "只查询当前组织；按 ID 倒序分页，最新记录在前；时间区间最长 366 天。",
+                "description": "查询当前部署实例；按 ID 倒序分页，最新记录在前；时间区间最长 366 天。",
                 "produces": [
                     "application/json"
                 ],
@@ -4526,7 +4526,7 @@
                         "AdminBearer": []
                     }
                 ],
-                "description": "返回当前组织激活用户数、启用模型和服务商数量，以及指定时间范围内的 Token 汇总、用户 Token Top 10、客户端逻辑模型请求 Top 10 与上游模型调用 Top 10。",
+                "description": "返回当前部署实例的激活用户数、启用模型和服务商数量，以及指定时间范围内的 Token 汇总、用户 Token Top 10、客户端逻辑模型请求 Top 10 与服务商调用 Top 10。",
                 "produces": [
                     "application/json"
                 ],
@@ -5136,10 +5136,6 @@
                     "type": "string"
                 },
                 "id": {
-                    "type": "string",
-                    "example": "0"
-                },
-                "organizationId": {
                     "type": "string",
                     "example": "0"
                 },
@@ -5780,6 +5776,13 @@
                         "type": "string"
                     }
                 },
+                "publisherProviderId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "publisherProviderName": {
+                    "type": "string"
+                },
                 "remark": {
                     "type": "string"
                 },
@@ -6304,6 +6307,12 @@
                 "providerCount": {
                     "type": "integer"
                 },
+                "providerRanking": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/usage.ProviderRank"
+                    }
+                },
                 "tokenRanking": {
                     "type": "array",
                     "items": {
@@ -6312,12 +6321,6 @@
                 },
                 "totalTokens": {
                     "type": "integer"
-                },
-                "upstreamModelRanking": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/usage.UpstreamModelRank"
-                    }
                 }
             }
         },
@@ -6340,6 +6343,24 @@
                     "type": "integer"
                 },
                 "writeErrors": {
+                    "type": "integer"
+                }
+            }
+        },
+        "usage.ProviderRank": {
+            "type": "object",
+            "properties": {
+                "calls": {
+                    "type": "integer"
+                },
+                "providerId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "providerName": {
+                    "type": "string"
+                },
+                "tokens": {
                     "type": "integer"
                 }
             }
@@ -6418,31 +6439,6 @@
                 "principalId": {
                     "type": "string",
                     "example": "0"
-                },
-                "tokens": {
-                    "type": "integer"
-                }
-            }
-        },
-        "usage.UpstreamModelRank": {
-            "type": "object",
-            "properties": {
-                "calls": {
-                    "type": "integer"
-                },
-                "modelCode": {
-                    "type": "string"
-                },
-                "modelId": {
-                    "type": "string",
-                    "example": "0"
-                },
-                "providerId": {
-                    "type": "string",
-                    "example": "0"
-                },
-                "providerName": {
-                    "type": "string"
                 },
                 "tokens": {
                     "type": "integer"

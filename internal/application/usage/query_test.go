@@ -31,7 +31,7 @@ func TestDashboardValidatesIdentityAndRange(t *testing.T) {
 	store := &queryStoreStub{dashboard: Dashboard{ActiveMemberCount: 3, ModelCount: 2, ProviderCount: 1, TotalTokens: 42}}
 	service := NewQuery(store)
 
-	result, err := service.Dashboard(context.Background(), admin.Identity{ID: 1, OrganizationID: 2}, from, to)
+	result, err := service.Dashboard(context.Background(), admin.Identity{ID: 1}, from, to)
 	if err != nil || result.ActiveMemberCount != 3 || result.TotalTokens != 42 || !store.from.Equal(from) || !store.to.Equal(to) {
 		t.Fatalf("unexpected dashboard result: result=%+v err=%v", result, err)
 	}
@@ -44,9 +44,9 @@ func TestDashboardValidatesIdentityAndRange(t *testing.T) {
 		want  error
 	}{
 		{"missing identity", admin.Identity{}, from, to, appsec.ErrUnauthenticated},
-		{"empty range", admin.Identity{ID: 1, OrganizationID: 2}, time.Time{}, to, appsec.ErrInvalidArgument},
-		{"reversed range", admin.Identity{ID: 1, OrganizationID: 2}, to, from, appsec.ErrInvalidArgument},
-		{"range too long", admin.Identity{ID: 1, OrganizationID: 2}, from, from.Add(367 * 24 * time.Hour), appsec.ErrInvalidArgument},
+		{"empty range", admin.Identity{ID: 1}, time.Time{}, to, appsec.ErrInvalidArgument},
+		{"reversed range", admin.Identity{ID: 1}, to, from, appsec.ErrInvalidArgument},
+		{"range too long", admin.Identity{ID: 1}, from, from.Add(367 * 24 * time.Hour), appsec.ErrInvalidArgument},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := service.Dashboard(context.Background(), tc.actor, tc.from, tc.to)

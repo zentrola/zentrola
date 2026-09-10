@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zentrola/zentrola/internal/application/bootstrap"
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	"github.com/zentrola/zentrola/internal/domain/admin"
 	"github.com/zentrola/zentrola/internal/infrastructure/idgen"
@@ -35,9 +34,6 @@ func (s resetBeforeIssue) Issue(identity admin.Identity) (string, time.Time, err
 func TestAdminPasswordResetIntegration(t *testing.T) {
 	ctx, pool, _ := integrationDatabase(t)
 	ids := idgen.New(pool)
-	if err := bootstrap.New(NewBootstrapStore(pool), ids).Initialize(ctx); err != nil {
-		t.Fatal(err)
-	}
 	passwords, err := cryptosec.NewPasswords(4)
 	if err != nil {
 		t.Fatal(err)
@@ -63,8 +59,8 @@ func TestAdminPasswordResetIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 另一位管理员的凭证不受重置影响。
-	_, err = pool.Exec(ctx, `INSERT INTO admin_user (id,organization_id,username,password_hash,display_name,status,created_by,updated_by,created_at,updated_at)
-SELECT 12345,organization_id,'other',password_hash,'Other','ACTIVE','system','system',now(),now() FROM admin_user WHERE username='admin'`)
+	_, err = pool.Exec(ctx, `INSERT INTO admin_user (id,username,password_hash,display_name,status,created_by,updated_by,created_at,updated_at)
+SELECT 12345,'other',password_hash,'Other','ACTIVE','system','system',now(),now() FROM admin_user WHERE username='admin'`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,13 +133,13 @@ SELECT 12345,organization_id,'other',password_hash,'Other','ACTIVE','system','sy
 		}
 	})
 
-	t.Run("reject missing inactive deleted and inactive organization", func(t *testing.T) {
+	t.Run("reject missing inactive and deleted", func(t *testing.T) {
 		for _, username := range []string{"missing", "", " admin"} {
 			if password, err := reset.Reset(ctx, username); err == nil || password != "" {
 				t.Fatal("invalid account accepted")
 			}
 		}
-		for _, sql := range []string{`UPDATE admin_user SET status='DISABLED' WHERE username='admin'`, `UPDATE admin_user SET status='ACTIVE',is_deleted=true WHERE username='admin'`, `UPDATE admin_user SET is_deleted=false WHERE username='admin'; UPDATE organization SET status='DISABLED'`} {
+		for _, sql := range []string{`UPDATE admin_user SET status='DISABLED' WHERE username='admin'`, `UPDATE admin_user SET status='ACTIVE',is_deleted=true WHERE username='admin'`} {
 			if _, err := pool.Exec(ctx, sql); err != nil {
 				t.Fatal(err)
 			}
@@ -151,7 +147,7 @@ SELECT 12345,organization_id,'other',password_hash,'Other','ACTIVE','system','sy
 				t.Fatal("inactive account reset")
 			}
 		}
-		if _, err := pool.Exec(ctx, `UPDATE organization SET status='ACTIVE'`); err != nil {
+		if _, err := pool.Exec(ctx, `UPDATE admin_user SET status='ACTIVE',is_deleted=false WHERE username='admin'`); err != nil {
 			t.Fatal(err)
 		}
 	})

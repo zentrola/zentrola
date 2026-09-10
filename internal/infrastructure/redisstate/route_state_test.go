@@ -5,8 +5,8 @@ import (
 	"testing"
 )
 
-func TestRouteKeyIsTenantAndCredentialScoped(t *testing.T) {
-	if got := routeKey(12, 34); got != "zentrola:route:cooldown:12:34" {
+func TestRouteKeyIsCredentialScoped(t *testing.T) {
+	if got := routeKey(34); got != "zentrola:route:cooldown:v2:34" {
 		t.Fatal(got)
 	}
 }

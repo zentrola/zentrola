@@ -227,6 +227,46 @@ func TestDevelopmentAccessLogCapturesRedactedBodies(t *testing.T) {
 	}
 }
 
+func TestRedactJSONOnlyRedactsSensitiveFields(t *testing.T) {
+	value := map[string]any{
+		"name":                  "GLM 5.3 Flash",
+		"createdAt":             "2026-09-10T16:41:23+08:00",
+		"inputModalities":       []any{"text", "image"},
+		"outputModalities":      []any{"text"},
+		"publisherProviderId":   "42",
+		"publisherProviderName": "Zhipu AI",
+		"remark":                "ordinary metadata",
+		"total":                 json.Number("15"),
+		"nextCursor":            "cursor-123",
+		"password":              "password-secret",
+		"accessToken":           "token-secret",
+		"messages":              []any{map[string]any{"role": "user", "content": "private-prompt"}},
+		"input_text":            "private-input",
+	}
+
+	encoded, err := json.Marshal(redactJSON(value))
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(encoded)
+	for _, expected := range []string{
+		"GLM 5.3 Flash", "2026-09-10T16:41:23+08:00", "text", "image", "42", "Zhipu AI",
+		"ordinary metadata", "15", "cursor-123",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("ordinary field value %q missing from %s", expected, output)
+		}
+	}
+	for _, secret := range []string{"password-secret", "token-secret", "private-prompt", "private-input"} {
+		if strings.Contains(output, secret) {
+			t.Fatalf("sensitive value %q leaked in %s", secret, output)
+		}
+	}
+	if strings.Count(output, "[REDACTED]") != 4 {
+		t.Fatalf("unexpected redacted output: %s", output)
+	}
+}
+
 func TestProductionAccessLogOmitsBodies(t *testing.T) {
 	var logs bytes.Buffer
 	logger := logging.New(&logs, "json", slog.LevelInfo)

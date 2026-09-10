@@ -14,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zentrola/zentrola/internal/application/bootstrap"
 	gw "github.com/zentrola/zentrola/internal/application/gateway"
 	"github.com/zentrola/zentrola/internal/application/health"
 	mgmt "github.com/zentrola/zentrola/internal/application/management"
@@ -50,9 +49,6 @@ func (b *usageInterruptedBody) Close() error { return nil }
 func TestStage5Integration(t *testing.T) {
 	ctx, pool, _ := integrationDatabase(t)
 	ids := idgen.New(pool)
-	if err := bootstrap.New(NewBootstrapStore(pool), ids).Initialize(ctx); err != nil {
-		t.Fatal(err)
-	}
 	securityStore := NewSecurityStore(pool, ids)
 	passwords, _ := cryptosec.NewPasswords(4)
 	entropy := make([]byte, 32)
@@ -263,7 +259,7 @@ func TestStage5Integration(t *testing.T) {
 		t.Fatal("count_tokens recorded as inference")
 	}
 	dashboard, err := app.NewQuery(store).Dashboard(ctx, actor, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
-	if err != nil || dashboard.ActiveMemberCount < 1 || dashboard.ModelCount < 1 || dashboard.ProviderCount < 1 || dashboard.TotalTokens != 58 || len(dashboard.TokenRanking) != 1 || dashboard.TokenRanking[0].PrincipalID != member.ID || len(dashboard.ClientModelRanking) != 1 || dashboard.ClientModelRanking[0].ModelID != sonnet.ID || dashboard.ClientModelRanking[0].Requests != 7 || len(dashboard.UpstreamModelRanking) != 1 || dashboard.UpstreamModelRanking[0].ProviderID != provider.ID || dashboard.UpstreamModelRanking[0].ModelID != sonnet.ID || dashboard.UpstreamModelRanking[0].ModelCode != "claude-sonnet" || dashboard.UpstreamModelRanking[0].Calls != 7 {
+	if err != nil || dashboard.ActiveMemberCount < 1 || dashboard.ModelCount < 1 || dashboard.ProviderCount < 1 || dashboard.TotalTokens != 58 || len(dashboard.TokenRanking) != 1 || dashboard.TokenRanking[0].PrincipalID != member.ID || len(dashboard.ClientModelRanking) != 1 || dashboard.ClientModelRanking[0].ModelID != sonnet.ID || dashboard.ClientModelRanking[0].Requests != 7 || len(dashboard.ProviderRanking) != 1 || dashboard.ProviderRanking[0].ProviderID != provider.ID || dashboard.ProviderRanking[0].Calls != 7 {
 		t.Fatalf("dashboard aggregation incorrect: result=%+v err=%v", dashboard, err)
 	}
 	var opusProviderModelID int64
@@ -277,7 +273,6 @@ func TestStage5Integration(t *testing.T) {
 	now := time.Now().UTC()
 	inputTokens, outputTokens := int64(2), int64(3)
 	if err := store.WriteBatch(ctx, []domain.Event{{
-		OrganizationID: actor.OrganizationID,
 		RequestID:      "same-upstream-model-code",
 		ClientProtocol: gw.AnthropicProtocol,
 		PrincipalID:    member.ID,
@@ -293,11 +288,54 @@ func TestStage5Integration(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	dashboard, err = app.NewQuery(store).Dashboard(ctx, actor, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
-	if err != nil || len(dashboard.ClientModelRanking) != 2 || dashboard.ClientModelRanking[0].ModelID != sonnet.ID || dashboard.ClientModelRanking[0].Requests != 7 || dashboard.ClientModelRanking[1].ModelID != opus.ID || dashboard.ClientModelRanking[1].Requests != 1 || len(dashboard.UpstreamModelRanking) != 2 || dashboard.UpstreamModelRanking[0].ModelID != sonnet.ID || dashboard.UpstreamModelRanking[0].ModelCode != "claude-sonnet" || dashboard.UpstreamModelRanking[0].Calls != 7 || dashboard.UpstreamModelRanking[0].Tokens != 58 || dashboard.UpstreamModelRanking[1].ModelID != opus.ID || dashboard.UpstreamModelRanking[1].ModelCode != "claude-opus" || dashboard.UpstreamModelRanking[1].Calls != 1 || dashboard.UpstreamModelRanking[1].Tokens != 5 {
-		t.Fatalf("logical models mapped to the same upstream code were not ranked separately: result=%+v err=%v", dashboard, err)
+	backupProvider, err := management.CreateProvider(ctx, actor, mgmt.ProviderInput{
+		Name:      "Anthropic 备用服务商",
+		Endpoints: []mgmt.ProviderEndpoint{{ProtocolType: "ANTHROPIC", BaseURL: "https://backup.anthropic.example.com"}},
+		Mappings:  []mgmt.ProviderMappingInput{{ModelID: sonnet.ID, UpstreamModelCode: "sonnet-backup"}},
+	}, appsec.RequestMeta{})
+	if err != nil {
+		t.Fatal(err)
 	}
-	// 查询 API：组合过滤、分页、时间、认证、非法参数和组织边界。
+	backupResource, err := management.CreateResource(ctx, actor, backupProvider.ID, "Backup usage resource", "backup-secret-not-in-usage", appsec.RequestMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := management.SetProviderStatus(ctx, actor, backupProvider.ID, "ACTIVE", appsec.RequestMeta{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := management.SetResourceStatus(ctx, actor, backupResource.ID, "ACTIVE", appsec.RequestMeta{}); err != nil {
+		t.Fatal(err)
+	}
+	var backupProviderModelID int64
+	if err := pool.QueryRow(ctx, `SELECT id FROM provider_model WHERE provider_id=$1 AND model_id=$2 AND NOT is_deleted`, backupProvider.ID, sonnet.ID).Scan(&backupProviderModelID); err != nil {
+		t.Fatal(err)
+	}
+	backupAttemptID, err := ids.NextID(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backupInputTokens, backupOutputTokens := int64(1), int64(1)
+	if err := store.WriteBatch(ctx, []domain.Event{{
+		RequestID:      "same-model-different-provider",
+		ClientProtocol: gw.AnthropicProtocol,
+		PrincipalID:    member.ID,
+		ModelID:        sonnet.ID,
+		RequestAt:      now,
+		CompletedAt:    now,
+		Status:         domain.Success,
+		Attempt: &domain.Attempt{
+			ID: backupAttemptID, ProviderID: backupProvider.ID, ProviderModelID: backupProviderModelID,
+			ResourceID: backupResource.ID, ModelID: sonnet.ID, InputTokens: &backupInputTokens,
+			OutputTokens: &backupOutputTokens, StartedAt: now, CompletedAt: now, Status: domain.Success,
+		},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	dashboard, err = app.NewQuery(store).Dashboard(ctx, actor, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+	if err != nil || dashboard.TotalTokens != 65 || len(dashboard.ClientModelRanking) != 2 || dashboard.ClientModelRanking[0].ModelID != sonnet.ID || dashboard.ClientModelRanking[0].Requests != 8 || dashboard.ClientModelRanking[1].ModelID != opus.ID || dashboard.ClientModelRanking[1].Requests != 1 || len(dashboard.ProviderRanking) != 2 || dashboard.ProviderRanking[0].ProviderID != provider.ID || dashboard.ProviderRanking[0].Calls != 8 || dashboard.ProviderRanking[0].Tokens != 63 || dashboard.ProviderRanking[1].ProviderID != backupProvider.ID || dashboard.ProviderRanking[1].Calls != 1 || dashboard.ProviderRanking[1].Tokens != 2 {
+		t.Fatalf("model and provider rankings were not aggregated independently: result=%+v err=%v", dashboard, err)
+	}
+	// 查询 API：组合过滤、分页、时间、认证和非法参数。
 	dashboardRange := "?from=" + time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano) + "&to=" + time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)
 	for _, tc := range []struct {
 		path          string
@@ -323,7 +361,6 @@ func TestStage5Integration(t *testing.T) {
 			t.Fatal("query isolation/validation failed")
 		}
 	}
-	forged := actor
 	filter := app.Filter{From: time.Now().Add(-time.Hour), To: time.Now().Add(time.Hour), Limit: 100, PrincipalID: &member.ID, ModelID: &modelID, ResourceID: &resource.ID}
 	filtered, err := app.NewQuery(store).Query(ctx, actor, filter)
 	if err != nil || len(filtered.Items) != 7 || filtered.Total != 7 {
@@ -351,15 +388,11 @@ func TestStage5Integration(t *testing.T) {
 	if none, err := app.NewQuery(store).Query(ctx, actor, filter); err != nil || len(none.Items) != 0 || none.Total != 0 {
 		t.Fatal("time range ignored")
 	}
-	forged.OrganizationID++
-	if _, err := store.Query(ctx, forged, app.Filter{From: time.Now().Add(-time.Hour), To: time.Now().Add(time.Hour), Limit: 10}); err == nil {
-		t.Fatal("cross organization query accepted")
-	}
 	// 约束失败不得留下记录，重复提交不得重复记账。
 	makeEvent := func(label string) domain.Event {
 		aid, _ := ids.NextID(ctx)
 		now := time.Now().UTC()
-		return domain.Event{OrganizationID: actor.OrganizationID, RequestID: label, ClientProtocol: gw.AnthropicProtocol, PrincipalID: member.ID, ModelID: modelID, RequestAt: now, CompletedAt: now, Status: domain.Success, Attempt: &domain.Attempt{ID: aid, ProviderID: provider.ID, ProviderModelID: 1, ResourceID: resource.ID, ModelID: modelID, StartedAt: now, CompletedAt: now, Status: domain.Success}}
+		return domain.Event{RequestID: label, ClientProtocol: gw.AnthropicProtocol, PrincipalID: member.ID, ModelID: modelID, RequestAt: now, CompletedAt: now, Status: domain.Success, Attempt: &domain.Attempt{ID: aid, ProviderID: provider.ID, ProviderModelID: 1, ResourceID: resource.ID, ModelID: modelID, StartedAt: now, CompletedAt: now, Status: domain.Success}}
 	}
 	bad := makeEvent("usage-atomic-test")
 	negative := int64(-1)

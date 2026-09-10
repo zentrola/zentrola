@@ -176,10 +176,13 @@ func (r *captureReadCloser) Read(p []byte) (int, error) {
 var nonAlphaNumeric = regexp.MustCompile(`[^a-z0-9]+`)
 
 func sensitiveJSONField(name string) bool {
-	if safeJSONField(name) {
+	name = nonAlphaNumeric.ReplaceAllString(strings.ToLower(name), "")
+	// 这些字段虽然包含敏感词片段，但只描述能力或用量，不携带实际载荷或凭据。
+	switch name {
+	case "inputmodalities", "outputmodalities", "maxtokens", "inputtokens", "outputtokens", "cachedinputtokens",
+		"prompttokens", "completiontokens", "totaltokens", "credentialconfigured":
 		return false
 	}
-	name = nonAlphaNumeric.ReplaceAllString(strings.ToLower(name), "")
 	for _, marker := range []string{
 		"password", "secret", "token", "credential", "authorization", "apikey", "virtualkey", "jwt",
 		"content", "message", "prompt", "input", "output", "system", "instruction", "thinking", "conversation", "context", "query", "response", "text",
@@ -189,19 +192,6 @@ func sensitiveJSONField(name string) bool {
 		}
 	}
 	return name == "key"
-}
-
-func safeJSONField(name string) bool {
-	name = nonAlphaNumeric.ReplaceAllString(strings.ToLower(name), "")
-	switch name {
-	case "id", "requestid", "modelid", "providerid", "providermodelid", "resourceid", "organizationid", "principalid", "accesskeyid",
-		"model", "stream", "maxtokens", "temperature", "topp", "type", "role", "code", "status", "object", "stopreason", "finishreason",
-		"usage", "inputtokens", "outputtokens", "cachedinputtokens", "prompttokens", "completiontokens", "totaltokens",
-		"preview", "keypreview", "credentialconfigured", "enabled":
-		return true
-	default:
-		return false
-	}
 }
 
 func redactJSON(value any) any {
@@ -215,23 +205,14 @@ func redactJSON(value any) any {
 			switch child.(type) {
 			case map[string]any, []any:
 				value[key] = redactJSON(child)
-			default:
-				if !safeJSONField(key) {
-					value[key] = "[REDACTED]"
-				}
 			}
 		}
 	case []any:
 		for i := range value {
-			switch value[i].(type) {
-			case map[string]any, []any:
-				value[i] = redactJSON(value[i])
-			default:
-				value[i] = "[REDACTED]"
-			}
+			value[i] = redactJSON(value[i])
 		}
 	default:
-		return "[REDACTED]"
+		return value
 	}
 	return value
 }

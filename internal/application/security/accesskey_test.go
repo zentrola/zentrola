@@ -37,9 +37,9 @@ type keyTestIDs struct{}
 func (keyTestIDs) NextID(context.Context) (int64, error) { return 123, nil }
 
 func TestCreateVirtualKeyFormatAndAuthentication(t *testing.T) {
-	store := &keyTestStore{identity: PrincipalIdentity{ID: 3, OrganizationID: 2, AccessKeyID: 123}}
+	store := &keyTestStore{identity: PrincipalIdentity{ID: 3, AccessKeyID: 123}}
 	keys := NewKeys(store, keyTestIDs{})
-	created, err := keys.Create(context.Background(), admin.Identity{ID: 1, OrganizationID: 2}, 3, "工作站", nil, RequestMeta{})
+	created, err := keys.Create(context.Background(), admin.Identity{ID: 1}, 3, "工作站", nil, RequestMeta{})
 	if err != nil {
 		t.Fatal(err)
 	}

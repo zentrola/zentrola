@@ -9,7 +9,7 @@ async function fixture(page: Page) {
     if (path.endsWith('/auth/login'))
       return reply({ token: 'test-token', expiresAt: new Date(Date.now() + 3600000).toISOString() })
     if (path.endsWith('/me'))
-      return reply({ id: '1', organizationId: '2', username: 'admin', displayName: '管理员' })
+      return reply({ id: '1', username: 'admin', displayName: '管理员' })
     if (path.endsWith('/auth/password')) {
       state.calls++
       state.body = route.request().postDataJSON()

@@ -52,14 +52,12 @@ func (s *ManagementStore) run(ctx context.Context, a admin.Identity, write bool,
 	ctx = idgen.WithQuerier(ctx, tx)
 	q := dbgen.New(tx)
 	if write {
-		// P0 单组织管理写入串行化；不在此事务中执行上游网络请求。
-		_, err = q.LockManagementOrganization(ctx, dbgen.LockManagementOrganizationParams{ID: a.OrganizationID, ID_2: a.ID})
-		if errors.Is(err, pgx.ErrNoRows) {
-			return appsec.ErrUnauthenticated
+		// 单一私有部署内的管理写入串行化；不在此事务中执行上游网络请求。
+		if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(829314004)"); err != nil {
+			return appsec.ErrUnavailable
 		}
-	} else {
-		err = validateActor(ctx, q, a)
 	}
+	err = validateActor(ctx, q, a)
 	if err != nil {
 		return managementError(err)
 	}
@@ -122,12 +120,17 @@ func memberView(r dbgen.Principal) mgmt.Member {
 func groupView(r dbgen.PrincipalGroup) mgmt.Group {
 	return mgmt.Group{ID: r.ID, Code: r.GroupCode, Name: r.GroupName, Remark: r.Remark, Status: r.Status, CreatedAt: r.CreatedAt.Time}
 }
-func modelView(r dbgen.Model) mgmt.Model {
+func modelView(id int64, code, name, status string, inputJSON, outputJSON []byte, remark string, publisherProviderID *int64, publisherProviderName *string, createdAt, updatedAt time.Time) mgmt.Model {
 	// 数组格式由数据库 CHECK 保证；响应只暴露业务字段。
 	input, output := []string{}, []string{}
-	_ = json.Unmarshal(r.InputModalities, &input)
-	_ = json.Unmarshal(r.OutputModalities, &output)
-	return mgmt.Model{ID: r.ID, Code: r.ModelCode, Name: r.DisplayName, Status: r.Status, InputModalities: input, OutputModalities: output, Remark: r.Remark, CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time}
+	_ = json.Unmarshal(inputJSON, &input)
+	_ = json.Unmarshal(outputJSON, &output)
+	return mgmt.Model{
+		ID: id, Code: code, Name: name, Status: status,
+		InputModalities: input, OutputModalities: output, Remark: remark,
+		PublisherProviderID: publisherProviderID, PublisherProviderName: publisherProviderName,
+		CreatedAt: createdAt, UpdatedAt: updatedAt,
+	}
 }
 func providerView(r dbgen.Provider) mgmt.Provider {
 	names := []string{}
@@ -207,7 +210,7 @@ func managementPageLimit(p mgmt.Page) int32 {
 	return p.Limit
 }
 func (s *managementSession) Members(ctx context.Context, p mgmt.Page) ([]mgmt.Member, error) {
-	rows, err := s.q.ManageMembers(ctx, dbgen.ManageMembersParams{OrganizationID: s.actor.OrganizationID, ID: p.After, Limit: managementPageLimit(p)})
+	rows, err := s.q.ManageMembers(ctx, dbgen.ManageMembersParams{ID: p.After, Limit: managementPageLimit(p)})
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +221,7 @@ func (s *managementSession) Members(ctx context.Context, p mgmt.Page) ([]mgmt.Me
 	return result, nil
 }
 func (s *managementSession) MemberSuggestions(ctx context.Context, p mgmt.Page, name string) ([]mgmt.Member, error) {
-	rows, err := s.q.ManageMemberSuggestions(ctx, dbgen.ManageMemberSuggestionsParams{OrganizationID: s.actor.OrganizationID, MemberName: name, AfterID: p.After, PageLimit: managementPageLimit(p)})
+	rows, err := s.q.ManageMemberSuggestions(ctx, dbgen.ManageMemberSuggestionsParams{MemberName: name, AfterID: p.After, PageLimit: managementPageLimit(p)})
 	if err != nil {
 		return nil, err
 	}
@@ -229,7 +232,7 @@ func (s *managementSession) MemberSuggestions(ctx context.Context, p mgmt.Page, 
 	return result, nil
 }
 func (s *managementSession) Groups(ctx context.Context, p mgmt.Page, status string) ([]mgmt.Group, error) {
-	rows, err := s.q.ManageGroups(ctx, dbgen.ManageGroupsParams{OrganizationID: s.actor.OrganizationID, Status: status, AfterID: p.After, PageLimit: managementPageLimit(p)})
+	rows, err := s.q.ManageGroups(ctx, dbgen.ManageGroupsParams{Status: status, AfterID: p.After, PageLimit: managementPageLimit(p)})
 	if err != nil {
 		return nil, err
 	}
@@ -246,7 +249,9 @@ func (s *managementSession) Models(ctx context.Context, p mgmt.Page, status stri
 	}
 	result := make([]mgmt.Model, 0, len(rows))
 	for _, row := range rows {
-		result = append(result, modelView(row))
+		result = append(result, modelView(row.ID, row.ModelCode, row.DisplayName, row.Status,
+			row.InputModalities, row.OutputModalities, row.Remark, row.PublisherProviderID,
+			row.PublisherProviderName, row.CreatedAt.Time, row.UpdatedAt.Time))
 	}
 	return result, nil
 }
@@ -278,13 +283,10 @@ func (s *managementSession) ProviderMappings(ctx context.Context, providerID int
 	return result, nil
 }
 func (s *managementSession) ProviderCredentialConfigured(ctx context.Context, providerID int64) (bool, error) {
-	return s.q.ManageProviderCredentialConfigured(ctx, dbgen.ManageProviderCredentialConfiguredParams{
-		OrganizationID: s.actor.OrganizationID,
-		ProviderID:     providerID,
-	})
+	return s.q.ManageProviderCredentialConfigured(ctx, providerID)
 }
 func (s *managementSession) Resources(ctx context.Context, p mgmt.Page) ([]mgmt.Resource, error) {
-	rows, err := s.q.ManageResources(ctx, dbgen.ManageResourcesParams{OrganizationID: s.actor.OrganizationID, ID: p.After, Limit: managementPageLimit(p)})
+	rows, err := s.q.ManageResources(ctx, dbgen.ManageResourcesParams{ID: p.After, Limit: managementPageLimit(p)})
 	if err != nil {
 		return nil, err
 	}
@@ -295,7 +297,7 @@ func (s *managementSession) Resources(ctx context.Context, p mgmt.Page) ([]mgmt.
 	return result, nil
 }
 func (s *managementSession) Operations(ctx context.Context, p mgmt.Page) ([]mgmt.Operation, error) {
-	rows, err := s.q.ManageOperations(ctx, dbgen.ManageOperationsParams{OrganizationID: s.actor.OrganizationID, ID: p.After, Limit: managementPageLimit(p)})
+	rows, err := s.q.ManageOperations(ctx, dbgen.ManageOperationsParams{ID: p.After, Limit: managementPageLimit(p)})
 	if err != nil {
 		return nil, err
 	}
@@ -306,7 +308,7 @@ func (s *managementSession) Operations(ctx context.Context, p mgmt.Page) ([]mgmt
 	return result, nil
 }
 func (s *managementSession) GroupMembers(ctx context.Context, id int64, p mgmt.Page) ([]mgmt.Member, error) {
-	rows, err := s.q.ManageGroupMembers(ctx, dbgen.ManageGroupMembersParams{OrganizationID: s.actor.OrganizationID, GroupID: id, ID: p.After, Limit: managementPageLimit(p)})
+	rows, err := s.q.ManageGroupMembers(ctx, dbgen.ManageGroupMembersParams{GroupID: id, ID: p.After, Limit: managementPageLimit(p)})
 	if err != nil {
 		return nil, err
 	}
@@ -317,7 +319,7 @@ func (s *managementSession) GroupMembers(ctx context.Context, id int64, p mgmt.P
 	return result, nil
 }
 func (s *managementSession) MemberGroups(ctx context.Context, id int64, p mgmt.Page) ([]mgmt.Group, error) {
-	rows, err := s.q.ManageMemberGroups(ctx, dbgen.ManageMemberGroupsParams{OrganizationID: s.actor.OrganizationID, PrincipalID: id, ID: p.After, Limit: managementPageLimit(p)})
+	rows, err := s.q.ManageMemberGroups(ctx, dbgen.ManageMemberGroupsParams{PrincipalID: id, ID: p.After, Limit: managementPageLimit(p)})
 	if err != nil {
 		return nil, err
 	}
@@ -328,18 +330,20 @@ func (s *managementSession) MemberGroups(ctx context.Context, id int64, p mgmt.P
 	return result, nil
 }
 func (s *managementSession) GroupModels(ctx context.Context, id int64, p mgmt.Page) ([]mgmt.Model, error) {
-	rows, err := s.q.ManageGroupModels(ctx, dbgen.ManageGroupModelsParams{OrganizationID: s.actor.OrganizationID, GroupID: id, ID: p.After, Limit: managementPageLimit(p)})
+	rows, err := s.q.ManageGroupModels(ctx, dbgen.ManageGroupModelsParams{GroupID: id, ID: p.After, Limit: managementPageLimit(p)})
 	if err != nil {
 		return nil, err
 	}
 	result := make([]mgmt.Model, 0, len(rows))
 	for _, row := range rows {
-		result = append(result, modelView(row))
+		result = append(result, modelView(row.ID, row.ModelCode, row.DisplayName, row.Status,
+			row.InputModalities, row.OutputModalities, row.Remark, row.PublisherProviderID,
+			row.PublisherProviderName, row.CreatedAt.Time, row.UpdatedAt.Time))
 	}
 	return result, nil
 }
 func (s *managementSession) Keys(ctx context.Context, id int64, p mgmt.Page) ([]mgmt.Key, error) {
-	rows, err := s.q.ManageKeys(ctx, dbgen.ManageKeysParams{OrganizationID: s.actor.OrganizationID, PrincipalID: id, ID: p.After, Limit: managementPageLimit(p)})
+	rows, err := s.q.ManageKeys(ctx, dbgen.ManageKeysParams{PrincipalID: id, ID: p.After, Limit: managementPageLimit(p)})
 	if err != nil {
 		return nil, err
 	}
@@ -350,13 +354,13 @@ func (s *managementSession) Keys(ctx context.Context, id int64, p mgmt.Page) ([]
 	return result, nil
 }
 func (s *managementSession) CountMembers(ctx context.Context) (int64, error) {
-	return s.q.CountManageMembers(ctx, s.actor.OrganizationID)
+	return s.q.CountManageMembers(ctx)
 }
 func (s *managementSession) CountMemberSuggestions(ctx context.Context, name string) (int64, error) {
-	return s.q.CountManageMemberSuggestions(ctx, dbgen.CountManageMemberSuggestionsParams{OrganizationID: s.actor.OrganizationID, MemberName: name})
+	return s.q.CountManageMemberSuggestions(ctx, name)
 }
 func (s *managementSession) CountGroups(ctx context.Context, status string) (int64, error) {
-	return s.q.CountManageGroups(ctx, dbgen.CountManageGroupsParams{OrganizationID: s.actor.OrganizationID, Status: status})
+	return s.q.CountManageGroups(ctx, status)
 }
 func (s *managementSession) CountModels(ctx context.Context, status string) (int64, error) {
 	return s.q.CountManageModels(ctx, status)
@@ -365,34 +369,36 @@ func (s *managementSession) CountProviders(ctx context.Context) (int64, error) {
 	return s.q.CountManageProviders(ctx)
 }
 func (s *managementSession) CountResources(ctx context.Context) (int64, error) {
-	return s.q.CountManageResources(ctx, s.actor.OrganizationID)
+	return s.q.CountManageResources(ctx)
 }
 func (s *managementSession) CountOperations(ctx context.Context) (int64, error) {
-	return s.q.CountManageOperations(ctx, s.actor.OrganizationID)
+	return s.q.CountManageOperations(ctx)
 }
 func (s *managementSession) CountGroupMembers(ctx context.Context, id int64) (int64, error) {
-	return s.q.CountManageGroupMembers(ctx, dbgen.CountManageGroupMembersParams{OrganizationID: s.actor.OrganizationID, GroupID: id})
+	return s.q.CountManageGroupMembers(ctx, id)
 }
 func (s *managementSession) CountMemberGroups(ctx context.Context, id int64) (int64, error) {
-	return s.q.CountManageMemberGroups(ctx, dbgen.CountManageMemberGroupsParams{OrganizationID: s.actor.OrganizationID, PrincipalID: id})
+	return s.q.CountManageMemberGroups(ctx, id)
 }
 func (s *managementSession) CountGroupModels(ctx context.Context, id int64) (int64, error) {
-	return s.q.CountManageGroupModels(ctx, dbgen.CountManageGroupModelsParams{OrganizationID: s.actor.OrganizationID, GroupID: id})
+	return s.q.CountManageGroupModels(ctx, id)
 }
 func (s *managementSession) CountKeys(ctx context.Context, id int64) (int64, error) {
-	return s.q.CountManageKeys(ctx, dbgen.CountManageKeysParams{OrganizationID: s.actor.OrganizationID, PrincipalID: id})
+	return s.q.CountManageKeys(ctx, id)
 }
 func (s *managementSession) Member(ctx context.Context, id int64) (mgmt.Member, error) {
-	row, err := s.q.ManageMember(ctx, dbgen.ManageMemberParams{OrganizationID: s.actor.OrganizationID, ID: id})
+	row, err := s.q.ManageMember(ctx, id)
 	return memberView(row), err
 }
 func (s *managementSession) Group(ctx context.Context, id int64) (mgmt.Group, error) {
-	row, err := s.q.ManageGroup(ctx, dbgen.ManageGroupParams{OrganizationID: s.actor.OrganizationID, ID: id})
+	row, err := s.q.ManageGroup(ctx, id)
 	return groupView(row), err
 }
 func (s *managementSession) Model(ctx context.Context, id int64) (mgmt.Model, error) {
 	row, err := s.q.ManageModel(ctx, id)
-	return modelView(row), err
+	return modelView(row.ID, row.ModelCode, row.DisplayName, row.Status,
+		row.InputModalities, row.OutputModalities, row.Remark, row.PublisherProviderID,
+		row.PublisherProviderName, row.CreatedAt.Time, row.UpdatedAt.Time), err
 }
 func (s *managementSession) Provider(ctx context.Context, id int64) (mgmt.Provider, error) {
 	row, err := s.q.ManageProvider(ctx, id)
@@ -405,7 +411,7 @@ func (s *managementSession) Provider(ctx context.Context, id int64) (mgmt.Provid
 }
 
 func (s *managementSession) Resource(ctx context.Context, id int64) (mgmt.ResourceRecord, error) {
-	r, err := s.q.ManageResource(ctx, dbgen.ManageResourceParams{OrganizationID: s.actor.OrganizationID, ID: id})
+	r, err := s.q.ManageResource(ctx, id)
 	return mgmt.ResourceRecord{Resource: mgmt.Resource{
 		ID: r.ID, ProviderID: r.ProviderID, Name: r.ResourceName, Status: r.Status,
 		RuntimeStatus: r.RuntimeStatus, BlockedReason: r.BlockedReason,
@@ -415,46 +421,46 @@ func (s *managementSession) Resource(ctx context.Context, id int64) (mgmt.Resour
 	}, Sealed: catalog.SealedCredential{Ciphertext: r.CredentialCiphertext, Nonce: r.CredentialNonce, KeyVersion: r.KeyVersion}}, err
 }
 func (s *managementSession) CreateMember(ctx context.Context, m mgmt.Member) error {
-	return s.q.ManageCreateMember(ctx, dbgen.ManageCreateMemberParams{ID: m.ID, OrganizationID: s.actor.OrganizationID, Name: m.Name, Remark: m.Remark, CreatedBy: actorRef(s.actor.ID), CreatedAt: pgTime(m.CreatedAt)})
+	return s.q.ManageCreateMember(ctx, dbgen.ManageCreateMemberParams{ID: m.ID, Name: m.Name, Remark: m.Remark, CreatedBy: actorRef(s.actor.ID), CreatedAt: pgTime(m.CreatedAt)})
 }
 func (s *managementSession) UpdateMember(ctx context.Context, m mgmt.Member) error {
-	return s.q.ManageUpdateMember(ctx, dbgen.ManageUpdateMemberParams{OrganizationID: s.actor.OrganizationID, ID: m.ID, Name: m.Name, Remark: m.Remark, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(time.Now())})
+	return s.q.ManageUpdateMember(ctx, dbgen.ManageUpdateMemberParams{ID: m.ID, Name: m.Name, Remark: m.Remark, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(time.Now())})
 }
 func (s *managementSession) SetMemberStatus(ctx context.Context, id int64, status string) error {
-	return s.q.ManageMemberStatus(ctx, dbgen.ManageMemberStatusParams{OrganizationID: s.actor.OrganizationID, ID: id, Status: status, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(time.Now())})
+	return s.q.ManageMemberStatus(ctx, dbgen.ManageMemberStatusParams{ID: id, Status: status, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(time.Now())})
 }
 func (s *managementSession) DeleteMember(ctx context.Context, id int64) error {
 	now, actor := pgTime(time.Now()), actorRef(s.actor.ID)
 	// 先锁定并删除成员，和签发 Key 的成员行锁串行化；所有更改与审计同事务提交。
-	if err := s.q.ManageDeleteMember(ctx, dbgen.ManageDeleteMemberParams{OrganizationID: s.actor.OrganizationID, ID: id, UpdatedBy: actor, UpdatedAt: now}); err != nil {
+	if err := s.q.ManageDeleteMember(ctx, dbgen.ManageDeleteMemberParams{ID: id, UpdatedBy: actor, UpdatedAt: now}); err != nil {
 		return err
 	}
-	if err := s.q.ManageDeleteMemberGroups(ctx, dbgen.ManageDeleteMemberGroupsParams{OrganizationID: s.actor.OrganizationID, PrincipalID: id, UpdatedBy: actor, UpdatedAt: now}); err != nil {
+	if err := s.q.ManageDeleteMemberGroups(ctx, dbgen.ManageDeleteMemberGroupsParams{PrincipalID: id, UpdatedBy: actor, UpdatedAt: now}); err != nil {
 		return err
 	}
-	return s.q.ManageRevokeMemberKeys(ctx, dbgen.ManageRevokeMemberKeysParams{OrganizationID: s.actor.OrganizationID, PrincipalID: id, UpdatedBy: actor, RevokedAt: now})
+	return s.q.ManageRevokeMemberKeys(ctx, dbgen.ManageRevokeMemberKeysParams{PrincipalID: id, UpdatedBy: actor, RevokedAt: now})
 }
 func (s *managementSession) CreateGroup(ctx context.Context, g mgmt.Group) error {
-	return s.q.ManageCreateGroup(ctx, dbgen.ManageCreateGroupParams{ID: g.ID, OrganizationID: s.actor.OrganizationID, GroupCode: g.Code, GroupName: g.Name, Remark: g.Remark, CreatedBy: actorRef(s.actor.ID), CreatedAt: pgTime(g.CreatedAt)})
+	return s.q.ManageCreateGroup(ctx, dbgen.ManageCreateGroupParams{ID: g.ID, GroupCode: g.Code, GroupName: g.Name, Remark: g.Remark, CreatedBy: actorRef(s.actor.ID), CreatedAt: pgTime(g.CreatedAt)})
 }
 func (s *managementSession) UpdateGroup(ctx context.Context, g mgmt.Group) error {
-	return s.q.ManageUpdateGroup(ctx, dbgen.ManageUpdateGroupParams{OrganizationID: s.actor.OrganizationID, ID: g.ID, GroupName: g.Name, Remark: g.Remark, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(time.Now())})
+	return s.q.ManageUpdateGroup(ctx, dbgen.ManageUpdateGroupParams{ID: g.ID, GroupName: g.Name, Remark: g.Remark, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(time.Now())})
 }
 func (s *managementSession) SetGroupStatus(ctx context.Context, id int64, status string) error {
-	return s.q.ManageGroupStatus(ctx, dbgen.ManageGroupStatusParams{OrganizationID: s.actor.OrganizationID, ID: id, Status: status, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(time.Now())})
+	return s.q.ManageGroupStatus(ctx, dbgen.ManageGroupStatusParams{ID: id, Status: status, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(time.Now())})
 }
 func (s *managementSession) DeleteGroup(ctx context.Context, id int64) error {
 	now, actor := pgTime(time.Now()), actorRef(s.actor.ID)
-	if err := s.q.ManageDeleteGroup(ctx, dbgen.ManageDeleteGroupParams{OrganizationID: s.actor.OrganizationID, ID: id, UpdatedBy: actor, UpdatedAt: now}); err != nil {
+	if err := s.q.ManageDeleteGroup(ctx, dbgen.ManageDeleteGroupParams{ID: id, UpdatedBy: actor, UpdatedAt: now}); err != nil {
 		return err
 	}
-	if err := s.q.ManageDeleteGroupMembers(ctx, dbgen.ManageDeleteGroupMembersParams{OrganizationID: s.actor.OrganizationID, GroupID: id, UpdatedBy: actor, UpdatedAt: now}); err != nil {
+	if err := s.q.ManageDeleteGroupMembers(ctx, dbgen.ManageDeleteGroupMembersParams{GroupID: id, UpdatedBy: actor, UpdatedAt: now}); err != nil {
 		return err
 	}
-	return s.q.ManageDeleteGroupModels(ctx, dbgen.ManageDeleteGroupModelsParams{OrganizationID: s.actor.OrganizationID, GroupID: id, UpdatedBy: actor, UpdatedAt: now})
+	return s.q.ManageDeleteGroupModels(ctx, dbgen.ManageDeleteGroupModelsParams{GroupID: id, UpdatedBy: actor, UpdatedAt: now})
 }
 func (s *managementSession) SetGroupMember(ctx context.Context, groupID, memberID int64, add bool) (bool, error) {
-	exists, err := s.q.ManageMembershipExists(ctx, dbgen.ManageMembershipExistsParams{OrganizationID: s.actor.OrganizationID, GroupID: groupID, PrincipalID: memberID})
+	exists, err := s.q.ManageMembershipExists(ctx, dbgen.ManageMembershipExistsParams{GroupID: groupID, PrincipalID: memberID})
 	if err != nil || exists == add {
 		return false, err
 	}
@@ -463,14 +469,14 @@ func (s *managementSession) SetGroupMember(ctx context.Context, groupID, memberI
 		if err != nil {
 			return false, err
 		}
-		err = s.q.ManageAddMember(ctx, dbgen.ManageAddMemberParams{ID: id, OrganizationID: s.actor.OrganizationID, GroupID: groupID, PrincipalID: memberID, CreatedBy: actorRef(s.actor.ID), CreatedAt: pgTime(time.Now())})
+		err = s.q.ManageAddMember(ctx, dbgen.ManageAddMemberParams{ID: id, GroupID: groupID, PrincipalID: memberID, CreatedBy: actorRef(s.actor.ID), CreatedAt: pgTime(time.Now())})
 		return err == nil, err
 	}
-	err = s.q.ManageRemoveMember(ctx, dbgen.ManageRemoveMemberParams{OrganizationID: s.actor.OrganizationID, GroupID: groupID, PrincipalID: memberID, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(time.Now())})
+	err = s.q.ManageRemoveMember(ctx, dbgen.ManageRemoveMemberParams{GroupID: groupID, PrincipalID: memberID, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(time.Now())})
 	return err == nil, err
 }
 func (s *managementSession) SetGroupModel(ctx context.Context, groupID, modelID int64, grant bool) (bool, error) {
-	exists, err := s.q.ManagePermissionExists(ctx, dbgen.ManagePermissionExistsParams{OrganizationID: s.actor.OrganizationID, GroupID: groupID, ModelID: modelID})
+	exists, err := s.q.ManagePermissionExists(ctx, dbgen.ManagePermissionExistsParams{GroupID: groupID, ModelID: modelID})
 	if err != nil || exists == grant {
 		return false, err
 	}
@@ -479,10 +485,10 @@ func (s *managementSession) SetGroupModel(ctx context.Context, groupID, modelID 
 		if err != nil {
 			return false, err
 		}
-		err = s.q.ManageGrantModel(ctx, dbgen.ManageGrantModelParams{ID: id, OrganizationID: s.actor.OrganizationID, GroupID: groupID, ModelID: modelID, CreatedBy: actorRef(s.actor.ID), CreatedAt: pgTime(time.Now())})
+		err = s.q.ManageGrantModel(ctx, dbgen.ManageGrantModelParams{ID: id, GroupID: groupID, ModelID: modelID, CreatedBy: actorRef(s.actor.ID), CreatedAt: pgTime(time.Now())})
 		return err == nil, err
 	}
-	err = s.q.ManageRevokeModel(ctx, dbgen.ManageRevokeModelParams{OrganizationID: s.actor.OrganizationID, GroupID: groupID, ModelID: modelID, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(time.Now())})
+	err = s.q.ManageRevokeModel(ctx, dbgen.ManageRevokeModelParams{GroupID: groupID, ModelID: modelID, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(time.Now())})
 	return err == nil, err
 }
 func (s *managementSession) SetModelStatus(ctx context.Context, id int64, status string) error {
@@ -579,7 +585,7 @@ func (s *managementSession) CreateModel(ctx context.Context, m mgmt.Model) error
 	if err != nil {
 		return err
 	}
-	return s.q.ManageCreateModel(ctx, dbgen.ManageCreateModelParams{ID: m.ID, ModelCode: m.Code, DisplayName: m.Name, InputModalities: input, OutputModalities: output, Remark: m.Remark, CreatedBy: actorRef(s.actor.ID), CreatedAt: pgTime(m.CreatedAt)})
+	return s.q.ManageCreateModel(ctx, dbgen.ManageCreateModelParams{ID: m.ID, ModelCode: m.Code, DisplayName: m.Name, InputModalities: input, OutputModalities: output, Remark: m.Remark, PublisherProviderID: m.PublisherProviderID, CreatedBy: actorRef(s.actor.ID), CreatedAt: pgTime(m.CreatedAt)})
 }
 func (s *managementSession) UpdateModel(ctx context.Context, m mgmt.Model) error {
 	input, err := json.Marshal(m.InputModalities)
@@ -590,17 +596,17 @@ func (s *managementSession) UpdateModel(ctx context.Context, m mgmt.Model) error
 	if err != nil {
 		return err
 	}
-	return s.q.ManageUpdateModel(ctx, dbgen.ManageUpdateModelParams{ID: m.ID, ModelCode: m.Code, DisplayName: m.Name, InputModalities: input, OutputModalities: output, Remark: m.Remark, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(m.UpdatedAt)})
+	return s.q.ManageUpdateModel(ctx, dbgen.ManageUpdateModelParams{ID: m.ID, ModelCode: m.Code, DisplayName: m.Name, InputModalities: input, OutputModalities: output, Remark: m.Remark, PublisherProviderID: m.PublisherProviderID, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(m.UpdatedAt)})
 }
 func (s *managementSession) CreateResource(ctx context.Context, r mgmt.ResourceRecord) error {
-	return s.q.ManageCreateResource(ctx, dbgen.ManageCreateResourceParams{ID: r.ID, OrganizationID: s.actor.OrganizationID, ProviderID: r.ProviderID, ResourceName: r.Name, CredentialCiphertext: r.Sealed.Ciphertext, CredentialNonce: r.Sealed.Nonce, KeyVersion: r.Sealed.KeyVersion, Status: r.Status, CreatedBy: actorRef(s.actor.ID), CreatedAt: pgTime(r.CreatedAt)})
+	return s.q.ManageCreateResource(ctx, dbgen.ManageCreateResourceParams{ID: r.ID, ProviderID: r.ProviderID, ResourceName: r.Name, CredentialCiphertext: r.Sealed.Ciphertext, CredentialNonce: r.Sealed.Nonce, KeyVersion: r.Sealed.KeyVersion, Status: r.Status, CreatedBy: actorRef(s.actor.ID), CreatedAt: pgTime(r.CreatedAt)})
 }
 func (s *managementSession) UpdateResource(ctx context.Context, r mgmt.ResourceRecord) error {
-	return s.q.ManageUpdateResource(ctx, dbgen.ManageUpdateResourceParams{OrganizationID: s.actor.OrganizationID, ID: r.ID, ResourceName: r.Name, CredentialCiphertext: r.Sealed.Ciphertext, CredentialNonce: r.Sealed.Nonce, KeyVersion: r.Sealed.KeyVersion, Status: r.Status, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(r.UpdatedAt)})
+	return s.q.ManageUpdateResource(ctx, dbgen.ManageUpdateResourceParams{ID: r.ID, ResourceName: r.Name, CredentialCiphertext: r.Sealed.Ciphertext, CredentialNonce: r.Sealed.Nonce, KeyVersion: r.Sealed.KeyVersion, Status: r.Status, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(r.UpdatedAt)})
 }
 func (s *managementSession) RestoreResourceRuntime(ctx context.Context, id int64, at time.Time) error {
 	_, err := s.q.ManageRestoreResourceRuntime(ctx, dbgen.ManageRestoreResourceRuntimeParams{
-		OrganizationID: s.actor.OrganizationID, ID: id, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(at),
+		ID: id, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(at),
 	})
 	return err
 }

@@ -1,38 +1,8 @@
 package bootstrap
 
 import (
-	"context"
-	"errors"
 	"testing"
 )
-
-type sequentialIDs struct {
-	next int64
-	fail int64
-}
-
-func (g *sequentialIDs) NextID(context.Context) (int64, error) {
-	g.next++
-	if g.next == g.fail {
-		return 0, errors.New("id failed")
-	}
-	return g.next, nil
-}
-
-type captureStore struct{ seed Seed }
-
-func (s *captureStore) InitializeOnce(_ context.Context, seed Seed) error { s.seed = seed; return nil }
-func (*captureStore) Initialized(context.Context) (bool, error)           { return true, nil }
-
-func TestInitializeSeedsOnlyOrganization(t *testing.T) {
-	store := &captureStore{}
-	if err := New(store, &sequentialIDs{}).Initialize(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if store.seed.OrganizationID != 1 || store.seed.CreatedAt.IsZero() {
-		t.Fatalf("unexpected seed: %+v", store.seed)
-	}
-}
 
 func TestOfficialProviderTemplatesRemainAvailableForExplicitInitialization(t *testing.T) {
 	providers := OfficialProviderTemplates()
@@ -68,15 +38,5 @@ func TestOfficialProviderTemplatesRemainAvailableForExplicitInitialization(t *te
 				t.Fatalf("unexpected endpoint: %+v", provider.Endpoints[index])
 			}
 		}
-	}
-}
-
-func TestInitializeStopsWhenOrganizationIDGenerationFails(t *testing.T) {
-	store := &captureStore{}
-	if err := New(store, &sequentialIDs{fail: 1}).Initialize(context.Background()); err == nil {
-		t.Fatal("ID failure was ignored")
-	}
-	if store.seed.OrganizationID != 0 {
-		t.Fatal("partial seed reached store")
 	}
 }

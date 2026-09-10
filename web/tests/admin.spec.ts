@@ -32,6 +32,8 @@ async function fixture(page: Page) {
       inputModalities: ['TEXT'],
       outputModalities: ['TEXT'],
       remark: '',
+      publisherProviderId: '81',
+      publisherProviderName: 'DeepSeek',
       createdAt: stamp,
       updatedAt: stamp,
     },
@@ -43,6 +45,8 @@ async function fixture(page: Page) {
       inputModalities: ['TEXT', 'IMAGE'],
       outputModalities: ['TEXT'],
       remark: '',
+      publisherProviderId: null,
+      publisherProviderName: null,
       createdAt: stamp,
       updatedAt: stamp,
     },
@@ -175,8 +179,7 @@ async function fixture(page: Page) {
         expiresAt: new Date(Date.now() + 3600000).toISOString(),
       })
     if (unauthorized) return reply(null, 401, 'UNAUTHENTICATED')
-    if (path === '/me')
-      return reply({ id: '1', organizationId: '11', username: 'admin', displayName: '组织管理员' })
+    if (path === '/me') return reply({ id: '1', username: 'admin', displayName: '管理员' })
     if (path === '/auth/logout') return reply({ clearToken: true })
     if (path === '/usage/dashboard')
       return reply({
@@ -204,23 +207,9 @@ async function fixture(page: Page) {
             tokens: 3740,
           },
         ],
-        upstreamModelRanking: [
-          {
-            providerId: '81',
-            providerName: 'DeepSeek',
-            modelId: '71',
-            modelCode: 'deepseek-v4-flash',
-            calls: 20,
-            tokens: 9200,
-          },
-          {
-            providerId: '82',
-            providerName: 'Anthropic',
-            modelId: '72',
-            modelCode: 'claude-sonnet',
-            calls: 7,
-            tokens: 3740,
-          },
+        providerRanking: [
+          { providerId: '81', providerName: 'DeepSeek', calls: 20, tokens: 9200 },
+          { providerId: '82', providerName: 'Anthropic', calls: 7, tokens: 3740 },
         ],
       })
     const pageReply = (items: any[]) => reply({ items, nextCursor: null, total: items.length })
@@ -665,7 +654,8 @@ test('首页展示本月指标、应用接入、配置脚本和分项排行榜',
   expect(dashboardURL.searchParams.get('from')).toBe(expectedRange.from)
   expect(dashboardURL.searchParams.get('to')).toBe(expectedRange.to)
 
-  await expect(page.getByText('12,840', { exact: true })).toBeVisible()
+  await expect(page.locator('.token-total dd')).toHaveText('12.8K')
+  await expect(page.locator('.token-total dd')).toHaveAttribute('title', '12,840')
   await expect(page.getByRole('heading', { name: '本月概览', exact: true })).toBeVisible()
   const expectedMonthLabel = await page.evaluate(() =>
     new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long' }).format(new Date()),
@@ -673,10 +663,17 @@ test('首页展示本月指标、应用接入、配置脚本和分项排行榜',
   await expect(page.locator('.dashboard-section-head > .dashboard-period')).toHaveText(
     expectedMonthLabel,
   )
-  await expect(page.getByText('本月 Token 消耗', { exact: true })).toBeVisible()
+  await expect(page.getByText('Token 消耗', { exact: true })).toBeVisible()
   await expect(
     page.locator('.provider-total').getByRole('img', { name: '已启用服务商均可用' }),
   ).toHaveClass(/is-healthy/)
+  expect(
+    await page.locator('.provider-metric-label').evaluate((element) => {
+      const label = element.querySelector('dt')!.getBoundingClientRect()
+      const badge = element.querySelector('.provider-health-badge')!.getBoundingClientRect()
+      return { above: badge.top < label.top, right: badge.left > label.right }
+    }),
+  ).toEqual({ above: true, right: true })
   await expect(page.getByText('最新统计', { exact: true })).toHaveCount(0)
   await expect(page.locator('.provider-health-alert')).toHaveCount(0)
   await expect(
@@ -685,7 +682,7 @@ test('首页展示本月指标、应用接入、配置脚本和分项排行榜',
   await expect(
     page.getByText('支持模型').locator('..').getByText('2', { exact: true }),
   ).toBeVisible()
-  await expect(page.getByText('服务商').locator('..').getByText('1', { exact: true })).toBeVisible()
+  await expect(page.locator('.provider-total').getByText('1', { exact: true })).toBeVisible()
   await expect(page.getByText('掌握今日模型服务状态、Token 消耗与团队使用趋势。')).toHaveCount(0)
   await expect(page.getByText('当前已启用')).toHaveCount(0)
   await expect(page.getByText('输入 + 输出')).toHaveCount(0)
@@ -704,19 +701,30 @@ test('首页展示本月指标、应用接入、配置脚本和分项排行榜',
           getComputedStyle(element).gridTemplateColumns.split(' ').filter(Boolean).length,
       ),
   ).toBe(4)
-  await expect(page.getByText('Token 消耗排行')).toBeVisible()
-  await expect(page.getByText('客户端模型排行')).toBeVisible()
-  await expect(page.getByText('上游模型调用排行')).toBeVisible()
+  expect(
+    await page
+      .locator('.ranking-grid')
+      .evaluate(
+        (element) =>
+          getComputedStyle(element).gridTemplateColumns.split(' ').filter(Boolean).length,
+      ),
+  ).toBe(3)
+  await expect(page.getByText('用户 Token 消耗排行')).toBeVisible()
+  await expect(page.getByText('模型请求排行')).toBeVisible()
+  await expect(page.getByText('服务商调用排行')).toBeVisible()
   await expect(page.getByText('OpenAI', { exact: true })).toBeVisible()
-  await expect(page.getByText('Anthropic', { exact: true })).toBeVisible()
+  await expect(page.locator('.access-panel').getByText('Anthropic', { exact: true })).toBeVisible()
   await expect(page.getByText('适用于 Codex 等 OpenAI 兼容客户端')).toBeVisible()
   await expect(page.getByText('适用于 Claude Code 等 Anthropic 兼容客户端')).toBeVisible()
   await expect(page.getByText('林知远', { exact: true })).toBeVisible()
   await expect(page.getByText('DeepSeek V4 Flash', { exact: true })).toBeVisible()
   await expect(
-    page.locator('.upstream-ranking').getByText('deepseek-v4-flash', { exact: true }),
+    page.locator('.provider-ranking').getByText('20 次调用', { exact: true }),
   ).toBeVisible()
-  await expect(page.getByText('20 次调用', { exact: true })).toBeVisible()
+  await expect(page.locator('.token-ranking [title="8,200 Token"]')).toHaveText('8.2K Token')
+  await expect(page.locator('.model-ranking small').first()).toContainText('9.1K Token')
+  await expect(page.locator('.model-ranking small').first()).toHaveAttribute('title', '9,100 Token')
+  await expect(page.locator('.provider-ranking small').first()).toHaveText('9.2K Token')
   await expect(page.getByText(/\/v1$/, { exact: true })).toBeVisible()
   await expect(page.getByText(/\/anthropic$/, { exact: true })).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
@@ -822,7 +830,7 @@ test('首页在启用服务商不可用时提醒管理员', async ({ page }) => 
   await expect(alert).toContainText('余额或计费异常 · HTTP 402')
   await expect(alert.getByRole('link', { name: '查看服务商' })).toHaveAttribute(
     'href',
-    '#/providers',
+    '#/providers?runtimeStatus=ABNORMAL',
   )
 })
 
@@ -884,6 +892,18 @@ test('首页用黄色角标表示部分启用服务商不可用', async ({ page 
     }),
   ).toHaveClass(/is-degraded/)
   await expect(page.locator('.provider-health-alert')).toContainText('Anthropic 当前不可用')
+  await page.getByRole('link', { name: '查看服务商' }).click()
+  const runtimeFilter = page.getByRole('combobox', { name: '运行状态' })
+  const deepSeekName = page.locator('tbody .person strong', { hasText: /^DeepSeek$/ })
+  const anthropicName = page.locator('tbody .person strong', { hasText: /^Anthropic$/ })
+  await expect(runtimeFilter).toHaveValue('ABNORMAL')
+  await expect(anthropicName).toBeVisible()
+  await expect(deepSeekName).toHaveCount(0)
+
+  await runtimeFilter.selectOption('HEALTHY')
+  await page.getByRole('button', { name: '搜索', exact: true }).click()
+  await expect(deepSeekName).toBeVisible()
+  await expect(anthropicName).toHaveCount(0)
 })
 
 test('操作日志详情展示原始 JSON、差异高亮和追踪信息', async ({ page }) => {
@@ -1212,6 +1232,7 @@ test('模型新增编辑、模态校验、冲突恢复和窄屏表单', async ({
   await page.getByRole('link', { name: '模型', exact: true }).click()
   await expect(page.getByRole('columnheader')).toHaveText([
     '官方模型名称',
+    '模型厂商',
     '状态',
     '输入类型',
     '输出类型',
@@ -1221,7 +1242,8 @@ test('模型新增编辑、模态校验、冲突恢复和窄屏表单', async ({
   const existingModelRow = page.getByRole('row').filter({ hasText: 'DeepSeek V4 Flash' })
   await expect(existingModelRow.locator('.person strong')).toHaveText('DeepSeek V4 Flash')
   await expect(existingModelRow.locator('.person small')).toHaveText('deepseek-v4-flash')
-  await expect(existingModelRow.getByRole('cell')).toHaveCount(6)
+  await expect(existingModelRow.getByRole('cell')).toHaveCount(7)
+  await expect(existingModelRow.getByRole('cell').nth(1)).toHaveText('DeepSeek')
   await page.getByRole('button', { name: '添加模型' }).click()
   const dialog = modal(page)
   await dialog.getByLabel('官方模型名称', { exact: true }).fill('测试官方模型')

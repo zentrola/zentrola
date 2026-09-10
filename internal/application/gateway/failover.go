@@ -28,17 +28,17 @@ func (s *Service) routes(ctx context.Context, identity appsec.PrincipalIdentity,
 	return []Route{route}, nil
 }
 
-func (s *Service) acquire(ctx context.Context, organizationID int64, route Route) bool {
+func (s *Service) acquire(ctx context.Context, route Route) bool {
 	if s.state == nil {
 		return true
 	}
-	allowed, err := s.state.Acquire(ctx, organizationID, route)
+	allowed, err := s.state.Acquire(ctx, route)
 	return err != nil || allowed
 }
 
-func (s *Service) nextRoute(ctx context.Context, organizationID int64, routes []Route, start int) int {
+func (s *Service) nextRoute(ctx context.Context, routes []Route, start int) int {
 	for index := start; index < len(routes); index++ {
-		if s.acquire(ctx, organizationID, routes[index]) {
+		if s.acquire(ctx, routes[index]) {
 			return index
 		}
 	}
@@ -47,7 +47,7 @@ func (s *Service) nextRoute(ctx context.Context, organizationID int64, routes []
 
 func (s *Service) forwardCandidates(ctx context.Context, identity appsec.PrincipalIdentity, request Request, parsed Parsed, routes []Route) (*Response, error) {
 	originalBody := request.Body
-	index := s.nextRoute(ctx, identity.OrganizationID, routes, 0)
+	index := s.nextRoute(ctx, routes, 0)
 	if index < 0 {
 		return nil, ErrRoute
 	}
@@ -56,17 +56,17 @@ func (s *Service) forwardCandidates(ctx context.Context, identity appsec.Princip
 		tries++
 		route := routes[index]
 		if !validModel(route.UpstreamModel) {
-			next := s.nextRoute(ctx, identity.OrganizationID, routes, index+1)
+			next := s.nextRoute(ctx, routes, index+1)
 			if next < 0 || tries >= s.maxTries {
 				return nil, ErrRoute
 			}
 			index = next
 			continue
 		}
-		credential, err := s.cipher.Decrypt(route.Credential, catalog.CredentialOwner{OrganizationID: identity.OrganizationID, ProviderID: route.ProviderID, ResourceID: route.ResourceID})
+		credential, err := s.cipher.Decrypt(route.Credential, catalog.CredentialOwner{ProviderID: route.ProviderID, ResourceID: route.ResourceID})
 		if err != nil {
 			s.block(ctx, identity, route, ResourceBlock{Reason: "CREDENTIAL_UNRECOVERABLE", ErrorCode: "CREDENTIAL_UNRECOVERABLE"})
-			next := s.nextRoute(ctx, identity.OrganizationID, routes, index+1)
+			next := s.nextRoute(ctx, routes, index+1)
 			if next < 0 || tries >= s.maxTries {
 				return nil, ErrCredential
 			}
@@ -76,8 +76,8 @@ func (s *Service) forwardCandidates(ctx context.Context, identity appsec.Princip
 		route.Proxy, err = s.decryptProxy(route)
 		if err != nil {
 			clear(credential)
-			s.cooldown(ctx, identity.OrganizationID, route, defaultRouteCooldown)
-			next := s.nextRoute(ctx, identity.OrganizationID, routes, index+1)
+			s.cooldown(ctx, route, defaultRouteCooldown)
+			next := s.nextRoute(ctx, routes, index+1)
 			if next < 0 || tries >= s.maxTries {
 				return nil, err
 			}
@@ -99,9 +99,9 @@ func (s *Service) forwardCandidates(ctx context.Context, identity appsec.Princip
 			}
 			if retryableOpenError(openErr) {
 				if !errors.Is(openErr, ErrRoute) && !errors.Is(openErr, ErrCredential) {
-					s.cooldown(ctx, identity.OrganizationID, route, defaultRouteCooldown)
+					s.cooldown(ctx, route, defaultRouteCooldown)
 				}
-				next := s.nextRoute(ctx, identity.OrganizationID, routes, index+1)
+				next := s.nextRoute(ctx, routes, index+1)
 				if next >= 0 && tries < s.maxTries {
 					index = next
 					continue
@@ -114,12 +114,12 @@ func (s *Service) forwardCandidates(ctx context.Context, identity appsec.Princip
 		if decision.permanent != nil {
 			s.block(ctx, identity, route, *decision.permanent)
 		} else if decision.retry {
-			s.cooldown(ctx, identity.OrganizationID, route, decision.cooldown)
+			s.cooldown(ctx, route, decision.cooldown)
 		} else if s.state != nil {
-			_ = s.state.Healthy(ctx, identity.OrganizationID, route)
+			_ = s.state.Healthy(ctx, route)
 		}
 		if decision.retry {
-			next := s.nextRoute(ctx, identity.OrganizationID, routes, index+1)
+			next := s.nextRoute(ctx, routes, index+1)
 			if next >= 0 && tries < s.maxTries {
 				s.failAttempt(request.Trace, attempt, "UPSTREAM_HTTP_"+strconv.Itoa(response.Status))
 				response.Body.Close()
@@ -162,9 +162,9 @@ func (s *Service) discardAttempt(event *usage.Event, attempt *usage.Attempt) {
 	}
 }
 
-func (s *Service) cooldown(ctx context.Context, organizationID int64, route Route, duration time.Duration) {
+func (s *Service) cooldown(ctx context.Context, route Route, duration time.Duration) {
 	if s.state != nil {
-		_ = s.state.Cooldown(ctx, organizationID, route, duration)
+		_ = s.state.Cooldown(ctx, route, duration)
 	}
 }
 

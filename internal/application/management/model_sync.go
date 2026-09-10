@@ -99,6 +99,8 @@ func (s *Service) SyncResourceModels(ctx context.Context, actor admin.Identity, 
 		}
 
 		now := time.Now().UTC().Truncate(time.Microsecond)
+		publisherProviderID := provider.ID
+		publisherProviderName := provider.Name
 		seen := make(map[string]struct{}, len(discovered))
 		for _, candidate := range discovered {
 			if !validText(candidate.Code, 128) {
@@ -121,6 +123,7 @@ func (s *Service) SyncResourceModels(ctx context.Context, actor admin.Identity, 
 				model = Model{
 					ID: modelID, Code: candidate.Code, Name: name, Status: "DISABLED",
 					InputModalities: []string{"TEXT"}, OutputModalities: []string{"TEXT"},
+					PublisherProviderID: &publisherProviderID, PublisherProviderName: &publisherProviderName,
 					CreatedAt: now, UpdatedAt: now,
 				}
 				if err := writer.CreateModel(ctx, model); err != nil {
@@ -128,8 +131,10 @@ func (s *Service) SyncResourceModels(ctx context.Context, actor admin.Identity, 
 				}
 				modelsByCode[model.Code] = model
 				result.Created++
-			} else if model.Name != name {
+			} else if model.Name != name || model.PublisherProviderID == nil || *model.PublisherProviderID != provider.ID {
 				model.Name = name
+				model.PublisherProviderID = &publisherProviderID
+				model.PublisherProviderName = &publisherProviderName
 				model.UpdatedAt = now
 				if err := writer.UpdateModel(ctx, model); err != nil {
 					return err
