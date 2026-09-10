@@ -21,19 +21,19 @@ type Failure struct {
 func (f *Failure) Error() string { return f.Code }
 
 var (
-	ErrAuthentication = &Failure{"UNAUTHENTICATED", "authentication_error", "Authentication failed.", 401}
-	ErrInvalid        = &Failure{"INVALID_REQUEST", "invalid_request_error", "Invalid request.", 400}
-	ErrModelUnknown   = &Failure{"MODEL_NOT_FOUND", "not_found_error", "Model not found.", 404}
-	ErrModelDisabled  = &Failure{"MODEL_DISABLED", "permission_error", "Model is disabled.", 403}
-	ErrPermission     = &Failure{"MODEL_PERMISSION_DENIED", "permission_error", "Model permission denied.", 403}
-	ErrRoute          = &Failure{"MODEL_ROUTE_UNAVAILABLE", "api_error", "No active model route is available.", 503}
-	ErrResource       = &Failure{"RESOURCE_UNAVAILABLE", "api_error", "No active resource is available.", 503}
-	ErrCredential     = &Failure{"CREDENTIAL_UNRECOVERABLE", "api_error", "Resource credential is unavailable.", 503}
-	ErrProxy          = &Failure{"PROXY_CONFIGURATION_UNRECOVERABLE", "api_error", "Provider proxy configuration is unavailable.", 503}
-	ErrUnavailable    = &Failure{"DEPENDENCY_UNAVAILABLE", "api_error", "Service unavailable.", 503}
-	ErrUpstream       = &Failure{"UPSTREAM_UNAVAILABLE", "api_error", "Upstream service unavailable.", 502}
-	ErrTimeout        = &Failure{"UPSTREAM_TIMEOUT", "api_error", "Upstream request timed out.", 504}
-	ErrCancelled      = &Failure{"REQUEST_CANCELLED", "api_error", "Request cancelled.", 499}
+	ErrAuthentication = &Failure{"UNAUTHENTICATED", "authentication_error", "Authentication failed. Check the API key.", 401}
+	ErrInvalid        = &Failure{"INVALID_REQUEST", "invalid_request_error", "The request is invalid. Check the request path, headers, and body.", 400}
+	ErrModelUnknown   = &Failure{"MODEL_NOT_FOUND", "not_found_error", "The requested model is not configured.", 404}
+	ErrModelDisabled  = &Failure{"MODEL_DISABLED", "permission_error", "The requested model is disabled. Enable it before retrying.", 403}
+	ErrPermission     = &Failure{"MODEL_PERMISSION_DENIED", "permission_error", "The API key is not authorized to use the requested model.", 403}
+	ErrRoute          = &Failure{"MODEL_ROUTE_UNAVAILABLE", "api_error", "No active provider route is available for the requested model. Enable a provider and configure its endpoint and model mapping.", 503}
+	ErrResource       = &Failure{"RESOURCE_UNAVAILABLE", "api_error", "No active provider API key is available. Configure or enable the provider API key.", 503}
+	ErrCredential     = &Failure{"CREDENTIAL_UNRECOVERABLE", "api_error", "The provider API key cannot be decrypted. Reconfigure the provider API key.", 503}
+	ErrProxy          = &Failure{"PROXY_CONFIGURATION_UNRECOVERABLE", "api_error", "The provider proxy configuration cannot be decrypted or parsed. Reconfigure the provider proxy.", 503}
+	ErrUnavailable    = &Failure{"DEPENDENCY_UNAVAILABLE", "api_error", "An internal dependency is unavailable. Retry later or contact the administrator.", 503}
+	ErrUpstream       = &Failure{"UPSTREAM_UNAVAILABLE", "api_error", "The upstream model provider is unavailable. Retry later.", 502}
+	ErrTimeout        = &Failure{"UPSTREAM_TIMEOUT", "api_error", "The upstream model provider timed out. Retry later.", 504}
+	ErrCancelled      = &Failure{"REQUEST_CANCELLED", "api_error", "The request was cancelled before completion.", 499}
 )
 
 type Route struct {

@@ -13,11 +13,43 @@ import (
 	"testing"
 	"time"
 
+	gw "github.com/zentrola/zentrola/internal/application/gateway"
 	"github.com/zentrola/zentrola/internal/application/health"
 	"github.com/zentrola/zentrola/internal/infrastructure/config"
 	"github.com/zentrola/zentrola/internal/infrastructure/logging"
 	"github.com/zentrola/zentrola/internal/infrastructure/telemetry"
 )
+
+func TestAnthropicGatewayErrorIncludesActionableReasonAndStableCode(t *testing.T) {
+	for _, test := range []struct {
+		failure *gw.Failure
+		reason  string
+	}{
+		{gw.ErrRoute, "configure its endpoint and model mapping"},
+		{gw.ErrResource, "Configure or enable the provider API key"},
+		{gw.ErrCredential, "Reconfigure the provider API key"},
+		{gw.ErrProxy, "Reconfigure the provider proxy"},
+	} {
+		t.Run(test.failure.Code, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			writeGatewayError(recorder, test.failure)
+
+			if recorder.Code != test.failure.Status {
+				t.Fatalf("status=%d; want %d", recorder.Code, test.failure.Status)
+			}
+			if recorder.Header().Get("X-Zentrola-Error-Code") != test.failure.Code {
+				t.Fatalf("missing error code header: %s", recorder.Header().Get("X-Zentrola-Error-Code"))
+			}
+			body := recorder.Body.String()
+			if !strings.Contains(body, test.reason) || !strings.Contains(body, "["+test.failure.Code+"]") {
+				t.Fatalf("response is not actionable: %s", body)
+			}
+			if strings.Contains(body, `"code"`) {
+				t.Fatalf("Anthropic error contract gained a non-standard code field: %s", body)
+			}
+		})
+	}
+}
 
 func TestHealthAndRequestCorrelation(t *testing.T) {
 	provider := telemetry.Setup()

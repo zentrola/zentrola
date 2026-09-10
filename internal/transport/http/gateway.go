@@ -51,7 +51,11 @@ func NewGatewayHandler(service *gw.Service, cfg config.Gateway, logger *slog.Log
 }
 func writeGatewayError(w http.ResponseWriter, failure *gw.Failure) {
 	w.Header().Set("X-Zentrola-Error-Code", failure.Code)
-	writeProtocolError(w, failure.Status, failure.Type, failure.Message)
+	message := failure.Message
+	if failure.Code != "" {
+		message += " [" + failure.Code + "]"
+	}
+	writeProtocolError(w, failure.Status, failure.Type, message)
 }
 func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/anthropic")
