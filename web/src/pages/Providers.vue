@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { all, api, errorText } from '../api'
 import { useAction, useCollection, useListSearch, validText } from '../composables'
 import { i18n, t } from '../i18n'
+import { showSuccessToast } from '../toast'
 import type {
   ConnectionResult,
   Model,
@@ -342,11 +343,11 @@ function saveCredential() {
   }
   void run(async () => {
     const provider = credentialTarget.value!
-    let resource = resourceFor(provider)
+    const resource = resourceFor(provider)
     if (resource) {
       await api(`/resources/${resource.id}/credential`, 'PUT', { credential: credential.value })
     } else {
-      resource = await api<Resource>('/resources', 'POST', {
+      await api('/resources', 'POST', {
         providerId: provider.id,
         name: `${provider.name} ${t('providers.credential')}`,
         credential: credential.value,
@@ -354,11 +355,7 @@ function saveCredential() {
     }
     closeCredential()
     await loadResources()
-    syncTarget.value = { provider, resource }
-    syncResult.value = null
-    const result = await api<ModelSyncResult>(`/resources/${resource.id}/sync-models`, 'POST')
-    syncResult.value = result
-    if (result.ok) await loadModels()
+    showSuccessToast(t('common.saved'))
   })
 }
 

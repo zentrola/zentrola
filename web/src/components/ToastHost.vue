@@ -11,6 +11,7 @@ const target = ref<string | HTMLElement>('body')
 watch(
   () => toast.value?.id,
   async (id) => {
+    await nextTick()
     target.value =
       Array.from(document.querySelectorAll<HTMLElement>('dialog[open]')).at(-1) ?? 'body'
     await nextTick()
@@ -30,13 +31,20 @@ onBeforeUnmount(() => {
 <template>
   <Teleport :to="target">
     <div ref="host" class="toast-host" popover="manual">
-      <div v-if="toast" class="toast" :class="`toast-${toast.tone}`" role="alert">
-        <span class="toast-icon"><Icon name="alert" :size="19" /></span>
+      <div
+        v-if="toast"
+        class="toast"
+        :class="`toast-${toast.tone}`"
+        :role="toast.tone === 'error' ? 'alert' : 'status'"
+      >
+        <span class="toast-icon"
+          ><Icon :name="toast.tone === 'error' ? 'alert' : 'check'" :size="19"
+        /></span>
         <span class="toast-message">{{ toast.message }}</span>
         <button
           type="button"
           class="icon-button toast-close"
-          :aria-label="t('close')"
+          :aria-label="t('closeNotification')"
           @click="dismissToast(toast.id)"
         >
           <Icon name="close" :size="17" />

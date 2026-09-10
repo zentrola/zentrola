@@ -133,7 +133,8 @@ async function fixture(page: Page) {
     modelQueries: URLSearchParams[] = [],
     memberListQueries: URLSearchParams[] = [],
     memberSuggestionQueries: URLSearchParams[] = [],
-    usageQueries: URLSearchParams[] = []
+    usageQueries: URLSearchParams[] = [],
+    modelSyncRequests: string[] = []
   const providerInputs: any[] = []
   const safeProviderProxy = (input: any) => {
     if (!input.proxyEnabled) return { proxyEnabled: false, proxyUrl: null, proxyHeaders: [] }
@@ -547,7 +548,8 @@ async function fixture(page: Page) {
         httpStatus: failedTest ? 401 : 200,
         latencyMs: 140,
       })
-    if (segments[2] === 'sync-models')
+    if (segments[2] === 'sync-models') {
+      modelSyncRequests.push(segments[1])
       return reply({
         ok: !failedTest,
         code: failedTest ? 'UPSTREAM_AUTH_FAILED' : 'OK',
@@ -558,6 +560,7 @@ async function fixture(page: Page) {
         updated: 0,
         mapped: failedTest ? 0 : 1,
       })
+    }
     return reply(null, 404, 'NOT_FOUND')
   })
   return {
@@ -575,6 +578,7 @@ async function fixture(page: Page) {
     memberListQueries,
     memberSuggestionQueries,
     usageQueries,
+    modelSyncRequests,
     expire: () => {
       unauthorized = true
     },
@@ -874,7 +878,8 @@ test('成员列表按需查看 Key 并处理删除和失败恢复', async ({ pag
   state.conflict(false)
   await modal(page).getByRole('button', { name: '撤销', exact: true }).click()
   await expect(page.locator('dialog')).toHaveCount(1)
-  await expect(historyDialog.getByRole('status')).toContainText('Key 已撤销')
+  await expect(page.locator('.toast-success')).toContainText('Key 已撤销')
+  await expect(historyDialog.locator('.notice')).toHaveCount(0)
   await expect(historyRevoke).toHaveCount(0)
   expect(state.keys[0].status).toBe('REVOKED')
   expect(state.keys[1].status).toBe('ACTIVE')
@@ -944,7 +949,8 @@ test('成员列表按需查看 Key 并处理删除和失败恢复', async ({ pag
   state.conflict(false)
   await modal(page).getByRole('button', { name: '删除', exact: true }).click()
   await expect(row).toHaveCount(0)
-  await expect(page.getByRole('status')).toContainText('用户已删除')
+  await expect(page.locator('.toast-success')).toContainText('用户已删除')
+  await expect(page.locator('.notice')).toHaveCount(0)
   expect(state.members).toHaveLength(2)
 })
 
@@ -1297,8 +1303,13 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await row.getByRole('button', { name: '配置 阿里云百炼 的密钥', exact: true }).click()
   await dialog.getByLabel('API Key', { exact: true }).fill('aliyun-fixture-credential')
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(page.locator('dialog')).toHaveCount(0)
+  await expect(page.locator('.toast-success')).toContainText('已保存')
+  expect(state.modelSyncRequests).toHaveLength(0)
+  await row.getByRole('button', { name: '同步 阿里云百炼 的官方模型', exact: true }).click()
   await expect(modal(page).getByRole('status')).toContainText('官方模型目录同步完成')
   await expect(modal(page)).toContainText('发现模型')
+  expect(state.modelSyncRequests).toHaveLength(1)
   await modal(page).getByRole('button', { name: '关闭', exact: true }).last().click()
   await expect(row).toContainText('是')
   await expect(createdStatus).toBeEnabled()
@@ -1482,6 +1493,8 @@ test('创建和编辑用户时可选择分组', async ({ page }) => {
   state.conflict(false)
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expect(page.locator('dialog')).toHaveCount(0)
+  await expect(page.locator('.toast-success')).toContainText('已保存')
+  await expect(page.locator('.notice')).toHaveCount(0)
   expect(state.members.find((member) => member.id === longID)?.name).toBe('林知远（编辑）')
   expect(state.relationships.get('groups/51/members')?.has(longID)).toBe(true)
   expect(state.relationships.get('groups/52/members')?.has(longID)).toBe(false)
@@ -1706,7 +1719,7 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
     errors: string[] = []
   page.on('pageerror', (e) => errors.push(e.message))
   await signIn(page)
-  await expect(page.getByText(longID, { exact: true })).toBeVisible()
+  await expect(page.getByText(longID, { exact: true })).toHaveCount(0)
   const memberSearch = page.getByRole('searchbox', { name: '用户名' })
   await expect(memberSearch).toHaveAttribute('placeholder', '请输入用户名')
   await expect(page.locator('.list-search-label')).toHaveText('用户名')
@@ -1823,7 +1836,12 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
   await providerRow.getByRole('button', { name: '配置 DeepSeek 的密钥', exact: true }).click()
   await modal(page).getByLabel('API Key', { exact: true }).fill('fixture-upstream-credential')
   await modal(page).getByRole('button', { name: '保存' }).click()
+  await expect(page.locator('dialog')).toHaveCount(0)
+  await expect(page.locator('.toast-success')).toContainText('已保存')
+  expect(state.modelSyncRequests).toHaveLength(0)
+  await providerRow.getByRole('button', { name: '同步 DeepSeek 的官方模型', exact: true }).click()
   await expect(modal(page).getByRole('status')).toContainText('官方模型目录同步完成')
+  expect(state.modelSyncRequests).toHaveLength(1)
   await modal(page).getByRole('button', { name: '关闭', exact: true }).last().click()
   const testConnection = providerRow.getByRole('button', {
     name: '测试 DeepSeek 的连接',
@@ -1846,8 +1864,9 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
   await editCredential.click()
   await modal(page).getByLabel('API Key', { exact: true }).fill('replacement-credential')
   await modal(page).getByRole('button', { name: '保存' }).click()
-  await expect(modal(page).getByRole('status')).toContainText('上游认证失败')
-  await modal(page).getByRole('button', { name: '关闭', exact: true }).last().click()
+  await expect(page.locator('dialog')).toHaveCount(0)
+  await expect(page.locator('.toast-success')).toContainText('已保存')
+  expect(state.modelSyncRequests).toHaveLength(1)
   await expect(
     providerRow.getByRole('switch', {
       name: 'DeepSeek 服务商凭证的启用状态',

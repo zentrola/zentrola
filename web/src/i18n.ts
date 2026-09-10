@@ -47,6 +47,7 @@ export const i18n = createI18n({
       collapseNavigation: '收起导航',
       expandNavigation: '展开导航',
       close: '关闭',
+      closeNotification: '关闭通知',
       logout: '注销登录',
       accountMenu: {
         label: '账号菜单',

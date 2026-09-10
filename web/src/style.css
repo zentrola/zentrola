@@ -299,6 +299,13 @@ label textarea {
   color: var(--danger);
   padding-top: 1px;
 }
+.toast-success {
+  border-color: #cce6d7;
+  border-left-color: #27845a;
+}
+.toast-success .toast-icon {
+  color: #27845a;
+}
 .toast-message {
   min-width: 0;
   overflow-wrap: anywhere;

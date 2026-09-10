@@ -16,6 +16,7 @@ export default {
   collapseNavigation: 'Collapse navigation',
   expandNavigation: 'Expand navigation',
   close: 'Close',
+  closeNotification: 'Close notification',
   logout: 'Sign out',
   accountMenu: {
     label: 'Account menu',

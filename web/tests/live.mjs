@@ -147,7 +147,7 @@ try {
     .click()
   await dialog().getByRole('button', { name: '撤销', exact: true }).click()
   await dialog().getByRole('button', { name: '撤销', exact: true }).click()
-  await dialog().getByRole('status').filter({ hasText: 'Key 已撤销' }).waitFor()
+  await page.locator('.toast-success').filter({ hasText: 'Key 已撤销' }).waitFor()
   await dialog().getByRole('button', { name: '关闭', exact: true }).click()
   assert.ok((await api(`/members/${memberID}/keys`)).items[0].revokedAt)
   step = 'usage_and_logs'

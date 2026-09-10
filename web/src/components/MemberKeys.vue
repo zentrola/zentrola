@@ -4,6 +4,7 @@ import { api } from '../api'
 import type { AccessKey, Member } from '../types'
 import { useCollection, useAction, dateOnly } from '../composables'
 import { t } from '../i18n'
+import { showSuccessToast } from '../toast'
 import Modal from './Modal.vue'
 import ListFooter from './ListFooter.vue'
 import Icon from './Icon.vue'
@@ -15,7 +16,6 @@ const { items, cursor, page, pageSize, total, loading, error, load, previous, re
   useCollection<AccessKey>(() => `/members/${props.member.id}/keys`)
 const { busy, error: actionError, run } = useAction()
 const revokeTarget = ref<AccessKey | null>(null),
-  notice = ref(''),
   now = ref(Date.now())
 let timer: ReturnType<typeof setInterval> | undefined
 onMounted(() => {
@@ -50,7 +50,7 @@ function revoke() {
     key.status = 'REVOKED'
     key.revokedAt = new Date().toISOString()
     revokeTarget.value = null
-    notice.value = t('members.revoked')
+    showSuccessToast(t('members.revoked'))
   })
 }
 </script>
@@ -65,7 +65,6 @@ function revoke() {
     <div class="context-note masked-key-note" role="note">
       <Icon name="shield" :size="18" /><span>{{ t('members.maskedKeyHint') }}</span>
     </div>
-    <p v-if="notice" class="notice" role="status">{{ notice }}</p>
     <div v-if="error" class="alert error" role="alert">
       {{ error }}
       <button class="text-button" :disabled="loading" @click="retry">

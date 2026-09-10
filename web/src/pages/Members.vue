@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { all, api } from '../api'
 import { useCollection, useAction, useListSearch, date, validText } from '../composables'
 import { t } from '../i18n'
-import { showErrorToast } from '../toast'
+import { showErrorToast, showSuccessToast } from '../toast'
 import type { Member, Group, CreatedKey } from '../types'
 import Icon from '../components/Icon.vue'
 import StatusSwitch from '../components/StatusSwitch.vue'
@@ -28,8 +28,7 @@ const {
   setPageSize,
 } = useCollection<Member>(() => '/members')
 const { busy, error: actionError, run } = useAction()
-const notice = ref(''),
-  creating = ref(false),
+const creating = ref(false),
   editing = ref<Member | null>(null),
   name = ref(''),
   remark = ref(''),
@@ -127,8 +126,8 @@ function saveMember() {
       groupIds: selectedGroupIDs.value,
     })
     closeMemberForm()
-    notice.value = t('common.saved')
     await load()
+    showSuccessToast(t('common.saved'))
   })
 }
 function changeStatus(member: Member) {
@@ -139,8 +138,8 @@ function changeStatus(member: Member) {
       await api(`/members/${member.id}/status`, 'PATCH', {
         status: member.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE',
       })
-      notice.value = t('common.updatedOK')
       await refresh()
+      showSuccessToast(t('common.updatedOK'))
     } finally {
       statusTarget.value = null
     }
@@ -161,8 +160,8 @@ function deleteMember() {
   void run(async () => {
     await api(`/members/${deleteTarget.value!.id}`, 'DELETE')
     deleteTarget.value = null
-    notice.value = t('members.deleted')
     await load()
+    showSuccessToast(t('members.deleted'))
   })
 }
 function issueKey() {
@@ -187,7 +186,7 @@ function issueKey() {
     keyName.value = ''
     expires.value = ''
     selected.value = null
-    notice.value = t('members.keyCreated')
+    showSuccessToast(t('members.keyCreated'))
   })
 }
 async function copyKey() {
@@ -201,7 +200,6 @@ async function copyKey() {
 </script>
 <template>
   <PageHeader name="members" />
-  <p v-if="notice" class="notice" role="status">{{ notice }}</p>
   <section class="panel">
     <ListSearch
       v-model="keyword"
@@ -251,7 +249,6 @@ async function copyKey() {
                       <Icon name="eye" :size="16" />
                     </button>
                   </div>
-                  <small>{{ member.id }}</small>
                 </div>
               </div>
             </td>
