@@ -1,16 +1,18 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { api } from '../api'
+import { all, api, errorText } from '../api'
 import { useCollection, useAction, useListSearch, validText } from '../composables'
 import { t } from '../i18n'
 import { showErrorToast } from '../toast'
-import type { Model, Modality } from '../types'
+import type { Model, Modality, Provider } from '../types'
 import Icon from '../components/Icon.vue'
 import StatusSwitch from '../components/StatusSwitch.vue'
 import Modal from '../components/Modal.vue'
 import PageHeader from '../components/PageHeader.vue'
 import ListFooter from '../components/ListFooter.vue'
 import ListSearch from '../components/ListSearch.vue'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
+import TableScroll from '../components/TableScroll.vue'
 const {
   items,
   cursor,
@@ -28,10 +30,15 @@ const {
 const { busy, error: actionError, run } = useAction()
 const editing = ref(false)
 const editTarget = ref<Model | null>(null)
+const deleteTarget = ref<Model | null>(null)
+const providers = ref<Provider[]>([])
+const providerLoading = ref(false)
+const providerError = ref('')
 const modalities: Modality[] = ['TEXT', 'IMAGE', 'AUDIO', 'VIDEO']
 const form = reactive({
   name: '',
   code: '',
+  publisherProviderId: '',
   inputModalities: [] as Modality[],
   outputModalities: [] as Modality[],
   remark: '',
@@ -41,6 +48,7 @@ function openEdit(model: Model | null = null) {
   Object.assign(form, {
     name: model?.name ?? '',
     code: model?.code ?? '',
+    publisherProviderId: model?.publisherProviderId ?? '',
     inputModalities: [...(model?.inputModalities ?? [])],
     outputModalities: [...(model?.outputModalities ?? [])],
     remark: model?.remark ?? '',
@@ -65,7 +73,7 @@ function save() {
     await api(
       editTarget.value ? `/models/${editTarget.value.id}` : '/models',
       editTarget.value ? 'PUT' : 'POST',
-      { ...form },
+      { ...form, publisherProviderId: form.publisherProviderId || null },
     )
     editing.value = false
     await load()
@@ -78,7 +86,25 @@ const { keyword, query, visible, search, reset } = useListSearch(
     `${model.name} ${model.code} ${model.id} ${model.publisherProviderName ?? ''} ${model.remark ?? ''} ${[...(model.inputModalities ?? []), ...(model.outputModalities ?? [])].map((value) => t(`models.${value}`)).join(' ')}`,
   load,
 )
-onMounted(() => load())
+async function loadProviders() {
+  providerLoading.value = true
+  providerError.value = ''
+  try {
+    providers.value = await all<Provider>('/providers')
+  } catch (error) {
+    providerError.value = errorText(error)
+  } finally {
+    providerLoading.value = false
+  }
+}
+function retryAll() {
+  void retry()
+  void loadProviders()
+}
+onMounted(() => {
+  void load()
+  void loadProviders()
+})
 function changeStatus(model: Model) {
   actionError.value = ''
   statusTarget.value = model
@@ -91,6 +117,19 @@ function changeStatus(model: Model) {
     } finally {
       statusTarget.value = null
     }
+  })
+}
+function openDelete(model: Model) {
+  actionError.value = ''
+  deleteTarget.value = model
+}
+function deleteModel() {
+  if (!deleteTarget.value) return
+  const modelID = deleteTarget.value.id
+  void run(async () => {
+    await api(`/models/${modelID}`, 'DELETE')
+    deleteTarget.value = null
+    await load()
   })
 }
 </script>
@@ -113,16 +152,17 @@ function changeStatus(model: Model) {
         </div>
       </template>
     </ListSearch>
-    <p v-if="error" class="alert error" role="alert">
-      {{ error }}<button class="text-button" @click="retry">{{ t('common.retry') }}</button>
+    <p v-if="error || providerError" class="alert error" role="alert">
+      {{ error || providerError
+      }}<button class="text-button" @click="retryAll">{{ t('common.retry') }}</button>
     </p>
-    <div class="table-scroll">
+    <TableScroll has-actions>
       <table>
         <thead>
           <tr>
             <th>{{ t('models.name') }}</th>
             <th>{{ t('models.publisher') }}</th>
-            <th>{{ t('common.status') }}</th>
+            <th>{{ t('common.enableStatus') }}</th>
             <th>{{ t('models.input') }}</th>
             <th>{{ t('models.output') }}</th>
             <th>{{ t('common.remark') }}</th>
@@ -140,7 +180,7 @@ function changeStatus(model: Model) {
                 </div>
               </div>
             </td>
-            <td>{{ model.publisherProviderName || '-' }}</td>
+            <td>{{ model.publisherProviderName || t('common.none') }}</td>
             <td>
               <StatusSwitch
                 :value="model.status"
@@ -165,10 +205,13 @@ function changeStatus(model: Model) {
               </div>
             </td>
             <td>
-              <div class="model-remark">{{ model.remark || '-' }}</div>
+              <div class="model-remark">{{ model.remark || t('common.none') }}</div>
             </td>
             <td>
               <div class="row-actions">
+                <button class="text-button danger" :disabled="busy" @click="openDelete(model)">
+                  {{ t('models.delete') }}
+                </button>
                 <button class="text-button" :disabled="busy" @click="openEdit(model)">
                   {{ t('models.editAction') }}
                 </button>
@@ -177,7 +220,7 @@ function changeStatus(model: Model) {
           </tr>
         </tbody>
       </table>
-    </div>
+    </TableScroll>
     <div v-if="!visible.length" class="empty-state">
       <Icon name="models" :size="32" />
       <p>{{ t(loading ? 'common.loading' : query ? 'common.noResults' : 'models.empty') }}</p>
@@ -229,6 +272,24 @@ function changeStatus(model: Model) {
       <p v-if="editTarget && form.code !== editTarget.code" class="alert" role="status">
         {{ t('models.codeChange') }}
       </p>
+      <div class="model-form-row">
+        <label class="model-form-label" for="model-publisher-input">{{
+          t('models.publisher')
+        }}</label>
+        <div class="model-form-control">
+          <select
+            id="model-publisher-input"
+            v-model="form.publisherProviderId"
+            :disabled="busy || providerLoading"
+          >
+            <option value="">{{ t('models.publisherPlaceholder') }}</option>
+            <option v-for="provider in providers" :key="provider.id" :value="provider.id">
+              {{ provider.name }}
+            </option>
+          </select>
+          <small class="model-field-hint">{{ t('models.publisherHint') }}</small>
+        </div>
+      </div>
       <div class="model-form-row">
         <div id="model-input-title" class="model-form-label required-label">
           {{ t('models.input') }}
@@ -288,6 +349,17 @@ function changeStatus(model: Model) {
       </footer>
     </form>
   </Modal>
+  <ConfirmDialog
+    v-if="deleteTarget"
+    :title="t('models.deleteTitle')"
+    :message="t('models.deleteQuestion', { name: deleteTarget.name })"
+    :hint="t('models.deleteConsequence')"
+    :confirm-label="t('models.delete')"
+    :busy="busy"
+    tone="danger"
+    @close="deleteTarget = null"
+    @confirm="deleteModel"
+  />
 </template>
 <style scoped>
 .model-form {
@@ -322,6 +394,12 @@ function changeStatus(model: Model) {
 }
 .model-form-control {
   min-width: 0;
+}
+.model-field-hint {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  line-height: 1.5;
 }
 .required-label::after {
   content: '*';

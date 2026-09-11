@@ -107,7 +107,7 @@ func TestOpenAIIntegration(t *testing.T) {
 	}
 	usageStore := NewUsageStore(pool)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	writer, err := usageapp.NewWriter(usageStore, ids, logger, usageapp.Options{QueueSize: 100, BatchSize: 100, FlushInterval: time.Hour, WriteTimeout: time.Second})
+	writer, err := usageapp.NewWriter(usageStore, logger, usageapp.Options{QueueSize: 100, BatchSize: 100, FlushInterval: time.Hour, WriteTimeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}

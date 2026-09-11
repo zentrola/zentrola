@@ -89,6 +89,19 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 		data, err := m.UpdateModel(req.Context(), adminFrom(req), id, input, requestMeta(req))
 		adminResult(w, req, 200, data, err)
 	})
+	// @Summary 删除官方模型
+	// @Tags 模型与资源
+	// @Description 逻辑删除模型，并解除其服务商映射和分组授权；保留历史用量和操作日志。
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "模型 ID"
+	// @Success 200 {object} response
+	// @Failure 400 {object} response
+	// @Failure 401 {object} response
+	// @Failure 404 {object} response
+	// @Failure 503 {object} response
+	// @Router /api/v1/models/{id} [delete]
+	r.Delete("/models/{id}", deleteEndpoint(m.DeleteModel))
 	// @Summary 创建服务商
 	// @Tags 模型与资源
 	// @Description 新服务商默认停用；至少配置一种 HTTPS 兼容协议地址和一条模型映射，映射与服务商在同一事务创建。

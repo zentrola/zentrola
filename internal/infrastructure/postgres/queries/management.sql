@@ -105,6 +105,15 @@ VALUES($1,$2,$3,$4,$5,$6,'DISABLED',$7,$8,$8,$9,$9);
 -- name: ManageUpdateModel :exec
 UPDATE model SET model_code=$2,display_name=$3,input_modalities=$4,output_modalities=$5,remark=$6,publisher_provider_id=$7,updated_by=$8,updated_at=$9
 WHERE id=$1 AND is_deleted=false;
+-- name: ManageDeleteModelMappings :exec
+UPDATE provider_model SET is_deleted=true,updated_by=$2,updated_at=$3
+WHERE model_id=$1 AND is_deleted=false;
+-- name: ManageDeleteModelPermissions :exec
+UPDATE principal_group_model_permission SET is_deleted=true,updated_by=$2,updated_at=$3
+WHERE model_id=$1 AND is_deleted=false;
+-- name: ManageDeleteModel :exec
+UPDATE model SET is_deleted=true,status='DISABLED',updated_by=$2,updated_at=$3
+WHERE id=$1 AND is_deleted=false;
 -- name: ManageProviders :many
 SELECT * FROM provider WHERE is_deleted=false AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2;
 -- name: ManageProvider :one

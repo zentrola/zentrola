@@ -41,7 +41,7 @@ func (s *UsageStore) WriteBatch(ctx context.Context, events []domain.Event) erro
 			if attemptNo <= 0 {
 				attemptNo = int32(index + 1)
 			}
-			attempts = append(attempts, map[string]any{"id": a.ID, "request_id": e.RequestID, "attempt_no": attemptNo, "client_protocol": e.ClientProtocol, "principal_id": e.PrincipalID, "provider_id": a.ProviderID, "provider_model_id": a.ProviderModelID, "provider_credential_id": a.ResourceID, "model_id": a.ModelID, "input_tokens": a.InputTokens, "output_tokens": a.OutputTokens, "cached_input_tokens": a.CachedInputTokens, "started_at": a.StartedAt, "completed_at": a.CompletedAt, "latency_ms": a.CompletedAt.Sub(a.StartedAt).Milliseconds(), "status": a.Status, "error_type": optionalError(a.ErrorType)})
+			attempts = append(attempts, map[string]any{"request_id": e.RequestID, "attempt_no": attemptNo, "client_protocol": e.ClientProtocol, "principal_id": e.PrincipalID, "provider_id": a.ProviderID, "provider_model_id": a.ProviderModelID, "provider_credential_id": a.ResourceID, "model_id": a.ModelID, "input_tokens": a.InputTokens, "output_tokens": a.OutputTokens, "cached_input_tokens": a.CachedInputTokens, "started_at": a.StartedAt, "completed_at": a.CompletedAt, "latency_ms": a.CompletedAt.Sub(a.StartedAt).Milliseconds(), "status": a.Status, "error_type": optionalError(a.ErrorType)})
 		}
 	}
 	if len(attempts) == 0 {

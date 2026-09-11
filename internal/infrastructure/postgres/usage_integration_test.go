@@ -117,7 +117,7 @@ func TestStage5Integration(t *testing.T) {
 	}
 	store := NewUsageStore(pool)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	writer, err := app.NewWriter(store, ids, logger, app.Options{QueueSize: 50, BatchSize: 50, FlushInterval: time.Hour, WriteTimeout: time.Second})
+	writer, err := app.NewWriter(store, logger, app.Options{QueueSize: 50, BatchSize: 50, FlushInterval: time.Hour, WriteTimeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func TestStage5Integration(t *testing.T) {
 	byID := map[string]app.Row{}
 	for _, r := range page.Items {
 		byID[r.RequestID] = r
-		if r.PrincipalID != member.ID {
+		if r.ID <= 0 || r.PrincipalID != member.ID {
 			t.Fatal("wrong principal attribution")
 		}
 	}
@@ -384,9 +384,8 @@ func TestStage5Integration(t *testing.T) {
 	}
 	// 约束失败不得留下记录，重复提交不得重复记账。
 	makeEvent := func(label string) domain.Event {
-		aid, _ := ids.NextID(ctx)
 		now := time.Now().UTC()
-		return domain.Event{RequestID: label, ClientProtocol: gw.AnthropicProtocol, PrincipalID: member.ID, ModelID: modelID, RequestAt: now, CompletedAt: now, Status: domain.Success, Attempt: &domain.Attempt{ID: aid, ProviderID: provider.ID, ProviderModelID: 1, ResourceID: resource.ID, ModelID: modelID, StartedAt: now, CompletedAt: now, Status: domain.Success}}
+		return domain.Event{RequestID: label, ClientProtocol: gw.AnthropicProtocol, PrincipalID: member.ID, ModelID: modelID, RequestAt: now, CompletedAt: now, Status: domain.Success, Attempt: &domain.Attempt{ProviderID: provider.ID, ProviderModelID: 1, ResourceID: resource.ID, ModelID: modelID, StartedAt: now, CompletedAt: now, Status: domain.Success}}
 	}
 	bad := makeEvent("usage-atomic-test")
 	negative := int64(-1)

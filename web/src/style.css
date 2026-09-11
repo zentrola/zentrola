@@ -159,14 +159,10 @@ label textarea {
 .status-switch {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
   min-height: 32px;
   padding: 4px 0;
   border: 0;
   background: transparent;
-  color: var(--muted);
-  font-size: 12px;
-  white-space: nowrap;
 }
 .status-switch-track {
   display: inline-flex;
@@ -186,9 +182,6 @@ label textarea {
   background: #fff;
   box-shadow: 0 1px 3px #172f4633;
   transition: transform 0.15s;
-}
-.status-switch[aria-checked='true'] {
-  color: var(--blue);
 }
 .status-switch[aria-checked='true'] .status-switch-track {
   background: var(--blue);
@@ -712,9 +705,50 @@ label textarea {
   left: 11px;
 }
 .table-scroll {
+  position: relative;
   overflow-x: auto;
   overscroll-behavior-inline: contain;
   scrollbar-gutter: stable;
+  isolation: isolate;
+}
+.table-scroll > table > thead > tr > th:first-child,
+.table-scroll > table > tbody > tr > td:first-child {
+  position: sticky;
+  left: 0;
+}
+.table-scroll > table > thead > tr > th:first-child {
+  z-index: 3;
+  background: #f8fafd;
+}
+.table-scroll > table > tbody > tr > td:first-child {
+  z-index: 2;
+  background: #fff;
+}
+.table-scroll--actions > table > thead > tr > th:last-child,
+.table-scroll--actions > table > tbody > tr > td:last-child {
+  position: sticky;
+  right: 0;
+  min-width: 96px;
+}
+.table-scroll--actions > table > thead > tr > th:last-child {
+  z-index: 3;
+  background: #f8fafd;
+}
+.table-scroll--actions > table > tbody > tr > td:last-child {
+  z-index: 2;
+  background: #fff;
+}
+.table-scroll > table > tbody > tr:hover > td:first-child,
+.table-scroll--actions > table > tbody > tr:hover > td:last-child {
+  background: #fbfdff;
+}
+.table-scroll.is-overflowing:not(.is-at-start) > table > thead > tr > th:first-child,
+.table-scroll.is-overflowing:not(.is-at-start) > table > tbody > tr > td:first-child {
+  box-shadow: 10px 0 14px -13px #18324780;
+}
+.table-scroll--actions.is-overflowing:not(.is-at-end) > table > thead > tr > th:last-child,
+.table-scroll--actions.is-overflowing:not(.is-at-end) > table > tbody > tr > td:last-child {
+  box-shadow: -10px 0 14px -13px #18324780;
 }
 table {
   border-collapse: collapse;

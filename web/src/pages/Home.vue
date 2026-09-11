@@ -269,11 +269,11 @@ onMounted(load)
       <dl class="metric-strip">
         <div>
           <dt>{{ t('home.activeMembers') }}</dt>
-          <dd>{{ summary ? count(summary.activeMemberCount) : '—' }}</dd>
+          <dd>{{ summary ? count(summary.activeMemberCount) : t('common.none') }}</dd>
         </div>
         <div>
           <dt>{{ t('home.supportedModels') }}</dt>
-          <dd>{{ summary ? count(summary.modelCount) : '—' }}</dd>
+          <dd>{{ summary ? count(summary.modelCount) : t('common.none') }}</dd>
         </div>
         <div class="provider-total">
           <div class="provider-metric-label">
@@ -288,7 +288,7 @@ onMounted(load)
               <i></i>
             </span>
           </div>
-          <dd>{{ summary ? count(summary.providerCount) : '—' }}</dd>
+          <dd>{{ summary ? count(summary.providerCount) : t('common.none') }}</dd>
         </div>
         <div class="token-total">
           <dt>{{ t('home.monthTokens') }}</dt>
@@ -296,7 +296,7 @@ onMounted(load)
             :title="summary ? count(summary.totalTokens) : undefined"
             :aria-label="summary ? count(summary.totalTokens) : undefined"
           >
-            {{ summary ? compactCount(summary.totalTokens) : '—' }}
+            {{ summary ? compactCount(summary.totalTokens) : t('common.none') }}
           </dd>
         </div>
       </dl>

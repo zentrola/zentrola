@@ -19,6 +19,10 @@ Zentrola 由 Go 后端和 Vue 管理界面组成。程序入口位于 `cmd/serve
 
 Go 代码必须经过 `gofmt`；包名使用简短的小写单词，导出标识符使用 PascalCase，测试以 `*_test.go` 命名并与实现放在同一包中。保持依赖方向：transport 调用 application 服务，domain 不得依赖 infrastructure。不要手动修改 `dbgen`。前端遵循 `.prettierrc.json`：不使用分号、使用单引号、每行最多 100 字符并保留尾随逗号。Vue 组件使用 PascalCase（如 `MemberKeys.vue`），TypeScript 工具函数使用 camelCase。
 
+### 前端本地化占位符
+
+界面字段没有记录或没有可展示的值时，必须按当前语言使用对应占位符：中文界面使用全角破折号 `—`，英文界面使用半角连字符 `-`。新增或修改页面、组件、国际化文案及相关测试时都必须遵循此规则，不得在英文界面中使用 `—` 表示空值。
+
 ## 测试规范
 
 验证逻辑和服务行为应编写聚焦的 Go 表驱动测试。Playwright 文件命名为 `*.spec.ts`，默认浏览器测试必须使用模拟 API。提交前运行 `go test ./...`、`npm run build` 和 `npm test`。不得将真实服务凭据写入测试数据、截图或日志。

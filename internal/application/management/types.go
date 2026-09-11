@@ -71,11 +71,12 @@ type Model struct {
 }
 
 type ModelInput struct {
-	Code             string   `json:"code" binding:"required"`
-	Name             string   `json:"name" binding:"required"`
-	InputModalities  []string `json:"inputModalities" binding:"required" enums:"TEXT,IMAGE,AUDIO,VIDEO"`
-	OutputModalities []string `json:"outputModalities" binding:"required" enums:"TEXT,IMAGE,AUDIO,VIDEO"`
-	Remark           string   `json:"remark"`
+	Code                string   `json:"code" binding:"required"`
+	Name                string   `json:"name" binding:"required"`
+	PublisherProviderID *int64   `json:"publisherProviderId,string"`
+	InputModalities     []string `json:"inputModalities" binding:"required" enums:"TEXT,IMAGE,AUDIO,VIDEO"`
+	OutputModalities    []string `json:"outputModalities" binding:"required" enums:"TEXT,IMAGE,AUDIO,VIDEO"`
+	Remark              string   `json:"remark"`
 }
 type Provider struct {
 	ID                 int64                    `json:"id,string"`
@@ -290,6 +291,7 @@ type Writer interface {
 	SetModelStatus(context.Context, int64, string) error
 	CreateModel(context.Context, Model) error
 	UpdateModel(context.Context, Model) error
+	DeleteModel(context.Context, int64, time.Time) error
 	CreateProvider(context.Context, Provider) error
 	UpdateProvider(context.Context, Provider) error
 	DeleteProvider(context.Context, int64, time.Time) error

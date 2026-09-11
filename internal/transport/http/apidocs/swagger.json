@@ -3072,6 +3072,62 @@
                         }
                     }
                 }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "description": "逻辑删除模型，并解除其服务商映射和分组授权；保留历史用量和操作日志。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "模型与资源"
+                ],
+                "summary": "删除官方模型",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "模型 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
             }
         },
         "/api/v1/models/{id}/status": {
@@ -5900,6 +5956,10 @@
                             "VIDEO"
                         ]
                     }
+                },
+                "publisherProviderId": {
+                    "type": "string",
+                    "example": "0"
                 },
                 "remark": {
                     "type": "string"

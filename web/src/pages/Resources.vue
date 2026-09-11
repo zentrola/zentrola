@@ -12,6 +12,7 @@ import PageHeader from '../components/PageHeader.vue'
 import ListFooter from '../components/ListFooter.vue'
 import ListSearch from '../components/ListSearch.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+import TableScroll from '../components/TableScroll.vue'
 const {
   items,
   cursor,
@@ -175,7 +176,7 @@ function runtimeReason(resource: Resource) {
     <p v-if="error" class="alert error" role="alert">
       {{ error }}<button class="text-button" @click="retry">{{ t('common.retry') }}</button>
     </p>
-    <div class="table-scroll">
+    <TableScroll has-actions>
       <table>
         <thead>
           <tr>
@@ -240,7 +241,7 @@ function runtimeReason(resource: Resource) {
           </tr>
         </tbody>
       </table>
-    </div>
+    </TableScroll>
     <div v-if="!visible.length" class="empty-state">
       <Icon name="resources" :size="32" />
       <h3>{{ t(loading ? 'common.loading' : query ? 'common.noResults' : 'common.empty') }}</h3>

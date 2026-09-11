@@ -518,6 +518,54 @@ func (q *Queries) ManageDeleteMemberGroups(ctx context.Context, arg ManageDelete
 	return err
 }
 
+const manageDeleteModel = `-- name: ManageDeleteModel :exec
+UPDATE model SET is_deleted=true,status='DISABLED',updated_by=$2,updated_at=$3
+WHERE id=$1 AND is_deleted=false
+`
+
+type ManageDeleteModelParams struct {
+	ID        int64
+	UpdatedBy string
+	UpdatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) ManageDeleteModel(ctx context.Context, arg ManageDeleteModelParams) error {
+	_, err := q.db.Exec(ctx, manageDeleteModel, arg.ID, arg.UpdatedBy, arg.UpdatedAt)
+	return err
+}
+
+const manageDeleteModelMappings = `-- name: ManageDeleteModelMappings :exec
+UPDATE provider_model SET is_deleted=true,updated_by=$2,updated_at=$3
+WHERE model_id=$1 AND is_deleted=false
+`
+
+type ManageDeleteModelMappingsParams struct {
+	ModelID   int64
+	UpdatedBy string
+	UpdatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) ManageDeleteModelMappings(ctx context.Context, arg ManageDeleteModelMappingsParams) error {
+	_, err := q.db.Exec(ctx, manageDeleteModelMappings, arg.ModelID, arg.UpdatedBy, arg.UpdatedAt)
+	return err
+}
+
+const manageDeleteModelPermissions = `-- name: ManageDeleteModelPermissions :exec
+UPDATE principal_group_model_permission SET is_deleted=true,updated_by=$2,updated_at=$3
+WHERE model_id=$1 AND is_deleted=false
+`
+
+type ManageDeleteModelPermissionsParams struct {
+	ModelID   int64
+	UpdatedBy string
+	UpdatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) ManageDeleteModelPermissions(ctx context.Context, arg ManageDeleteModelPermissionsParams) error {
+	_, err := q.db.Exec(ctx, manageDeleteModelPermissions, arg.ModelID, arg.UpdatedBy, arg.UpdatedAt)
+	return err
+}
+
 const manageDeleteProvider = `-- name: ManageDeleteProvider :exec
 UPDATE provider
 SET status='DISABLED',is_deleted=true,proxy_enabled=false,proxy_url_display=NULL,

@@ -12,6 +12,7 @@ import PageHeader from '../components/PageHeader.vue'
 import ListFooter from '../components/ListFooter.vue'
 import ListSearch from '../components/ListSearch.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+import TableScroll from '../components/TableScroll.vue'
 const {
   items,
   cursor,
@@ -183,12 +184,12 @@ function deleteGroup() {
     <p v-if="error" class="alert error" role="alert">
       {{ error }}<button class="text-button" @click="retry">{{ t('common.retry') }}</button>
     </p>
-    <div class="table-scroll">
+    <TableScroll has-actions>
       <table>
         <thead>
           <tr>
             <th>{{ t('common.name') }}</th>
-            <th>{{ t('common.status') }}</th>
+            <th>{{ t('common.enableStatus') }}</th>
             <th>{{ t('common.created') }}</th>
             <th>{{ t('common.remark') }}</th>
             <th class="align-right">{{ t('common.actions') }}</th>
@@ -212,7 +213,9 @@ function deleteGroup() {
               />
             </td>
             <td>{{ date(group.createdAt) }}</td>
-            <td class="remark-cell" :title="group.remark || ''">{{ group.remark || '-' }}</td>
+            <td class="remark-cell" :title="group.remark || ''">
+              {{ group.remark || t('common.none') }}
+            </td>
             <td>
               <div class="row-actions">
                 <button class="text-button" @click="manage(group)">
@@ -226,7 +229,7 @@ function deleteGroup() {
           </tr>
         </tbody>
       </table>
-    </div>
+    </TableScroll>
     <div v-if="!visible.length" class="empty-state">
       <Icon name="groups" :size="32" />
       <h3>{{ t(loading ? 'common.loading' : query ? 'common.noResults' : 'common.empty') }}</h3>
@@ -279,9 +282,9 @@ function deleteGroup() {
               }}</span>
             </div>
             <div class="create-models">
-              <div
+              <TableScroll
                 v-if="createModelsReady && creationModels.length"
-                class="table-scroll create-model-list"
+                class="create-model-list"
               >
                 <table>
                   <colgroup>
@@ -336,7 +339,7 @@ function deleteGroup() {
                     </tr>
                   </tbody>
                 </table>
-              </div>
+              </TableScroll>
               <p v-else-if="busy && !createModelsReady" class="empty-compact">
                 {{ t('common.loading') }}
               </p>
@@ -411,10 +414,7 @@ function deleteGroup() {
               }}</span>
             </div>
             <div class="create-models">
-              <div
-                v-if="relationReady && modelCandidates.length"
-                class="table-scroll create-model-list"
-              >
+              <TableScroll v-if="relationReady && modelCandidates.length" class="create-model-list">
                 <table>
                   <colgroup>
                     <col class="model-check-column" />
@@ -473,7 +473,7 @@ function deleteGroup() {
                     </tr>
                   </tbody>
                 </table>
-              </div>
+              </TableScroll>
               <p v-else-if="busy && !relationReady" class="empty-compact">
                 {{ t('common.loading') }}
               </p>

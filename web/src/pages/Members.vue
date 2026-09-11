@@ -13,6 +13,7 @@ import ListFooter from '../components/ListFooter.vue'
 import ListSearch from '../components/ListSearch.vue'
 import MemberKeys from '../components/MemberKeys.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+import TableScroll from '../components/TableScroll.vue'
 const {
   items,
   cursor,
@@ -212,12 +213,12 @@ async function copyKey() {
     <div v-if="error" class="alert error" role="alert">
       {{ error }}<button class="text-button" @click="retry">{{ t('common.retry') }}</button>
     </div>
-    <div class="table-scroll">
+    <TableScroll has-actions>
       <table class="members-table">
         <thead>
           <tr>
             <th>{{ t('members.member') }}</th>
-            <th>{{ t('common.status') }}</th>
+            <th>{{ t('members.activationStatus') }}</th>
             <th>{{ t('common.remark') }}</th>
             <th>{{ t('common.created') }}</th>
             <th class="align-right">{{ t('common.actions') }}</th>
@@ -249,8 +250,6 @@ async function copyKey() {
                 :value="member.status"
                 :name="member.name"
                 :aria-label="t('members.statusFor', { name: member.name })"
-                :active-label="t('members.active')"
-                :inactive-label="t('members.inactive')"
                 :disabled="busy || loading"
                 :busy="busy && statusTarget?.id === member.id"
                 @change="changeStatus(member)"
@@ -280,7 +279,7 @@ async function copyKey() {
           </tr>
         </tbody>
       </table>
-    </div>
+    </TableScroll>
     <div v-if="!visible.length" class="empty-state">
       <Icon name="members" :size="32" />
       <h3>{{ t(loading ? 'common.loading' : query ? 'common.noResults' : 'common.empty') }}</h3>

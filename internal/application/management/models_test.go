@@ -28,6 +28,10 @@ func TestModelInputValidation(t *testing.T) {
 		func(m *ModelInput) { m.Name = strings.Repeat("中", 43) },
 		func(m *ModelInput) { m.Remark = strings.Repeat("中", 667) },
 		func(m *ModelInput) { m.Remark = "\x00" },
+		func(m *ModelInput) {
+			publisherID := int64(0)
+			m.PublisherProviderID = &publisherID
+		},
 	} {
 		model := valid
 		mutate(&model)

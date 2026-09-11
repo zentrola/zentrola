@@ -143,10 +143,10 @@ export function dateOnly(value: string | null | undefined) {
     : t('common.none')
 }
 export function count(value: number | null) {
-  return value === null ? '-' : new Intl.NumberFormat(activeLocale.value).format(value)
+  return value === null ? t('common.none') : new Intl.NumberFormat(activeLocale.value).format(value)
 }
 export function compactCount(value: number | null) {
-  if (value === null) return '-'
+  if (value === null) return t('common.none')
   const absolute = Math.abs(value)
   if (absolute < 1000) return count(value)
 

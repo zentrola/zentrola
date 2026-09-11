@@ -9,7 +9,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/zentrola/zentrola/internal/domain/shared"
 	domain "github.com/zentrola/zentrola/internal/domain/usage"
 )
 
@@ -30,7 +29,6 @@ type Metrics struct {
 }
 type Writer struct {
 	store                                            Store
-	ids                                              shared.IDGenerator
 	logger                                           *slog.Logger
 	opts                                             Options
 	queue                                            chan domain.Event
@@ -46,11 +44,11 @@ type Writer struct {
 	pending                                          atomic.Int64
 }
 
-func NewWriter(store Store, ids shared.IDGenerator, logger *slog.Logger, opts Options) (*Writer, error) {
+func NewWriter(store Store, logger *slog.Logger, opts Options) (*Writer, error) {
 	if opts.QueueSize < 1 || opts.BatchSize < 1 || opts.FlushInterval <= 0 || opts.WriteTimeout <= 0 {
 		return nil, errors.New("invalid usage writer options")
 	}
-	w := &Writer{store: store, ids: ids, logger: logger, opts: opts, queue: make(chan domain.Event, opts.QueueSize), done: make(chan struct{})}
+	w := &Writer{store: store, logger: logger, opts: opts, queue: make(chan domain.Event, opts.QueueSize), done: make(chan struct{})}
 	w.allDone = make(chan struct{})
 	w.ctx, w.cancel = context.WithCancel(context.Background())
 	go w.run() // 固定一个 Worker；无每请求后台 goroutine。
@@ -60,7 +58,8 @@ func (w *Writer) Submit(event domain.Event) error {
 	if event.Attempt == nil && len(event.Attempts) == 0 {
 		return nil
 	}
-	// 防止调用方在入队后修改指针；每次上游尝试拥有独立 ID。
+	// 防止调用方在入队后修改指针。Attempt ID 在批量落库时统一生成，
+	// 避免每个请求入队前同步访问 PostgreSQL sequence。
 	clone := func(v *int64) *int64 {
 		if v == nil {
 			return nil
@@ -68,32 +67,23 @@ func (w *Writer) Submit(event domain.Event) error {
 		n := *v
 		return &n
 	}
-	cloneAttempt := func(source domain.Attempt) (domain.Attempt, error) {
+	cloneAttempt := func(source domain.Attempt) domain.Attempt {
 		source.InputTokens = clone(source.InputTokens)
 		source.OutputTokens = clone(source.OutputTokens)
 		source.CachedInputTokens = clone(source.CachedInputTokens)
-		var err error
-		source.ID, err = w.ids.NextID(w.ctx)
-		return source, err
+		source.ID = 0
+		return source
 	}
 	event.Attempts = append([]domain.Attempt(nil), event.Attempts...)
 	for index := range event.Attempts {
-		attempt, err := cloneAttempt(event.Attempts[index])
-		if err != nil {
-			w.failure(event, "USAGE_ID_FAILED")
-			return errors.New("usage ID generation failed")
-		}
+		attempt := cloneAttempt(event.Attempts[index])
 		if attempt.AttemptNo <= 0 {
 			attempt.AttemptNo = int32(index + 1)
 		}
 		event.Attempts[index] = attempt
 	}
 	if event.Attempt != nil {
-		attempt, err := cloneAttempt(*event.Attempt)
-		if err != nil {
-			w.failure(event, "USAGE_ID_FAILED")
-			return errors.New("usage ID generation failed")
-		}
+		attempt := cloneAttempt(*event.Attempt)
 		if attempt.AttemptNo <= 0 {
 			attempt.AttemptNo = int32(len(event.Attempts) + 1)
 		}

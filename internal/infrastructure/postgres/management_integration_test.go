@@ -692,15 +692,18 @@ func TestStage3Integration(t *testing.T) {
 	})
 
 	t.Run("official model creation editing validation and audit", func(t *testing.T) {
-		input := mgmt.ModelInput{Code: "official-model-test", Name: "官方模型测试", InputModalities: []string{"TEXT", "IMAGE"}, OutputModalities: []string{"TEXT"}, Remark: "用途说明"}
+		publisherProviderID := provider.ID
+		input := mgmt.ModelInput{Code: "official-model-test", Name: "官方模型测试", PublisherProviderID: &publisherProviderID, InputModalities: []string{"TEXT", "IMAGE"}, OutputModalities: []string{"TEXT"}, Remark: "用途说明"}
 		savedToken := token
 		token = ""
 		request("POST", "/api/v1/models", input, 401)
 		request("PUT", "/api/v1/models/1", input, 401)
+		request("DELETE", "/api/v1/models/1", nil, 401)
 		token = savedToken
 		created := stage3Data[mgmt.Model](t, request("POST", "/api/v1/models", input, 201))
 		path := "/api/v1/models/" + sid(created.ID)
-		if created.Status != "DISABLED" || len(created.InputModalities) != 2 || created.Remark != input.Remark {
+		if created.Status != "DISABLED" || len(created.InputModalities) != 2 || created.Remark != input.Remark ||
+			created.PublisherProviderID == nil || *created.PublisherProviderID != provider.ID || created.PublisherProviderName == nil || *created.PublisherProviderName != provider.Name {
 			t.Fatal("model metadata/default status lost")
 		}
 		activeModels := stage3Data[struct {
@@ -738,6 +741,16 @@ func TestStage3Integration(t *testing.T) {
 		request("GET", "/api/v1/models/bad", nil, 400)
 		request("GET", "/api/v1/models/1", nil, 404)
 		request("PUT", "/api/v1/models/1", input, 404)
+		request("DELETE", "/api/v1/models/1", nil, 404)
+		zeroPublisherID := int64(0)
+		invalidPublisher := input
+		invalidPublisher.PublisherProviderID = &zeroPublisherID
+		request("POST", "/api/v1/models", invalidPublisher, 400)
+		missingPublisherID := int64(999999999999999)
+		missingPublisher := input
+		missingPublisher.Code = "missing-publisher-model"
+		missingPublisher.PublisherProviderID = &missingPublisherID
+		request("POST", "/api/v1/models", missingPublisher, 404)
 		request("PATCH", path+"/status", map[string]string{"status": "ACTIVE"}, 200)
 		activeModels = stage3Data[struct {
 			Items []mgmt.Model `json:"items"`
@@ -788,6 +801,33 @@ func TestStage3Integration(t *testing.T) {
 		if err := pool.QueryRow(ctx, "SELECT count(*) FROM operation_log WHERE target_id=$1 AND operation_type IN ('MODEL_CREATE','MODEL_UPDATE')", created.ID).Scan(&count); err != nil || count != 2 {
 			t.Fatal("model audit count incorrect")
 		}
+
+		deletionProvider := stage3Data[mgmt.Provider](t, request("POST", "/api/v1/providers", mgmt.ProviderInput{
+			Name:      "模型删除关联服务商",
+			Endpoints: []mgmt.ProviderEndpoint{{ProtocolType: "OPENAI", BaseURL: "https://model-delete.example.com/v1"}},
+			Mappings:  []mgmt.ProviderMappingInput{{ModelID: created.ID, UpstreamModelCode: "deleted-upstream-model"}},
+		}, 201))
+		if err := broken.DeleteModel(ctx, actor, created.ID, appsec.RequestMeta{}); !errors.Is(err, appsec.ErrUnavailable) {
+			t.Fatal("model deletion ignored audit failure")
+		}
+		var deleted bool
+		if err := pool.QueryRow(ctx, "SELECT is_deleted FROM model WHERE id=$1", created.ID).Scan(&deleted); err != nil || deleted {
+			t.Fatal("unaudited model deletion committed")
+		}
+		request("DELETE", path, nil, 200)
+		request("GET", path, nil, 404)
+		var mappingDeleted, permissionDeleted bool
+		if err := pool.QueryRow(ctx, `
+			SELECT m.is_deleted, pm.is_deleted, permission.is_deleted
+			FROM model m
+			JOIN provider_model pm ON pm.model_id=m.id AND pm.provider_id=$2
+			JOIN principal_group_model_permission permission ON permission.model_id=m.id AND permission.group_id=$3
+			WHERE m.id=$1`, created.ID, deletionProvider.ID, g.ID).Scan(&deleted, &mappingDeleted, &permissionDeleted); err != nil || !deleted || !mappingDeleted || !permissionDeleted {
+			t.Fatalf("incomplete model deletion: %v %v %v %v", deleted, mappingDeleted, permissionDeleted, err)
+		}
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM operation_log WHERE target_id=$1 AND operation_type IN ('MODEL_CREATE','MODEL_UPDATE','MODEL_DELETE')", created.ID).Scan(&count); err != nil || count != 3 {
+			t.Fatal("model creation/edit/deletion audit count incorrect")
+		}
 	})
 
 	t.Run("audit API contains all management events without secrets", func(t *testing.T) {
@@ -796,7 +836,7 @@ func TestStage3Integration(t *testing.T) {
 		if err := pool.QueryRow(ctx, "SELECT string_agg(row_to_json(l)::text,' ') FROM operation_log l").Scan(&stored); err != nil {
 			t.Fatal(err)
 		}
-		for _, event := range []string{"MEMBER_CREATE", "MEMBER_STATUS_CHANGE", "ACCESS_KEY_CREATE", "ACCESS_KEY_REVOKE", "GROUP_CREATE", "GROUP_UPDATE", "GROUP_STATUS_CHANGE", "GROUP_DELETE", "GROUP_MEMBER_ADD", "GROUP_MEMBER_REMOVE", "GROUP_MODEL_GRANT", "GROUP_MODEL_REVOKE", "MODEL_CREATE", "MODEL_UPDATE", "MODEL_STATUS_CHANGE", "PROVIDER_CREATE", "PROVIDER_UPDATE", "RESOURCE_CREATE", "RESOURCE_CREDENTIAL_UPDATE", "RESOURCE_STATUS_CHANGE", "RESOURCE_CONNECTION_TEST"} {
+		for _, event := range []string{"MEMBER_CREATE", "MEMBER_STATUS_CHANGE", "ACCESS_KEY_CREATE", "ACCESS_KEY_REVOKE", "GROUP_CREATE", "GROUP_UPDATE", "GROUP_STATUS_CHANGE", "GROUP_DELETE", "GROUP_MEMBER_ADD", "GROUP_MEMBER_REMOVE", "GROUP_MODEL_GRANT", "GROUP_MODEL_REVOKE", "MODEL_CREATE", "MODEL_UPDATE", "MODEL_DELETE", "MODEL_STATUS_CHANGE", "PROVIDER_CREATE", "PROVIDER_UPDATE", "RESOURCE_CREATE", "RESOURCE_CREDENTIAL_UPDATE", "RESOURCE_STATUS_CHANGE", "RESOURCE_CONNECTION_TEST"} {
 			if !strings.Contains(stored, event) {
 				t.Errorf("missing audit %s", event)
 			}

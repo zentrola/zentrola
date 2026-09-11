@@ -626,6 +626,16 @@ func (s *managementSession) UpdateModel(ctx context.Context, m mgmt.Model) error
 	}
 	return s.q.ManageUpdateModel(ctx, dbgen.ManageUpdateModelParams{ID: m.ID, ModelCode: m.Code, DisplayName: m.Name, InputModalities: input, OutputModalities: output, Remark: m.Remark, PublisherProviderID: m.PublisherProviderID, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(m.UpdatedAt)})
 }
+func (s *managementSession) DeleteModel(ctx context.Context, id int64, at time.Time) error {
+	actor, updatedAt := actorRef(s.actor.ID), pgTime(at)
+	if err := s.q.ManageDeleteModelMappings(ctx, dbgen.ManageDeleteModelMappingsParams{ModelID: id, UpdatedBy: actor, UpdatedAt: updatedAt}); err != nil {
+		return err
+	}
+	if err := s.q.ManageDeleteModelPermissions(ctx, dbgen.ManageDeleteModelPermissionsParams{ModelID: id, UpdatedBy: actor, UpdatedAt: updatedAt}); err != nil {
+		return err
+	}
+	return s.q.ManageDeleteModel(ctx, dbgen.ManageDeleteModelParams{ID: id, UpdatedBy: actor, UpdatedAt: updatedAt})
+}
 func (s *managementSession) CreateResource(ctx context.Context, r mgmt.ResourceRecord) error {
 	return s.q.ManageCreateResource(ctx, dbgen.ManageCreateResourceParams{
 		ID: r.ID, ProviderID: r.ProviderID, ResourceName: r.Name, AuthType: r.AuthType,

@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { all, api, errorText } from '../api'
-import { useAction, useCollection, useListSearch, validText } from '../composables'
+import { date, useAction, useCollection, useListSearch, validText } from '../composables'
 import { i18n, t } from '../i18n'
 import { showErrorToast, showSuccessToast } from '../toast'
 import type {
@@ -23,6 +23,7 @@ import PageHeader from '../components/PageHeader.vue'
 import Status from '../components/Status.vue'
 import StatusSwitch from '../components/StatusSwitch.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+import TableScroll from '../components/TableScroll.vue'
 
 const {
   items,
@@ -53,6 +54,8 @@ const credentialCreating = ref(false)
 const credentialAuthType = ref<'API_KEY' | 'SUBSCRIPTION'>('API_KEY')
 const testTarget = ref<{ provider: Provider; resource: Resource } | null>(null)
 const testResult = ref<ConnectionResult | null>(null)
+const credentialVerifiedAt = reactive<Record<string, string>>({})
+const credentialValidationResults = reactive<Record<string, boolean>>({})
 const syncTarget = ref<{ provider: Provider; resource: Resource } | null>(null)
 const syncResult = ref<ModelSyncResult | null>(null)
 const credential = ref('')
@@ -359,6 +362,51 @@ function providerRuntime(provider: Provider) {
   }
 }
 
+function providerRuntimeHint(provider: Provider) {
+  const runtime = providerRuntime(provider)
+  return [runtime.reason, runtime.errorCode].filter(Boolean).join(' · ')
+}
+
+function providerRuntimeLabel(provider: Provider) {
+  const runtime = providerRuntime(provider)
+  const stateKey = `state.${runtime.status}`
+  const status = i18n.global.te(stateKey) ? t(stateKey) : runtime.status
+  const hint = providerRuntimeHint(provider)
+  return hint ? `${status}：${hint}` : status
+}
+
+function providerCredentialState(provider: Provider) {
+  const configured = resourcesFor(provider)
+  if (!configured.length) {
+    return {
+      key: 'missing',
+      symbol: t('common.none'),
+      label: t('resources.credentialStates.missing'),
+    }
+  }
+  if (
+    configured.some(
+      (resource) =>
+        credentialValidationResults[resource.id] ?? resource.runtimeStatus !== 'BLOCKED',
+    )
+  ) {
+    return { key: 'verified', symbol: '', label: t('resources.credentialStates.verified') }
+  }
+  return { key: 'failed', symbol: '!', label: t('resources.credentialStates.failed') }
+}
+
+function maskedCredential(resource: Resource | undefined) {
+  if (!resource) return t('common.none')
+  return resource.authType === 'SUBSCRIPTION'
+    ? t('resources.maskedToken')
+    : t('resources.maskedApiKey')
+}
+
+function lastCredentialVerification(resource: Resource | undefined) {
+  if (!resource) return null
+  return credentialVerifiedAt[resource.id] || resource.quotaCheckedAt || resource.lastErrorAt
+}
+
 function providerRuntimeAbnormal(provider: Provider) {
   if (provider.status !== 'ACTIVE') return false
   const configured = resourcesFor(provider)
@@ -531,8 +579,11 @@ async function importSubscription(event: Event) {
 
 function deleteCredential() {
   if (!credentialDeleteTarget.value) return
+  const resourceID = credentialDeleteTarget.value.id
   void run(async () => {
-    await api(`/resources/${credentialDeleteTarget.value!.id}`, 'DELETE')
+    await api(`/resources/${resourceID}`, 'DELETE')
+    delete credentialVerifiedAt[resourceID]
+    delete credentialValidationResults[resourceID]
     credentialDeleteTarget.value = null
     await loadResources()
   })
@@ -546,9 +597,16 @@ function testConnection(provider: Provider) {
   actionError.value = ''
   void run(async () => {
     const result = await api<ConnectionResult>(`/resources/${resource.id}/test-connection`, 'POST')
+    credentialVerifiedAt[resource.id] = new Date().toISOString()
+    credentialValidationResults[resource.id] = result.ok
     await loadResources()
     testResult.value = result
   })
+}
+
+function testCredentialFromModal(provider: Provider) {
+  closeCredential()
+  testConnection(provider)
 }
 
 function syncModels(provider: Provider) {
@@ -698,14 +756,17 @@ onMounted(() => {
         {{ t('common.retry') }}
       </button>
     </p>
-    <div class="table-scroll">
+    <TableScroll has-actions>
       <table>
+        <colgroup>
+          <col class="provider-name-column" />
+          <col span="5" />
+        </colgroup>
         <thead>
           <tr>
             <th>{{ t('providers.name') }}</th>
-            <th>{{ t('common.status') }}</th>
+            <th>{{ t('common.enableStatus') }}</th>
             <th>{{ t('providers.runtimeStatus') }}</th>
-            <th class="credential-column">{{ t('providers.keyConfiguration') }}</th>
             <th class="proxy-column">{{ t('providers.proxyAccess') }}</th>
             <th>{{ t('providers.endpoints') }}</th>
             <th class="align-right">{{ t('common.actions') }}</th>
@@ -771,40 +832,14 @@ onMounted(() => {
               />
             </td>
             <td class="provider-runtime">
-              <Status :value="providerRuntime(provider).status" />
-              <small
-                v-if="providerRuntime(provider).reason"
-                class="subline"
-                :title="providerRuntime(provider).errorCode || providerRuntime(provider).reason"
-                >{{ providerRuntime(provider).reason }}</small
+              <span
+                class="provider-runtime-state"
+                :tabindex="providerRuntimeHint(provider) ? 0 : undefined"
+                :title="providerRuntimeHint(provider) || undefined"
+                :aria-label="providerRuntimeLabel(provider)"
               >
-            </td>
-            <td class="credential-column">
-              <button
-                type="button"
-                class="icon-button credential-status"
-                :class="resourceFor(provider) ? 'is-configured' : 'is-missing'"
-                :disabled="busy"
-                :aria-label="
-                  t(
-                    resourceFor(provider)
-                      ? 'providers.configuredKeyFor'
-                      : 'providers.missingKeyFor',
-                    { name: provider.name },
-                  )
-                "
-                :title="
-                  t(
-                    resourceFor(provider)
-                      ? 'providers.configuredKeyFor'
-                      : 'providers.missingKeyFor',
-                    { name: provider.name },
-                  )
-                "
-                @click="configureCredential(provider)"
-              >
-                <Icon :name="resourceFor(provider) ? 'lock' : 'lock-open'" :size="20" />
-              </button>
+                <Status :value="providerRuntime(provider).status" />
+              </span>
             </td>
             <td class="proxy-column">
               <span
@@ -832,36 +867,64 @@ onMounted(() => {
               </span>
             </td>
             <td>
-              <div class="endpoint-stack">
+              <div
+                v-if="endpointURL(provider, 'OPENAI') || endpointURL(provider, 'ANTHROPIC')"
+                class="endpoint-stack"
+              >
                 <span
-                  ><b>OpenAI</b
-                  ><code class="endpoint" :title="endpointURL(provider, 'OPENAI') || undefined">{{
-                    endpointURL(provider, 'OPENAI') || '-'
+                  v-if="endpointURL(provider, 'OPENAI')"
+                  ><span class="endpoint-protocol">OpenAI</span
+                  ><code class="endpoint" :title="endpointURL(provider, 'OPENAI')">{{
+                    endpointURL(provider, 'OPENAI')
                   }}</code></span
                 ><span
-                  ><b>Anthropic</b
-                  ><code
-                    class="endpoint"
-                    :title="endpointURL(provider, 'ANTHROPIC') || undefined"
-                    >{{ endpointURL(provider, 'ANTHROPIC') || '-' }}</code
-                  ></span
+                  v-if="endpointURL(provider, 'ANTHROPIC')"
+                  ><span class="endpoint-protocol">Anthropic</span
+                  ><code class="endpoint" :title="endpointURL(provider, 'ANTHROPIC')">{{
+                    endpointURL(provider, 'ANTHROPIC')
+                  }}</code></span
                 >
               </div>
             </td>
             <td class="align-right">
               <div class="provider-actions">
-                <button class="text-button danger" :disabled="busy" @click="openDelete(provider)">
-                  {{ t('providers.delete') }}
-                </button>
                 <button class="text-button" :disabled="busy" @click="openEdit(provider)">
                   {{ t('providers.edit') }}
                 </button>
+                <button
+                  type="button"
+                  class="text-button"
+                  :disabled="busy"
+                  :aria-label="t('providers.editCredentialFor', { name: provider.name })"
+                  :title="t('providers.editCredentialFor', { name: provider.name })"
+                  @click="configureCredential(provider)"
+                >
+                  {{ t('providers.credentialAction') }}
+                </button>
+                <details class="provider-more">
+                  <summary
+                    :aria-label="t('providers.moreActionsFor', { name: provider.name })"
+                    :title="t('providers.moreActions')"
+                  >
+                    ⋯
+                  </summary>
+                  <div class="provider-more-menu">
+                    <button
+                      type="button"
+                      class="text-button danger"
+                      :disabled="busy"
+                      @click="openDelete(provider)"
+                    >
+                      {{ t('providers.delete') }}
+                    </button>
+                  </div>
+                </details>
               </div>
             </td>
           </tr>
         </tbody>
       </table>
-    </div>
+    </TableScroll>
     <div v-if="!visible.length" class="empty-state">
       <Icon name="providers" :size="32" />
       <p>
@@ -1198,7 +1261,7 @@ onMounted(() => {
 
   <Modal
     v-if="credentialTarget"
-    :title="t(credentialCreating ? 'resources.create' : 'resources.manageCredentials')"
+    :title="t('resources.configurationTitle')"
     :busy="busy"
     :medium="!credentialCreating"
     @close="closeCredential"
@@ -1213,6 +1276,45 @@ onMounted(() => {
           <Icon name="plus" :size="16" />{{ t('resources.addCredential') }}
         </button>
       </div>
+      <dl class="credential-overview">
+        <div>
+          <dt>{{ t('resources.provider') }}</dt>
+          <dd>{{ credentialTarget.name }}</dd>
+        </div>
+        <div>
+          <dt>{{ t('resources.credentialStatus') }}</dt>
+          <dd>
+            <span
+              class="credential-overview-status"
+              :class="`is-${providerCredentialState(credentialTarget).key}`"
+              ><b v-if="providerCredentialState(credentialTarget).symbol" aria-hidden="true">{{
+                providerCredentialState(credentialTarget).symbol
+              }}</b
+              >{{ providerCredentialState(credentialTarget).label }}</span
+            >
+          </dd>
+        </div>
+        <div>
+          <dt>{{ t('resources.maskedCredential') }}</dt>
+          <dd>
+            <code>{{ maskedCredential(resourceFor(credentialTarget)) }}</code>
+          </dd>
+        </div>
+        <div>
+          <dt>{{ t('resources.lastVerifiedAt') }}</dt>
+          <dd>{{ date(lastCredentialVerification(resourceFor(credentialTarget))) }}</dd>
+        </div>
+        <div class="credential-overview-endpoints">
+          <dt>{{ t('resources.baseUrl') }}</dt>
+          <dd>
+            <span v-for="endpoint in credentialTarget.endpoints" :key="endpoint.protocolType">
+              <b>{{ endpoint.protocolType === 'OPENAI' ? 'OpenAI' : 'Anthropic' }}</b>
+              <code :title="endpoint.baseUrl">{{ endpoint.baseUrl }}</code>
+            </span>
+            <span v-if="!credentialTarget.endpoints.length">{{ t('common.none') }}</span>
+          </dd>
+        </div>
+      </dl>
       <div v-if="resourcesFor(credentialTarget).length" class="credential-list">
         <table>
           <colgroup>
@@ -1267,7 +1369,7 @@ onMounted(() => {
                     {{ resource.lastErrorCode }}
                   </small>
                 </template>
-                <span v-else>-</span>
+                <span v-else>{{ t('common.none') }}</span>
               </td>
               <td class="credential-action-column" :data-label="t('common.actions')">
                 <button
@@ -1289,7 +1391,12 @@ onMounted(() => {
         <p>{{ t('resources.emptyCredentialsHint') }}</p>
       </div>
     </template>
-    <form v-else class="credential-create-form" @submit.prevent="saveCredential">
+    <form
+      v-else
+      id="credential-create-form"
+      class="credential-create-form"
+      @submit.prevent="saveCredential"
+    >
       <p class="muted">{{ t('resources.createHint') }}</p>
       <div class="credential-form-row">
         <label class="credential-form-label" for="credential-auth-type">{{
@@ -1347,14 +1454,33 @@ onMounted(() => {
           )
         }}
       </p>
-      <footer class="form-footer">
+    </form>
+    <template #footer>
+      <template v-if="credentialCreating">
         <button type="button" class="button" :disabled="busy" @click="cancelCredentialCreation">
           {{ t('common.cancel') }}</button
-        ><button class="button primary" :disabled="busy">
+        ><button
+          type="submit"
+          form="credential-create-form"
+          class="button primary"
+          :disabled="busy"
+        >
           {{ t(busy ? 'common.working' : 'common.save') }}
         </button>
-      </footer>
-    </form>
+      </template>
+      <template v-else>
+        <button
+          type="button"
+          class="button"
+          :disabled="busy || !resourceFor(credentialTarget)"
+          @click="testCredentialFromModal(credentialTarget)"
+        >
+          {{ t('resources.test') }}</button
+        ><button type="button" class="button primary" :disabled="busy" @click="closeCredential">
+          {{ t('common.save') }}
+        </button>
+      </template>
+    </template>
   </Modal>
 
   <ConfirmDialog
@@ -1460,7 +1586,7 @@ onMounted(() => {
   font-size: 12px;
 }
 .panel table {
-  min-width: 900px;
+  min-width: 840px;
   table-layout: fixed;
 }
 .panel th,
@@ -1468,39 +1594,58 @@ onMounted(() => {
   padding-left: 14px;
   padding-right: 14px;
 }
-.panel th:nth-child(1) {
-  width: 150px;
+.provider-name-column {
+  width: 230px;
 }
 .panel th:nth-child(2) {
-  width: 65px;
+  width: 90px;
 }
 .panel th:nth-child(3) {
   width: 125px;
 }
 .panel th:nth-child(4) {
-  width: 56px;
+  width: 64px;
 }
 .panel th:nth-child(5) {
-  width: 58px;
+  width: auto;
 }
 .panel th:nth-child(6) {
-  width: 210px;
+  width: 190px;
 }
-.panel th:nth-child(7) {
-  width: 100px;
+.panel th:nth-child(4),
+.panel td:nth-child(4) {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+.panel th:nth-child(2),
+.panel td:nth-child(2) {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+.panel th:nth-child(3),
+.panel td:nth-child(3) {
+  padding-left: 18px;
+}
+.provider-runtime-state {
+  display: inline-flex;
+  border-radius: 7px;
+}
+.provider-runtime-state:focus-visible {
+  outline: 2px solid #90b7fb;
+  outline-offset: 2px;
 }
 .endpoint {
   display: block;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 .provider-name-line {
   display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
+  overflow: hidden;
 }
 .provider-name-line strong {
   overflow: hidden;
@@ -1545,16 +1690,22 @@ onMounted(() => {
 .endpoint-stack > span {
   display: grid;
   grid-template-columns: 58px minmax(0, 1fr);
-  align-items: center;
+  align-items: start;
   gap: 8px;
 }
-.endpoint-stack b {
-  color: #778a9d;
+.endpoint-protocol {
+  display: inline-flex;
+  min-height: 18px;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 5px;
+  border-radius: 4px;
+  color: #60788d;
+  background: #eef3f7;
   font-size: 10px;
   font-weight: 600;
-}
-.credential-column {
-  text-align: center;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 .proxy-column {
   text-align: center;
@@ -1579,29 +1730,6 @@ onMounted(() => {
   max-width: 190px;
   font-size: 11px;
 }
-.credential-status {
-  width: 32px;
-  height: 32px;
-  transition:
-    color 0.15s,
-    background-color 0.15s;
-}
-.credential-status.is-configured {
-  color: #20714f;
-  background: #eaf7f0;
-}
-.credential-status.is-configured:hover:not(:disabled) {
-  color: #155c3e;
-  background: #dcefe5;
-}
-.credential-status.is-missing {
-  color: #778b9e;
-  background: #f0f3f6;
-}
-.credential-status.is-missing:hover:not(:disabled) {
-  background: #eaf1fb;
-  color: #2463c4;
-}
 .credential-list-head {
   display: flex;
   align-items: flex-start;
@@ -1620,6 +1748,100 @@ onMounted(() => {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.55;
+}
+.credential-overview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  margin: 0 0 16px;
+  overflow: hidden;
+  border: 1px solid #dce5ee;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+.credential-overview > div {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e3eaf1;
+}
+.credential-overview > div:nth-child(odd):not(.credential-overview-endpoints) {
+  border-right: 1px solid #e3eaf1;
+}
+.credential-overview dt,
+.credential-overview dd {
+  min-width: 0;
+  margin: 0;
+}
+.credential-overview dt {
+  color: #687e92;
+  font-size: 11px;
+  font-weight: 600;
+}
+.credential-overview dd {
+  color: #29445c;
+  font-size: 12px;
+}
+.credential-overview dd > code {
+  color: #38556f;
+  letter-spacing: 0.04em;
+}
+.credential-overview-endpoints {
+  grid-column: 1 / -1;
+  border-bottom: 0 !important;
+}
+.credential-overview-endpoints dd {
+  display: grid;
+  gap: 6px;
+}
+.credential-overview-endpoints dd > span {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 8px;
+}
+.credential-overview-endpoints b {
+  color: #73889a;
+  font-size: 10px;
+  font-weight: 600;
+}
+.credential-overview-endpoints code {
+  overflow: hidden;
+  color: #38556f;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.credential-overview-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+.credential-overview-status b {
+  display: inline-grid;
+  width: 17px;
+  height: 17px;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 11px;
+}
+.credential-overview-status.is-verified {
+  color: #20714f;
+}
+.credential-overview-status.is-verified b {
+  background: #dcefe5;
+}
+.credential-overview-status.is-failed {
+  color: #a43b3b;
+}
+.credential-overview-status.is-failed b {
+  background: #f8e1e1;
+}
+.credential-overview-status.is-missing {
+  color: #71869a;
+}
+.credential-overview-status.is-missing b {
+  background: #e7edf2;
 }
 .credential-list {
   min-width: 0;
@@ -1740,8 +1962,56 @@ onMounted(() => {
 }
 .provider-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
-  gap: 12px;
+  gap: 10px;
+  white-space: nowrap;
+}
+.provider-more {
+  position: relative;
+  flex: none;
+}
+.provider-more summary {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 5px;
+  color: #60788d;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  list-style: none;
+}
+.provider-more summary::-webkit-details-marker {
+  display: none;
+}
+.provider-more summary:hover,
+.provider-more summary:focus-visible {
+  color: var(--blue);
+  background: #edf4fc;
+}
+.provider-more summary:focus-visible {
+  outline: 2px solid #90b7fb;
+  outline-offset: 2px;
+}
+.provider-more-menu {
+  position: absolute;
+  z-index: 4;
+  top: 50%;
+  right: calc(100% + 4px);
+  min-width: 80px;
+  padding: 6px;
+  border: 1px solid #d8e2ec;
+  border-radius: 7px;
+  background: #fff;
+  box-shadow: 0 8px 24px #1832471f;
+  transform: translateY(-50%);
+}
+.provider-more-menu .text-button {
+  width: 100%;
+  justify-content: flex-start;
+  padding: 6px 8px;
 }
 .provider-form {
   display: grid;
@@ -2053,9 +2323,6 @@ onMounted(() => {
   border-top: 1px solid #e5ebf1;
 }
 .mapping-grid-head {
-  position: sticky;
-  top: 0;
-  z-index: 1;
   padding-top: 6px;
   padding-bottom: 6px;
   border-top: 0;
@@ -2125,6 +2392,17 @@ onMounted(() => {
   text-align: center;
 }
 @media (max-width: 760px) {
+  .credential-overview {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .credential-overview > div,
+  .credential-overview > div:nth-child(odd):not(.credential-overview-endpoints) {
+    grid-template-columns: 88px minmax(0, 1fr);
+    border-right: 0;
+  }
+  .credential-overview-endpoints {
+    grid-column: 1;
+  }
   .credential-form-row {
     grid-template-columns: 1fr;
     gap: 6px;

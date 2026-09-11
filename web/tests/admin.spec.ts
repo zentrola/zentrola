@@ -374,6 +374,10 @@ async function fixture(page: Page) {
         lastErrorCode: null,
         modelSyncSupported: path === '/providers' ? false : undefined,
         authAdapters: path === '/providers' ? ['API_KEY'] : undefined,
+        publisherProviderName:
+          path === '/models'
+            ? (providers.find((provider) => provider.id === body.publisherProviderId)?.name ?? null)
+            : undefined,
         ...(path === '/resources'
           ? {
               authType: body.authType || 'API_KEY',
@@ -432,7 +436,11 @@ async function fixture(page: Page) {
     if (segments[0] === 'models' && segments.length === 2 && method === 'PUT') {
       if (conflict) return reply(null, 409, 'CONFLICT')
       const row = models.find((model) => model.id === segments[1])
-      Object.assign(row, body)
+      if (!row) return reply(null, 404, 'NOT_FOUND')
+      Object.assign(row, body, {
+        publisherProviderName:
+          providers.find((provider) => provider.id === body.publisherProviderId)?.name ?? null,
+      })
       return reply(row)
     }
     if (segments[0] === 'providers' && segments.length === 2 && method === 'PUT') {
@@ -492,6 +500,21 @@ async function fixture(page: Page) {
       groups.splice(index, 1)
       relationships.delete(`groups/${segments[1]}/members`)
       relationships.delete(`groups/${segments[1]}/models`)
+      return reply({ deleted: true })
+    }
+    if (segments[0] === 'models' && segments.length === 2 && method === 'DELETE') {
+      if (conflict) return reply(null, 409, 'CONFLICT')
+      const index = models.findIndex((model) => model.id === segments[1])
+      if (index < 0) return reply(null, 404, 'NOT_FOUND')
+      models.splice(index, 1)
+      for (const [key, ids] of relationships) {
+        if (key.endsWith('/models')) ids.delete(segments[1])
+      }
+      for (const mappings of providerMappings.values()) {
+        for (let mappingIndex = mappings.length - 1; mappingIndex >= 0; mappingIndex--) {
+          if (mappings[mappingIndex].modelId === segments[1]) mappings.splice(mappingIndex, 1)
+        }
+      }
       return reply({ deleted: true })
     }
     if (segments[0] === 'providers' && segments.length === 2 && method === 'DELETE') {
@@ -1114,7 +1137,7 @@ test('成员列表按需查看 Key 并处理删除和失败恢复', async ({ pag
   })
   await expect(disabledMemberStatus).toBeEnabled()
   await expect(disabledMemberStatus).not.toHaveAttribute('title')
-  await expect(disabledMemberStatus).toContainText('未激活')
+  await expect(disabledMemberStatus).toHaveText('')
   await expect(disabledMemberRow.getByRole('button', { name: '密钥', exact: true })).toBeEnabled()
   const assignKey = row.getByRole('button', { name: '密钥', exact: true })
   await expect(assignKey.locator('svg')).toHaveCount(0)
@@ -1185,7 +1208,7 @@ test('成员列表不预查密钥且分配密钥后可激活', async ({ page }) 
   await status.click()
   await expect(status).toBeChecked()
   await expect(modal(page)).toHaveCount(0)
-  await expect(status).toContainText('已激活')
+  await expect(status).toHaveText('')
   expect(state.members.find((member) => member.name === '周予安')?.status).toBe('ACTIVE')
 })
 
@@ -1276,7 +1299,7 @@ test('模型新增编辑、模态校验、冲突恢复和窄屏表单', async ({
   await expect(page.getByRole('columnheader')).toHaveText([
     '模型名称',
     '模型厂商',
-    '状态',
+    '启用状态',
     '输入类型',
     '输出类型',
     '备注',
@@ -1290,10 +1313,11 @@ test('模型新增编辑、模态校验、冲突恢复和窄屏表单', async ({
   await page.getByRole('button', { name: '添加模型' }).click()
   const dialog = modal(page)
   const modelFormRows = dialog.locator('.model-form-row')
-  await expect(modelFormRows).toHaveCount(5)
+  await expect(modelFormRows).toHaveCount(6)
   await expect(modelFormRows.locator('.model-form-label')).toHaveText([
     '模型编码',
     '模型名称',
+    '模型厂商',
     '输入类型',
     '输出类型',
     '备注',
@@ -1301,6 +1325,7 @@ test('模型新增编辑、模态校验、冲突恢复和窄屏表单', async ({
   await expect(modelFormRows.first()).toHaveCSS('grid-template-columns', /\S+ \S+/)
   await dialog.getByLabel('模型名称', { exact: true }).fill('测试官方模型')
   await dialog.getByLabel('模型编码', { exact: true }).fill('official-test-v1')
+  await dialog.getByLabel('模型厂商', { exact: true }).selectOption('81')
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expect(page.locator('.toast')).toContainText('至少选择一项')
   await expect(dialog.locator('.alert.error')).toHaveCount(0)
@@ -1324,8 +1349,12 @@ test('模型新增编辑、模态校验、冲突恢复和窄屏表单', async ({
   expect(created.inputModalities).toEqual(['TEXT', 'IMAGE'])
   expect(created.outputModalities).toEqual(['TEXT'])
   expect(created.status).toBe('DISABLED')
+  expect(created.publisherProviderId).toBe('81')
+  expect(created.publisherProviderName).toBe('DeepSeek')
+  await expect(row.getByRole('cell').nth(1)).toHaveText('DeepSeek')
   await row.getByRole('button', { name: '编辑', exact: true }).click()
   await expect(dialog.getByLabel('发布方编码', { exact: true })).toHaveCount(0)
+  await expect(dialog.getByLabel('模型厂商', { exact: true })).toHaveValue('81')
   await mkdir('../.cache/web-visual', { recursive: true })
   await dialog.screenshot({ path: '../.cache/web-visual/model-edit-desktop.png' })
   await expect(
@@ -1339,11 +1368,14 @@ test('模型新增编辑、模态校验、冲突恢复和窄屏表单', async ({
   expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
   await mkdir('../.cache/web-visual', { recursive: true })
   await page.screenshot({ path: '../.cache/web-visual/model-edit-mobile.png' })
+  await dialog.getByLabel('模型厂商', { exact: true }).selectOption('')
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expect(page.locator('dialog')).toHaveCount(0)
   expect(created.code).toBe('official-test-v2')
   expect(created.status).toBe('DISABLED')
   expect(created.outputModalities).toEqual(['TEXT', 'AUDIO'])
+  expect(created.publisherProviderId).toBeNull()
+  expect(created.publisherProviderName).toBeNull()
   await page.setViewportSize({ width: 1440, height: 1000 })
   const modelSearch = page.getByRole('searchbox', { name: '模型名称' })
   await expect(modelSearch).toHaveAttribute('placeholder', '请输入模型名称')
@@ -1352,6 +1384,14 @@ test('模型新增编辑、模态校验、冲突恢复和窄屏表单', async ({
   await page.getByRole('button', { name: '搜索', exact: true }).click()
   await expect(page.getByRole('row').filter({ hasText: 'official-test-v2' })).toHaveCount(1)
   await page.screenshot({ path: '../.cache/web-visual/model-catalog-desktop.png' })
+  const updatedRow = page.getByRole('row').filter({ hasText: 'official-test-v2' })
+  await expect(updatedRow.getByRole('cell').nth(1)).toHaveText('-')
+  await updatedRow.getByRole('button', { name: '删除', exact: true }).click()
+  const deleteDialog = modal(page)
+  await expect(deleteDialog).toContainText('相关服务商映射和分组授权将同时失效')
+  await deleteDialog.getByRole('button', { name: '删除', exact: true }).click()
+  await expect(page.getByRole('row').filter({ hasText: 'official-test-v2' })).toHaveCount(0)
+  expect(state.models.some((model) => model.id === created.id)).toBe(false)
 })
 
 test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => {
@@ -1367,7 +1407,7 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   const providerSearch = page.getByRole('search')
   await expect(providerSearch.getByRole('searchbox', { name: '服务商名称' })).toHaveAttribute(
     'placeholder',
-    '请输入服务商名称或接口地址',
+    '请输入服务商名称',
   )
   await expect(
     page.locator('.page-heading').getByRole('button', { name: '添加服务商', exact: true }),
@@ -1395,21 +1435,30 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   expect(state.providers).toHaveLength(7)
 
   const deepSeekRow = page.getByRole('row').filter({ hasText: '深度求索' })
-  await expect(page.getByRole('columnheader', { name: '认证凭据', exact: true })).toBeVisible()
+  await expect(page.getByRole('columnheader', { name: '启用状态', exact: true })).toBeVisible()
+  await expect(page.getByRole('columnheader', { name: '认证凭据', exact: true })).toHaveCount(0)
   const deepSeekCredential = deepSeekRow.getByRole('button', {
-    name: '深度求索 尚未配置认证凭据，点击添加',
+    name: '管理 深度求索 的认证凭据',
     exact: true,
   })
   await expect(deepSeekCredential).toBeVisible()
-  await expect(deepSeekCredential).toHaveClass(/is-missing/)
-  await expect(deepSeekCredential.locator('svg')).toHaveCount(1)
+  await expect(deepSeekCredential).toHaveText('凭证')
   const deepSeekProxy = deepSeekRow.getByRole('img', {
     name: '深度求索 未启用代理访问',
     exact: true,
   })
   await expect(deepSeekProxy).toBeVisible()
   await expect(deepSeekProxy.locator('svg')).toHaveCount(1)
-  await expect(deepSeekRow.locator('td').last().getByRole('button')).toHaveText(['删除', '编辑'])
+  await expect(deepSeekRow.locator('td').last().getByRole('button', { name: '编辑' })).toBeVisible()
+  const moreActions = deepSeekRow.locator('td').last().locator('summary')
+  await expect(moreActions).toHaveAttribute('aria-label', '深度求索 的更多操作')
+  await moreActions.click()
+  await expect(deepSeekRow.locator('.provider-more-menu')).toBeVisible()
+  const moreMenuBox = (await deepSeekRow.locator('.provider-more-menu').boundingBox())!
+  const tableBox = (await page.locator('.table-scroll').boundingBox())!
+  expect(moreMenuBox.x).toBeGreaterThanOrEqual(tableBox.x)
+  expect(moreMenuBox.y).toBeGreaterThanOrEqual(tableBox.y)
+  await moreActions.click()
   await deepSeekRow.getByRole('button', { name: '编辑', exact: true }).click()
   await expect(modal(page).getByRole('tab', { name: '模型配置', exact: true })).toHaveAttribute(
     'aria-selected',
@@ -1603,18 +1652,49 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
     }),
   ])
   const row = page.getByRole('row').filter({ hasText: '阿里云百炼' })
-  await expect(row).toContainText('dashscope.aliyuncs.com/compatible-mode/v1')
+  const providerNameCellBox = await row.getByRole('cell').first().boundingBox()
+  expect(providerNameCellBox).not.toBeNull()
+  expect(providerNameCellBox!.width).toBeGreaterThanOrEqual(230)
+  const endpoint = row.locator('.endpoint')
+  await expect(endpoint).toHaveText('https://dashscope.aliyuncs.com/compatible-mode/v1')
+  await expect(endpoint).toHaveCSS('overflow-wrap', 'anywhere')
+  await expect(endpoint).toHaveCSS('white-space', 'normal')
+  expect(await endpoint.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(
+    true,
+  )
+  await expect(row.getByText('OpenAI', { exact: true })).toBeVisible()
+  await expect(row.locator('.endpoint-protocol')).toHaveText(['OpenAI'])
+  await expect(row.getByText('Anthropic', { exact: true })).toHaveCount(0)
+  const proxyCellBox = await row.getByRole('cell').nth(3).boundingBox()
+  const endpointCellBox = await row.getByRole('cell').nth(4).boundingBox()
+  expect(proxyCellBox).not.toBeNull()
+  expect(endpointCellBox).not.toBeNull()
+  expect(proxyCellBox!.width).toBeLessThan(80)
+  expect(endpointCellBox!.width).toBeGreaterThan(proxyCellBox!.width * 3)
+  const enabledStatusBox = await row.getByRole('switch').boundingBox()
+  const runtimeStatusBox = await row.locator('.provider-runtime-state').boundingBox()
+  expect(enabledStatusBox).not.toBeNull()
+  expect(runtimeStatusBox).not.toBeNull()
+  expect(runtimeStatusBox!.x - (enabledStatusBox!.x + enabledStatusBox!.width)).toBeGreaterThanOrEqual(
+    16,
+  )
+  await expect(row.locator('.provider-runtime .subline')).toHaveCount(0)
+  await expect(row.locator('.provider-runtime-state')).toHaveAttribute(
+    'title',
+    '尚未配置服务商凭证',
+  )
   await expect(
     row.getByRole('img', { name: '阿里云百炼 已启用代理访问', exact: true }),
   ).toBeVisible()
   const createdStatus = row.getByRole('switch', { name: '阿里云百炼的启用状态' })
+  await expect(createdStatus).toHaveText('')
   await expect(createdStatus).toBeDisabled()
   await expect(createdStatus).toHaveAttribute('title', '请先配置服务商认证凭据，再启用服务商。')
   const missingCredential = row.getByRole('button', {
-    name: '阿里云百炼 尚未配置认证凭据，点击添加',
+    name: '管理 阿里云百炼 的认证凭据',
     exact: true,
   })
-  await expect(missingCredential).toHaveClass(/is-missing/)
+  await expect(missingCredential).toHaveText('凭证')
   await missingCredential.click()
   await expect(dialog.getByText('暂无认证凭据', { exact: true })).toBeVisible()
   await dialog.getByRole('button', { name: '新增凭据', exact: true }).click()
@@ -1637,8 +1717,11 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   ).toHaveCount(0)
   expect(state.modelSyncRequests).toHaveLength(0)
   await expect(
-    row.getByRole('button', { name: '阿里云百炼 已配置认证凭据，点击管理', exact: true }),
-  ).toHaveClass(/is-configured/)
+    row.getByRole('button', {
+      name: '管理 阿里云百炼 的认证凭据',
+      exact: true,
+    }),
+  ).toHaveText('凭证')
   await expect(createdStatus).toBeEnabled()
   await expect(createdStatus).not.toHaveAttribute('title')
   const testCredential = row.getByRole('button', {
@@ -1646,6 +1729,13 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
     exact: true,
   })
   await expect(testCredential).toBeVisible()
+  const testCredentialBox = await testCredential.boundingBox()
+  const currentProviderNameCellBox = await row.getByRole('cell').first().boundingBox()
+  expect(testCredentialBox).not.toBeNull()
+  expect(currentProviderNameCellBox).not.toBeNull()
+  expect(testCredentialBox!.x + testCredentialBox!.width).toBeLessThanOrEqual(
+    currentProviderNameCellBox!.x + currentProviderNameCellBox!.width,
+  )
   await testCredential.click()
   await expect(modal(page).getByRole('status')).toContainText('连接测试通过')
   await modal(page).getByRole('button', { name: '关闭', exact: true }).last().click()
@@ -1704,11 +1794,9 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
     .toBe(76)
 
   await page.setViewportSize({ width: 1200, height: 900 })
-  await page
-    .getByRole('row')
-    .filter({ hasText: '阿里云模型服务' })
-    .getByRole('button', { name: '删除', exact: true })
-    .click()
+  const renamedRow = page.getByRole('row').filter({ hasText: '阿里云模型服务' })
+  await renamedRow.locator('summary').click()
+  await renamedRow.getByRole('button', { name: '删除', exact: true }).click()
   await expect(modal(page)).toContainText('确认删除服务商「阿里云模型服务」')
   await modal(page).screenshot({ path: '../.cache/web-visual/delete-confirm-dialog.png' })
   await modal(page).getByRole('button', { name: '删除', exact: true }).click()
@@ -1740,12 +1828,25 @@ test('服务商列表展示凭证聚合运行状态和错误原因', async ({ pa
   await expect(page.getByRole('columnheader', { name: '运行状态', exact: true })).toBeVisible()
   const row = page.getByRole('row').filter({ hasText: 'DeepSeek' })
   await expect(row.getByText('已阻断', { exact: true })).toBeVisible()
-  await expect(row).toContainText('余额或计费异常 · HTTP 402')
-  await expect(row.locator('.provider-runtime .subline')).toHaveAttribute(
+  await expect(row).not.toContainText('余额或计费异常 · HTTP 402')
+  await expect(row.locator('.provider-runtime-state')).toHaveAttribute(
     'title',
-    'UPSTREAM_BILLING_BLOCKED',
+    '余额或计费异常 · HTTP 402 · UPSTREAM_BILLING_BLOCKED',
   )
-  await row.getByRole('button', { name: 'DeepSeek 已配置认证凭据，点击管理', exact: true }).click()
+  await row
+    .getByRole('button', {
+      name: '管理 DeepSeek 的认证凭据',
+      exact: true,
+    })
+    .click()
+  await expect(modal(page).getByRole('heading', { name: '服务商凭证配置' })).toBeVisible()
+  await expect(modal(page).locator('.credential-overview')).toContainText('API Key · ••••••••')
+  await expect(modal(page).locator('.credential-overview')).toContainText(
+    'https://api.deepseek.com',
+  )
+  await expect(modal(page).getByRole('button', { name: '测试连接', exact: true })).toBeVisible()
+  await expect(modal(page).getByRole('button', { name: '保存', exact: true })).toBeVisible()
+  await modal(page).screenshot({ path: '../.cache/web-visual/provider-credential-config.png' })
   const credentialRow = modal(page).getByRole('row').filter({ hasText: 'DeepSeek API Key' })
   await expect(modal(page).getByRole('columnheader')).toHaveText([
     '认证凭据',
@@ -1767,6 +1868,9 @@ test('服务商列表展示凭证聚合运行状态和错误原因', async ({ pa
   expect(
     await credentialList.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
   ).toBe(true)
+  await modal(page).screenshot({
+    path: '../.cache/web-visual/provider-credential-config-mobile.png',
+  })
 })
 
 test('服务商支持个人订阅优先并保留 API Key 兜底', async ({ page }) => {
@@ -1792,7 +1896,10 @@ test('服务商支持个人订阅优先并保留 API Key 兜底', async ({ page 
   const providerRow = page.getByRole('row').filter({ hasText: 'OpenAI' })
 
   await providerRow
-    .getByRole('button', { name: 'OpenAI 尚未配置认证凭据，点击添加', exact: true })
+    .getByRole('button', {
+      name: '管理 OpenAI 的认证凭据',
+      exact: true,
+    })
     .click()
   await modal(page).getByRole('button', { name: '新增凭据', exact: true }).click()
   await modal(page).getByRole('combobox', { name: '认证方式' }).selectOption('SUBSCRIPTION')
@@ -1838,7 +1945,10 @@ test('服务商支持个人订阅优先并保留 API Key 兜底', async ({ page 
   expect(state.resources[0].quotaStatus).toBe('AVAILABLE')
 
   await providerRow
-    .getByRole('button', { name: 'OpenAI 已配置认证凭据，点击管理', exact: true })
+    .getByRole('button', {
+      name: '管理 OpenAI 的认证凭据',
+      exact: true,
+    })
     .click()
   await modal(page).getByRole('button', { name: '新增凭据', exact: true }).click()
   await modal(page).getByRole('combobox', { name: '认证方式' }).selectOption('API_KEY')
@@ -1855,7 +1965,10 @@ test('服务商支持个人订阅优先并保留 API Key 兜底', async ({ page 
   )
 
   await providerRow
-    .getByRole('button', { name: 'OpenAI 已配置认证凭据，点击管理', exact: true })
+    .getByRole('button', {
+      name: '管理 OpenAI 的认证凭据',
+      exact: true,
+    })
     .click()
   await modal(page)
     .getByRole('row')
@@ -1879,6 +1992,7 @@ test('状态 switch 直接生效且危险操作仍需确认', async ({ page }) =
   await status.click()
   await expect(status).not.toBeChecked()
   await expect(modal(page)).toHaveCount(0)
+  await row.locator('summary', { hasText: '⋯' }).click()
   await row.getByRole('button', { name: 'Delete', exact: true }).click()
 
   const dialog = modal(page)
@@ -1956,8 +2070,11 @@ test('创建和编辑用户时可选择分组', async ({ page }) => {
   const created = state.members.find((member) => member.name === '新用户')
   expect(created.status).toBe('DISABLED')
   await expect(
-    page.getByRole('row').filter({ hasText: '新用户' }).getByText('未激活', { exact: true }),
-  ).toBeVisible()
+    page
+      .getByRole('row')
+      .filter({ hasText: '新用户' })
+      .getByRole('switch', { name: '新用户的激活状态' }),
+  ).not.toBeChecked()
   expect(state.relationships.get('groups/51/members')?.has(created.id)).toBe(true)
   expect(state.relationships.get('groups/52/members')?.has(created.id)).toBe(false)
 
@@ -2000,11 +2117,7 @@ test('分组编辑表单与创建一致、失败恢复及停用授权限制', as
   const createDialog = modal(page)
   const createFormRows = createDialog.locator('.group-form-row')
   await expect(createFormRows).toHaveCount(3)
-  await expect(createFormRows.locator('.group-form-label')).toHaveText([
-    '名称',
-    '访问模型',
-    '备注',
-  ])
+  await expect(createFormRows.locator('.group-form-label')).toHaveText(['名称', '访问模型', '备注'])
   await expect(createFormRows.first()).toHaveCSS('grid-template-columns', /\S+ \S+/)
   await expect(createDialog.getByLabel('名称', { exact: true })).toHaveAttribute('required', '')
   await expect(createFormRows.nth(1).locator('.group-form-label')).toHaveClass(/required-label/)
@@ -2125,7 +2238,7 @@ test('分组列表按最新记录倒序显示并提示输入分组名称', async
 
   await expect(page.getByRole('columnheader')).toHaveText([
     '名称',
-    '状态',
+    '启用状态',
     '创建时间',
     '备注',
     '操作',
@@ -2145,6 +2258,7 @@ test('分组列表按最新记录倒序显示并提示输入分组名称', async
   await expect(page.locator('.list-search-label')).toHaveText('分组名称')
 
   const latestSwitch = page.getByRole('switch', { name: '最新分组的启用状态' })
+  await expect(latestSwitch).toHaveText('')
   await expect(latestSwitch).toBeChecked()
   await latestSwitch.click()
   await expect(latestSwitch).not.toBeChecked()
@@ -2320,7 +2434,10 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
   const providerRow = page.getByRole('row').filter({ hasText: 'DeepSeek' })
   await expect(providerRow.getByRole('link', { name: '在新页面打开 DeepSeek 官网' })).toHaveCount(0)
   await providerRow
-    .getByRole('button', { name: 'DeepSeek 尚未配置认证凭据，点击添加', exact: true })
+    .getByRole('button', {
+      name: '管理 DeepSeek 的认证凭据',
+      exact: true,
+    })
     .click()
   await modal(page).getByRole('button', { name: '新增凭据', exact: true }).click()
   await modal(page).getByLabel('API Key', { exact: true }).fill('fixture-upstream-credential')
@@ -2348,11 +2465,17 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
   await expect(modal(page).getByRole('status')).toContainText('上游认证失败')
   await modal(page).getByRole('button', { name: '关闭', exact: true }).last().click()
   const editCredential = providerRow.getByRole('button', {
-    name: 'DeepSeek 已配置认证凭据，点击管理',
+    name: '管理 DeepSeek 的认证凭据',
   })
-  await expect(editCredential.locator('svg')).toHaveCount(1)
+  await expect(editCredential).toHaveText('凭证')
   await expect(providerRow.getByRole('button', { name: '更新 API Key' })).toHaveCount(0)
   await editCredential.click()
+  await expect(
+    modal(page)
+      .locator('.credential-overview > div')
+      .filter({ hasText: '最后验证时间' })
+      .locator('dd'),
+  ).not.toHaveText('-')
   const credentialRow = modal(page).getByRole('row').filter({ hasText: 'DeepSeek API Key' })
   await expect(modal(page).getByLabel('API Key', { exact: true })).toHaveCount(0)
   await expect(credentialRow.getByRole('button')).toHaveText(['删除'])
@@ -2372,7 +2495,11 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
       name: 'DeepSeek 服务商凭证的启用状态',
     }),
   ).toHaveCount(0)
-  await expect(editCredential).toHaveClass(/is-configured/)
+  await expect(
+    providerRow.getByRole('button', {
+      name: '管理 DeepSeek 的认证凭据',
+    }),
+  ).toHaveText('凭证')
 
   await page.getByRole('link', { name: '用户管理', exact: true }).click()
   await page
@@ -2537,6 +2664,72 @@ test('14 寸屏幕默认展开侧栏并将横向溢出限制在表格内', async
   })
 })
 
+test('有操作列表固定首尾列，无操作列表只固定首列', async ({ page }) => {
+  await fixture(page)
+  await page.setViewportSize({ width: 760, height: 768 })
+  await signIn(page, 'home')
+  await page.goto('/#/usage')
+  await expect(page.getByRole('heading', { name: '用量记录', exact: true })).toBeVisible()
+
+  const tableScroll = page.locator('.usage-list-panel > .table-scroll')
+  await expect(tableScroll).toHaveClass(/is-overflowing/)
+  await expect(tableScroll).toHaveClass(/table-scroll--actions/)
+  await expect(tableScroll).toHaveClass(/is-at-start/)
+  await expect(tableScroll).not.toHaveClass(/is-at-end/)
+
+  const firstHeader = tableScroll.getByRole('columnheader').first()
+  const actionHeader = tableScroll.getByRole('columnheader').last()
+  const initialEdges = await Promise.all([
+    tableScroll.boundingBox(),
+    firstHeader.boundingBox(),
+    actionHeader.boundingBox(),
+  ])
+  expect(initialEdges.every(Boolean)).toBe(true)
+  expect(Math.abs(initialEdges[1]!.x - initialEdges[0]!.x)).toBeLessThanOrEqual(1)
+  expect(
+    Math.abs(
+      initialEdges[2]!.x + initialEdges[2]!.width - (initialEdges[0]!.x + initialEdges[0]!.width),
+    ),
+  ).toBeLessThanOrEqual(1)
+  await expect(actionHeader).not.toHaveCSS('box-shadow', 'none')
+
+  await tableScroll.evaluate((element) => {
+    element.scrollLeft = element.scrollWidth - element.clientWidth
+  })
+  await expect(tableScroll).toHaveClass(/is-at-end/)
+  await expect(tableScroll).not.toHaveClass(/is-at-start/)
+  await expect(firstHeader).not.toHaveCSS('box-shadow', 'none')
+  await expect(actionHeader).toHaveCSS('box-shadow', 'none')
+
+  await page.setViewportSize({ width: 480, height: 768 })
+  await page.goto('/#/groups')
+  await expect(page.getByRole('heading', { name: '用户分组', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '创建分组', exact: true }).click()
+
+  const selectionScroll = modal(page).locator('.create-model-list')
+  await expect(selectionScroll).toHaveClass(/is-overflowing/)
+  await expect(selectionScroll).not.toHaveClass(/table-scroll--actions/)
+  const selectionFirstHeader = selectionScroll.getByRole('columnheader').first()
+  const selectionStart = await Promise.all([
+    selectionScroll.boundingBox(),
+    selectionFirstHeader.boundingBox(),
+  ])
+  expect(selectionStart.every(Boolean)).toBe(true)
+  expect(Math.abs(selectionStart[1]!.x - selectionStart[0]!.x)).toBeLessThanOrEqual(1)
+
+  await selectionScroll.evaluate((element) => {
+    element.scrollLeft = element.scrollWidth - element.clientWidth
+  })
+  await expect(selectionScroll).not.toHaveClass(/is-at-start/)
+  const selectionEnd = await Promise.all([
+    selectionScroll.boundingBox(),
+    selectionFirstHeader.boundingBox(),
+  ])
+  expect(selectionEnd.every(Boolean)).toBe(true)
+  expect(Math.abs(selectionEnd[1]!.x - selectionEnd[0]!.x)).toBeLessThanOrEqual(1)
+  await expect(selectionFirstHeader).not.toHaveCSS('box-shadow', 'none')
+})
+
 test('桌面侧栏可手动折叠和展开', async ({ page }) => {
   await fixture(page)
   await page.setViewportSize({ width: 1366, height: 768 })
@@ -2590,6 +2783,7 @@ test('用户页面使用明确术语并在紧凑侧栏展示菜单提示', async
   await expect(page.getByRole('heading', { name: '用户管理', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '创建用户' })).toBeVisible()
   await expect(page.getByRole('columnheader', { name: '用户名', exact: true })).toBeVisible()
+  await expect(page.getByRole('columnheader', { name: '激活状态', exact: true })).toBeVisible()
   await expect(page.locator('.workspace-square')).toHaveCount(0)
   await expect(page.locator('.workspace-label')).toHaveCount(0)
   await expect(page.locator('.nav-section')).toHaveText(['社区版', '基础配置', '使用记录'])

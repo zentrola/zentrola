@@ -9,6 +9,7 @@ import Modal from './Modal.vue'
 import ListFooter from './ListFooter.vue'
 import Icon from './Icon.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
+import TableScroll from './TableScroll.vue'
 
 const props = defineProps<{ member: Member }>()
 defineEmits<{ close: [] }>()
@@ -72,7 +73,7 @@ function revoke() {
       </button>
     </div>
     <p v-if="loading && !items.length" class="muted" role="status">{{ t('common.loading') }}</p>
-    <div v-if="items.length" class="table-scroll">
+    <TableScroll v-if="items.length" has-actions>
       <table class="key-list">
         <thead>
           <tr>
@@ -102,7 +103,7 @@ function revoke() {
           </tr>
         </tbody>
       </table>
-    </div>
+    </TableScroll>
     <p v-else-if="!loading && !error" class="muted">{{ t('members.noKeys') }}</p>
     <ListFooter
       v-if="!error && items.length"

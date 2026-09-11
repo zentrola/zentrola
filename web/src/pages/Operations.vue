@@ -10,6 +10,7 @@ import PageHeader from '../components/PageHeader.vue'
 import ListFooter from '../components/ListFooter.vue'
 import ListSearch from '../components/ListSearch.vue'
 import OperationDiff from '../components/OperationDiff.vue'
+import TableScroll from '../components/TableScroll.vue'
 const { items, cursor, page, pageSize, total, loading, error, load, previous, retry, setPageSize } =
   useCollection<Operation>(() => '/operation-logs')
 const selected = ref<Operation | null>(null)
@@ -49,7 +50,7 @@ onMounted(() => load())
     <p v-if="error" class="alert error" role="alert">
       {{ error }}<button class="text-button" @click="retry">{{ t('common.retry') }}</button>
     </p>
-    <div class="table-scroll">
+    <TableScroll has-actions>
       <table>
         <thead>
           <tr>
@@ -79,7 +80,7 @@ onMounted(() => load())
           </tr>
         </tbody>
       </table>
-    </div>
+    </TableScroll>
     <div v-if="!visible.length" class="empty-state">
       <Icon name="operations" :size="32" />
       <p>{{ t(loading ? 'common.loading' : query ? 'common.noResults' : 'operations.empty') }}</p>

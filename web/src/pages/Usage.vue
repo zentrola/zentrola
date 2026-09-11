@@ -10,6 +10,7 @@ import Status from '../components/Status.vue'
 import Modal from '../components/Modal.vue'
 import PageHeader from '../components/PageHeader.vue'
 import ListFooter from '../components/ListFooter.vue'
+import TableScroll from '../components/TableScroll.vue'
 const memberID = ref(''),
   memberName = ref(''),
   modelID = ref(''),
@@ -245,7 +246,7 @@ async function lookups() {
   }
 }
 function label(list: { id: string; name: string }[], id: string | null) {
-  return id === null ? '-' : list.find((x) => x.id === id)?.name || id
+  return id === null ? t('common.none') : list.find((x) => x.id === id)?.name || id
 }
 onMounted(() => {
   document.addEventListener('pointerdown', closeFloatingPanels)
@@ -414,7 +415,7 @@ onBeforeUnmount(() => {
     <p v-if="error" class="alert error" role="alert">
       {{ error }}<button class="text-button" @click="retry">{{ t('common.retry') }}</button>
     </p>
-    <div class="table-scroll">
+    <TableScroll has-actions>
       <table class="usage-table">
         <thead>
           <tr>
@@ -458,7 +459,7 @@ onBeforeUnmount(() => {
           </tr>
         </tbody>
       </table>
-    </div>
+    </TableScroll>
     <div v-if="!items.length" class="empty-state">
       <Icon name="usage" :size="32" />
       <h3>{{ t(loading ? 'common.loading' : 'common.empty') }}</h3>
@@ -499,7 +500,7 @@ onBeforeUnmount(() => {
       <dt>{{ t('common.status') }}</dt>
       <dd><Status :value="selected.status" /></dd>
       <dt>{{ t('usage.errorType') }}</dt>
-      <dd>{{ selected.errorType || '-' }}</dd>
+      <dd>{{ selected.errorType || t('common.none') }}</dd>
       <dt>{{ t('usage.time') }}</dt>
       <dd>{{ date(selected.requestAt) }}</dd>
       <dt>{{ t('usage.latency') }}</dt>

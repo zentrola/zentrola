@@ -28,6 +28,7 @@ func (input ModelInput) Valid() bool { return validModelInput(input) }
 
 func validModelInput(input ModelInput) bool {
 	return validText(input.Code, 128) && validText(input.Name, 128) &&
+		(input.PublisherProviderID == nil || *input.PublisherProviderID > 0) &&
 		validRemark(input.Remark) &&
 		catalog.ValidModalities(input.InputModalities) && catalog.ValidModalities(input.OutputModalities)
 }
@@ -35,7 +36,25 @@ func validModelInput(input ModelInput) bool {
 func applyModelInput(m Model, input ModelInput) Model {
 	m.Code, m.Name, m.Remark = input.Code, input.Name, input.Remark
 	m.InputModalities, m.OutputModalities = slices.Clone(input.InputModalities), slices.Clone(input.OutputModalities)
+	m.PublisherProviderID, m.PublisherProviderName = nil, nil
+	if input.PublisherProviderID != nil {
+		publisherID := *input.PublisherProviderID
+		m.PublisherProviderID = &publisherID
+	}
 	return m
+}
+
+func hydrateModelPublisher(ctx context.Context, w Writer, model *Model) error {
+	if model.PublisherProviderID == nil {
+		return nil
+	}
+	provider, err := w.Provider(ctx, *model.PublisherProviderID)
+	if err != nil {
+		return err
+	}
+	publisherName := provider.Name
+	model.PublisherProviderName = &publisherName
+	return nil
 }
 
 func (s *Service) CreateModel(ctx context.Context, actor admin.Identity, input ModelInput, meta appsec.RequestMeta) (Model, error) {
@@ -50,6 +69,9 @@ func (s *Service) CreateModel(ctx context.Context, actor admin.Identity, input M
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	model := applyModelInput(Model{ID: id, Status: "DISABLED", CreatedAt: now, UpdatedAt: now}, input)
 	err = s.store.Write(ctx, actor, func(w Writer) error {
+		if err := hydrateModelPublisher(ctx, w, &model); err != nil {
+			return err
+		}
 		if err := w.CreateModel(ctx, model); err != nil {
 			return err
 		}
@@ -71,12 +93,31 @@ func (s *Service) UpdateModel(ctx context.Context, actor admin.Identity, id int6
 		}
 		model = applyModelInput(before, input)
 		model.UpdatedAt = time.Now().UTC().Truncate(time.Microsecond)
+		if err := hydrateModelPublisher(ctx, w, &model); err != nil {
+			return err
+		}
 		if err := w.UpdateModel(ctx, model); err != nil {
 			return err
 		}
 		return w.Audit(ctx, Audit{Event: operation.ModelUpdate, Target: "MODEL", ID: id, Name: model.Name, Before: before, After: model}, meta)
 	})
 	return model, err
+}
+
+func (s *Service) DeleteModel(ctx context.Context, actor admin.Identity, id int64, meta appsec.RequestMeta) error {
+	if id <= 0 {
+		return appsec.ErrInvalidArgument
+	}
+	return s.store.Write(ctx, actor, func(w Writer) error {
+		model, err := w.Model(ctx, id)
+		if err != nil {
+			return err
+		}
+		if err := w.DeleteModel(ctx, id, time.Now().UTC().Truncate(time.Microsecond)); err != nil {
+			return err
+		}
+		return w.Audit(ctx, Audit{Event: operation.ModelDelete, Target: "MODEL", ID: id, Name: model.Name, Before: model, After: map[string]bool{"deleted": true}}, meta)
+	})
 }
 
 func (s *Service) Model(ctx context.Context, actor admin.Identity, id int64) (Model, error) {

@@ -7,8 +7,6 @@ defineProps<{
   disabled?: boolean
   busy?: boolean
   ariaLabel?: string
-  activeLabel?: string
-  inactiveLabel?: string
   title?: string
 }>()
 defineEmits<{ change: [] }>()
@@ -27,8 +25,5 @@ defineEmits<{ change: [] }>()
     @click="$emit('change')"
   >
     <span class="status-switch-track" aria-hidden="true"><span class="status-switch-thumb" /></span>
-    <span>{{
-      value === 'ACTIVE' ? activeLabel || t('state.ACTIVE') : inactiveLabel || t('state.DISABLED')
-    }}</span>
   </button>
 </template>

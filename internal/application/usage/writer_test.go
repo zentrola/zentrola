@@ -13,10 +13,6 @@ import (
 	domain "github.com/zentrola/zentrola/internal/domain/usage"
 )
 
-type testIDs struct{ n atomic.Int64 }
-
-func (i *testIDs) NextID(context.Context) (int64, error) { return i.n.Add(1), nil }
-
 type storeFunc func(context.Context, []domain.Event) error
 
 func (f storeFunc) WriteBatch(c context.Context, e []domain.Event) error { return f(c, e) }
@@ -25,7 +21,7 @@ func attemptEvent(requestID string) domain.Event {
 }
 func writerFor(t *testing.T, s Store, q, b int) *Writer {
 	t.Helper()
-	w, err := NewWriter(s, &testIDs{}, slog.New(slog.NewTextHandler(io.Discard, nil)), Options{QueueSize: q, BatchSize: b, FlushInterval: 10 * time.Millisecond, WriteTimeout: time.Second})
+	w, err := NewWriter(s, slog.New(slog.NewTextHandler(io.Discard, nil)), Options{QueueSize: q, BatchSize: b, FlushInterval: 10 * time.Millisecond, WriteTimeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +137,7 @@ func TestTimerFlushAndSnapshot(t *testing.T) {
 		t.Fatal("timer did not flush")
 	}
 }
-func TestEveryFailoverAttemptGetsAnIDAndSequence(t *testing.T) {
+func TestEveryFailoverAttemptGetsASequenceWithoutAllocatingAnID(t *testing.T) {
 	received := make(chan []domain.Event, 1)
 	w := writerFor(t, storeFunc(func(_ context.Context, events []domain.Event) error {
 		copyEvents := append([]domain.Event(nil), events...)
@@ -164,7 +160,7 @@ func TestEveryFailoverAttemptGetsAnIDAndSequence(t *testing.T) {
 	select {
 	case events := <-received:
 		got := events[0]
-		if len(got.Attempts) != 1 || got.Attempts[0].ID <= 0 || got.Attempts[0].AttemptNo != 1 || got.Attempt == nil || got.Attempt.ID <= got.Attempts[0].ID || got.Attempt.AttemptNo != 2 {
+		if len(got.Attempts) != 1 || got.Attempts[0].ID != 0 || got.Attempts[0].AttemptNo != 1 || got.Attempt == nil || got.Attempt.ID != 0 || got.Attempt.AttemptNo != 2 {
 			t.Fatalf("attempts=%+v active=%+v", got.Attempts, got.Attempt)
 		}
 	case <-time.After(time.Second):
