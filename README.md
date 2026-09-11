@@ -113,7 +113,7 @@ Zentrola 遵循 Client-native First 和 Thin Gateway 原则：客户端已经具
 - MEMBER 创建、状态管理和删除
 - Group 创建、成员分配和 Group Model Allowlist
 - 管理员可按需初始化 OpenAI、Anthropic、Google、深度求索、智谱 AI、月之暗面和阿里云等服务商的中英文名称、官方网站及协议地址
-- Provider Credential 加密存储；保存 API Key 后从官方模型接口同步模型及上游映射
+- Provider Credential 加密存储；支持 API Key 与 ChatGPT 个人订阅认证，同一服务商可同时配置并以订阅优先、API Key 兜底
 - Resource 启停、连接测试和模型目录手动重新同步
 - Virtual Key 签发、有效期管理和撤销
 - Anthropic Messages、Count Tokens、SSE 和原生 Tool Loop
@@ -378,7 +378,7 @@ Admin Web 默认地址为 `http://127.0.0.1:9528`。程序读取同目录的 `.e
 
 服务启动不创建任何业务数据。“服务商”页面的“初始化”由管理员主动触发，会按当前界面语言同步官方服务商的预置中英文名称、官方网站及协议地址，其他已有配置保持不变，也不会访问厂商。管理员按以下顺序完成第一条治理链路：
 
-1. 在“服务商”中点击“初始化”，再为所需厂商填写 Provider Credential。保存后可通过服务商编码选择官方模型目录适配器并同步模型；当前支持 DeepSeek 和智谱 AI。同步会新增尚不存在的模型和上游映射，并按编码更新已有模型的官方名称；新模型默认停用，其他配置保持不变。
+1. 在“服务商”中点击“初始化”，再为所需厂商填写 Provider Credential。认证凭据可以是 API Key；OpenAI 服务商还可导入已登录 ChatGPT 个人订阅的 Codex `auth.json`。订阅导入、更新和连接测试会直接请求 ChatGPT 额度接口；只有短期 Access Token 临近过期或接口返回 401 时才通过官方 Codex app-server 刷新认证，因此服务端必须安装 Codex CLI，必要时用 `CODEX_EXECUTABLE` 指定路径。保存 API Key 后可通过服务商编码选择官方模型目录适配器并同步模型；当前支持 OpenAI、DeepSeek 和智谱 AI。
 2. 在“模型”中检查同步结果，并启用准备开放给客户端的逻辑模型；必要时再调整服务商映射。
 3. 创建成员和 Group，将成员加入对应 Group。
 4. 为 Group 授权可用逻辑模型。
@@ -392,9 +392,9 @@ Admin Web 默认地址为 `http://127.0.0.1:9528`。程序读取同目录的 `.e
 
 Virtual Key 只负责识别 MEMBER Principal，实际权限来自成员所属 Group 的 Model Allowlist。
 
-Gateway 先按 Provider Model 的 `priority` 选择服务商，同一候选再遵循“同协议优先、异协议兜底”：Anthropic 客户端优先使用 `ANTHROPIC` 端点，OpenAI 客户端顺序相反。异协议调用会转换普通响应、SSE、工具调用、停止原因、错误和 Usage，客户端始终收到其请协议的格式。在尚未向客户端返回响应时，网络错误、超时、`429`、可重试的 `403/404` 或 `5xx` 最多触发一次备选服务商切换；响应已开始向客户端输出后不再重试。Anthropic `count_tokens` 没有等价的 OpenAI 上游接口，因此仅配置 `OPENAI` 端点时返回路由不可用，不生成估算值。
+Gateway 先按 Provider Model 的 `priority` 选择服务商，同一服务商中优先选择额度可用的个人订阅，订阅不可用、刷新失败或额度耗尽时再选择 API Key。ChatGPT 个人订阅当前仅承接 OpenAI Responses 请求。其余候选再遵循“同协议优先、异协议兜底”：Anthropic 客户端优先使用 `ANTHROPIC` 端点，OpenAI 客户端顺序相反。异协议调用会转换普通响应、SSE、工具调用、停止原因、错误和 Usage，客户端始终收到其请求协议的格式。在尚未向客户端返回响应时，网络错误、超时、`429`、可重试的 `403/404` 或 `5xx` 最多触发一次备选服务商切换；响应已开始向客户端输出后不再重试。Anthropic `count_tokens` 没有等价的 OpenAI 上游接口，因此仅配置 `OPENAI` 端点时返回路由不可用，不生成估算值。
 
-短期冷却状态保存在 Redis，默认 60 秒。冷却到期后不会由后台定时请求上游；下一个客户请求通过 Redis 原子争抢唯一探测名额。Redis 不可用时路由 fail-open，不把 Redis 纳入就绪检查。欠费、认证失效、账号停用和凭证无法解密会把 `provider_credential.runtime_status` 设为 `BLOCKED`，不再参与后续路由；更换 API Key 或连接测试成功后恢复为 `HEALTHY`。每次实际上游尝试都使用独立 `attempt_no` 记录 Usage。
+短期冷却状态保存在 Redis，默认 60 秒。冷却到期后不会由后台定时请求上游；下一个客户请求通过 Redis 原子争抢唯一探测名额。Redis 不可用时路由 fail-open，不把 Redis 纳入就绪检查。欠费、认证失效、账号停用和凭证无法解密会把 `provider_credential.runtime_status` 设为 `BLOCKED`，不再参与后续路由；更新凭据或连接测试成功后恢复为 `HEALTHY`。订阅 access token 临近过期时由官方 Codex app-server 刷新并重新加密保存。每次实际上游尝试都使用独立 `attempt_no` 记录 Usage。
 
 ### Anthropic Compatible
 

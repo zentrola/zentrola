@@ -139,7 +139,7 @@ func (q *Queries) GetProviderModel(ctx context.Context, id int64) (ProviderModel
 }
 
 const getResource = `-- name: GetResource :one
-SELECT id, is_deleted, status, provider_id, resource_name, credential_ciphertext, credential_nonce, key_version, created_by, updated_by, created_at, updated_at, runtime_status, blocked_reason, blocked_at, last_error_at, last_http_status, last_error_code FROM provider_credential WHERE id = $1 AND is_deleted = false
+SELECT id, is_deleted, provider_id, resource_name, credential_ciphertext, credential_nonce, key_version, created_by, updated_by, created_at, updated_at, runtime_status, blocked_reason, blocked_at, last_error_at, last_http_status, last_error_code, auth_type, auth_adapter, subscription_type, plan_code, external_account_ref, priority, effective_at, expires_at, quota_status, quota_checked_at, quota_resets_at FROM provider_credential WHERE id = $1 AND is_deleted = false
 `
 
 // 包含加密凭证，仅供内部 Repository 使用，禁止直接序列化为 API 响应。
@@ -149,7 +149,6 @@ func (q *Queries) GetResource(ctx context.Context, id int64) (ProviderCredential
 	err := row.Scan(
 		&i.ID,
 		&i.IsDeleted,
-		&i.Status,
 		&i.ProviderID,
 		&i.ResourceName,
 		&i.CredentialCiphertext,
@@ -165,6 +164,17 @@ func (q *Queries) GetResource(ctx context.Context, id int64) (ProviderCredential
 		&i.LastErrorAt,
 		&i.LastHttpStatus,
 		&i.LastErrorCode,
+		&i.AuthType,
+		&i.AuthAdapter,
+		&i.SubscriptionType,
+		&i.PlanCode,
+		&i.ExternalAccountRef,
+		&i.Priority,
+		&i.EffectiveAt,
+		&i.ExpiresAt,
+		&i.QuotaStatus,
+		&i.QuotaCheckedAt,
+		&i.QuotaResetsAt,
 	)
 	return i, err
 }

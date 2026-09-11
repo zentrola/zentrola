@@ -12,8 +12,11 @@ import (
 	"time"
 
 	gw "github.com/zentrola/zentrola/internal/application/gateway"
+	"github.com/zentrola/zentrola/internal/infrastructure/openaicodex"
 	"github.com/zentrola/zentrola/internal/infrastructure/provider"
 )
+
+const codexSubscriptionBaseURL = "https://chatgpt.com/backend-api/codex"
 
 type GatewayClient struct{ client *http.Client }
 
@@ -28,7 +31,22 @@ func NewGatewayClient(headerTimeout time.Duration) *GatewayClient {
 }
 func (c *GatewayClient) CloseIdleConnections() { c.client.CloseIdleConnections() }
 func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Request, credential []byte) (*gw.Response, error) {
-	baseURL, allowed := provider.BaseURL(route.BaseURL)
+	base := route.BaseURL
+	upstreamPath := "/chat/completions"
+	requestCredential := string(credential)
+	accountID := ""
+	if route.AuthType == "SUBSCRIPTION" {
+		if route.AuthAdapter != openaicodex.AdapterCode || input.Protocol != gw.OpenAIResponsesProtocol || input.Path != "/v1/responses" {
+			return nil, gw.ErrRoute
+		}
+		accessToken, account, expiresAt, err := openaicodex.RequestCredential(credential)
+		if err != nil || expiresAt != nil && !expiresAt.After(time.Now().Add(time.Minute)) {
+			return nil, gw.ErrCredential
+		}
+		requestCredential, accountID = accessToken, account
+		base, upstreamPath = codexSubscriptionBaseURL, "/responses"
+	}
+	baseURL, allowed := provider.BaseURL(base)
 	if !allowed {
 		return nil, gw.ErrRoute
 	}
@@ -36,16 +54,15 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 		(input.Path != "/v1/chat/completions" && input.Path != "/v1/responses") || input.BetaQuery {
 		return nil, gw.ErrInvalid
 	}
-	if len(credential) == 0 || len(credential) > 4096 {
+	if requestCredential == "" || len(requestCredential) > 16<<10 {
 		return nil, gw.ErrCredential
 	}
-	for _, b := range credential {
+	for _, b := range []byte(requestCredential) {
 		if b < 33 || b > 126 {
 			return nil, gw.ErrCredential
 		}
 	}
-	upstreamPath := "/chat/completions"
-	if input.Protocol == gw.OpenAIResponsesProtocol {
+	if route.AuthType != "SUBSCRIPTION" && input.Protocol == gw.OpenAIResponsesProtocol {
 		upstreamPath = "/responses"
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+upstreamPath, bytes.NewReader(input.Body))
@@ -56,7 +73,11 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	req.Header.Set("Accept-Encoding", "identity")
-	req.Header.Set("Authorization", "Bearer "+string(credential))
+	req.Header.Set("Authorization", "Bearer "+requestCredential)
+	if accountID != "" {
+		req.Header.Set("ChatGPT-Account-Id", accountID)
+		req.Header.Set("Originator", "zentrola")
+	}
 	if input.RequestID != "" {
 		req.Header.Set("X-Request-ID", input.RequestID)
 	}
@@ -69,6 +90,7 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 	resp, err := instrumented.Do(req)
 	if err != nil {
 		sentHeaders.Delete("Authorization")
+		sentHeaders.Delete("ChatGPT-Account-Id")
 		cleanup()
 		if errors.Is(ctx.Err(), context.Canceled) {
 			return nil, gw.ErrCancelled
@@ -99,6 +121,7 @@ func (b *responseBody) Close() error {
 	b.once.Do(func() {
 		b.err = b.ReadCloser.Close()
 		b.sentHeaders.Delete("Authorization")
+		b.sentHeaders.Delete("ChatGPT-Account-Id")
 		if b.cleanup != nil {
 			b.cleanup()
 		}

@@ -440,6 +440,26 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 	// @Failure 404 {object} response
 	// @Router /api/v1/resources/{id} [get]
 	r.Get("/resources/{id}", detailEndpoint(m.Resource))
+	// @Summary 资源订阅额度
+	// @Tags 模型与资源
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "业务 ID（正整数字符串）"
+	// @Success 200 {object} response{data=[]mgmt.ResourceQuota}
+	// @Failure 400 {object} response
+	// @Failure 401 {object} response
+	// @Failure 404 {object} response
+	// @Failure 503 {object} response
+	// @Router /api/v1/resources/{id}/quotas [get]
+	r.Get("/resources/{id}/quotas", func(w http.ResponseWriter, req *http.Request) {
+		id, err := routeID(req, "id")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		data, err := m.ResourceQuotas(req.Context(), adminFrom(req), id)
+		adminResult(w, req, 200, data, err)
+	})
 	// @Summary 服务商详情
 	// @Tags 模型与资源
 	// @Produce json
@@ -577,7 +597,7 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 	})
 	// @Summary 创建资源
 	// @Tags 模型与资源
-	// @Description 凭证加密保存并默认启用；服务商停用时不会参与实际调用。
+	// @Description 创建 API Key 或个人订阅认证资源；凭证加密保存，订阅认证优先于 API Key 参与调用。
 	// @Produce json
 	// @Security AdminBearer
 	// @Accept json
@@ -596,10 +616,31 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 		if !ok {
 			return
 		}
-		data, err := m.CreateResource(req.Context(), adminFrom(req), input.ProviderID, input.Name, input.Credential, requestMeta(req))
+		priority := int32(100)
+		if input.Priority != nil {
+			priority = *input.Priority
+		}
+		data, err := m.CreateAuthenticationResource(req.Context(), adminFrom(req), mgmt.CreateResourceInput{
+			ProviderID: input.ProviderID, Name: input.Name, Credential: input.Credential,
+			AuthType: input.AuthType, AuthAdapter: input.AuthAdapter, Priority: priority,
+			EffectiveAt: input.EffectiveAt, ExpiresAt: input.ExpiresAt,
+		}, requestMeta(req))
 		input.Credential = ""
 		adminResult(w, req, 201, data, err)
 	})
+	// @Summary 删除资源
+	// @Tags 模型与资源
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "业务 ID（正整数字符串）"
+	// @Success 200 {object} response{data=UpdatedResponse}
+	// @Failure 400 {object} response
+	// @Failure 401 {object} response
+	// @Failure 404 {object} response
+	// @Failure 409 {object} response
+	// @Failure 503 {object} response
+	// @Router /api/v1/resources/{id} [delete]
+	r.Delete("/resources/{id}", deleteEndpoint(m.DeleteResource))
 	// @Summary 更新资源凭证
 	// @Tags 模型与资源
 	// @Produce json
@@ -657,7 +698,7 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 	})
 	// @Summary 同步官方模型目录
 	// @Tags 模型与资源
-	// @Description 根据服务商编码选择官方模型目录适配器；当前支持 DeepSeek。创建缺失模型和映射，同编码模型更新官方名称；新模型默认停用，其他既有配置保持不变。HTTP 200 后仍需检查 data.ok 和 data.code。
+	// @Description 根据服务商编码选择官方模型目录适配器；当前支持 OpenAI、DeepSeek 和智谱 AI。创建缺失模型和映射，同编码模型更新官方名称；新模型默认停用，其他既有配置保持不变。HTTP 200 后仍需检查 data.ok 和 data.code。
 	// @Produce json
 	// @Security AdminBearer
 	// @Param id path string true "业务 ID（正整数字符串）"
@@ -749,24 +790,6 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 	// @Failure 503 {object} response
 	// @Router /api/v1/providers/{id}/status [patch]
 	r.Patch("/providers/{id}/status", statusEndpoint(m.SetProviderStatus))
-
-	// @Summary 修改资源状态
-	// @Tags 模型与资源
-	// @Produce json
-	// @Security AdminBearer
-	// @Param id path string true "业务 ID（正整数字符串）"
-	// @Accept json
-	// @Param body body UpdateStatusRequest true "请求参数"
-	// @Success 200 {object} response{data=UpdatedResponse}
-	// @Header all {string} X-Request-ID "请求追踪 ID"
-	// @Failure 400 {object} response
-	// @Failure 503 {object} response
-	// @Failure 401 {object} response
-	// @Failure 404 {object} response
-	// @Failure 409 {object} response
-	// @Failure 422 {object} response
-	// @Router /api/v1/resources/{id}/status [patch]
-	r.Patch("/resources/{id}/status", statusEndpoint(m.SetResourceStatus))
 
 	// @Summary 添加分组成员
 	// @Tags 分组与授权

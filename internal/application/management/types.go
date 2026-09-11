@@ -20,6 +20,18 @@ var (
 	ErrProviderCredentialRequired = errors.New("provider credential required")
 )
 
+const (
+	AuthTypeAPIKey         = "API_KEY"
+	AuthTypeSubscription   = "SUBSCRIPTION"
+	AuthAdapterAPIKey      = "API_KEY"
+	AuthAdapterOpenAICodex = "OPENAI_CODEX"
+	SubscriptionPersonal   = "PERSONAL"
+	QuotaAvailable         = "AVAILABLE"
+	QuotaNearLimit         = "NEAR_LIMIT"
+	QuotaExhausted         = "EXHAUSTED"
+	QuotaUnknown           = "UNKNOWN"
+)
+
 type Page struct {
 	After     int64
 	Limit     int32
@@ -73,6 +85,7 @@ type Provider struct {
 	Website            *string                  `json:"website"`
 	Endpoints          []ProviderEndpoint       `json:"endpoints"`
 	ModelSyncSupported bool                     `json:"modelSyncSupported"`
+	AuthAdapters       []string                 `json:"authAdapters"`
 	ProxyEnabled       bool                     `json:"proxyEnabled"`
 	ProxyURL           *string                  `json:"proxyUrl"`
 	ProxyHeaders       []ProviderProxyHeader    `json:"proxyHeaders"`
@@ -134,7 +147,17 @@ type Resource struct {
 	ID                   int64      `json:"id,string"`
 	ProviderID           int64      `json:"providerId,string"`
 	Name                 string     `json:"name"`
-	Status               string     `json:"status"`
+	AuthType             string     `json:"authType"`
+	AuthAdapter          string     `json:"authAdapter"`
+	SubscriptionType     *string    `json:"subscriptionType"`
+	PlanCode             *string    `json:"planCode"`
+	ExternalAccountRef   *string    `json:"externalAccountRef"`
+	Priority             int32      `json:"priority"`
+	EffectiveAt          *time.Time `json:"effectiveAt"`
+	ExpiresAt            *time.Time `json:"expiresAt"`
+	QuotaStatus          string     `json:"quotaStatus"`
+	QuotaCheckedAt       *time.Time `json:"quotaCheckedAt"`
+	QuotaResetsAt        *time.Time `json:"quotaResetsAt"`
 	RuntimeStatus        string     `json:"runtimeStatus"`
 	BlockedReason        *string    `json:"blockedReason"`
 	BlockedAt            *time.Time `json:"blockedAt"`
@@ -145,9 +168,50 @@ type Resource struct {
 	CreatedAt            time.Time  `json:"createdAt"`
 	UpdatedAt            time.Time  `json:"updatedAt"`
 }
+type ResourceQuota struct {
+	Code                  string     `json:"code"`
+	Name                  *string    `json:"name"`
+	Status                string     `json:"status"`
+	Unit                  *string    `json:"unit"`
+	LimitValue            *string    `json:"limitValue"`
+	UsedValue             *string    `json:"usedValue"`
+	RemainingValue        *string    `json:"remainingValue"`
+	UsedPercent           *float64   `json:"usedPercent"`
+	WindowDurationSeconds *int64     `json:"windowDurationSeconds"`
+	ResetsAt              *time.Time `json:"resetsAt"`
+	ReachedType           *string    `json:"reachedType"`
+	ObservedAt            time.Time  `json:"observedAt"`
+}
 type ResourceRecord struct {
 	Resource
 	Sealed catalog.SealedCredential `json:"-"`
+}
+
+type CreateResourceInput struct {
+	ProviderID                              int64
+	Name, Credential, AuthType, AuthAdapter string
+	Priority                                int32
+	EffectiveAt, ExpiresAt                  *time.Time
+}
+
+type SubscriptionInspection struct {
+	AccountRef string
+	PlanCode   string
+	ExpiresAt  *time.Time
+}
+
+type SubscriptionProbe struct {
+	Inspection SubscriptionInspection
+	Credential []byte
+	Quotas     []ResourceQuota
+}
+
+type SubscriptionAdapter interface {
+	Code() string
+	Supports(string) bool
+	SupportsProvider(Provider) bool
+	Inspect([]byte) (SubscriptionInspection, error)
+	Probe(context.Context, []byte) (SubscriptionProbe, error)
 }
 type Key struct {
 	ID        int64      `json:"id,string"`
@@ -205,6 +269,7 @@ type Reader interface {
 	Resources(context.Context, Page) ([]Resource, error)
 	CountResources(context.Context) (int64, error)
 	Resource(context.Context, int64) (ResourceRecord, error)
+	ResourceQuotas(context.Context, int64) ([]ResourceQuota, error)
 	Keys(context.Context, int64, Page) ([]Key, error)
 	CountKeys(context.Context, int64) (int64, error)
 	Operations(context.Context, Page) ([]Operation, error)
@@ -234,6 +299,8 @@ type Writer interface {
 	DeleteProviderMapping(context.Context, int64, int64, time.Time) error
 	CreateResource(context.Context, ResourceRecord) error
 	UpdateResource(context.Context, ResourceRecord) error
+	DeleteResource(context.Context, int64, time.Time) (bool, error)
+	ReplaceResourceQuotas(context.Context, int64, []ResourceQuota) error
 	Audit(context.Context, Audit, appsec.RequestMeta) error
 }
 type Store interface {

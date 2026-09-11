@@ -330,11 +330,9 @@ func TestStage3Integration(t *testing.T) {
 		}
 		first = create("主资源")
 		request("PATCH", "/api/v1/providers/"+sid(provider.ID)+"/status", map[string]string{"status": "ACTIVE"}, 200)
-		if first.Status != "ACTIVE" {
-			t.Fatal("new provider credential should be active")
-		}
 		firstPath := "/api/v1/resources/" + sid(first.ID)
-		request("POST", "/api/v1/resources", map[string]string{"providerId": sid(provider.ID), "name": "备用配置", "credential": credential}, 409)
+		backup := stage3Data[mgmt.Resource](t, request("POST", "/api/v1/resources", map[string]string{"providerId": sid(provider.ID), "name": "备用配置", "credential": credential}, 201))
+		request("DELETE", "/api/v1/resources/"+sid(backup.ID), nil, 200)
 		var encrypted []byte
 		if err := pool.QueryRow(ctx, "SELECT credential_ciphertext FROM provider_credential WHERE id=$1", first.ID).Scan(&encrypted); err != nil || bytes.Contains(encrypted, []byte(credential)) {
 			t.Fatal("resource stored plaintext")
@@ -349,21 +347,17 @@ func TestStage3Integration(t *testing.T) {
 		if !result.OK {
 			t.Fatal("connection test failed")
 		}
-		request("PATCH", firstPath+"/status", map[string]string{"status": "DISABLED"}, 200)
-		request("PATCH", firstPath+"/status", map[string]string{"status": "ACTIVE"}, 200)
-		request("PATCH", firstPath+"/status", map[string]string{"status": "DISABLED"}, 200)
 		if _, err := pool.Exec(ctx, "UPDATE provider_credential SET credential_ciphertext=decode(repeat('00',32),'hex') WHERE id=$1", first.ID); err != nil {
 			t.Fatal(err)
 		}
-		request("PATCH", firstPath+"/status", map[string]string{"status": "ACTIVE"}, 422)
 		result = stage3Data[mgmt.ConnectionResult](t, request("POST", firstPath+"/test-connection", nil, 200))
 		if result.OK || result.Code != "CREDENTIAL_UNRECOVERABLE" {
 			t.Fatal("unrecoverable credential test accepted")
 		}
 		request("PUT", firstPath+"/credential", map[string]string{"credential": credential}, 200)
 		recovered := stage3Data[mgmt.Resource](t, request("GET", firstPath, nil, 200))
-		if recovered.Status != "ACTIVE" {
-			t.Fatalf("replaced credential status=%q; want ACTIVE", recovered.Status)
+		if !recovered.CredentialConfigured {
+			t.Fatal("replaced credential should stay configured")
 		}
 	})
 

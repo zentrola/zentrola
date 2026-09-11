@@ -142,7 +142,7 @@ SET is_deleted=true,updated_by=$2,updated_at=$3
 WHERE provider_id=$1 AND is_deleted=false;
 -- name: ManageDeleteProviderResources :exec
 UPDATE provider_credential
-SET status='DISABLED',is_deleted=true,updated_by=$2,updated_at=$3
+SET is_deleted=true,updated_by=$2,updated_at=$3
 WHERE provider_id=$1 AND is_deleted=false;
 -- name: ManageProviderStatus :exec
 UPDATE provider SET status=$2,updated_by=$3,updated_at=$4 WHERE id=$1 AND is_deleted=false;
@@ -167,24 +167,52 @@ SET is_deleted=true,updated_by=$3,updated_at=$4
 WHERE id=$1 AND provider_id=$2 AND is_deleted=false;
 
 -- name: ManageResources :many
-SELECT id,provider_id,resource_name,status,runtime_status,blocked_reason,blocked_at,
-       last_error_at,last_http_status,last_error_code,created_at,updated_at FROM provider_credential
+SELECT id,provider_id,resource_name,auth_type,auth_adapter,subscription_type,plan_code,
+       external_account_ref,priority,effective_at,expires_at,quota_status,quota_checked_at,
+       quota_resets_at,runtime_status,blocked_reason,blocked_at,last_error_at,last_http_status,
+       last_error_code,created_at,updated_at FROM provider_credential
 WHERE is_deleted=false AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2;
 -- name: ManageResource :one
 SELECT * FROM provider_credential WHERE id=$1 AND is_deleted=false;
 -- name: ManageCreateResource :exec
-INSERT INTO provider_credential(id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,created_by,updated_by,created_at,updated_at)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$8,$9,$9);
+INSERT INTO provider_credential(
+    id,provider_id,resource_name,auth_type,auth_adapter,subscription_type,plan_code,
+    external_account_ref,priority,effective_at,expires_at,quota_status,quota_checked_at,
+    quota_resets_at,credential_ciphertext,credential_nonce,key_version,created_by,updated_by,
+    created_at,updated_at)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$18,$19,$19);
 -- name: ManageUpdateResource :exec
-UPDATE provider_credential SET resource_name=$2,credential_ciphertext=$3,credential_nonce=$4,key_version=$5,status=$6,
-runtime_status=CASE WHEN credential_ciphertext IS DISTINCT FROM $3 THEN 'HEALTHY' ELSE runtime_status END,
-blocked_reason=CASE WHEN credential_ciphertext IS DISTINCT FROM $3 THEN NULL ELSE blocked_reason END,
-blocked_at=CASE WHEN credential_ciphertext IS DISTINCT FROM $3 THEN NULL ELSE blocked_at END,
-last_error_at=CASE WHEN credential_ciphertext IS DISTINCT FROM $3 THEN NULL ELSE last_error_at END,
-last_http_status=CASE WHEN credential_ciphertext IS DISTINCT FROM $3 THEN NULL ELSE last_http_status END,
-last_error_code=CASE WHEN credential_ciphertext IS DISTINCT FROM $3 THEN NULL ELSE last_error_code END,
-updated_by=$7,updated_at=$8
+UPDATE provider_credential SET resource_name=$2,auth_type=$3,auth_adapter=$4,subscription_type=$5,
+plan_code=$6,external_account_ref=$7,priority=$8,effective_at=$9,expires_at=$10,
+quota_status=$11,quota_checked_at=$12,quota_resets_at=$13,
+credential_ciphertext=$14,credential_nonce=$15,key_version=$16,
+runtime_status=CASE WHEN credential_ciphertext IS DISTINCT FROM $14 THEN 'HEALTHY' ELSE runtime_status END,
+blocked_reason=CASE WHEN credential_ciphertext IS DISTINCT FROM $14 THEN NULL ELSE blocked_reason END,
+blocked_at=CASE WHEN credential_ciphertext IS DISTINCT FROM $14 THEN NULL ELSE blocked_at END,
+last_error_at=CASE WHEN credential_ciphertext IS DISTINCT FROM $14 THEN NULL ELSE last_error_at END,
+last_http_status=CASE WHEN credential_ciphertext IS DISTINCT FROM $14 THEN NULL ELSE last_http_status END,
+last_error_code=CASE WHEN credential_ciphertext IS DISTINCT FROM $14 THEN NULL ELSE last_error_code END,
+updated_by=$17,updated_at=$18
 WHERE id=$1 AND is_deleted=false;
+
+-- name: ManageDeleteResource :execrows
+UPDATE provider_credential
+SET is_deleted=true,updated_by=$2,updated_at=$3
+WHERE id=$1 AND is_deleted=false;
+
+-- name: ManageDeleteResourceQuotas :exec
+DELETE FROM provider_credential_quota WHERE provider_credential_id=$1;
+
+-- name: ManageCreateResourceQuota :exec
+INSERT INTO provider_credential_quota(
+    provider_credential_id,quota_code,quota_name,quota_status,quota_unit,limit_value,
+    used_value,remaining_value,used_percent,window_duration_seconds,resets_at,reached_type,
+    observed_at,created_at,updated_at)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13,$13);
+
+-- name: ManageResourceQuotas :many
+SELECT * FROM provider_credential_quota
+WHERE provider_credential_id=$1 ORDER BY quota_code;
 
 -- name: ManageRestoreResourceRuntime :execrows
 UPDATE provider_credential

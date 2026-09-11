@@ -144,17 +144,17 @@ func (q *Queries) CreateInitialAdmin(ctx context.Context, arg CreateInitialAdmin
 	return err
 }
 
-const disableUnrecoverableResource = `-- name: DisableUnrecoverableResource :exec
-UPDATE provider_credential SET status='DISABLED',updated_by='system',updated_at=$2 WHERE id=$1 AND is_deleted=false
+const deleteUnrecoverableResource = `-- name: DeleteUnrecoverableResource :exec
+UPDATE provider_credential SET is_deleted=true,updated_by='system',updated_at=$2 WHERE id=$1 AND is_deleted=false
 `
 
-type DisableUnrecoverableResourceParams struct {
+type DeleteUnrecoverableResourceParams struct {
 	ID        int64
 	UpdatedAt pgtype.Timestamptz
 }
 
-func (q *Queries) DisableUnrecoverableResource(ctx context.Context, arg DisableUnrecoverableResourceParams) error {
-	_, err := q.db.Exec(ctx, disableUnrecoverableResource, arg.ID, arg.UpdatedAt)
+func (q *Queries) DeleteUnrecoverableResource(ctx context.Context, arg DeleteUnrecoverableResourceParams) error {
+	_, err := q.db.Exec(ctx, deleteUnrecoverableResource, arg.ID, arg.UpdatedAt)
 	return err
 }
 
@@ -282,7 +282,7 @@ func (q *Queries) HasAnyAdmin(ctx context.Context) (bool, error) {
 }
 
 const listResourcesForCredentialCheck = `-- name: ListResourcesForCredentialCheck :many
-SELECT id, is_deleted, status, provider_id, resource_name, credential_ciphertext, credential_nonce, key_version, created_by, updated_by, created_at, updated_at, runtime_status, blocked_reason, blocked_at, last_error_at, last_http_status, last_error_code FROM provider_credential WHERE is_deleted=false AND status='ACTIVE' ORDER BY id FOR UPDATE
+SELECT id, is_deleted, provider_id, resource_name, credential_ciphertext, credential_nonce, key_version, created_by, updated_by, created_at, updated_at, runtime_status, blocked_reason, blocked_at, last_error_at, last_http_status, last_error_code, auth_type, auth_adapter, subscription_type, plan_code, external_account_ref, priority, effective_at, expires_at, quota_status, quota_checked_at, quota_resets_at FROM provider_credential WHERE is_deleted=false ORDER BY id FOR UPDATE
 `
 
 func (q *Queries) ListResourcesForCredentialCheck(ctx context.Context) ([]ProviderCredential, error) {
@@ -297,7 +297,6 @@ func (q *Queries) ListResourcesForCredentialCheck(ctx context.Context) ([]Provid
 		if err := rows.Scan(
 			&i.ID,
 			&i.IsDeleted,
-			&i.Status,
 			&i.ProviderID,
 			&i.ResourceName,
 			&i.CredentialCiphertext,
@@ -313,6 +312,17 @@ func (q *Queries) ListResourcesForCredentialCheck(ctx context.Context) ([]Provid
 			&i.LastErrorAt,
 			&i.LastHttpStatus,
 			&i.LastErrorCode,
+			&i.AuthType,
+			&i.AuthAdapter,
+			&i.SubscriptionType,
+			&i.PlanCode,
+			&i.ExternalAccountRef,
+			&i.Priority,
+			&i.EffectiveAt,
+			&i.ExpiresAt,
+			&i.QuotaStatus,
+			&i.QuotaCheckedAt,
+			&i.QuotaResetsAt,
 		); err != nil {
 			return nil, err
 		}

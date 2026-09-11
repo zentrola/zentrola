@@ -12,6 +12,7 @@ const (
 
 const (
 	AnthropicOfficialCode = "anthropic-official"
+	OpenAIOfficialCode    = "openai-official"
 	DeepSeekOfficialCode  = "deepseek-official"
 	ZhipuOfficialCode     = "zhipu-official"
 	SonnetCode            = "claude-sonnet"

@@ -203,49 +203,82 @@ function changeStatus(model: Model) {
   >
     <p v-if="!editTarget" class="model-form-hint">{{ t('models.createHint') }}</p>
     <form class="model-form" @submit.prevent="save">
-      <div class="model-fields">
-        <label
-          >{{ t('models.name') }}<input v-model="form.name" required :disabled="busy" autofocus
-        /></label>
-        <label
-          >{{ t('models.code')
-          }}<input v-model="form.code" required :disabled="busy" spellcheck="false"
-        /></label>
+      <div class="model-form-row">
+        <label class="model-form-label required-label" for="model-code-input">{{
+          t('models.code')
+        }}</label>
+        <div class="model-form-control">
+          <input
+            id="model-code-input"
+            v-model="form.code"
+            required
+            :disabled="busy"
+            spellcheck="false"
+            autofocus
+          />
+        </div>
+      </div>
+      <div class="model-form-row">
+        <label class="model-form-label required-label" for="model-name-input">{{
+          t('models.name')
+        }}</label>
+        <div class="model-form-control">
+          <input id="model-name-input" v-model="form.name" required :disabled="busy" />
+        </div>
       </div>
       <p v-if="editTarget && form.code !== editTarget.code" class="alert" role="status">
         {{ t('models.codeChange') }}
       </p>
-      <div class="model-fields">
-        <fieldset class="modality-field" :disabled="busy">
-          <legend>{{ t('models.input') }}</legend>
-          <div class="modality-options">
-            <label v-for="value in modalities" :key="value"
-              ><input v-model="form.inputModalities" type="checkbox" :value="value" />{{
-                t(`models.${value}`)
-              }}</label
-            >
-          </div>
-        </fieldset>
-        <fieldset class="modality-field" :disabled="busy">
-          <legend>{{ t('models.output') }}</legend>
-          <div class="modality-options">
-            <label v-for="value in modalities" :key="value"
-              ><input v-model="form.outputModalities" type="checkbox" :value="value" />{{
-                t(`models.${value}`)
-              }}</label
-            >
-          </div>
-        </fieldset>
+      <div class="model-form-row">
+        <div id="model-input-title" class="model-form-label required-label">
+          {{ t('models.input') }}
+        </div>
+        <div
+          class="model-form-control modality-options"
+          role="group"
+          aria-labelledby="model-input-title"
+        >
+          <label v-for="value in modalities" :key="value"
+            ><input
+              v-model="form.inputModalities"
+              type="checkbox"
+              :value="value"
+              :disabled="busy"
+            />{{ t(`models.${value}`) }}</label
+          >
+        </div>
       </div>
-      <label
-        >{{ t('common.remark')
-        }}<textarea
-          v-model="form.remark"
-          :disabled="busy"
-          :placeholder="t('models.remarkPlaceholder')"
-          rows="3"
-        />
-      </label>
+      <div class="model-form-row">
+        <div id="model-output-title" class="model-form-label required-label">
+          {{ t('models.output') }}
+        </div>
+        <div
+          class="model-form-control modality-options"
+          role="group"
+          aria-labelledby="model-output-title"
+        >
+          <label v-for="value in modalities" :key="value"
+            ><input
+              v-model="form.outputModalities"
+              type="checkbox"
+              :value="value"
+              :disabled="busy"
+            />{{ t(`models.${value}`) }}</label
+          >
+        </div>
+      </div>
+      <div class="model-form-row">
+        <label class="model-form-label" for="model-remark-input">{{ t('common.remark') }}</label>
+        <div class="model-form-control">
+          <textarea
+            id="model-remark-input"
+            v-model="form.remark"
+            :disabled="busy"
+            :placeholder="t('models.remarkPlaceholder')"
+            rows="3"
+          />
+        </div>
+      </div>
       <footer class="form-footer">
         <button type="button" class="button" :disabled="busy" @click="editing = false">
           {{ t('common.cancel') }}</button
@@ -259,7 +292,7 @@ function changeStatus(model: Model) {
 <style scoped>
 .model-form {
   display: grid;
-  gap: 22px;
+  gap: 16px;
 }
 .model-form label {
   margin-bottom: 0;
@@ -271,22 +304,29 @@ function changeStatus(model: Model) {
   margin: 0 0 20px;
   color: var(--muted);
 }
-.model-fields {
+.model-form-row {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 20px;
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
 }
-.modality-field {
-  min-width: 0;
+.model-form-label {
+  display: block;
   margin: 0;
-  padding: 0;
-  border: 0;
-}
-.modality-field legend {
-  padding: 0;
-  margin-bottom: 8px;
+  padding-top: 10px;
+  color: #485e72;
   font-size: 13px;
   font-weight: 600;
+  line-height: 1.4;
+  text-align: right;
+}
+.model-form-control {
+  min-width: 0;
+}
+.required-label::after {
+  content: '*';
+  margin-left: 4px;
+  color: var(--danger);
 }
 .modality-options,
 .modality-tags {
@@ -303,6 +343,9 @@ function changeStatus(model: Model) {
   margin: 0;
   font-weight: 400;
   cursor: pointer;
+}
+.modality-options {
+  min-height: 38px;
 }
 .modality-options input {
   width: 16px;
@@ -327,9 +370,13 @@ function changeStatus(model: Model) {
   font-size: 12px;
 }
 @media (max-width: 640px) {
-  .model-fields {
+  .model-form-row {
     grid-template-columns: 1fr;
-    gap: 22px;
+    gap: 8px;
+  }
+  .model-form-label {
+    padding-top: 0;
+    text-align: left;
   }
 }
 </style>

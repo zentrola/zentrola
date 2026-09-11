@@ -257,11 +257,12 @@ func TestStage4Integration(t *testing.T) {
 		if err := management.SetGroupModel(ctx, actor, group.ID, modelID, true, appsec.RequestMeta{}); err != nil {
 			t.Fatal(err)
 		}
-		if err := management.SetResourceStatus(ctx, actor, resource.ID, "DISABLED", appsec.RequestMeta{}); err != nil {
+		if err := management.DeleteResource(ctx, actor, resource.ID, appsec.RequestMeta{}); err != nil {
 			t.Fatal(err)
 		}
 		checkFailure(503, "RESOURCE_UNAVAILABLE")
-		if err := management.SetResourceStatus(ctx, actor, resource.ID, "ACTIVE", appsec.RequestMeta{}); err != nil {
+		resource, err = management.CreateResource(ctx, actor, provider.ID, "Anthropic resource replacement", providerKey, appsec.RequestMeta{})
+		if err != nil {
 			t.Fatal(err)
 		}
 		if err := management.SetModelStatus(ctx, actor, modelID, "DISABLED", appsec.RequestMeta{}); err != nil {

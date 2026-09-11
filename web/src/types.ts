@@ -41,6 +41,7 @@ export interface Provider {
   website: string | null
   endpoints: ProviderEndpoint[]
   modelSyncSupported: boolean
+  authAdapters: string[]
   proxyEnabled: boolean
   proxyUrl: string | null
   proxyHeaders: ProviderProxyHeader[]
@@ -78,7 +79,17 @@ export interface Resource {
   id: string
   name: string
   providerId: string
-  status: string
+  authType: 'API_KEY' | 'SUBSCRIPTION'
+  authAdapter: 'API_KEY' | 'OPENAI_CODEX'
+  subscriptionType: 'PERSONAL' | 'SEAT' | null
+  planCode: string | null
+  externalAccountRef: string | null
+  priority: number
+  effectiveAt: string | null
+  expiresAt: string | null
+  quotaStatus: 'AVAILABLE' | 'NEAR_LIMIT' | 'EXHAUSTED' | 'UNKNOWN'
+  quotaCheckedAt: string | null
+  quotaResetsAt: string | null
   runtimeStatus: 'HEALTHY' | 'BLOCKED'
   blockedReason: string | null
   blockedAt: string | null
@@ -88,6 +99,20 @@ export interface Resource {
   credentialConfigured: boolean
   createdAt: string
   updatedAt: string
+}
+export interface ResourceQuota {
+  code: string
+  name: string | null
+  status: 'AVAILABLE' | 'NEAR_LIMIT' | 'EXHAUSTED' | 'UNKNOWN'
+  unit: string | null
+  limitValue: string | null
+  usedValue: string | null
+  remainingValue: string | null
+  usedPercent: number | null
+  windowDurationSeconds: number | null
+  resetsAt: string | null
+  reachedType: string | null
+  observedAt: string
 }
 export interface AccessKey {
   id: string

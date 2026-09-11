@@ -134,6 +134,17 @@ func (s *Service) Resource(ctx context.Context, a admin.Identity, id int64) (Res
 	}
 	return read(ctx, s, a, func(r Reader) (Resource, error) { row, err := r.Resource(ctx, id); return row.Resource, err })
 }
+func (s *Service) ResourceQuotas(ctx context.Context, a admin.Identity, id int64) ([]ResourceQuota, error) {
+	if id <= 0 {
+		return nil, appsec.ErrInvalidArgument
+	}
+	return read(ctx, s, a, func(r Reader) ([]ResourceQuota, error) {
+		if _, err := r.Resource(ctx, id); err != nil {
+			return nil, err
+		}
+		return r.ResourceQuotas(ctx, id)
+	})
+}
 func (s *Service) Provider(ctx context.Context, a admin.Identity, id int64) (ProviderDetail, error) {
 	if id <= 0 {
 		return ProviderDetail{}, appsec.ErrInvalidArgument

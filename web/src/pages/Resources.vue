@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { api, all, errorText } from '../api'
 import { useCollection, useAction, useListSearch, date, validText } from '../composables'
 import { t, i18n } from '../i18n'
@@ -7,11 +7,11 @@ import { showErrorToast } from '../toast'
 import type { Resource, Provider, ConnectionResult } from '../types'
 import Icon from '../components/Icon.vue'
 import Status from '../components/Status.vue'
-import StatusSwitch from '../components/StatusSwitch.vue'
 import Modal from '../components/Modal.vue'
 import PageHeader from '../components/PageHeader.vue'
 import ListFooter from '../components/ListFooter.vue'
 import ListSearch from '../components/ListSearch.vue'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 const {
   items,
   cursor,
@@ -31,12 +31,21 @@ const providers = ref<Provider[]>([]),
   providerError = ref(''),
   creating = ref(false),
   replaceTarget = ref<Resource | null>(null),
-  statusTarget = ref<Resource | null>(null),
+  deleteTarget = ref<Resource | null>(null),
   testTarget = ref<Resource | null>(null),
   testResult = ref<ConnectionResult | null>(null)
 const name = ref(''),
   providerID = ref(''),
-  credential = ref('')
+  credential = ref(''),
+  authType = ref<'API_KEY' | 'SUBSCRIPTION'>('API_KEY')
+const subscriptionSupported = computed(() =>
+  providers.value
+    .find((provider) => provider.id === providerID.value)
+    ?.authAdapters?.includes('OPENAI_CODEX'),
+)
+watch(subscriptionSupported, (supported) => {
+  if (!supported && creating.value) authType.value = 'API_KEY'
+})
 const { keyword, query, visible, search, reset } = useListSearch(
   items,
   (r) => `${r.name} ${r.id} ${providerName(r.providerId)}`,
@@ -62,11 +71,13 @@ function newResource() {
   name.value = ''
   providerID.value = ''
   credential.value = ''
+  authType.value = 'API_KEY'
   actionError.value = ''
 }
 function replace(resource: Resource) {
   replaceTarget.value = resource
   credential.value = ''
+  authType.value = resource.authType
   actionError.value = ''
 }
 function closeEdit() {
@@ -75,8 +86,16 @@ function closeEdit() {
   credential.value = ''
 }
 function save() {
-  if (!/^[\x21-\x7e]{1,4096}$/.test(credential.value)) {
-    showErrorToast(t('resources.credentialRequired'))
+  const credentialValid =
+    authType.value === 'API_KEY'
+      ? /^[\x21-\x7e]{1,4096}$/.test(credential.value)
+      : credential.value.length > 0 && new TextEncoder().encode(credential.value).length <= 65536
+  if (!credentialValid) {
+    showErrorToast(
+      t(
+        `resources.${authType.value === 'API_KEY' ? 'credentialRequired' : 'subscriptionRequired'}`,
+      ),
+    )
     return
   }
   if (creating.value && (!validText(name.value, 128) || !providerID.value)) {
@@ -89,6 +108,8 @@ function save() {
         name: name.value,
         providerId: providerID.value,
         credential: credential.value,
+        authType: authType.value,
+        authAdapter: authType.value === 'SUBSCRIPTION' ? 'OPENAI_CODEX' : 'API_KEY',
       })
     else
       await api(`/resources/${replaceTarget.value!.id}/credential`, 'PUT', {
@@ -98,19 +119,23 @@ function save() {
     await load()
   })
 }
-function changeStatus(resource: Resource) {
-  actionError.value = ''
-  statusTarget.value = resource
+function removeResource() {
   void run(async () => {
-    try {
-      await api(`/resources/${resource.id}/status`, 'PATCH', {
-        status: resource.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE',
-      })
-      await refresh()
-    } finally {
-      statusTarget.value = null
-    }
+    await api(`/resources/${deleteTarget.value!.id}`, 'DELETE')
+    deleteTarget.value = null
+    await refresh()
   })
+}
+async function importSubscription(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  if (file.size > 65536) {
+    showErrorToast(t('resources.subscriptionRequired'))
+    input.value = ''
+    return
+  }
+  credential.value = await file.text()
 }
 function test(resource: Resource) {
   testTarget.value = resource
@@ -157,8 +182,9 @@ function runtimeReason(resource: Resource) {
             <th>{{ t('common.name') }}</th>
             <th>{{ t('resources.provider') }}</th>
             <th>{{ t('resources.credential') }}</th>
+            <th>{{ t('resources.authType') }}</th>
+            <th>{{ t('resources.quota') }}</th>
             <th>{{ t('resources.runtimeStatus') }}</th>
-            <th>{{ t('common.status') }}</th>
             <th class="align-right">{{ t('common.actions') }}</th>
           </tr>
         </thead>
@@ -177,6 +203,17 @@ function runtimeReason(resource: Resource) {
               >
             </td>
             <td>
+              {{ t(`resources.authTypes.${resource.authType}`) }}
+              <small v-if="resource.planCode" class="subline">{{ resource.planCode }}</small>
+            </td>
+            <td>
+              <Status v-if="resource.authType === 'SUBSCRIPTION'" :value="resource.quotaStatus" />
+              <span v-else>{{ t('common.none') }}</span>
+              <small v-if="resource.quotaCheckedAt" class="subline">{{
+                date(resource.quotaCheckedAt)
+              }}</small>
+            </td>
+            <td>
               <Status :value="resource.runtimeStatus" />
               <small
                 v-if="resource.runtimeStatus === 'BLOCKED'"
@@ -186,20 +223,17 @@ function runtimeReason(resource: Resource) {
               >
             </td>
             <td>
-              <StatusSwitch
-                :value="resource.status"
-                :name="resource.name"
-                :disabled="busy || loading"
-                :busy="busy && statusTarget?.id === resource.id"
-                @change="changeStatus(resource)"
-              />
-            </td>
-            <td>
               <div class="row-actions">
                 <button class="text-button" :disabled="busy" @click="test(resource)">
                   {{ t('resources.test') }}</button
                 ><button class="text-button" @click="replace(resource)">
-                  {{ t('resources.replace') }}
+                  {{ t('resources.replace') }}</button
+                ><button
+                  class="text-button danger-text"
+                  :disabled="busy"
+                  @click="deleteTarget = resource"
+                >
+                  {{ t('resources.delete') }}
                 </button>
               </div>
             </td>
@@ -246,6 +280,14 @@ function runtimeReason(resource: Resource) {
               {{ provider.name }}
             </option>
           </select></label
+        ><label
+          >{{ t('resources.authType')
+          }}<select v-model="authType" required :disabled="busy">
+            <option value="API_KEY">{{ t('resources.authTypes.API_KEY') }}</option>
+            <option v-if="subscriptionSupported" value="SUBSCRIPTION">
+              {{ t('resources.authTypes.SUBSCRIPTION') }}
+            </option>
+          </select></label
         >
         <p v-if="providerError" class="alert error">
           {{ providerError
@@ -253,8 +295,8 @@ function runtimeReason(resource: Resource) {
             {{ t('common.retry') }}
           </button>
         </p></template
-      ><label
-        >{{ t('resources.credential')
+      ><label v-if="authType === 'API_KEY'"
+        >{{ t('resources.apiKey')
         }}<input
           v-model="credential"
           type="password"
@@ -263,7 +305,18 @@ function runtimeReason(resource: Resource) {
           :disabled="busy"
           spellcheck="false"
       /></label>
-      <p class="field-hint">{{ t('resources.credentialHint') }}</p>
+      <label v-else
+        >{{ t('resources.authFile')
+        }}<input
+          type="file"
+          accept=".json,application/json"
+          required
+          :disabled="busy"
+          @change="importSubscription"
+      /></label>
+      <p class="field-hint">
+        {{ t(authType === 'API_KEY' ? 'resources.credentialHint' : 'resources.subscriptionHint') }}
+      </p>
       <footer class="form-footer">
         <button type="button" class="button" :disabled="busy" @click="closeEdit">
           {{ t('common.cancel') }}</button
@@ -273,6 +326,17 @@ function runtimeReason(resource: Resource) {
       </footer>
     </form></Modal
   >
+  <ConfirmDialog
+    v-if="deleteTarget"
+    :title="t('resources.deleteTitle')"
+    :message="t('resources.deleteQuestion', { name: deleteTarget.name })"
+    :hint="t('resources.deleteConsequence')"
+    :confirm-label="t('resources.delete')"
+    :busy="busy"
+    tone="danger"
+    @close="deleteTarget = null"
+    @confirm="removeResource"
+  />
   <Modal
     v-if="testTarget"
     :title="`${testTarget.name} / ${t('resources.result')}`"

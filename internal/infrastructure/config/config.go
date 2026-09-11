@@ -47,6 +47,7 @@ type Usage struct {
 type Gateway struct {
 	MaxBodyBytes                                                 int64
 	RequestTimeout, HeaderTimeout, BodyReadTimeout, WriteTimeout time.Duration
+	CodexExecutable                                              string
 	Development                                                  bool
 }
 
@@ -277,6 +278,7 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 			HeaderTimeout:   duration("GATEWAY_HEADER_TIMEOUT", "120s"),
 			BodyReadTimeout: duration("GATEWAY_BODY_READ_TIMEOUT", "30s"),
 			WriteTimeout:    duration("GATEWAY_WRITE_TIMEOUT", "30s"),
+			CodexExecutable: strings.TrimSpace(get("CODEX_EXECUTABLE", "codex")),
 		},
 		Security: Security{
 			MasterKey: get("ACP_MASTER_KEY", ""), ExternalMasterKeyPath: get("ACP_MASTER_KEY_FILE", ""), MasterKeyPath: get("MASTER_KEY_PATH", "data/secrets/master.key"),
@@ -313,7 +315,8 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 	for key, value := range map[string]string{
 		"POSTGRES_HOST": cfg.Postgres.Host, "POSTGRES_DB": cfg.Postgres.Database,
 		"POSTGRES_USER": cfg.Postgres.User, "POSTGRES_PASSWORD": cfg.Postgres.Password,
-		"REDIS_HOST": cfg.Redis.Host,
+		"REDIS_HOST":       cfg.Redis.Host,
+		"CODEX_EXECUTABLE": cfg.Gateway.CodexExecutable,
 	} {
 		if strings.TrimSpace(value) == "" {
 			problems = append(problems, fmt.Errorf("%s is required", key))

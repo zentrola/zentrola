@@ -101,9 +101,6 @@ func TestStage5Integration(t *testing.T) {
 	if err := management.SetProviderStatus(ctx, actor, provider.ID, "ACTIVE", appsec.RequestMeta{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := management.SetResourceStatus(ctx, actor, resource.ID, "ACTIVE", appsec.RequestMeta{}); err != nil {
-		t.Fatal(err)
-	}
 	if err := management.SetGroupModel(ctx, actor, group.ID, modelID, true, appsec.RequestMeta{}); err != nil {
 		t.Fatal(err)
 	}
@@ -301,9 +298,6 @@ func TestStage5Integration(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := management.SetProviderStatus(ctx, actor, backupProvider.ID, "ACTIVE", appsec.RequestMeta{}); err != nil {
-		t.Fatal(err)
-	}
-	if err := management.SetResourceStatus(ctx, actor, backupResource.ID, "ACTIVE", appsec.RequestMeta{}); err != nil {
 		t.Fatal(err)
 	}
 	var backupProviderModelID int64

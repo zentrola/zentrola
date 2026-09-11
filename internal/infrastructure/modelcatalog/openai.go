@@ -1,0 +1,67 @@
+package modelcatalog
+
+import (
+	"encoding/json"
+	"errors"
+	"sort"
+	"strings"
+
+	mgmt "github.com/zentrola/zentrola/internal/application/management"
+)
+
+var errInvalidOpenAICatalog = errors.New("invalid OpenAI model catalog response")
+
+type openAIAdapter struct{}
+
+func (openAIAdapter) Name() string { return "openai" }
+
+func (openAIAdapter) Request() catalogRequest {
+	return catalogRequest{URL: "https://api.openai.com/v1/models", Bearer: true}
+}
+
+func (openAIAdapter) Decode(data []byte) ([]mgmt.DiscoveredModel, error) {
+	var payload struct {
+		Object string `json:"object"`
+		Data   []struct {
+			ID      string `json:"id"`
+			Object  string `json:"object"`
+			OwnedBy string `json:"owned_by"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil || payload.Object != "list" || payload.Data == nil {
+		return nil, errInvalidOpenAICatalog
+	}
+
+	models := make([]mgmt.DiscoveredModel, 0, len(payload.Data))
+	seen := make(map[string]struct{}, len(payload.Data))
+	for _, item := range payload.Data {
+		if item.Object != "model" || !validModelCode(item.ID) || item.OwnedBy == "" || item.OwnedBy != strings.TrimSpace(item.OwnedBy) {
+			return nil, errInvalidOpenAICatalog
+		}
+		if _, duplicate := seen[item.ID]; duplicate {
+			continue
+		}
+		seen[item.ID] = struct{}{}
+		models = append(models, mgmt.DiscoveredModel{
+			Code: item.ID,
+			Name: openAIDisplayName(item.ID),
+		})
+	}
+	sort.Slice(models, func(i, j int) bool { return models[i].Code < models[j].Code })
+	return models, nil
+}
+
+func openAIDisplayName(code string) string {
+	switch {
+	case strings.HasPrefix(code, "gpt-"):
+		return "GPT-" + code[len("gpt-"):]
+	case strings.HasPrefix(code, "chatgpt-"):
+		return "ChatGPT-" + code[len("chatgpt-"):]
+	case strings.HasPrefix(code, "tts-"):
+		return "TTS-" + code[len("tts-"):]
+	case strings.HasPrefix(code, "dall-e-"):
+		return "DALL-E " + code[len("dall-e-"):]
+	default:
+		return deepSeekDisplayName(code)
+	}
+}

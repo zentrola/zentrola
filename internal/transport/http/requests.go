@@ -236,17 +236,38 @@ func (r UpdateGroupRequest) Valid() bool {
 }
 
 type CreateResourceRequest struct {
-	ProviderID int64  `json:"providerId,string" binding:"required" swaggertype:"string" example:"123456789"`
-	Name       string `json:"name" binding:"required" example:"企业模型资源"`
-	Credential string `json:"credential" binding:"required" example:"your-provider-api-key"`
+	ProviderID  int64      `json:"providerId,string" binding:"required" swaggertype:"string" example:"123456789"`
+	Name        string     `json:"name" binding:"required" example:"企业模型资源"`
+	Credential  string     `json:"credential" binding:"required" example:"your-provider-api-key"`
+	AuthType    string     `json:"authType" enums:"API_KEY,SUBSCRIPTION" example:"API_KEY"`
+	AuthAdapter string     `json:"authAdapter" example:"API_KEY"`
+	Priority    *int32     `json:"priority,omitempty" example:"100"`
+	EffectiveAt *time.Time `json:"effectiveAt,omitempty"`
+	ExpiresAt   *time.Time `json:"expiresAt,omitempty"`
 }
 
 func (r *CreateResourceRequest) Normalize() {
 	r.Name = strings.TrimSpace(r.Name)
 	r.Credential = strings.TrimSpace(r.Credential)
+	r.AuthType = strings.TrimSpace(r.AuthType)
+	r.AuthAdapter = strings.TrimSpace(r.AuthAdapter)
+	if r.AuthType == "" {
+		r.AuthType = "API_KEY"
+	}
+	if r.AuthAdapter == "" && r.AuthType == "API_KEY" {
+		r.AuthAdapter = "API_KEY"
+	}
 }
 func (r CreateResourceRequest) Valid() bool {
-	return r.ProviderID > 0 && validRequestText(r.Name, 128, true) && validCredential(r.Credential)
+	if r.ProviderID <= 0 || !validRequestText(r.Name, 128, true) || r.Priority != nil && *r.Priority < 0 ||
+		r.EffectiveAt != nil && r.ExpiresAt != nil && !r.ExpiresAt.After(*r.EffectiveAt) {
+		return false
+	}
+	if r.AuthType == "API_KEY" {
+		return r.AuthAdapter == "API_KEY" && validCredential(r.Credential)
+	}
+	return r.AuthType == "SUBSCRIPTION" && r.AuthAdapter == "OPENAI_CODEX" &&
+		len(r.Credential) > 0 && len(r.Credential) <= 64<<10 && utf8.ValidString(r.Credential) && !strings.ContainsRune(r.Credential, 0)
 }
 
 type UpdateCredentialRequest struct {
@@ -254,7 +275,9 @@ type UpdateCredentialRequest struct {
 }
 
 func (r *UpdateCredentialRequest) Normalize() { r.Credential = strings.TrimSpace(r.Credential) }
-func (r UpdateCredentialRequest) Valid() bool { return validCredential(r.Credential) }
+func (r UpdateCredentialRequest) Valid() bool {
+	return len(r.Credential) > 0 && len(r.Credential) <= 64<<10 && utf8.ValidString(r.Credential) && !strings.ContainsRune(r.Credential, 0)
+}
 
 type UpdateStatusRequest struct {
 	Status string `json:"status" binding:"required" enums:"ACTIVE,DISABLED" example:"ACTIVE"`

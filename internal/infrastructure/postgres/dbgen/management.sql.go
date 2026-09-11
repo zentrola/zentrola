@@ -340,18 +340,32 @@ func (q *Queries) ManageCreateProviderMapping(ctx context.Context, arg ManageCre
 }
 
 const manageCreateResource = `-- name: ManageCreateResource :exec
-INSERT INTO provider_credential(id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,created_by,updated_by,created_at,updated_at)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$8,$9,$9)
+INSERT INTO provider_credential(
+    id,provider_id,resource_name,auth_type,auth_adapter,subscription_type,plan_code,
+    external_account_ref,priority,effective_at,expires_at,quota_status,quota_checked_at,
+    quota_resets_at,credential_ciphertext,credential_nonce,key_version,created_by,updated_by,
+    created_at,updated_at)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$18,$19,$19)
 `
 
 type ManageCreateResourceParams struct {
 	ID                   int64
 	ProviderID           int64
 	ResourceName         string
+	AuthType             string
+	AuthAdapter          string
+	SubscriptionType     *string
+	PlanCode             *string
+	ExternalAccountRef   *string
+	Priority             int32
+	EffectiveAt          pgtype.Timestamptz
+	ExpiresAt            pgtype.Timestamptz
+	QuotaStatus          string
+	QuotaCheckedAt       pgtype.Timestamptz
+	QuotaResetsAt        pgtype.Timestamptz
 	CredentialCiphertext []byte
 	CredentialNonce      []byte
 	KeyVersion           int32
-	Status               string
 	CreatedBy            string
 	CreatedAt            pgtype.Timestamptz
 }
@@ -361,12 +375,65 @@ func (q *Queries) ManageCreateResource(ctx context.Context, arg ManageCreateReso
 		arg.ID,
 		arg.ProviderID,
 		arg.ResourceName,
+		arg.AuthType,
+		arg.AuthAdapter,
+		arg.SubscriptionType,
+		arg.PlanCode,
+		arg.ExternalAccountRef,
+		arg.Priority,
+		arg.EffectiveAt,
+		arg.ExpiresAt,
+		arg.QuotaStatus,
+		arg.QuotaCheckedAt,
+		arg.QuotaResetsAt,
 		arg.CredentialCiphertext,
 		arg.CredentialNonce,
 		arg.KeyVersion,
-		arg.Status,
 		arg.CreatedBy,
 		arg.CreatedAt,
+	)
+	return err
+}
+
+const manageCreateResourceQuota = `-- name: ManageCreateResourceQuota :exec
+INSERT INTO provider_credential_quota(
+    provider_credential_id,quota_code,quota_name,quota_status,quota_unit,limit_value,
+    used_value,remaining_value,used_percent,window_duration_seconds,resets_at,reached_type,
+    observed_at,created_at,updated_at)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13,$13)
+`
+
+type ManageCreateResourceQuotaParams struct {
+	ProviderCredentialID  int64
+	QuotaCode             string
+	QuotaName             *string
+	QuotaStatus           string
+	QuotaUnit             *string
+	LimitValue            pgtype.Numeric
+	UsedValue             pgtype.Numeric
+	RemainingValue        pgtype.Numeric
+	UsedPercent           pgtype.Numeric
+	WindowDurationSeconds *int64
+	ResetsAt              pgtype.Timestamptz
+	ReachedType           *string
+	ObservedAt            pgtype.Timestamptz
+}
+
+func (q *Queries) ManageCreateResourceQuota(ctx context.Context, arg ManageCreateResourceQuotaParams) error {
+	_, err := q.db.Exec(ctx, manageCreateResourceQuota,
+		arg.ProviderCredentialID,
+		arg.QuotaCode,
+		arg.QuotaName,
+		arg.QuotaStatus,
+		arg.QuotaUnit,
+		arg.LimitValue,
+		arg.UsedValue,
+		arg.RemainingValue,
+		arg.UsedPercent,
+		arg.WindowDurationSeconds,
+		arg.ResetsAt,
+		arg.ReachedType,
+		arg.ObservedAt,
 	)
 	return err
 }
@@ -527,7 +594,7 @@ func (q *Queries) ManageDeleteProviderMappings(ctx context.Context, arg ManageDe
 
 const manageDeleteProviderResources = `-- name: ManageDeleteProviderResources :exec
 UPDATE provider_credential
-SET status='DISABLED',is_deleted=true,updated_by=$2,updated_at=$3
+SET is_deleted=true,updated_by=$2,updated_at=$3
 WHERE provider_id=$1 AND is_deleted=false
 `
 
@@ -539,6 +606,35 @@ type ManageDeleteProviderResourcesParams struct {
 
 func (q *Queries) ManageDeleteProviderResources(ctx context.Context, arg ManageDeleteProviderResourcesParams) error {
 	_, err := q.db.Exec(ctx, manageDeleteProviderResources, arg.ProviderID, arg.UpdatedBy, arg.UpdatedAt)
+	return err
+}
+
+const manageDeleteResource = `-- name: ManageDeleteResource :execrows
+UPDATE provider_credential
+SET is_deleted=true,updated_by=$2,updated_at=$3
+WHERE id=$1 AND is_deleted=false
+`
+
+type ManageDeleteResourceParams struct {
+	ID        int64
+	UpdatedBy string
+	UpdatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) ManageDeleteResource(ctx context.Context, arg ManageDeleteResourceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, manageDeleteResource, arg.ID, arg.UpdatedBy, arg.UpdatedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const manageDeleteResourceQuotas = `-- name: ManageDeleteResourceQuotas :exec
+DELETE FROM provider_credential_quota WHERE provider_credential_id=$1
+`
+
+func (q *Queries) ManageDeleteResourceQuotas(ctx context.Context, providerCredentialID int64) error {
+	_, err := q.db.Exec(ctx, manageDeleteResourceQuotas, providerCredentialID)
 	return err
 }
 
@@ -1417,7 +1513,7 @@ func (q *Queries) ManageRemoveMember(ctx context.Context, arg ManageRemoveMember
 }
 
 const manageResource = `-- name: ManageResource :one
-SELECT id, is_deleted, status, provider_id, resource_name, credential_ciphertext, credential_nonce, key_version, created_by, updated_by, created_at, updated_at, runtime_status, blocked_reason, blocked_at, last_error_at, last_http_status, last_error_code FROM provider_credential WHERE id=$1 AND is_deleted=false
+SELECT id, is_deleted, provider_id, resource_name, credential_ciphertext, credential_nonce, key_version, created_by, updated_by, created_at, updated_at, runtime_status, blocked_reason, blocked_at, last_error_at, last_http_status, last_error_code, auth_type, auth_adapter, subscription_type, plan_code, external_account_ref, priority, effective_at, expires_at, quota_status, quota_checked_at, quota_resets_at FROM provider_credential WHERE id=$1 AND is_deleted=false
 `
 
 func (q *Queries) ManageResource(ctx context.Context, id int64) (ProviderCredential, error) {
@@ -1426,7 +1522,6 @@ func (q *Queries) ManageResource(ctx context.Context, id int64) (ProviderCredent
 	err := row.Scan(
 		&i.ID,
 		&i.IsDeleted,
-		&i.Status,
 		&i.ProviderID,
 		&i.ResourceName,
 		&i.CredentialCiphertext,
@@ -1442,13 +1537,67 @@ func (q *Queries) ManageResource(ctx context.Context, id int64) (ProviderCredent
 		&i.LastErrorAt,
 		&i.LastHttpStatus,
 		&i.LastErrorCode,
+		&i.AuthType,
+		&i.AuthAdapter,
+		&i.SubscriptionType,
+		&i.PlanCode,
+		&i.ExternalAccountRef,
+		&i.Priority,
+		&i.EffectiveAt,
+		&i.ExpiresAt,
+		&i.QuotaStatus,
+		&i.QuotaCheckedAt,
+		&i.QuotaResetsAt,
 	)
 	return i, err
 }
 
+const manageResourceQuotas = `-- name: ManageResourceQuotas :many
+SELECT provider_credential_id, quota_code, quota_name, quota_status, quota_unit, limit_value, used_value, remaining_value, used_percent, window_duration_seconds, resets_at, reached_type, observed_at, created_at, updated_at FROM provider_credential_quota
+WHERE provider_credential_id=$1 ORDER BY quota_code
+`
+
+func (q *Queries) ManageResourceQuotas(ctx context.Context, providerCredentialID int64) ([]ProviderCredentialQuotum, error) {
+	rows, err := q.db.Query(ctx, manageResourceQuotas, providerCredentialID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ProviderCredentialQuotum{}
+	for rows.Next() {
+		var i ProviderCredentialQuotum
+		if err := rows.Scan(
+			&i.ProviderCredentialID,
+			&i.QuotaCode,
+			&i.QuotaName,
+			&i.QuotaStatus,
+			&i.QuotaUnit,
+			&i.LimitValue,
+			&i.UsedValue,
+			&i.RemainingValue,
+			&i.UsedPercent,
+			&i.WindowDurationSeconds,
+			&i.ResetsAt,
+			&i.ReachedType,
+			&i.ObservedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const manageResources = `-- name: ManageResources :many
-SELECT id,provider_id,resource_name,status,runtime_status,blocked_reason,blocked_at,
-       last_error_at,last_http_status,last_error_code,created_at,updated_at FROM provider_credential
+SELECT id,provider_id,resource_name,auth_type,auth_adapter,subscription_type,plan_code,
+       external_account_ref,priority,effective_at,expires_at,quota_status,quota_checked_at,
+       quota_resets_at,runtime_status,blocked_reason,blocked_at,last_error_at,last_http_status,
+       last_error_code,created_at,updated_at FROM provider_credential
 WHERE is_deleted=false AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2
 `
 
@@ -1458,18 +1607,28 @@ type ManageResourcesParams struct {
 }
 
 type ManageResourcesRow struct {
-	ID             int64
-	ProviderID     int64
-	ResourceName   string
-	Status         string
-	RuntimeStatus  string
-	BlockedReason  *string
-	BlockedAt      pgtype.Timestamptz
-	LastErrorAt    pgtype.Timestamptz
-	LastHttpStatus *int32
-	LastErrorCode  *string
-	CreatedAt      pgtype.Timestamptz
-	UpdatedAt      pgtype.Timestamptz
+	ID                 int64
+	ProviderID         int64
+	ResourceName       string
+	AuthType           string
+	AuthAdapter        string
+	SubscriptionType   *string
+	PlanCode           *string
+	ExternalAccountRef *string
+	Priority           int32
+	EffectiveAt        pgtype.Timestamptz
+	ExpiresAt          pgtype.Timestamptz
+	QuotaStatus        string
+	QuotaCheckedAt     pgtype.Timestamptz
+	QuotaResetsAt      pgtype.Timestamptz
+	RuntimeStatus      string
+	BlockedReason      *string
+	BlockedAt          pgtype.Timestamptz
+	LastErrorAt        pgtype.Timestamptz
+	LastHttpStatus     *int32
+	LastErrorCode      *string
+	CreatedAt          pgtype.Timestamptz
+	UpdatedAt          pgtype.Timestamptz
 }
 
 func (q *Queries) ManageResources(ctx context.Context, arg ManageResourcesParams) ([]ManageResourcesRow, error) {
@@ -1485,7 +1644,17 @@ func (q *Queries) ManageResources(ctx context.Context, arg ManageResourcesParams
 			&i.ID,
 			&i.ProviderID,
 			&i.ResourceName,
-			&i.Status,
+			&i.AuthType,
+			&i.AuthAdapter,
+			&i.SubscriptionType,
+			&i.PlanCode,
+			&i.ExternalAccountRef,
+			&i.Priority,
+			&i.EffectiveAt,
+			&i.ExpiresAt,
+			&i.QuotaStatus,
+			&i.QuotaCheckedAt,
+			&i.QuotaResetsAt,
 			&i.RuntimeStatus,
 			&i.BlockedReason,
 			&i.BlockedAt,
@@ -1713,24 +1882,37 @@ func (q *Queries) ManageUpdateProviderMapping(ctx context.Context, arg ManageUpd
 }
 
 const manageUpdateResource = `-- name: ManageUpdateResource :exec
-UPDATE provider_credential SET resource_name=$2,credential_ciphertext=$3,credential_nonce=$4,key_version=$5,status=$6,
-runtime_status=CASE WHEN credential_ciphertext IS DISTINCT FROM $3 THEN 'HEALTHY' ELSE runtime_status END,
-blocked_reason=CASE WHEN credential_ciphertext IS DISTINCT FROM $3 THEN NULL ELSE blocked_reason END,
-blocked_at=CASE WHEN credential_ciphertext IS DISTINCT FROM $3 THEN NULL ELSE blocked_at END,
-last_error_at=CASE WHEN credential_ciphertext IS DISTINCT FROM $3 THEN NULL ELSE last_error_at END,
-last_http_status=CASE WHEN credential_ciphertext IS DISTINCT FROM $3 THEN NULL ELSE last_http_status END,
-last_error_code=CASE WHEN credential_ciphertext IS DISTINCT FROM $3 THEN NULL ELSE last_error_code END,
-updated_by=$7,updated_at=$8
+UPDATE provider_credential SET resource_name=$2,auth_type=$3,auth_adapter=$4,subscription_type=$5,
+plan_code=$6,external_account_ref=$7,priority=$8,effective_at=$9,expires_at=$10,
+quota_status=$11,quota_checked_at=$12,quota_resets_at=$13,
+credential_ciphertext=$14,credential_nonce=$15,key_version=$16,
+runtime_status=CASE WHEN credential_ciphertext IS DISTINCT FROM $14 THEN 'HEALTHY' ELSE runtime_status END,
+blocked_reason=CASE WHEN credential_ciphertext IS DISTINCT FROM $14 THEN NULL ELSE blocked_reason END,
+blocked_at=CASE WHEN credential_ciphertext IS DISTINCT FROM $14 THEN NULL ELSE blocked_at END,
+last_error_at=CASE WHEN credential_ciphertext IS DISTINCT FROM $14 THEN NULL ELSE last_error_at END,
+last_http_status=CASE WHEN credential_ciphertext IS DISTINCT FROM $14 THEN NULL ELSE last_http_status END,
+last_error_code=CASE WHEN credential_ciphertext IS DISTINCT FROM $14 THEN NULL ELSE last_error_code END,
+updated_by=$17,updated_at=$18
 WHERE id=$1 AND is_deleted=false
 `
 
 type ManageUpdateResourceParams struct {
 	ID                   int64
 	ResourceName         string
+	AuthType             string
+	AuthAdapter          string
+	SubscriptionType     *string
+	PlanCode             *string
+	ExternalAccountRef   *string
+	Priority             int32
+	EffectiveAt          pgtype.Timestamptz
+	ExpiresAt            pgtype.Timestamptz
+	QuotaStatus          string
+	QuotaCheckedAt       pgtype.Timestamptz
+	QuotaResetsAt        pgtype.Timestamptz
 	CredentialCiphertext []byte
 	CredentialNonce      []byte
 	KeyVersion           int32
-	Status               string
 	UpdatedBy            string
 	UpdatedAt            pgtype.Timestamptz
 }
@@ -1739,10 +1921,20 @@ func (q *Queries) ManageUpdateResource(ctx context.Context, arg ManageUpdateReso
 	_, err := q.db.Exec(ctx, manageUpdateResource,
 		arg.ID,
 		arg.ResourceName,
+		arg.AuthType,
+		arg.AuthAdapter,
+		arg.SubscriptionType,
+		arg.PlanCode,
+		arg.ExternalAccountRef,
+		arg.Priority,
+		arg.EffectiveAt,
+		arg.ExpiresAt,
+		arg.QuotaStatus,
+		arg.QuotaCheckedAt,
+		arg.QuotaResetsAt,
 		arg.CredentialCiphertext,
 		arg.CredentialNonce,
 		arg.KeyVersion,
-		arg.Status,
 		arg.UpdatedBy,
 		arg.UpdatedAt,
 	)

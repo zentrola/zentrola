@@ -16,17 +16,22 @@ import (
 )
 
 type Service struct {
-	store      Store
-	ids        shared.IDGenerator
-	cipher     Cipher
-	tester     ConnectionTester
-	discoverer ModelDiscoverer
+	store        Store
+	ids          shared.IDGenerator
+	cipher       Cipher
+	tester       ConnectionTester
+	discoverer   ModelDiscoverer
+	subscription SubscriptionAdapter
 }
 
 type Option func(*Service)
 
 func WithModelDiscoverer(discoverer ModelDiscoverer) Option {
 	return func(service *Service) { service.discoverer = discoverer }
+}
+
+func WithSubscriptionAdapter(adapter SubscriptionAdapter) Option {
+	return func(service *Service) { service.subscription = adapter }
 }
 
 func New(store Store, ids shared.IDGenerator, cipher Cipher, tester ConnectionTester, options ...Option) *Service {
@@ -39,6 +44,10 @@ func New(store Store, ids shared.IDGenerator, cipher Cipher, tester ConnectionTe
 
 func (s *Service) withProviderCapabilities(provider Provider) Provider {
 	provider.ModelSyncSupported = s.discoverer != nil && s.discoverer.Supports(provider.Code)
+	provider.AuthAdapters = []string{AuthAdapterAPIKey}
+	if s.subscription != nil && s.subscription.SupportsProvider(provider) {
+		provider.AuthAdapters = append(provider.AuthAdapters, s.subscription.Code())
+	}
 	return provider
 }
 
@@ -63,6 +72,10 @@ func validCredential(s string) bool {
 		}
 	}
 	return true
+}
+
+func validSubscriptionCredential(s string) bool {
+	return len(s) > 0 && len(s) <= 64<<10 && utf8.ValidString(s) && !strings.ContainsRune(s, 0)
 }
 func (s *Service) next(ctx context.Context) (int64, error) {
 	id, err := s.ids.NextID(ctx)
@@ -500,98 +513,219 @@ func (s *Service) decryptedProviderProxy(provider Provider) (*catalog.OutboundPr
 	return proxy, nil
 }
 func (s *Service) CreateResource(ctx context.Context, actor admin.Identity, providerID int64, name, credential string, meta appsec.RequestMeta) (Resource, error) {
-	if providerID <= 0 || !validText(name, 128) || !validCredential(credential) {
+	return s.CreateAuthenticationResource(ctx, actor, CreateResourceInput{
+		ProviderID: providerID, Name: name, Credential: credential,
+		AuthType: AuthTypeAPIKey, AuthAdapter: AuthAdapterAPIKey, Priority: 100,
+	}, meta)
+}
+
+func (s *Service) CreateAuthenticationResource(ctx context.Context, actor admin.Identity, input CreateResourceInput, meta appsec.RequestMeta) (Resource, error) {
+	if input.ProviderID <= 0 || !validText(input.Name, 128) || input.Priority < 0 {
 		return Resource{}, appsec.ErrInvalidArgument
 	}
+	if input.AuthType == "" {
+		input.AuthType = AuthTypeAPIKey
+	}
+	if input.AuthAdapter == "" && input.AuthType == AuthTypeAPIKey {
+		input.AuthAdapter = AuthAdapterAPIKey
+	}
+	if input.EffectiveAt != nil && input.ExpiresAt != nil && !input.ExpiresAt.After(*input.EffectiveAt) {
+		return Resource{}, appsec.ErrInvalidArgument
+	}
+
+	plain := []byte(input.Credential)
+	defer func() { clear(plain) }()
+	var inspection SubscriptionInspection
+	var subscriptionProbe *SubscriptionProbe
+	switch input.AuthType {
+	case AuthTypeAPIKey:
+		if input.AuthAdapter != AuthAdapterAPIKey || !validCredential(input.Credential) {
+			return Resource{}, appsec.ErrInvalidArgument
+		}
+	case AuthTypeSubscription:
+		if !validSubscriptionCredential(input.Credential) || s.subscription == nil || !s.subscription.Supports(input.AuthAdapter) {
+			return Resource{}, appsec.ErrInvalidArgument
+		}
+		if _, err := s.subscription.Inspect(plain); err != nil {
+			return Resource{}, appsec.ErrInvalidArgument
+		}
+		var provider Provider
+		if err := s.store.Read(ctx, actor, func(r Reader) error {
+			var err error
+			provider, err = r.Provider(ctx, input.ProviderID)
+			return err
+		}); err != nil {
+			return Resource{}, err
+		}
+		if !s.subscription.SupportsProvider(provider) {
+			return Resource{}, appsec.ErrInvalidArgument
+		}
+		probe, err := s.subscription.Probe(ctx, plain)
+		if err != nil {
+			return Resource{}, appsec.ErrUnavailable
+		}
+		inspection = probe.Inspection
+		if len(probe.Credential) == 0 {
+			clear(probe.Credential)
+			return Resource{}, appsec.ErrUnavailable
+		}
+		clear(plain)
+		plain = probe.Credential
+		probe.Credential = nil
+		subscriptionProbe = &probe
+	default:
+		return Resource{}, appsec.ErrInvalidArgument
+	}
+
 	id, err := s.next(ctx)
 	if err != nil {
 		return Resource{}, err
 	}
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	r := Resource{ID: id, ProviderID: providerID, Name: name, Status: "ACTIVE", RuntimeStatus: "HEALTHY", CredentialConfigured: true, CreatedAt: now, UpdatedAt: now}
-	plain := []byte(credential)
-	defer clear(plain)
-	sealed, err := s.cipher.Encrypt(plain, owner(actor, r))
+	resource := Resource{
+		ID: id, ProviderID: input.ProviderID, Name: input.Name,
+		AuthType: input.AuthType, AuthAdapter: input.AuthAdapter, Priority: input.Priority,
+		EffectiveAt: input.EffectiveAt, ExpiresAt: input.ExpiresAt, QuotaStatus: QuotaUnknown,
+		RuntimeStatus: "HEALTHY", CredentialConfigured: true, CreatedAt: now, UpdatedAt: now,
+	}
+	if input.AuthType == AuthTypeSubscription {
+		subscriptionType := SubscriptionPersonal
+		resource.SubscriptionType = &subscriptionType
+		resource.ExternalAccountRef = stringPointer(inspection.AccountRef)
+		resource.PlanCode = stringPointer(inspection.PlanCode)
+		if resource.ExpiresAt == nil {
+			resource.ExpiresAt = inspection.ExpiresAt
+		}
+		resource.QuotaStatus, resource.QuotaResetsAt = aggregateQuota(subscriptionProbe.Quotas)
+		resource.QuotaCheckedAt = &now
+	}
+	sealed, err := s.cipher.Encrypt(plain, owner(actor, resource))
 	if err != nil {
 		return Resource{}, appsec.ErrUnavailable
 	}
 	err = s.store.Write(ctx, actor, func(w Writer) error {
-		if _, err := w.Provider(ctx, providerID); err != nil {
+		if _, err := w.Provider(ctx, input.ProviderID); err != nil {
 			return err
 		}
-		if err := w.CreateResource(ctx, ResourceRecord{Resource: r, Sealed: sealed}); err != nil {
+		if err := w.CreateResource(ctx, ResourceRecord{Resource: resource, Sealed: sealed}); err != nil {
 			return err
 		}
-		return w.Audit(ctx, Audit{Event: operation.ResourceCreate, Target: "RESOURCE", ID: id, Name: name, After: r}, meta)
+		if subscriptionProbe != nil {
+			if err := w.ReplaceResourceQuotas(ctx, id, subscriptionProbe.Quotas); err != nil {
+				return err
+			}
+		}
+		return w.Audit(ctx, Audit{Event: operation.ResourceCreate, Target: "RESOURCE", ID: id, Name: input.Name, After: resource}, meta)
 	})
-	return r, err
+	return resource, err
 }
+
+func stringPointer(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
 func (s *Service) UpdateCredential(ctx context.Context, actor admin.Identity, id int64, credential string, meta appsec.RequestMeta) error {
-	if id <= 0 || !validCredential(credential) {
+	if id <= 0 {
 		return appsec.ErrInvalidArgument
 	}
-	plain := []byte(credential)
-	defer clear(plain)
-	return s.store.Write(ctx, actor, func(w Writer) error {
-		r, err := w.Resource(ctx, id)
+	var original ResourceRecord
+	var provider Provider
+	if err := s.store.Read(ctx, actor, func(r Reader) error {
+		var err error
+		original, err = r.Resource(ctx, id)
 		if err != nil {
 			return err
 		}
-		beforeStatus := r.Status
-		r.Sealed, err = s.cipher.Encrypt(plain, owner(actor, r.Resource))
-		if err != nil {
+		if original.AuthType == AuthTypeSubscription {
+			provider, err = r.Provider(ctx, original.ProviderID)
+		}
+		return err
+	}); err != nil {
+		return err
+	}
+	plain := []byte(credential)
+	defer func() { clear(plain) }()
+	var subscriptionProbe *SubscriptionProbe
+	if original.AuthType == AuthTypeAPIKey {
+		if !validCredential(credential) {
+			return appsec.ErrInvalidArgument
+		}
+	} else {
+		if !validSubscriptionCredential(credential) || s.subscription == nil || !s.subscription.Supports(original.AuthAdapter) || !s.subscription.SupportsProvider(provider) {
+			return appsec.ErrInvalidArgument
+		}
+		if _, err := s.subscription.Inspect(plain); err != nil {
+			return appsec.ErrInvalidArgument
+		}
+		probe, err := s.subscription.Probe(ctx, plain)
+		if err != nil || len(probe.Credential) == 0 {
+			clear(probe.Credential)
 			return appsec.ErrUnavailable
 		}
-		// 配置或替换 API Key 表示该凭证应立即参与网关路由。
-		// 数据库唯一索引保证同一服务商最多只有一个 ACTIVE 凭证。
-		r.Status = "ACTIVE"
-		r.UpdatedAt = time.Now().UTC().Truncate(time.Microsecond)
-		if err := w.UpdateResource(ctx, r); err != nil {
+		clear(plain)
+		plain = probe.Credential
+		probe.Credential = nil
+		subscriptionProbe = &probe
+	}
+	sealed, err := s.cipher.Encrypt(plain, owner(actor, original.Resource))
+	if err != nil {
+		return appsec.ErrUnavailable
+	}
+	return s.store.Write(ctx, actor, func(w Writer) error {
+		record, err := w.Resource(ctx, id)
+		if err != nil {
 			return err
 		}
+		if !record.UpdatedAt.Equal(original.UpdatedAt) {
+			return ErrConflict
+		}
+		record.Sealed = sealed
+		if subscriptionProbe != nil {
+			record.ExternalAccountRef = stringPointer(subscriptionProbe.Inspection.AccountRef)
+			record.PlanCode = stringPointer(subscriptionProbe.Inspection.PlanCode)
+			if subscriptionProbe.Inspection.ExpiresAt != nil {
+				record.ExpiresAt = subscriptionProbe.Inspection.ExpiresAt
+			}
+			record.QuotaStatus, record.QuotaResetsAt = aggregateQuota(subscriptionProbe.Quotas)
+			now := time.Now().UTC().Truncate(time.Microsecond)
+			record.QuotaCheckedAt = &now
+		}
+		record.UpdatedAt = time.Now().UTC().Truncate(time.Microsecond)
+		if err := w.UpdateResource(ctx, record); err != nil {
+			return err
+		}
+		if subscriptionProbe != nil {
+			if err := w.ReplaceResourceQuotas(ctx, id, subscriptionProbe.Quotas); err != nil {
+				return err
+			}
+		}
 		return w.Audit(ctx, Audit{
-			Event:  operation.ResourceCredentialUpdate,
-			Target: "RESOURCE",
-			ID:     id,
-			Name:   r.Name,
-			Before: map[string]string{"status": beforeStatus},
-			After:  map[string]any{"credentialConfigured": true, "status": r.Status},
+			Event: operation.ResourceCredentialUpdate, Target: "RESOURCE", ID: id, Name: record.Name,
+			After: map[string]any{"credentialConfigured": true, "authType": record.AuthType},
 		}, meta)
 	})
 }
-func (s *Service) SetResourceStatus(ctx context.Context, actor admin.Identity, id int64, status string, meta appsec.RequestMeta) error {
-	if id <= 0 || !validStatus(status) {
+
+func (s *Service) DeleteResource(ctx context.Context, actor admin.Identity, id int64, meta appsec.RequestMeta) error {
+	if id <= 0 {
 		return appsec.ErrInvalidArgument
 	}
 	return s.store.Write(ctx, actor, func(w Writer) error {
-		r, err := w.Resource(ctx, id)
+		record, err := w.Resource(ctx, id)
 		if err != nil {
 			return err
 		}
-		if status == "ACTIVE" {
-			p, err := w.Provider(ctx, r.ProviderID)
-			if err != nil {
-				return err
-			}
-			if p.Status != "ACTIVE" {
-				return ErrProvider
-			}
-			plain, err := s.cipher.Decrypt(r.Sealed, owner(actor, r.Resource))
-			clear(plain)
-			if err != nil {
-				return ErrCredential
-			}
-		}
-		if r.Status == status {
-			return nil
-		}
-		before := r.Status
-		r.Status = status
-		r.UpdatedAt = time.Now().UTC().Truncate(time.Microsecond)
-		if err := w.UpdateResource(ctx, r); err != nil {
+		deleted, err := w.DeleteResource(ctx, id, time.Now().UTC().Truncate(time.Microsecond))
+		if err != nil {
 			return err
 		}
-		return w.Audit(ctx, Audit{Event: operation.ResourceStatusChange, Target: "RESOURCE", ID: id, Name: r.Name, Before: map[string]string{"status": before}, After: map[string]string{"status": status}}, meta)
+		if !deleted {
+			return ErrConflict
+		}
+		return w.Audit(ctx, Audit{Event: operation.ResourceDelete, Target: "RESOURCE", ID: id, Name: record.Name, Before: record.Resource, After: map[string]bool{"deleted": true}}, meta)
 	})
 }
 func (s *Service) TestResource(ctx context.Context, actor admin.Identity, id int64, meta appsec.RequestMeta) (ConnectionResult, error) {
@@ -613,18 +747,49 @@ func (s *Service) TestResource(ctx context.Context, actor admin.Identity, id int
 		return ConnectionResult{}, err
 	}
 	result := ConnectionResult{Code: "PROVIDER_UNAVAILABLE"}
-	protocol, baseURL := preferredProviderEndpoint(provider)
-	if baseURL != "" {
-		plain, err := s.cipher.Decrypt(resource.Sealed, owner(actor, resource.Resource))
-		if err != nil {
-			result.Code = "CREDENTIAL_UNRECOVERABLE"
-		} else {
-			defer clear(plain)
-			proxy, proxyErr := s.decryptedProviderProxy(provider)
-			if proxyErr != nil {
-				result.Code = "PROXY_CONFIGURATION_UNRECOVERABLE"
+	var subscriptionProbe *SubscriptionProbe
+	var refreshedSealed catalog.SealedCredential
+	plain, decryptErr := s.cipher.Decrypt(resource.Sealed, owner(actor, resource.Resource))
+	if decryptErr != nil {
+		result.Code = "CREDENTIAL_UNRECOVERABLE"
+	} else {
+		defer clear(plain)
+		if resource.AuthType == AuthTypeSubscription {
+			startedAt := time.Now()
+			if s.subscription == nil || !s.subscription.Supports(resource.AuthAdapter) || !s.subscription.SupportsProvider(provider) {
+				result.Code = "SUBSCRIPTION_ADAPTER_UNAVAILABLE"
+			} else if probe, probeErr := s.subscription.Probe(ctx, plain); probeErr != nil {
+				result.Code = "SUBSCRIPTION_UNAVAILABLE"
 			} else {
-				result = s.tester.Test(ctx, protocol, baseURL, plain, proxy)
+				subscriptionProbe = &probe
+				result.OK, result.Code = true, "OK"
+				resource.PlanCode = stringPointer(probe.Inspection.PlanCode)
+				resource.ExternalAccountRef = stringPointer(probe.Inspection.AccountRef)
+				if probe.Inspection.ExpiresAt != nil {
+					resource.ExpiresAt = probe.Inspection.ExpiresAt
+				}
+				resource.QuotaStatus, resource.QuotaResetsAt = aggregateQuota(probe.Quotas)
+				now := time.Now().UTC().Truncate(time.Microsecond)
+				resource.QuotaCheckedAt = &now
+				if len(probe.Credential) > 0 {
+					refreshedSealed, probeErr = s.cipher.Encrypt(probe.Credential, owner(actor, resource.Resource))
+					clear(probe.Credential)
+					if probeErr != nil {
+						result.OK, result.Code = false, "CREDENTIAL_UNRECOVERABLE"
+						subscriptionProbe = nil
+					}
+				}
+			}
+			result.LatencyMS = time.Since(startedAt).Milliseconds()
+		} else {
+			protocol, baseURL := preferredProviderEndpoint(provider)
+			if baseURL != "" {
+				proxy, proxyErr := s.decryptedProviderProxy(provider)
+				if proxyErr != nil {
+					result.Code = "PROXY_CONFIGURATION_UNRECOVERABLE"
+				} else {
+					result = s.tester.Test(ctx, protocol, baseURL, plain, proxy)
+				}
 			}
 		}
 	}
@@ -639,6 +804,24 @@ func (s *Service) TestResource(ctx context.Context, actor admin.Identity, id int
 		if !current.UpdatedAt.Equal(resource.UpdatedAt) {
 			result.OK = false
 			result.Code = "RESOURCE_CHANGED"
+		}
+		if result.OK && subscriptionProbe != nil {
+			current.PlanCode = resource.PlanCode
+			current.ExternalAccountRef = resource.ExternalAccountRef
+			current.ExpiresAt = resource.ExpiresAt
+			current.QuotaStatus = resource.QuotaStatus
+			current.QuotaCheckedAt = resource.QuotaCheckedAt
+			current.QuotaResetsAt = resource.QuotaResetsAt
+			if refreshedSealed.KeyVersion != 0 {
+				current.Sealed = refreshedSealed
+			}
+			current.UpdatedAt = time.Now().UTC().Truncate(time.Microsecond)
+			if err := w.UpdateResource(auditCtx, current); err != nil {
+				return err
+			}
+			if err := w.ReplaceResourceQuotas(auditCtx, id, subscriptionProbe.Quotas); err != nil {
+				return err
+			}
 		}
 		if result.OK {
 			if restorer, ok := w.(interface {
@@ -656,4 +839,47 @@ func (s *Service) TestResource(ctx context.Context, actor admin.Identity, id int
 		return w.Audit(auditCtx, Audit{Event: operation.ResourceConnectionTest, Target: "RESOURCE", ID: id, Name: resource.Name, After: map[string]any{"test": result, "testedUpdatedAt": resource.UpdatedAt}, ErrorCode: code}, meta)
 	})
 	return result, err
+}
+
+func aggregateQuota(quotas []ResourceQuota) (string, *time.Time) {
+	status := QuotaUnknown
+	var resetsAt *time.Time
+	exhaustedResetUnknown := false
+	for _, quota := range quotas {
+		switch quota.Status {
+		case QuotaExhausted:
+			if status != QuotaExhausted {
+				resetsAt = nil
+				exhaustedResetUnknown = false
+			}
+			status = QuotaExhausted
+			if quota.ResetsAt == nil {
+				exhaustedResetUnknown = true
+				resetsAt = nil
+			} else if !exhaustedResetUnknown && (resetsAt == nil || quota.ResetsAt.After(*resetsAt)) {
+				value := *quota.ResetsAt
+				resetsAt = &value
+			}
+		case QuotaNearLimit:
+			if status != QuotaExhausted {
+				status = QuotaNearLimit
+				if quota.ResetsAt != nil && (resetsAt == nil || quota.ResetsAt.Before(*resetsAt)) {
+					value := *quota.ResetsAt
+					resetsAt = &value
+				}
+			}
+		case QuotaAvailable:
+			if status == QuotaUnknown {
+				status = QuotaAvailable
+				if quota.ResetsAt != nil {
+					value := *quota.ResetsAt
+					resetsAt = &value
+				}
+			} else if status == QuotaAvailable && quota.ResetsAt != nil && (resetsAt == nil || quota.ResetsAt.Before(*resetsAt)) {
+				value := *quota.ResetsAt
+				resetsAt = &value
+			}
+		}
+	}
+	return status, resetsAt
 }

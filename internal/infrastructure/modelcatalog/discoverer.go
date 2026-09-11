@@ -53,6 +53,7 @@ func NewDiscoverer(logger *slog.Logger) *Discoverer {
 		},
 		logger: logger,
 		adapters: map[string]adapter{
+			catalog.OpenAIOfficialCode:   openAIAdapter{},
 			catalog.DeepSeekOfficialCode: deepSeekAdapter{},
 			catalog.ZhipuOfficialCode:    zhipuAdapter{},
 		},

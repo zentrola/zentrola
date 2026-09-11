@@ -4,8 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
+	"time"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	mgmt "github.com/zentrola/zentrola/internal/application/management"
 	appsec "github.com/zentrola/zentrola/internal/application/security"
@@ -14,7 +18,6 @@ import (
 	"github.com/zentrola/zentrola/internal/domain/shared"
 	"github.com/zentrola/zentrola/internal/infrastructure/idgen"
 	"github.com/zentrola/zentrola/internal/infrastructure/postgres/dbgen"
-	"time"
 )
 
 type ManagementStore struct {
@@ -190,7 +193,11 @@ func (s *managementSession) providerEndpoints(ctx context.Context, providerID in
 }
 func resourceView(r dbgen.ManageResourcesRow) mgmt.Resource {
 	return mgmt.Resource{
-		ID: r.ID, ProviderID: r.ProviderID, Name: r.ResourceName, Status: r.Status,
+		ID: r.ID, ProviderID: r.ProviderID, Name: r.ResourceName,
+		AuthType: r.AuthType, AuthAdapter: r.AuthAdapter, SubscriptionType: r.SubscriptionType,
+		PlanCode: r.PlanCode, ExternalAccountRef: r.ExternalAccountRef, Priority: r.Priority,
+		EffectiveAt: timePointer(r.EffectiveAt), ExpiresAt: timePointer(r.ExpiresAt),
+		QuotaStatus: r.QuotaStatus, QuotaCheckedAt: timePointer(r.QuotaCheckedAt), QuotaResetsAt: timePointer(r.QuotaResetsAt),
 		RuntimeStatus: r.RuntimeStatus, BlockedReason: r.BlockedReason,
 		BlockedAt: timePointer(r.BlockedAt), LastErrorAt: timePointer(r.LastErrorAt),
 		LastHTTPStatus: r.LastHttpStatus, LastErrorCode: r.LastErrorCode,
@@ -413,12 +420,33 @@ func (s *managementSession) Provider(ctx context.Context, id int64) (mgmt.Provid
 func (s *managementSession) Resource(ctx context.Context, id int64) (mgmt.ResourceRecord, error) {
 	r, err := s.q.ManageResource(ctx, id)
 	return mgmt.ResourceRecord{Resource: mgmt.Resource{
-		ID: r.ID, ProviderID: r.ProviderID, Name: r.ResourceName, Status: r.Status,
+		ID: r.ID, ProviderID: r.ProviderID, Name: r.ResourceName,
+		AuthType: r.AuthType, AuthAdapter: r.AuthAdapter, SubscriptionType: r.SubscriptionType,
+		PlanCode: r.PlanCode, ExternalAccountRef: r.ExternalAccountRef, Priority: r.Priority,
+		EffectiveAt: timePointer(r.EffectiveAt), ExpiresAt: timePointer(r.ExpiresAt),
+		QuotaStatus: r.QuotaStatus, QuotaCheckedAt: timePointer(r.QuotaCheckedAt), QuotaResetsAt: timePointer(r.QuotaResetsAt),
 		RuntimeStatus: r.RuntimeStatus, BlockedReason: r.BlockedReason,
 		BlockedAt: timePointer(r.BlockedAt), LastErrorAt: timePointer(r.LastErrorAt),
 		LastHTTPStatus: r.LastHttpStatus, LastErrorCode: r.LastErrorCode,
 		CredentialConfigured: true, CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time,
 	}, Sealed: catalog.SealedCredential{Ciphertext: r.CredentialCiphertext, Nonce: r.CredentialNonce, KeyVersion: r.KeyVersion}}, err
+}
+func (s *managementSession) ResourceQuotas(ctx context.Context, id int64) ([]mgmt.ResourceQuota, error) {
+	rows, err := s.q.ManageResourceQuotas(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]mgmt.ResourceQuota, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, mgmt.ResourceQuota{
+			Code: row.QuotaCode, Name: row.QuotaName, Status: row.QuotaStatus, Unit: row.QuotaUnit,
+			LimitValue: numericString(row.LimitValue), UsedValue: numericString(row.UsedValue),
+			RemainingValue: numericString(row.RemainingValue), UsedPercent: numericFloat(row.UsedPercent),
+			WindowDurationSeconds: row.WindowDurationSeconds, ResetsAt: timePointer(row.ResetsAt),
+			ReachedType: row.ReachedType, ObservedAt: row.ObservedAt.Time,
+		})
+	}
+	return result, nil
 }
 func (s *managementSession) CreateMember(ctx context.Context, m mgmt.Member) error {
 	return s.q.ManageCreateMember(ctx, dbgen.ManageCreateMemberParams{ID: m.ID, Name: m.Name, Remark: m.Remark, CreatedBy: actorRef(s.actor.ID), CreatedAt: pgTime(m.CreatedAt)})
@@ -599,14 +627,96 @@ func (s *managementSession) UpdateModel(ctx context.Context, m mgmt.Model) error
 	return s.q.ManageUpdateModel(ctx, dbgen.ManageUpdateModelParams{ID: m.ID, ModelCode: m.Code, DisplayName: m.Name, InputModalities: input, OutputModalities: output, Remark: m.Remark, PublisherProviderID: m.PublisherProviderID, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(m.UpdatedAt)})
 }
 func (s *managementSession) CreateResource(ctx context.Context, r mgmt.ResourceRecord) error {
-	return s.q.ManageCreateResource(ctx, dbgen.ManageCreateResourceParams{ID: r.ID, ProviderID: r.ProviderID, ResourceName: r.Name, CredentialCiphertext: r.Sealed.Ciphertext, CredentialNonce: r.Sealed.Nonce, KeyVersion: r.Sealed.KeyVersion, Status: r.Status, CreatedBy: actorRef(s.actor.ID), CreatedAt: pgTime(r.CreatedAt)})
+	return s.q.ManageCreateResource(ctx, dbgen.ManageCreateResourceParams{
+		ID: r.ID, ProviderID: r.ProviderID, ResourceName: r.Name, AuthType: r.AuthType,
+		AuthAdapter: r.AuthAdapter, SubscriptionType: r.SubscriptionType, PlanCode: r.PlanCode,
+		ExternalAccountRef: r.ExternalAccountRef, Priority: r.Priority,
+		EffectiveAt: nullableTime(r.EffectiveAt), ExpiresAt: nullableTime(r.ExpiresAt),
+		QuotaStatus: r.QuotaStatus, QuotaCheckedAt: nullableTime(r.QuotaCheckedAt), QuotaResetsAt: nullableTime(r.QuotaResetsAt),
+		CredentialCiphertext: r.Sealed.Ciphertext, CredentialNonce: r.Sealed.Nonce,
+		KeyVersion: r.Sealed.KeyVersion, CreatedBy: actorRef(s.actor.ID), CreatedAt: pgTime(r.CreatedAt),
+	})
 }
 func (s *managementSession) UpdateResource(ctx context.Context, r mgmt.ResourceRecord) error {
-	return s.q.ManageUpdateResource(ctx, dbgen.ManageUpdateResourceParams{ID: r.ID, ResourceName: r.Name, CredentialCiphertext: r.Sealed.Ciphertext, CredentialNonce: r.Sealed.Nonce, KeyVersion: r.Sealed.KeyVersion, Status: r.Status, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(r.UpdatedAt)})
+	return s.q.ManageUpdateResource(ctx, dbgen.ManageUpdateResourceParams{
+		ID: r.ID, ResourceName: r.Name, AuthType: r.AuthType, AuthAdapter: r.AuthAdapter,
+		SubscriptionType: r.SubscriptionType, PlanCode: r.PlanCode, ExternalAccountRef: r.ExternalAccountRef,
+		Priority: r.Priority, EffectiveAt: nullableTime(r.EffectiveAt), ExpiresAt: nullableTime(r.ExpiresAt),
+		QuotaStatus: r.QuotaStatus, QuotaCheckedAt: nullableTime(r.QuotaCheckedAt), QuotaResetsAt: nullableTime(r.QuotaResetsAt),
+		CredentialCiphertext: r.Sealed.Ciphertext, CredentialNonce: r.Sealed.Nonce,
+		KeyVersion: r.Sealed.KeyVersion, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(r.UpdatedAt),
+	})
+}
+func (s *managementSession) DeleteResource(ctx context.Context, id int64, at time.Time) (bool, error) {
+	rows, err := s.q.ManageDeleteResource(ctx, dbgen.ManageDeleteResourceParams{ID: id, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(at)})
+	return rows > 0, err
+}
+func (s *managementSession) ReplaceResourceQuotas(ctx context.Context, id int64, quotas []mgmt.ResourceQuota) error {
+	if err := s.q.ManageDeleteResourceQuotas(ctx, id); err != nil {
+		return err
+	}
+	for _, quota := range quotas {
+		if err := s.q.ManageCreateResourceQuota(ctx, dbgen.ManageCreateResourceQuotaParams{
+			ProviderCredentialID: id, QuotaCode: quota.Code, QuotaName: quota.Name,
+			QuotaStatus: quota.Status, QuotaUnit: quota.Unit, LimitValue: pgNumeric(quota.LimitValue),
+			UsedValue: pgNumeric(quota.UsedValue), RemainingValue: pgNumeric(quota.RemainingValue),
+			UsedPercent: pgFloat(quota.UsedPercent), WindowDurationSeconds: quota.WindowDurationSeconds,
+			ResetsAt: nullableTime(quota.ResetsAt), ReachedType: quota.ReachedType, ObservedAt: pgTime(quota.ObservedAt),
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 func (s *managementSession) RestoreResourceRuntime(ctx context.Context, id int64, at time.Time) error {
 	_, err := s.q.ManageRestoreResourceRuntime(ctx, dbgen.ManageRestoreResourceRuntimeParams{
 		ID: id, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(at),
 	})
 	return err
+}
+
+func pgNumeric(value *string) pgtype.Numeric {
+	if value == nil {
+		return pgtype.Numeric{}
+	}
+	var numeric pgtype.Numeric
+	if numeric.Scan(*value) != nil {
+		return pgtype.Numeric{}
+	}
+	return numeric
+}
+
+func numericString(value pgtype.Numeric) *string {
+	if !value.Valid {
+		return nil
+	}
+	raw, err := value.Value()
+	if err != nil {
+		return nil
+	}
+	text, ok := raw.(string)
+	if !ok {
+		return nil
+	}
+	return &text
+}
+
+func pgFloat(value *float64) pgtype.Numeric {
+	if value == nil {
+		return pgtype.Numeric{}
+	}
+	text := strconv.FormatFloat(*value, 'f', -1, 64)
+	return pgNumeric(&text)
+}
+
+func numericFloat(value pgtype.Numeric) *float64 {
+	text := numericString(value)
+	if text == nil {
+		return nil
+	}
+	parsed, err := strconv.ParseFloat(*text, 64)
+	if err != nil {
+		return nil
+	}
+	return &parsed
 }

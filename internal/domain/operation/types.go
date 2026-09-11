@@ -39,7 +39,7 @@ const (
 	ProviderStatusChange     Type = "PROVIDER_STATUS_CHANGE"
 	ResourceCreate           Type = "RESOURCE_CREATE"
 	ResourceCredentialUpdate Type = "RESOURCE_CREDENTIAL_UPDATE"
-	ResourceStatusChange     Type = "RESOURCE_STATUS_CHANGE"
+	ResourceDelete           Type = "RESOURCE_DELETE"
 	ResourceConnectionTest   Type = "RESOURCE_CONNECTION_TEST"
 	LoginSuccess             Type = "LOGIN_SUCCESS"
 	LoginFailed              Type = "LOGIN_FAILED"

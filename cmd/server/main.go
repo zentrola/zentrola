@@ -27,6 +27,7 @@ import (
 	"github.com/zentrola/zentrola/internal/infrastructure/logging"
 	"github.com/zentrola/zentrola/internal/infrastructure/modelcatalog"
 	"github.com/zentrola/zentrola/internal/infrastructure/openai"
+	"github.com/zentrola/zentrola/internal/infrastructure/openaicodex"
 	"github.com/zentrola/zentrola/internal/infrastructure/postgres"
 	"github.com/zentrola/zentrola/internal/infrastructure/redisstate"
 	cryptosec "github.com/zentrola/zentrola/internal/infrastructure/security"
@@ -256,18 +257,20 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 	if setup.Required {
 		logger.Info("administrator setup required; open the management page to create the first administrator")
 	}
-	disabled, err := securityStore.RecoverCredentials(startup, credentials, master.Created)
+	deleted, err := securityStore.RecoverCredentials(startup, credentials, master.Created)
 	if err != nil {
 		return err
 	}
-	if disabled > 0 {
-		logger.Warn("resources disabled: credentials cannot be recovered", "count", disabled, "error_code", "CREDENTIAL_UNRECOVERABLE")
+	if deleted > 0 {
+		logger.Warn("resources deleted: credentials cannot be recovered", "count", deleted, "error_code", "CREDENTIAL_UNRECOVERABLE")
 	}
 	keyService := appsec.NewKeys(securityStore, ids)
 	connectionTester := anthropic.NewConnectionTester()
+	codexSubscription := openaicodex.New(cfg.Gateway.CodexExecutable)
 	managementService := management.New(
 		postgres.NewManagementStore(pool, ids), ids, credentials, connectionTester,
 		management.WithModelDiscoverer(modelcatalog.NewDiscoverer(logger)),
+		management.WithSubscriptionAdapter(codexSubscription),
 	)
 	anthropicClient := anthropic.NewGatewayClient(cfg.Gateway.HeaderTimeout)
 	defer anthropicClient.CloseIdleConnections()
@@ -284,6 +287,7 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 	gatewayService := gateway.New(
 		postgres.NewGatewayStore(pool), credentials, compatibleUpstream,
 		gateway.WithRouteState(routeState), gateway.WithMaxAttempts(2),
+		gateway.WithSubscriptionRefresher(codexSubscription),
 	)
 	usageStore := postgres.NewUsageStore(pool)
 	usageWriter, err := usageapp.NewWriter(usageStore, ids, logger, usageapp.Options{QueueSize: cfg.Usage.QueueSize, BatchSize: cfg.Usage.BatchSize, FlushInterval: cfg.Usage.FlushInterval, WriteTimeout: cfg.Usage.WriteTimeout})

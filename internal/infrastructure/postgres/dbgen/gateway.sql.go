@@ -17,7 +17,7 @@ SET runtime_status='BLOCKED',blocked_reason=$1,blocked_at=$2,
     last_error_at=$2,last_http_status=$3,
     last_error_code=$4,updated_by='system',updated_at=$2
 WHERE id=$5
-  AND NOT is_deleted AND status='ACTIVE' AND runtime_status='HEALTHY'
+  AND NOT is_deleted AND runtime_status='HEALTHY'
 `
 
 type BlockGatewayResourceParams struct {
@@ -46,17 +46,24 @@ const gatewayCandidates = `-- name: GatewayCandidates :many
 SELECT pm.id AS provider_model_id,pm.provider_id,pm.upstream_model_code,pe.base_url,pe.protocol_type,
        p.proxy_enabled,p.proxy_url_ciphertext,p.proxy_url_nonce,p.proxy_url_key_version,
        p.proxy_headers_ciphertext,p.proxy_headers_nonce,p.proxy_headers_key_version,
-       r.id AS resource_id,r.credential_ciphertext,r.credential_nonce,r.key_version
+       r.id AS resource_id,r.auth_type,r.auth_adapter,r.subscription_type,r.priority AS resource_priority,
+       r.quota_status,r.quota_checked_at,r.quota_resets_at,
+       r.credential_ciphertext,r.credential_nonce,r.key_version
 FROM provider_model pm
 JOIN provider p ON p.id=pm.provider_id
 JOIN provider_endpoint pe ON pe.provider_id=p.id AND pe.protocol_type IN ('OPENAI','ANTHROPIC')
 JOIN provider_credential r ON r.provider_id=p.id
-    AND NOT r.is_deleted AND r.status='ACTIVE' AND r.runtime_status='HEALTHY'
+    AND NOT r.is_deleted AND r.runtime_status='HEALTHY'
+    AND (r.effective_at IS NULL OR r.effective_at<=now())
+    AND (r.expires_at IS NULL OR r.expires_at>now())
+    AND (r.auth_type='API_KEY' OR r.quota_status IN ('AVAILABLE','NEAR_LIMIT')
+         OR (r.quota_status='EXHAUSTED' AND r.quota_resets_at IS NOT NULL AND r.quota_resets_at<=now()))
 WHERE pm.model_id=$1 AND NOT pm.is_deleted
   AND NOT p.is_deleted AND p.status='ACTIVE'
 ORDER BY pm.priority,
     CASE WHEN pe.protocol_type=$2 THEN 0 ELSE 1 END,
-    pm.id,r.id
+    CASE WHEN r.auth_type='SUBSCRIPTION' THEN 0 ELSE 1 END,
+    r.priority,pm.id,r.id
 `
 
 type GatewayCandidatesParams struct {
@@ -78,6 +85,13 @@ type GatewayCandidatesRow struct {
 	ProxyHeadersNonce      []byte
 	ProxyHeadersKeyVersion *int32
 	ResourceID             int64
+	AuthType               string
+	AuthAdapter            string
+	SubscriptionType       *string
+	ResourcePriority       int32
+	QuotaStatus            string
+	QuotaCheckedAt         pgtype.Timestamptz
+	QuotaResetsAt          pgtype.Timestamptz
 	CredentialCiphertext   []byte
 	CredentialNonce        []byte
 	KeyVersion             int32
@@ -106,6 +120,13 @@ func (q *Queries) GatewayCandidates(ctx context.Context, arg GatewayCandidatesPa
 			&i.ProxyHeadersNonce,
 			&i.ProxyHeadersKeyVersion,
 			&i.ResourceID,
+			&i.AuthType,
+			&i.AuthAdapter,
+			&i.SubscriptionType,
+			&i.ResourcePriority,
+			&i.QuotaStatus,
+			&i.QuotaCheckedAt,
+			&i.QuotaResetsAt,
 			&i.CredentialCiphertext,
 			&i.CredentialNonce,
 			&i.KeyVersion,
@@ -180,7 +201,10 @@ JOIN provider_model pm ON pm.model_id=m.id AND NOT pm.is_deleted
 JOIN provider p ON p.id=pm.provider_id AND NOT p.is_deleted AND p.status='ACTIVE'
 JOIN provider_endpoint pe ON pe.provider_id=p.id AND pe.protocol_type IN ('OPENAI','ANTHROPIC')
 WHERE NOT m.is_deleted AND m.status='ACTIVE'
-AND EXISTS(SELECT 1 FROM provider_credential r WHERE r.provider_id=p.id AND NOT r.is_deleted AND r.status='ACTIVE' AND r.runtime_status='HEALTHY')
+AND EXISTS(SELECT 1 FROM provider_credential r WHERE r.provider_id=p.id AND NOT r.is_deleted AND r.runtime_status='HEALTHY'
+    AND (r.effective_at IS NULL OR r.effective_at<=now()) AND (r.expires_at IS NULL OR r.expires_at>now())
+    AND (r.auth_type='API_KEY' OR r.quota_status IN ('AVAILABLE','NEAR_LIMIT')
+         OR (r.quota_status='EXHAUSTED' AND r.quota_resets_at IS NOT NULL AND r.quota_resets_at<=now())))
 AND EXISTS(SELECT 1 FROM principal_group_membership pg JOIN principal_group g ON g.id=pg.group_id
 JOIN principal_group_model_permission gp ON gp.group_id=g.id
 WHERE pg.principal_id=$1
@@ -212,4 +236,35 @@ func (q *Queries) OpenAIModels(ctx context.Context, principalID int64) ([]OpenAI
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateGatewayResourceCredential = `-- name: UpdateGatewayResourceCredential :execrows
+UPDATE provider_credential
+SET credential_ciphertext=$1,credential_nonce=$2,
+    key_version=$3,updated_by='system',updated_at=$4
+WHERE id=$5 AND provider_id=$6 AND NOT is_deleted
+`
+
+type UpdateGatewayResourceCredentialParams struct {
+	CredentialCiphertext []byte
+	CredentialNonce      []byte
+	KeyVersion           int32
+	UpdatedAt            pgtype.Timestamptz
+	ResourceID           int64
+	ProviderID           int64
+}
+
+func (q *Queries) UpdateGatewayResourceCredential(ctx context.Context, arg UpdateGatewayResourceCredentialParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateGatewayResourceCredential,
+		arg.CredentialCiphertext,
+		arg.CredentialNonce,
+		arg.KeyVersion,
+		arg.UpdatedAt,
+		arg.ResourceID,
+		arg.ProviderID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	gw "github.com/zentrola/zentrola/internal/application/gateway"
+	mgmt "github.com/zentrola/zentrola/internal/application/management"
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	"github.com/zentrola/zentrola/internal/domain/catalog"
 	"github.com/zentrola/zentrola/internal/infrastructure/postgres/dbgen"
@@ -86,6 +87,9 @@ func (s *GatewayStore) ResolveCandidates(ctx context.Context, identity appsec.Pr
 	seen := make(map[candidateKey]struct{}, len(rows))
 	routes := make([]gw.Route, 0, len(rows))
 	for _, row := range rows {
+		if row.AuthType == mgmt.AuthTypeSubscription && protocol != gw.OpenAIResponsesProtocol {
+			continue
+		}
 		key := candidateKey{providerModelID: row.ProviderModelID, resourceID: row.ResourceID}
 		if _, duplicate := seen[key]; duplicate {
 			continue
@@ -94,8 +98,13 @@ func (s *GatewayStore) ResolveCandidates(ctx context.Context, identity appsec.Pr
 		route := gw.Route{
 			ModelID: m.ID, ProviderID: row.ProviderID, ProviderModelID: row.ProviderModelID, ResourceID: row.ResourceID,
 			UpstreamModel: row.UpstreamModelCode, BaseURL: row.BaseUrl, EndpointProtocol: row.ProtocolType,
+			AuthType: row.AuthType, AuthAdapter: row.AuthAdapter, ResourcePriority: row.ResourcePriority,
+			QuotaStatus:  row.QuotaStatus,
 			Credential:   catalog.SealedCredential{Ciphertext: row.CredentialCiphertext, Nonce: row.CredentialNonce, KeyVersion: row.KeyVersion},
 			ProxyEnabled: row.ProxyEnabled,
+		}
+		if row.SubscriptionType != nil {
+			route.SubscriptionType = *row.SubscriptionType
 		}
 		if row.ProxyUrlKeyVersion != nil {
 			route.ProxyURL = catalog.SealedCredential{Ciphertext: row.ProxyUrlCiphertext, Nonce: row.ProxyUrlNonce, KeyVersion: *row.ProxyUrlKeyVersion}
@@ -138,6 +147,21 @@ func (s *GatewayStore) BlockResource(ctx context.Context, identity appsec.Princi
 		HttpStatus: httpStatus, ErrorCode: &code,
 	})
 	if err != nil {
+		return gw.ErrUnavailable
+	}
+	return nil
+}
+
+func (s *GatewayStore) UpdateResourceCredential(ctx context.Context, route gw.Route, sealed catalog.SealedCredential) error {
+	if route.ResourceID <= 0 || route.ProviderID <= 0 || sealed.KeyVersion <= 0 {
+		return gw.ErrInvalid
+	}
+	updated, err := dbgen.New(s.pool).UpdateGatewayResourceCredential(ctx, dbgen.UpdateGatewayResourceCredentialParams{
+		ResourceID: route.ResourceID, ProviderID: route.ProviderID,
+		CredentialCiphertext: sealed.Ciphertext, CredentialNonce: sealed.Nonce, KeyVersion: sealed.KeyVersion,
+		UpdatedAt: pgtype.Timestamptz{Time: time.Now().UTC().Truncate(time.Microsecond), Valid: true},
+	})
+	if err != nil || updated != 1 {
 		return gw.ErrUnavailable
 	}
 	return nil

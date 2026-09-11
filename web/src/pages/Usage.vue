@@ -16,8 +16,7 @@ const memberID = ref(''),
   from = ref(''),
   to = ref(''),
   query = ref(''),
-  lookupError = ref(''),
-  metricsError = ref('')
+  lookupError = ref('')
 const models = ref<Model[]>([]),
   resources = ref<Resource[]>([]),
   selected = ref<Usage | null>(null)
@@ -34,7 +33,6 @@ const memberAutocomplete = ref<HTMLElement | null>(null),
   rangeSelectionStarted = ref(false),
   hoveredDate = ref(''),
   datePickerValidation = ref('')
-const metrics = ref<{ pending: number; failed: number } | null>(null)
 let memberSearchTimer: ReturnType<typeof setTimeout> | undefined,
   memberSearchRevision = 0
 const { items, cursor, page, pageSize, total, loading, error, load, previous, retry, setPageSize } =
@@ -139,7 +137,6 @@ function search() {
     if (value) params.set(key, value)
   query.value = params.toString()
   void load()
-  void loadMetrics()
 }
 function reset() {
   memberID.value = ''
@@ -247,15 +244,6 @@ async function lookups() {
     lookupError.value = errorText(e)
   }
 }
-async function loadMetrics() {
-  metricsError.value = ''
-  try {
-    metrics.value = await api('/usage/writer')
-  } catch (e) {
-    metrics.value = null
-    metricsError.value = errorText(e)
-  }
-}
 function label(list: { id: string; name: string }[], id: string | null) {
   return id === null ? '-' : list.find((x) => x.id === id)?.name || id
 }
@@ -272,11 +260,16 @@ onBeforeUnmount(() => {
 </script>
 <template>
   <PageHeader name="usage" />
-  <section class="filter-panel">
-    <form class="usage-filters" :aria-label="t('usage.filters')" @submit.prevent="search">
+  <section class="panel usage-list-panel">
+    <form
+      class="table-toolbar usage-filters"
+      :aria-label="t('usage.filters')"
+      @submit.prevent="search"
+    >
       <div ref="memberAutocomplete" class="filter-field member-filter-field">
         <span class="filter-label">{{ t('usage.member') }}</span>
         <div class="member-autocomplete" @keydown.esc="memberSuggestionsOpen = false">
+          <Icon class="member-search-icon" name="search" :size="18" />
           <input
             id="usage-member"
             v-model="memberName"
@@ -418,22 +411,6 @@ onBeforeUnmount(() => {
     <p v-if="lookupError" class="alert error" role="alert">
       {{ lookupError }}<button class="text-button" @click="lookups">{{ t('common.retry') }}</button>
     </p>
-  </section>
-  <div class="usage-context">
-    <span><Icon name="usage" :size="17" />{{ t('usage.semantics') }}</span>
-    <div v-if="metrics" class="writer-metrics" :title="t('usage.metricsHint')">
-      <span
-        >{{ t('usage.pending') }} <b>{{ metrics.pending }}</b></span
-      ><span :class="{ danger: metrics.failed > 0 }"
-        >{{ t('usage.failed') }} <b>{{ metrics.failed }}</b></span
-      >
-    </div>
-  </div>
-  <p v-if="metricsError" class="alert error" role="alert">
-    {{ t('usage.writer') }}：{{ metricsError
-    }}<button class="text-button" @click="loadMetrics">{{ t('common.retry') }}</button>
-  </p>
-  <section class="panel">
     <p v-if="error" class="alert error" role="alert">
       {{ error }}<button class="text-button" @click="retry">{{ t('common.retry') }}</button>
     </p>

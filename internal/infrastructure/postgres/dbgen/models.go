@@ -280,23 +280,21 @@ type Provider struct {
 	UpdatedAt pgtype.Timestamptz
 }
 
-// 企业持有的供应方调用凭证；归属于 Provider
+// Provider 认证资源；可使用 API Key 或订阅认证参与上游调用
 type ProviderCredential struct {
 	// 主键，由应用侧生成的正数 64-bit ID
 	ID int64
 	// 逻辑删除标识；删除后不可恢复
 	IsDeleted bool
-	// 状态：ACTIVE=启用；DISABLED=停用
-	Status string
 	// 资源所属供应方 ID，不归属于 Provider Model
 	ProviderID int64
 	// 资源名称
 	ResourceName string
-	// AES-256-GCM 密文，包含 16-byte 认证标签；禁止明文
+	// AES-256-GCM 认证材料密文，包含 16-byte 认证标签；内容格式由 auth_adapter 解释，禁止明文
 	CredentialCiphertext []byte
-	// AES-GCM 随机 Nonce，12 bytes；每次加密重新生成
+	// 认证材料 AES-GCM 随机 Nonce，12 bytes；每次加密重新生成
 	CredentialNonce []byte
-	// 资源凭证密文格式版本：1=含旧 AAD 上下文；2=无组织或实例依赖
+	// 认证材料密文格式版本，不含 Master Key 本身
 	KeyVersion int32
 	// 创建者引用：system、admin:<id> 或 principal:<id>
 	CreatedBy string
@@ -318,6 +316,62 @@ type ProviderCredential struct {
 	LastHttpStatus *int32
 	// 最近一次导致长期阻断的规范化错误编码，不保存上游响应正文
 	LastErrorCode *string
+	// 认证资源类型：API_KEY=按量 API；SUBSCRIPTION=订阅
+	AuthType string
+	// 认证与调用适配器编码；由应用注册表解释，不绑定具体 Provider 枚举
+	AuthAdapter string
+	// 订阅形态：PERSONAL=个人订阅；SEAT=席位订阅；API Key 为 NULL
+	SubscriptionType *string
+	// 服务商套餐编码；仅订阅使用，具体值由对应适配器解释
+	PlanCode *string
+	// 服务商侧账号或订阅引用；不得保存密码、Token 等秘密
+	ExternalAccountRef *string
+	// 同类型认证资源的路由优先级；数值越小优先级越高
+	Priority int32
+	// 认证资源生效时间；NULL=立即生效
+	EffectiveAt pgtype.Timestamptz
+	// 认证资源到期时间；NULL=未知或不限制
+	ExpiresAt pgtype.Timestamptz
+	// 最近观测的额度状态；适用于订阅，也预留给存在额度限制的按量 API
+	QuotaStatus string
+	// 最近一次额度检查时间；NULL=尚未检查
+	QuotaCheckedAt pgtype.Timestamptz
+	// 额度预计重置时间；NULL=上游未提供或不适用
+	QuotaResetsAt pgtype.Timestamptz
+}
+
+// Provider 认证资源最近观测到的额度窗口；只保存当前状态，不作为 Usage 事实
+type ProviderCredentialQuotum struct {
+	// 所属 Provider 认证资源 ID
+	ProviderCredentialID int64
+	// 适配器提供的稳定额度窗口编码
+	QuotaCode string
+	// 服务商返回的额度窗口显示名称
+	QuotaName *string
+	// 额度窗口状态：AVAILABLE、NEAR_LIMIT、EXHAUSTED 或 UNKNOWN
+	QuotaStatus string
+	// 额度单位，如 TOKEN、REQUEST、CREDIT、COST 或 CONCURRENCY；允许适配器扩展
+	QuotaUnit *string
+	// 额度上限；NULL=上游未提供绝对值
+	LimitValue pgtype.Numeric
+	// 已使用额度；NULL=上游未提供绝对值
+	UsedValue pgtype.Numeric
+	// 剩余额度；NULL=上游未提供绝对值
+	RemainingValue pgtype.Numeric
+	// 已使用百分比，范围 0～100；NULL=上游未提供
+	UsedPercent pgtype.Numeric
+	// 额度窗口长度，单位秒；NULL=上游未提供或非周期额度
+	WindowDurationSeconds *int64
+	// 额度窗口预计重置时间；NULL=上游未提供或不重置
+	ResetsAt pgtype.Timestamptz
+	// 服务商返回或适配器归一化的额度耗尽类型
+	ReachedType *string
+	// 本额度状态从服务商观测到的时间
+	ObservedAt pgtype.Timestamptz
+	// 额度窗口首次写入时间，UTC
+	CreatedAt pgtype.Timestamptz
+	// 额度窗口最近更新时间，UTC
+	UpdatedAt pgtype.Timestamptz
 }
 
 // 服务商支持的协议及对应上游基础地址

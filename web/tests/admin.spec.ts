@@ -70,6 +70,7 @@ async function fixture(page: Page) {
       proxyUrl: null,
       proxyHeaders: [],
       modelSyncSupported: true,
+      authAdapters: ['API_KEY'],
       createdAt: stamp,
       updatedAt: stamp,
     },
@@ -338,6 +339,7 @@ async function fixture(page: Page) {
           proxyUrl: null,
           proxyHeaders: [],
           modelSyncSupported: code === 'deepseek-official',
+          authAdapters: code === 'openai-official' ? ['API_KEY', 'OPENAI_CODEX'] : ['API_KEY'],
           createdAt: stamp,
           updatedAt: stamp,
         })
@@ -371,6 +373,22 @@ async function fixture(page: Page) {
         lastHttpStatus: null,
         lastErrorCode: null,
         modelSyncSupported: path === '/providers' ? false : undefined,
+        authAdapters: path === '/providers' ? ['API_KEY'] : undefined,
+        ...(path === '/resources'
+          ? {
+              authType: body.authType || 'API_KEY',
+              authAdapter: body.authAdapter || 'API_KEY',
+              subscriptionType: body.authType === 'SUBSCRIPTION' ? 'PERSONAL' : null,
+              planCode: body.authType === 'SUBSCRIPTION' ? 'plus' : null,
+              externalAccountRef: body.authType === 'SUBSCRIPTION' ? 'account-fixture' : null,
+              priority: body.priority ?? 100,
+              effectiveAt: body.effectiveAt ?? null,
+              expiresAt: body.expiresAt ?? null,
+              quotaStatus: 'UNKNOWN',
+              quotaCheckedAt: null,
+              quotaResetsAt: null,
+            }
+          : {}),
       }
       if (conflict) return reply(null, 409, 'CONFLICT')
       const target =
@@ -487,6 +505,12 @@ async function fixture(page: Page) {
       }
       return reply({ deleted: true })
     }
+    if (segments[0] === 'resources' && segments.length === 2 && method === 'DELETE') {
+      const index = resources.findIndex((resource) => resource.id === segments[1])
+      if (index < 0) return reply(null, 404, 'NOT_FOUND')
+      resources.splice(index, 1)
+      return reply({ deleted: true })
+    }
     if (segments[2] === 'status') {
       const list =
         segments[0] === 'members'
@@ -561,13 +585,19 @@ async function fixture(page: Page) {
       resources.find((r) => r.id === segments[1]).credential = body.credential
       return reply({ updated: true })
     }
-    if (segments[2] === 'test-connection')
+    if (segments[2] === 'test-connection') {
+      const resource = resources.find((candidate) => candidate.id === segments[1])
+      if (resource?.authType === 'SUBSCRIPTION' && !failedTest) {
+        resource.quotaStatus = 'AVAILABLE'
+        resource.quotaCheckedAt = stamp
+      }
       return reply({
         ok: !failedTest,
         code: failedTest ? 'UPSTREAM_AUTH_FAILED' : 'OK',
         httpStatus: failedTest ? 401 : 200,
         latencyMs: 140,
       })
+    }
     if (segments[2] === 'sync-models') {
       modelSyncRequests.push(segments[1])
       return reply({
@@ -780,7 +810,7 @@ test('首页展示本月指标、应用接入、配置脚本和分项排行榜',
   await page.screenshot({ path: '../.cache/web-visual/home-setup-cc-switch.png', fullPage: true })
   await modal(page).getByRole('tab', { name: '使用脚本' }).click()
   await page.screenshot({ path: '../.cache/web-visual/home-setup.png', fullPage: true })
-  await modal(page).getByRole('button', { name: '关闭', exact: true }).click()
+  await modal(page).getByRole('button', { name: '关闭', exact: true }).last().click()
 
   const anthropicRow = accessPanel
     .locator('.access-addresses > div')
@@ -1244,7 +1274,7 @@ test('模型新增编辑、模态校验、冲突恢复和窄屏表单', async ({
   await signIn(page)
   await page.getByRole('link', { name: '模型', exact: true }).click()
   await expect(page.getByRole('columnheader')).toHaveText([
-    '官方模型名称',
+    '模型名称',
     '模型厂商',
     '状态',
     '输入类型',
@@ -1259,8 +1289,18 @@ test('模型新增编辑、模态校验、冲突恢复和窄屏表单', async ({
   await expect(existingModelRow.getByRole('cell').nth(1)).toHaveText('DeepSeek')
   await page.getByRole('button', { name: '添加模型' }).click()
   const dialog = modal(page)
-  await dialog.getByLabel('官方模型名称', { exact: true }).fill('测试官方模型')
-  await dialog.getByLabel('官方模型编码', { exact: true }).fill('official-test-v1')
+  const modelFormRows = dialog.locator('.model-form-row')
+  await expect(modelFormRows).toHaveCount(5)
+  await expect(modelFormRows.locator('.model-form-label')).toHaveText([
+    '模型编码',
+    '模型名称',
+    '输入类型',
+    '输出类型',
+    '备注',
+  ])
+  await expect(modelFormRows.first()).toHaveCSS('grid-template-columns', /\S+ \S+/)
+  await dialog.getByLabel('模型名称', { exact: true }).fill('测试官方模型')
+  await dialog.getByLabel('模型编码', { exact: true }).fill('official-test-v1')
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expect(page.locator('.toast')).toContainText('至少选择一项')
   await expect(dialog.locator('.alert.error')).toHaveCount(0)
@@ -1271,7 +1311,7 @@ test('模型新增编辑、模态校验、冲突恢复和窄屏表单', async ({
   state.conflict(true)
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expect(page.locator('.toast')).toContainText('操作冲突')
-  await expect(dialog.getByLabel('官方模型编码', { exact: true })).toHaveValue('official-test-v1')
+  await expect(dialog.getByLabel('模型编码', { exact: true })).toHaveValue('official-test-v1')
   state.conflict(false)
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expect(page.locator('dialog')).toHaveCount(0)
@@ -1291,7 +1331,7 @@ test('模型新增编辑、模态校验、冲突恢复和窄屏表单', async ({
   await expect(
     dialog.getByRole('group', { name: '输入类型' }).getByLabel('图片', { exact: true }),
   ).toBeChecked()
-  await dialog.getByLabel('官方模型编码', { exact: true }).fill('official-test-v2')
+  await dialog.getByLabel('模型编码', { exact: true }).fill('official-test-v2')
   await expect(dialog.getByRole('status')).toContainText('客户端需要使用新编码')
   await dialog.getByRole('group', { name: '输出类型' }).getByLabel('音频', { exact: true }).check()
   await page.setViewportSize({ width: 390, height: 844 })
@@ -1355,9 +1395,9 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   expect(state.providers).toHaveLength(7)
 
   const deepSeekRow = page.getByRole('row').filter({ hasText: '深度求索' })
-  await expect(page.getByRole('columnheader', { name: '密钥', exact: true })).toBeVisible()
+  await expect(page.getByRole('columnheader', { name: '认证凭据', exact: true })).toBeVisible()
   const deepSeekCredential = deepSeekRow.getByRole('button', {
-    name: '深度求索 密钥未配置，点击添加',
+    name: '深度求索 尚未配置认证凭据，点击添加',
     exact: true,
   })
   await expect(deepSeekCredential).toBeVisible()
@@ -1401,7 +1441,7 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   expect((await dialogHeader.boundingBox())!.y).toBe(headerTop)
   expect((await dialogFooter.boundingBox())!.y).toBe(footerTop)
   await page.setViewportSize({ width: 1200, height: 900 })
-  await modal(page).getByLabel('网站').fill('https://www.deepseek.com/')
+  await modal(page).getByLabel('官方网站').fill('https://www.deepseek.com/')
   await modal(page).getByRole('button', { name: '保存', exact: true }).click()
   expect(state.providers[0].website).toBe('https://www.deepseek.com')
   expect(state.providerMappings.get('81')).toHaveLength(1)
@@ -1416,18 +1456,47 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
 
   await page.getByRole('button', { name: '添加服务商' }).click()
   const dialog = modal(page)
+  const providerFieldRows = dialog.locator('.connection-fields .provider-field-row')
+  await expect(providerFieldRows).toHaveCount(4)
+  await expect(providerFieldRows.locator('.provider-field-label')).toHaveText([
+    '服务商名称',
+    '官方网站',
+    'OpenAI 协议地址',
+    'Anthropic 协议地址',
+  ])
+  await expect(dialog.getByText('基础配置', { exact: true })).toHaveCount(0)
+  await expect(
+    dialog.getByText('请至少填写一个协议地址：OpenAI 或 Anthropic。', { exact: true }),
+  ).toBeVisible()
+  await expect(dialog.locator('.connection-fields')).toHaveCSS('grid-template-columns', /^\S+$/)
+  await expect(providerFieldRows.first()).toHaveCSS('grid-template-columns', /\S+ \S+/)
   await expect(dialog.getByRole('tab', { name: '模型配置', exact: true })).toHaveAttribute(
     'aria-selected',
     'true',
   )
   await expect(dialog.getByRole('button', { name: '添加映射', exact: true })).toHaveCount(0)
+  await expect(dialog.getByText('模型映射', { exact: true })).toHaveCount(0)
+  const selectAllMappings = dialog.getByRole('checkbox', { name: '全选系统模型', exact: true })
   const mappingCheckbox = dialog.getByRole('checkbox', {
     name: '启用 DeepSeek V4 Flash 映射',
   })
+  const claudeMappingCheckbox = dialog.getByRole('checkbox', {
+    name: '启用 Claude Sonnet 映射',
+  })
+  await expect(dialog.locator('.mapping-list')).toHaveCSS('max-height', 'none')
+  await expect(dialog.locator('.mapping-list')).toHaveCSS('overflow-y', 'clip')
+  await expect(dialog.locator('.modal-body')).toHaveCSS('overflow-y', 'auto')
+  await expect(dialog.locator('.mapping-row').first()).toHaveCSS('min-height', '44px')
   const providerModelCode = dialog.getByLabel('DeepSeek V4 Flash 的服务商模型编码')
+  await selectAllMappings.check()
+  await expect(mappingCheckbox).toBeChecked()
+  await expect(claudeMappingCheckbox).toBeChecked()
+  await selectAllMappings.uncheck()
   await expect(mappingCheckbox).not.toBeChecked()
+  await expect(claudeMappingCheckbox).not.toBeChecked()
   await expect(providerModelCode).toBeDisabled()
   await mappingCheckbox.check()
+  await expect(selectAllMappings).toHaveJSProperty('indeterminate', true)
   await expect(providerModelCode).toBeEnabled()
   await expect(providerModelCode).toHaveValue('')
   await expect(providerModelCode).toHaveAttribute('placeholder', '留空则使用 deepseek-v4-flash')
@@ -1437,7 +1506,7 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await mappingCheckbox.uncheck()
   await expect(providerModelCode).toBeDisabled()
   await dialog.getByLabel('服务商名称').fill('阿里云百炼')
-  await dialog.getByLabel('网站').fill('https://www.aliyun.com')
+  await dialog.getByLabel('官方网站').fill('https://www.aliyun.com')
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expect(page.locator('.toast')).toContainText('至少填写一种协议接口地址')
   await expect(dialog.locator('.alert.error')).toHaveCount(0)
@@ -1451,11 +1520,49 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
     .getByLabel('OpenAI 协议地址')
     .fill('https://dashscope.aliyuncs.com/compatible-mode/v1')
   await dialog.getByRole('tab', { name: '代理配置', exact: true }).click()
-  await dialog.getByRole('switch', { name: '启用代理', exact: true }).check()
+  const proxySwitch = dialog.getByRole('switch', { name: '启用代理', exact: true })
+  await expect(dialog.locator('.proxy-switch-row')).toHaveCSS('grid-template-columns', /\S+ \S+/)
+  await expect(dialog.locator('.proxy-switch-row .provider-field-label')).toHaveCSS(
+    'text-align',
+    'left',
+  )
+  await expect(
+    dialog.getByText('仅该服务商的连接测试和模型调用使用此代理，默认直连。', {
+      exact: true,
+    }),
+  ).toHaveCount(0)
+  await expect(proxySwitch).toHaveAttribute(
+    'title',
+    '仅该服务商的连接测试和模型调用使用此代理，默认直连。',
+  )
+  await proxySwitch.check()
+  await expect(dialog.locator('.proxy-url-row')).toHaveCSS('grid-template-columns', /\S+ \S+/)
+  await expect(dialog.locator('.proxy-url-row .provider-field-label')).toHaveCSS(
+    'text-align',
+    'left',
+  )
+  const proxyURLLabelBox = await dialog
+      .locator('.proxy-url-row .provider-field-label')
+      .boundingBox(),
+    proxyURLInputBox = await dialog.getByLabel('代理服务器地址', { exact: true }).boundingBox()
+  expect(proxyURLLabelBox).not.toBeNull()
+  expect(proxyURLInputBox).not.toBeNull()
+  expect(proxyURLInputBox!.x - proxyURLLabelBox!.x).toBeLessThan(140)
+  const proxySwitchBox = await proxySwitch.boundingBox()
+  expect(proxySwitchBox).not.toBeNull()
+  expect(Math.abs(proxySwitchBox!.x - proxyURLInputBox!.x)).toBeLessThanOrEqual(1)
   await dialog
     .getByLabel('代理服务器地址', { exact: true })
     .fill('http://proxy-user:proxy-password@proxy.example.com:8080')
   await dialog.getByRole('button', { name: '添加 Header', exact: true }).click()
+  await expect(dialog.locator('.proxy-header-field')).toHaveCount(2)
+  await expect(dialog.locator('.proxy-header-field').first()).toHaveCSS(
+    'grid-template-columns',
+    /\S+ \S+/,
+  )
+  const proxyHeaderBox = await dialog.locator('.proxy-header-field').first().boundingBox()
+  expect(proxyHeaderBox).not.toBeNull()
+  expect(Math.abs(proxyHeaderBox!.x - proxyURLInputBox!.x)).toBeLessThanOrEqual(1)
   await dialog.getByLabel('KEY', { exact: true }).fill('X-Proxy-Token')
   await expect(dialog.getByLabel('VALUE', { exact: true })).toHaveAttribute('type', 'text')
   await dialog.getByLabel('VALUE', { exact: true }).fill('proxy-header-secret')
@@ -1502,23 +1609,35 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   ).toBeVisible()
   const createdStatus = row.getByRole('switch', { name: '阿里云百炼的启用状态' })
   await expect(createdStatus).toBeDisabled()
-  await expect(createdStatus).toHaveAttribute('title', '请先配置服务商密钥，再启用服务商。')
+  await expect(createdStatus).toHaveAttribute('title', '请先配置服务商认证凭据，再启用服务商。')
   const missingCredential = row.getByRole('button', {
-    name: '阿里云百炼 密钥未配置，点击添加',
+    name: '阿里云百炼 尚未配置认证凭据，点击添加',
     exact: true,
   })
   await expect(missingCredential).toHaveClass(/is-missing/)
   await missingCredential.click()
+  await expect(dialog.getByText('暂无认证凭据', { exact: true })).toBeVisible()
+  await dialog.getByRole('button', { name: '新增凭据', exact: true }).click()
+  await expect(dialog).not.toHaveClass(/medium/)
+  const credentialFormRows = dialog.locator('.credential-form-row')
+  await expect(credentialFormRows).toHaveCount(2)
+  await expect(credentialFormRows.locator('.credential-form-label')).toHaveText([
+    '认证方式',
+    'API Key',
+  ])
+  await expect(credentialFormRows.first()).toHaveCSS('grid-template-columns', /\S+ \S+/)
   await dialog.getByLabel('API Key', { exact: true }).fill('aliyun-fixture-credential')
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
-  await expect(page.locator('dialog')).toHaveCount(0)
+  await expect(dialog.getByRole('row').filter({ hasText: '阿里云百炼 API Key' })).toBeVisible()
   await expect(page.locator('.toast-success')).toContainText('已保存')
+  await dialog.getByRole('button', { name: '关闭', exact: true }).click()
+  await expect(page.locator('dialog')).toHaveCount(0)
   await expect(
     row.getByRole('button', { name: '同步 阿里云百炼 的官方模型', exact: true }),
   ).toHaveCount(0)
   expect(state.modelSyncRequests).toHaveLength(0)
   await expect(
-    row.getByRole('button', { name: '阿里云百炼 密钥已配置，点击更新', exact: true }),
+    row.getByRole('button', { name: '阿里云百炼 已配置认证凭据，点击管理', exact: true }),
   ).toHaveClass(/is-configured/)
   await expect(createdStatus).toBeEnabled()
   await expect(createdStatus).not.toHaveAttribute('title')
@@ -1626,6 +1745,128 @@ test('服务商列表展示凭证聚合运行状态和错误原因', async ({ pa
     'title',
     'UPSTREAM_BILLING_BLOCKED',
   )
+  await row.getByRole('button', { name: 'DeepSeek 已配置认证凭据，点击管理', exact: true }).click()
+  const credentialRow = modal(page).getByRole('row').filter({ hasText: 'DeepSeek API Key' })
+  await expect(modal(page).getByRole('columnheader')).toHaveText([
+    '认证凭据',
+    '认证方式',
+    '运行状态',
+    '错误信息',
+    '操作',
+  ])
+  await expect(credentialRow.getByRole('cell').nth(2)).toContainText('已阻断')
+  await expect(credentialRow.getByRole('cell').nth(3)).toContainText('余额或计费异常 · HTTP 402')
+  await expect(credentialRow.getByRole('cell').nth(3)).toContainText('UPSTREAM_BILLING_BLOCKED')
+  const credentialList = modal(page).locator('.credential-list')
+  expect(
+    await credentialList.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+  ).toBe(true)
+
+  await page.setViewportSize({ width: 560, height: 800 })
+  await expect(credentialRow).toHaveCSS('display', 'grid')
+  expect(
+    await credentialList.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+  ).toBe(true)
+})
+
+test('服务商支持个人订阅优先并保留 API Key 兜底', async ({ page }) => {
+  const state = await fixture(page)
+  state.providers.push({
+    id: '82',
+    name: 'OpenAI',
+    code: 'openai-official',
+    type: 'OFFICIAL',
+    status: 'ACTIVE',
+    website: 'https://openai.com',
+    endpoints: [{ protocolType: 'OPENAI', baseUrl: 'https://api.openai.com/v1' }],
+    proxyEnabled: false,
+    proxyUrl: null,
+    proxyHeaders: [],
+    modelSyncSupported: false,
+    authAdapters: ['API_KEY', 'OPENAI_CODEX'],
+    createdAt: stamp,
+    updatedAt: stamp,
+  })
+  await signIn(page)
+  await page.getByRole('link', { name: '服务商', exact: true }).click()
+  const providerRow = page.getByRole('row').filter({ hasText: 'OpenAI' })
+
+  await providerRow
+    .getByRole('button', { name: 'OpenAI 尚未配置认证凭据，点击添加', exact: true })
+    .click()
+  await modal(page).getByRole('button', { name: '新增凭据', exact: true }).click()
+  await modal(page).getByRole('combobox', { name: '认证方式' }).selectOption('SUBSCRIPTION')
+  await modal(page)
+    .getByLabel('Codex auth.json', { exact: true })
+    .setInputFiles({
+      name: 'auth.json',
+      mimeType: 'application/json',
+      buffer: Buffer.from(
+        JSON.stringify({
+          auth_mode: 'chatgpt',
+          tokens: {
+            id_token: 'fixture-id-token',
+            access_token: 'fixture-access-token',
+            refresh_token: 'fixture-refresh-token',
+            account_id: 'fixture-account',
+          },
+        }),
+      ),
+    })
+  await modal(page).getByRole('button', { name: '保存', exact: true }).click()
+  const credentialList = modal(page)
+  await expect(credentialList.getByRole('columnheader')).toHaveText([
+    '认证凭据',
+    '认证方式',
+    '运行状态',
+    '错误信息',
+    '操作',
+  ])
+  const subscriptionRow = credentialList.getByRole('row').filter({ hasText: '个人订阅' })
+  await expect(subscriptionRow).toContainText('OpenAI 个人订阅')
+  await expect(subscriptionRow.getByRole('cell').nth(3)).toHaveText('-')
+  await expect(subscriptionRow.getByRole('button')).toHaveText(['删除'])
+  await credentialList.getByRole('button', { name: '关闭', exact: true }).click()
+  await expect(page.locator('dialog')).toHaveCount(0)
+  expect(state.resources).toEqual([
+    expect.objectContaining({ authType: 'SUBSCRIPTION', authAdapter: 'OPENAI_CODEX' }),
+  ])
+
+  await providerRow.getByRole('button', { name: '测试 OpenAI 的连接', exact: true }).click()
+  await expect(modal(page).getByRole('status')).toContainText('连接测试通过')
+  await modal(page).getByRole('button', { name: '关闭', exact: true }).last().click()
+  expect(state.resources[0].quotaStatus).toBe('AVAILABLE')
+
+  await providerRow
+    .getByRole('button', { name: 'OpenAI 已配置认证凭据，点击管理', exact: true })
+    .click()
+  await modal(page).getByRole('button', { name: '新增凭据', exact: true }).click()
+  await modal(page).getByRole('combobox', { name: '认证方式' }).selectOption('API_KEY')
+  await modal(page).getByLabel('API Key', { exact: true }).fill('fallback-api-key')
+  await modal(page).getByRole('button', { name: '保存', exact: true }).click()
+  await expect(modal(page).getByRole('row').filter({ hasText: 'OpenAI API Key' })).toBeVisible()
+  await modal(page).getByRole('button', { name: '关闭', exact: true }).click()
+  await expect(page.locator('dialog')).toHaveCount(0)
+  expect(state.resources).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ authType: 'SUBSCRIPTION' }),
+      expect.objectContaining({ authType: 'API_KEY' }),
+    ]),
+  )
+
+  await providerRow
+    .getByRole('button', { name: 'OpenAI 已配置认证凭据，点击管理', exact: true })
+    .click()
+  await modal(page)
+    .getByRole('row')
+    .filter({ hasText: 'OpenAI 个人订阅' })
+    .getByRole('button', { name: '删除', exact: true })
+    .click()
+  await modal(page).getByRole('button', { name: '删除', exact: true }).click()
+  await expect
+    .poll(() => state.resources.filter((resource) => resource.authType === 'SUBSCRIPTION').length)
+    .toBe(0)
+  expect(state.resources.some((resource) => resource.authType === 'API_KEY')).toBe(true)
 })
 
 test('状态 switch 直接生效且危险操作仍需确认', async ({ page }) => {
@@ -1701,6 +1942,11 @@ test('创建和编辑用户时可选择分组', async ({ page }) => {
   await expect(dialog.getByText(/已选择.*共.*个分组/)).toHaveCount(0)
   const groupOptions = dialog.locator('.member-group-option')
   await expect(groupOptions).toHaveCount(3)
+  const optionTops = await groupOptions.evaluateAll((options) =>
+    options.map((option) => Math.round(option.getBoundingClientRect().top)),
+  )
+  expect(new Set(optionTops).size).toBe(1)
+  await expect(dialog.getByLabel('备注', { exact: true })).toHaveAttribute('rows', '3')
   await expect(dialog.locator('.member-group-list').getByText('启用', { exact: true })).toHaveCount(
     0,
   )
@@ -1756,13 +2002,13 @@ test('分组编辑表单与创建一致、失败恢复及停用授权限制', as
   await expect(createFormRows).toHaveCount(3)
   await expect(createFormRows.locator('.group-form-label')).toHaveText([
     '名称',
+    '访问模型',
     '备注',
-    '允许访问的模型',
   ])
   await expect(createFormRows.first()).toHaveCSS('grid-template-columns', /\S+ \S+/)
   await expect(createDialog.getByLabel('名称', { exact: true })).toHaveAttribute('required', '')
-  await expect(createFormRows.nth(2).locator('.group-form-label')).toHaveClass(/required-label/)
-  await expect(createFormRows.nth(2).locator('.group-model-field')).toHaveAttribute(
+  await expect(createFormRows.nth(1).locator('.group-form-label')).toHaveClass(/required-label/)
+  await expect(createFormRows.nth(1).locator('.group-model-field')).toHaveAttribute(
     'aria-required',
     'true',
   )
@@ -2074,12 +2320,15 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
   const providerRow = page.getByRole('row').filter({ hasText: 'DeepSeek' })
   await expect(providerRow.getByRole('link', { name: '在新页面打开 DeepSeek 官网' })).toHaveCount(0)
   await providerRow
-    .getByRole('button', { name: 'DeepSeek 密钥未配置，点击添加', exact: true })
+    .getByRole('button', { name: 'DeepSeek 尚未配置认证凭据，点击添加', exact: true })
     .click()
+  await modal(page).getByRole('button', { name: '新增凭据', exact: true }).click()
   await modal(page).getByLabel('API Key', { exact: true }).fill('fixture-upstream-credential')
   await modal(page).getByRole('button', { name: '保存' }).click()
-  await expect(page.locator('dialog')).toHaveCount(0)
+  await expect(modal(page).getByRole('row').filter({ hasText: 'DeepSeek API Key' })).toBeVisible()
   await expect(page.locator('.toast-success')).toContainText('已保存')
+  await modal(page).getByRole('button', { name: '关闭', exact: true }).click()
+  await expect(page.locator('dialog')).toHaveCount(0)
   expect(state.modelSyncRequests).toHaveLength(0)
   await providerRow.getByRole('button', { name: '同步 DeepSeek 的官方模型', exact: true }).click()
   await expect(modal(page).getByRole('status')).toContainText('官方模型目录同步完成')
@@ -2099,15 +2348,24 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
   await expect(modal(page).getByRole('status')).toContainText('上游认证失败')
   await modal(page).getByRole('button', { name: '关闭', exact: true }).last().click()
   const editCredential = providerRow.getByRole('button', {
-    name: 'DeepSeek 密钥已配置，点击更新',
+    name: 'DeepSeek 已配置认证凭据，点击管理',
   })
   await expect(editCredential.locator('svg')).toHaveCount(1)
   await expect(providerRow.getByRole('button', { name: '更新 API Key' })).toHaveCount(0)
   await editCredential.click()
+  const credentialRow = modal(page).getByRole('row').filter({ hasText: 'DeepSeek API Key' })
+  await expect(modal(page).getByLabel('API Key', { exact: true })).toHaveCount(0)
+  await expect(credentialRow.getByRole('button')).toHaveText(['删除'])
+  await credentialRow.getByRole('button', { name: '删除', exact: true }).click()
+  await modal(page).getByRole('button', { name: '删除', exact: true }).click()
+  await expect(modal(page).getByText('暂无认证凭据', { exact: true })).toBeVisible()
+  await modal(page).getByRole('button', { name: '新增凭据', exact: true }).click()
   await modal(page).getByLabel('API Key', { exact: true }).fill('replacement-credential')
   await modal(page).getByRole('button', { name: '保存' }).click()
-  await expect(page.locator('dialog')).toHaveCount(0)
+  await expect(modal(page).getByRole('row').filter({ hasText: 'DeepSeek API Key' })).toBeVisible()
   await expect(page.locator('.toast-success')).toContainText('已保存')
+  await modal(page).getByRole('button', { name: '关闭', exact: true }).click()
+  await expect(page.locator('dialog')).toHaveCount(0)
   expect(state.modelSyncRequests).toHaveLength(1)
   await expect(
     providerRow.getByRole('switch', {
@@ -2267,6 +2525,9 @@ test('14 寸屏幕默认展开侧栏并将横向溢出限制在表格内', async
 
   await page.getByRole('link', { name: '用量记录', exact: true }).click()
   await expect(page.getByRole('heading', { name: '用量记录', exact: true })).toBeVisible()
+  await expect(page.locator('.usage-context')).toHaveCount(0)
+  await expect(page.locator('.usage-list-panel > .usage-filters')).toHaveCount(1)
+  await expect(page.locator('.usage-list-panel > .table-scroll')).toHaveCount(1)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   await mkdir('../.cache/web-visual', { recursive: true })
   await page.screenshot({

@@ -235,7 +235,7 @@ func (s *SecurityStore) RecoverCredentials(ctx context.Context, cipher *cryptose
 	if err != nil {
 		return 0, appsec.ErrUnavailable
 	}
-	disabled := 0
+	deleted := 0
 	for _, r := range resources {
 		if !newMaster {
 			plain, err := cipher.Decrypt(cryptosec.SealedCredential{Ciphertext: r.CredentialCiphertext, Nonce: r.CredentialNonce, KeyVersion: r.KeyVersion}, cryptosec.CredentialOwner{ProviderID: r.ProviderID, ResourceID: r.ID})
@@ -244,19 +244,19 @@ func (s *SecurityStore) RecoverCredentials(ctx context.Context, cipher *cryptose
 				continue
 			}
 		}
-		if err := q.DisableUnrecoverableResource(ctx, dbgen.DisableUnrecoverableResourceParams{ID: r.ID, UpdatedAt: pgTime(time.Now().UTC())}); err != nil {
+		if err := q.DeleteUnrecoverableResource(ctx, dbgen.DeleteUnrecoverableResourceParams{ID: r.ID, UpdatedAt: pgTime(time.Now().UTC())}); err != nil {
 			return 0, appsec.ErrUnavailable
 		}
 		actor := admin.Identity{DisplayName: "system"}
-		if err := s.appendLog(ctx, q, actor, "RESOURCE", operation.ResourceStatusChange, "RESOURCE", r.ID, r.ResourceName, "SUCCESS", "", appsec.RequestMeta{}, []byte(`{"status":"ACTIVE"}`), []byte(`{"status":"DISABLED"}`), "CREDENTIAL_UNRECOVERABLE"); err != nil {
+		if err := s.appendLog(ctx, q, actor, "RESOURCE", operation.ResourceDelete, "RESOURCE", r.ID, r.ResourceName, "SUCCESS", "", appsec.RequestMeta{}, nil, []byte(`{"deleted":true}`), "CREDENTIAL_UNRECOVERABLE"); err != nil {
 			return 0, appsec.ErrUnavailable
 		}
-		disabled++
+		deleted++
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return 0, appsec.ErrUnavailable
 	}
-	return disabled, nil
+	return deleted, nil
 }
 
 func validateActor(ctx context.Context, q *dbgen.Queries, actor admin.Identity) error {

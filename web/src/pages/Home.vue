@@ -54,12 +54,9 @@ const providerHealthIssues = computed(() =>
     if (!configured.length)
       return [{ provider, reason: t('providers.runtimeReasons.UNCONFIGURED') }]
 
-    const active = configured.filter((resource) => resource.status === 'ACTIVE')
-    if (!active.length)
-      return [{ provider, reason: t('providers.runtimeReasons.CREDENTIAL_DISABLED') }]
-    if (active.some((resource) => resource.runtimeStatus !== 'BLOCKED')) return []
+    if (configured.some((resource) => resource.runtimeStatus !== 'BLOCKED')) return []
 
-    const blocked = [...active]
+    const blocked = [...configured]
       .filter((resource) => resource.runtimeStatus === 'BLOCKED')
       .sort((left, right) => (right.lastErrorAt || '').localeCompare(left.lastErrorAt || ''))[0]
     if (!blocked) return [{ provider, reason: t('providers.runtimeReasons.UNKNOWN') }]

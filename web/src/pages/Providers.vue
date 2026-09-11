@@ -48,6 +48,9 @@ const resourceError = ref('')
 const models = ref<Model[]>([])
 const modelError = ref('')
 const credentialTarget = ref<Provider | null>(null)
+const credentialDeleteTarget = ref<Resource | null>(null)
+const credentialCreating = ref(false)
+const credentialAuthType = ref<'API_KEY' | 'SUBSCRIPTION'>('API_KEY')
 const testTarget = ref<{ provider: Provider; resource: Resource } | null>(null)
 const testResult = ref<ConnectionResult | null>(null)
 const syncTarget = ref<{ provider: Provider; resource: Resource } | null>(null)
@@ -84,6 +87,12 @@ const mappingRows = computed(() =>
   })),
 )
 const selectedMappingCount = computed(() => mappingRows.value.filter((row) => row.mapping).length)
+const allMappingsSelected = computed(
+  () => enabledModels.value.length > 0 && selectedMappingCount.value === enabledModels.value.length,
+)
+const someMappingsSelected = computed(
+  () => selectedMappingCount.value > 0 && !allMappingsSelected.value,
+)
 const route = useRoute()
 const router = useRouter()
 type RuntimeFilter = '' | 'HEALTHY' | 'ABNORMAL'
@@ -250,6 +259,21 @@ function toggleMapping(model: Model) {
   }
 }
 
+function toggleAllMappings(event: Event) {
+  const checked = (event.target as HTMLInputElement).checked
+  const enabledModelIDs = new Set(enabledModels.value.map((model) => model.id))
+  if (checked) {
+    for (const model of enabledModels.value) {
+      if (!form.mappings.some((mapping) => mapping.modelId === model.id)) {
+        form.mappings.push({ modelId: model.id, upstreamModelCode: '' })
+      }
+    }
+    return
+  }
+  const remaining = form.mappings.filter((mapping) => !enabledModelIDs.has(mapping.modelId))
+  form.mappings.splice(0, form.mappings.length, ...remaining)
+}
+
 function updateUpstreamModelCode(modelId: string, event: Event) {
   const mapping = form.mappings.find((candidate) => candidate.modelId === modelId)
   if (mapping) mapping.upstreamModelCode = (event.target as HTMLInputElement).value
@@ -276,11 +300,26 @@ function normalizeUpstreamModelCode(mapping: MappingDraft) {
 }
 
 function resourceFor(provider: Provider) {
-  return resources.value.find((resource) => resource.providerId === provider.id)
+  return [...resourcesFor(provider)].sort((left, right) => {
+    const preferred = (resource: Resource) =>
+      resource.authType === 'SUBSCRIPTION' &&
+      (resource.quotaStatus === 'AVAILABLE' || resource.quotaStatus === 'NEAR_LIMIT')
+        ? 0
+        : resource.authType === 'API_KEY' || !resource.authType
+          ? 1
+          : 2
+    return preferred(left) - preferred(right) || left.priority - right.priority
+  })[0]
 }
 
 function resourcesFor(provider: Provider) {
   return resources.value.filter((resource) => resource.providerId === provider.id)
+}
+
+function apiKeyResourceFor(provider: Provider) {
+  return resourcesFor(provider).find(
+    (resource) => resource.authType === 'API_KEY' || !resource.authType,
+  )
 }
 
 function blockedResourceReason(resource: Resource) {
@@ -299,17 +338,8 @@ function providerRuntime(provider: Provider) {
     }
   }
 
-  const active = configured.filter((resource) => resource.status === 'ACTIVE')
-  if (!active.length) {
-    return {
-      status: 'UNAVAILABLE',
-      reason: t('providers.runtimeReasons.CREDENTIAL_DISABLED'),
-      errorCode: '',
-    }
-  }
-
-  const healthy = active.filter((resource) => resource.runtimeStatus !== 'BLOCKED')
-  const blocked = active
+  const healthy = configured.filter((resource) => resource.runtimeStatus !== 'BLOCKED')
+  const blocked = configured
     .filter((resource) => resource.runtimeStatus === 'BLOCKED')
     .sort((left, right) => (right.lastErrorAt || '').localeCompare(left.lastErrorAt || ''))
 
@@ -333,8 +363,7 @@ function providerRuntimeAbnormal(provider: Provider) {
   if (provider.status !== 'ACTIVE') return false
   const configured = resourcesFor(provider)
   if (!configured.length) return true
-  const active = configured.filter((resource) => resource.status === 'ACTIVE')
-  return !active.length || !active.some((resource) => resource.runtimeStatus !== 'BLOCKED')
+  return !configured.some((resource) => resource.runtimeStatus !== 'BLOCKED')
 }
 
 const visible = computed(() =>
@@ -419,8 +448,21 @@ function initializeProviders() {
 
 function configureCredential(provider: Provider) {
   credentialTarget.value = provider
+  credentialCreating.value = false
+  credentialAuthType.value = 'API_KEY'
   credential.value = ''
   actionError.value = ''
+}
+
+function addCredential() {
+  credentialCreating.value = true
+  credentialAuthType.value = 'API_KEY'
+  credential.value = ''
+}
+
+function cancelCredentialCreation() {
+  credentialCreating.value = false
+  credential.value = ''
 }
 
 function openDelete(provider: Provider) {
@@ -440,29 +482,59 @@ function deleteProvider() {
 
 function closeCredential() {
   credentialTarget.value = null
+  credentialCreating.value = false
   credential.value = ''
 }
 
 function saveCredential() {
-  if (!/^[\x21-\x7e]{1,4096}$/.test(credential.value)) {
-    showErrorToast(t('resources.credentialRequired'))
+  const valid =
+    credentialAuthType.value === 'API_KEY'
+      ? /^[\x21-\x7e]{1,4096}$/.test(credential.value)
+      : credential.value.length > 0 && new TextEncoder().encode(credential.value).length <= 65536
+  if (!valid) {
+    showErrorToast(
+      t(
+        credentialAuthType.value === 'API_KEY'
+          ? 'resources.credentialRequired'
+          : 'resources.subscriptionRequired',
+      ),
+    )
     return
   }
   void run(async () => {
     const provider = credentialTarget.value!
-    const resource = resourceFor(provider)
-    if (resource) {
-      await api(`/resources/${resource.id}/credential`, 'PUT', { credential: credential.value })
-    } else {
-      await api('/resources', 'POST', {
-        providerId: provider.id,
-        name: `${provider.name} ${t('providers.credential')}`,
-        credential: credential.value,
-      })
-    }
-    closeCredential()
+    await api('/resources', 'POST', {
+      providerId: provider.id,
+      name: `${provider.name} ${t(`resources.authTypes.${credentialAuthType.value}`)}`,
+      credential: credential.value,
+      authType: credentialAuthType.value,
+      authAdapter: credentialAuthType.value === 'SUBSCRIPTION' ? 'OPENAI_CODEX' : 'API_KEY',
+    })
     await loadResources()
+    credentialCreating.value = false
+    credential.value = ''
     showSuccessToast(t('common.saved'))
+  })
+}
+
+async function importSubscription(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  if (file.size > 65536) {
+    showErrorToast(t('resources.subscriptionRequired'))
+    input.value = ''
+    return
+  }
+  credential.value = await file.text()
+}
+
+function deleteCredential() {
+  if (!credentialDeleteTarget.value) return
+  void run(async () => {
+    await api(`/resources/${credentialDeleteTarget.value!.id}`, 'DELETE')
+    credentialDeleteTarget.value = null
+    await loadResources()
   })
 }
 
@@ -480,7 +552,7 @@ function testConnection(provider: Provider) {
 }
 
 function syncModels(provider: Provider) {
-  const resource = resourceFor(provider)
+  const resource = apiKeyResourceFor(provider)
   if (!resource) return
   syncTarget.value = { provider, resource }
   syncResult.value = null
@@ -668,7 +740,7 @@ onMounted(() => {
                     >
                       <Icon name="activity" :size="16" /></button
                     ><button
-                      v-if="provider.modelSyncSupported && resourceFor(provider)"
+                      v-if="provider.modelSyncSupported && apiKeyResourceFor(provider)"
                       type="button"
                       class="provider-quick-action provider-direct-action"
                       :aria-label="t('providers.syncModelsFor', { name: provider.name })"
@@ -825,44 +897,67 @@ onMounted(() => {
     @close="editing = false"
   >
     <form id="provider-form" class="provider-form" @submit.prevent="save">
-      <section class="connection-editor" aria-labelledby="provider-connection-title">
-        <header class="provider-section-head">
-          <div>
-            <h3 id="provider-connection-title">{{ t('providers.connectionTitle') }}</h3>
-            <p>{{ t('providers.endpointHint') }}</p>
-          </div>
-        </header>
+      <section class="connection-editor" :aria-label="t('providers.connectionTitle')">
+        <p class="provider-connection-hint">{{ t('providers.endpointHint') }}</p>
         <div class="connection-fields">
-          <label
-            >{{ t('providers.name')
-            }}<input v-model="form.name" required autofocus :disabled="busy"
-          /></label>
-          <label
-            >{{ t('providers.website')
-            }}<input
-              v-model="form.website"
-              type="url"
-              placeholder="https://example.com"
-              :disabled="busy"
-          /></label>
-          <label
-            >{{ t('providers.openaiEndpoint')
-            }}<input
-              v-model="form.openaiBaseUrl"
-              type="url"
-              placeholder="https://api.example.com/v1"
-              spellcheck="false"
-              :disabled="busy"
-          /></label>
-          <label
-            >{{ t('providers.anthropicEndpoint')
-            }}<input
-              v-model="form.anthropicBaseUrl"
-              type="url"
-              placeholder="https://api.example.com/anthropic"
-              spellcheck="false"
-              :disabled="busy"
-          /></label>
+          <div class="provider-field-row">
+            <label class="provider-field-label required-label" for="provider-name-input">{{
+              t('providers.name')
+            }}</label>
+            <div class="provider-field-control">
+              <input
+                id="provider-name-input"
+                v-model="form.name"
+                required
+                autofocus
+                :disabled="busy"
+              />
+            </div>
+          </div>
+          <div class="provider-field-row">
+            <label class="provider-field-label" for="provider-website-input">{{
+              t('providers.website')
+            }}</label>
+            <div class="provider-field-control">
+              <input
+                id="provider-website-input"
+                v-model="form.website"
+                type="url"
+                placeholder="https://example.com"
+                :disabled="busy"
+              />
+            </div>
+          </div>
+          <div class="provider-field-row">
+            <label class="provider-field-label" for="provider-openai-endpoint-input">{{
+              t('providers.openaiEndpoint')
+            }}</label>
+            <div class="provider-field-control">
+              <input
+                id="provider-openai-endpoint-input"
+                v-model="form.openaiBaseUrl"
+                type="url"
+                placeholder="https://api.example.com/v1"
+                spellcheck="false"
+                :disabled="busy"
+              />
+            </div>
+          </div>
+          <div class="provider-field-row">
+            <label class="provider-field-label" for="provider-anthropic-endpoint-input">{{
+              t('providers.anthropicEndpoint')
+            }}</label>
+            <div class="provider-field-control">
+              <input
+                id="provider-anthropic-endpoint-input"
+                v-model="form.anthropicBaseUrl"
+                type="url"
+                placeholder="https://api.example.com/anthropic"
+                spellcheck="false"
+                :disabled="busy"
+              />
+            </div>
+          </div>
         </div>
       </section>
       <section class="config-editor">
@@ -914,7 +1009,6 @@ onMounted(() => {
         >
           <header class="mapping-editor-head">
             <div>
-              <h3 id="provider-mapping-title">{{ t('providers.mappingTitle') }}</h3>
               <p>{{ t('providers.mappingHint') }}</p>
             </div>
             <span v-if="enabledModels.length" class="mapping-selection-count">
@@ -927,8 +1021,17 @@ onMounted(() => {
             </span>
           </header>
           <div v-if="enabledModels.length" class="mapping-list">
-            <div class="mapping-grid mapping-grid-head" aria-hidden="true">
-              <span></span>
+            <div class="mapping-grid mapping-grid-head">
+              <label class="mapping-check mapping-select-all">
+                <input
+                  type="checkbox"
+                  :checked="allMappingsSelected"
+                  :indeterminate="someMappingsSelected"
+                  :disabled="busy"
+                  :aria-label="t('providers.selectAllMappings')"
+                  @change="toggleAllMappings"
+                />
+              </label>
               <span>{{ t('providers.logicalModel') }}</span>
               <span>{{ t('providers.upstreamModelCode') }}</span>
             </div>
@@ -974,35 +1077,43 @@ onMounted(() => {
           aria-labelledby="provider-proxy-tab"
           tabindex="0"
         >
-          <div class="proxy-switch-row">
-            <div>
-              <strong>{{ t('providers.proxyEnabled') }}</strong>
-              <p>{{ t('providers.proxyHint') }}</p>
+          <div class="provider-field-row proxy-switch-row">
+            <label class="provider-field-label" for="provider-proxy-enabled">{{
+              t('providers.proxyEnabled')
+            }}</label>
+            <div class="provider-field-control proxy-switch-field">
+              <span class="proxy-switch-control">
+                <input
+                  id="provider-proxy-enabled"
+                  v-model="form.proxyEnabled"
+                  type="checkbox"
+                  role="switch"
+                  :aria-label="t('providers.proxyEnabled')"
+                  :title="t('providers.proxyHint')"
+                  :disabled="busy"
+                />
+                <span class="proxy-switch-track" aria-hidden="true"></span>
+              </span>
             </div>
-            <label class="proxy-switch-control">
-              <input
-                v-model="form.proxyEnabled"
-                type="checkbox"
-                role="switch"
-                :aria-label="t('providers.proxyEnabled')"
-                :disabled="busy"
-              />
-              <span class="proxy-switch-track" aria-hidden="true"></span>
-            </label>
           </div>
           <div v-if="form.proxyEnabled" class="proxy-fields">
-            <label
-              >{{ t('providers.proxyUrl') }}
-              <input
-                v-model="form.proxyUrl"
-                type="text"
-                placeholder="http://username:password@proxy.example.com:8080"
-                autocomplete="off"
-                spellcheck="false"
-                :disabled="busy"
-              />
-            </label>
-            <p class="field-hint">{{ t('providers.proxyUrlHint') }}</p>
+            <div class="provider-field-row proxy-url-row">
+              <label class="provider-field-label" for="provider-proxy-url">{{
+                t('providers.proxyUrl')
+              }}</label>
+              <div class="provider-field-control proxy-url-control">
+                <input
+                  id="provider-proxy-url"
+                  v-model="form.proxyUrl"
+                  type="text"
+                  placeholder="http://username:password@proxy.example.com:8080"
+                  autocomplete="off"
+                  spellcheck="false"
+                  :disabled="busy"
+                />
+                <p class="field-hint proxy-url-hint">{{ t('providers.proxyUrlHint') }}</p>
+              </div>
+            </div>
             <div class="proxy-headers-head">
               <div>
                 <strong>{{ t('providers.proxyHeaders') }}</strong>
@@ -1023,7 +1134,7 @@ onMounted(() => {
                 :key="index"
                 class="proxy-header-row"
               >
-                <label>
+                <label class="proxy-header-field">
                   <span>{{ t('providers.proxyHeaderKey') }}</span>
                   <input
                     v-model="header.key"
@@ -1033,7 +1144,7 @@ onMounted(() => {
                     placeholder="Proxy-Authorization"
                   />
                 </label>
-                <label>
+                <label class="proxy-header-field">
                   <span>{{ t('providers.proxyHeaderValue') }}</span>
                   <input
                     v-model="header.value"
@@ -1087,32 +1198,157 @@ onMounted(() => {
 
   <Modal
     v-if="credentialTarget"
-    :title="t(resourceFor(credentialTarget) ? 'providers.editKey' : 'providers.configureKey')"
+    :title="t(credentialCreating ? 'resources.create' : 'resources.manageCredentials')"
     :busy="busy"
+    :medium="!credentialCreating"
     @close="closeCredential"
   >
-    <p class="muted">
-      {{
-        t(resourceFor(credentialTarget) ? 'resources.replaceHint' : 'providers.credentialHint', {
-          name: credentialTarget.name,
-        })
-      }}
-    </p>
-    <form @submit.prevent="saveCredential">
-      <label
-        >{{ t('resources.credential')
-        }}<input
-          v-model="credential"
-          type="password"
-          autocomplete="new-password"
-          required
-          autofocus
-          :disabled="busy"
-          spellcheck="false"
-      /></label>
-      <p class="field-hint">{{ t('resources.credentialHint') }}</p>
+    <template v-if="!credentialCreating">
+      <div class="credential-list-head">
+        <div>
+          <h3>{{ credentialTarget.name }}</h3>
+          <p>{{ t('resources.listHint') }}</p>
+        </div>
+        <button type="button" class="button primary" :disabled="busy" @click="addCredential">
+          <Icon name="plus" :size="16" />{{ t('resources.addCredential') }}
+        </button>
+      </div>
+      <div v-if="resourcesFor(credentialTarget).length" class="credential-list">
+        <table>
+          <colgroup>
+            <col class="credential-name-column" />
+            <col class="credential-auth-column" />
+            <col class="credential-runtime-column" />
+            <col class="credential-error-column" />
+            <col class="credential-operation-column" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>{{ t('resources.credential') }}</th>
+              <th>{{ t('resources.authType') }}</th>
+              <th>{{ t('resources.runtimeStatus') }}</th>
+              <th>{{ t('resources.errorInfo') }}</th>
+              <th class="credential-action-column">{{ t('common.actions') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="resource in resourcesFor(credentialTarget)" :key="resource.id">
+              <td :data-label="t('resources.credential')">
+                <strong>{{ resource.name }}</strong>
+                <small v-if="resource.externalAccountRef" class="credential-detail">{{
+                  resource.externalAccountRef
+                }}</small>
+              </td>
+              <td class="credential-auth" :data-label="t('resources.authType')">
+                {{ t(`resources.authTypes.${resource.authType || 'API_KEY'}`) }}
+                <Status
+                  v-if="resource.authType === 'SUBSCRIPTION'"
+                  :value="resource.quotaStatus || 'UNKNOWN'"
+                />
+              </td>
+              <td class="credential-runtime" :data-label="t('resources.runtimeStatus')">
+                <Status :value="resource.runtimeStatus || 'HEALTHY'" />
+              </td>
+              <td class="credential-error" :data-label="t('resources.errorInfo')">
+                <template
+                  v-if="
+                    resource.runtimeStatus === 'BLOCKED' ||
+                    resource.blockedReason ||
+                    resource.lastErrorCode ||
+                    resource.lastHttpStatus
+                  "
+                >
+                  <span>{{ blockedResourceReason(resource) }}</span>
+                  <small
+                    v-if="resource.lastErrorCode"
+                    class="credential-detail"
+                    :title="resource.lastErrorCode"
+                  >
+                    {{ resource.lastErrorCode }}
+                  </small>
+                </template>
+                <span v-else>-</span>
+              </td>
+              <td class="credential-action-column" :data-label="t('common.actions')">
+                <button
+                  type="button"
+                  class="text-button danger"
+                  :disabled="busy"
+                  @click="credentialDeleteTarget = resource"
+                >
+                  {{ t('resources.delete') }}
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div v-else class="credential-empty">
+        <Icon name="lock-open" :size="28" />
+        <strong>{{ t('resources.emptyCredentials') }}</strong>
+        <p>{{ t('resources.emptyCredentialsHint') }}</p>
+      </div>
+    </template>
+    <form v-else class="credential-create-form" @submit.prevent="saveCredential">
+      <p class="muted">{{ t('resources.createHint') }}</p>
+      <div class="credential-form-row">
+        <label class="credential-form-label" for="credential-auth-type">{{
+          t('resources.authType')
+        }}</label>
+        <div class="credential-form-control">
+          <select id="credential-auth-type" v-model="credentialAuthType" :disabled="busy">
+            <option value="API_KEY">{{ t('resources.authTypes.API_KEY') }}</option>
+            <option
+              v-if="credentialTarget.authAdapters?.includes('OPENAI_CODEX')"
+              value="SUBSCRIPTION"
+            >
+              {{ t('resources.authTypes.SUBSCRIPTION') }}
+            </option>
+          </select>
+        </div>
+      </div>
+      <div class="credential-form-row">
+        <label
+          class="credential-form-label"
+          :for="credentialAuthType === 'API_KEY' ? 'credential-api-key' : 'credential-auth-file'"
+          >{{
+            t(credentialAuthType === 'API_KEY' ? 'resources.apiKey' : 'resources.authFile')
+          }}</label
+        >
+        <div class="credential-form-control">
+          <input
+            v-if="credentialAuthType === 'API_KEY'"
+            id="credential-api-key"
+            v-model="credential"
+            type="password"
+            autocomplete="new-password"
+            required
+            autofocus
+            :disabled="busy"
+            spellcheck="false"
+          />
+          <input
+            v-else
+            id="credential-auth-file"
+            type="file"
+            accept=".json,application/json"
+            required
+            :disabled="busy"
+            @change="importSubscription"
+          />
+        </div>
+      </div>
+      <p class="field-hint credential-form-hint">
+        {{
+          t(
+            credentialAuthType === 'API_KEY'
+              ? 'resources.credentialHint'
+              : 'resources.subscriptionHint',
+          )
+        }}
+      </p>
       <footer class="form-footer">
-        <button type="button" class="button" :disabled="busy" @click="closeCredential">
+        <button type="button" class="button" :disabled="busy" @click="cancelCredentialCreation">
           {{ t('common.cancel') }}</button
         ><button class="button primary" :disabled="busy">
           {{ t(busy ? 'common.working' : 'common.save') }}
@@ -1120,6 +1356,18 @@ onMounted(() => {
       </footer>
     </form>
   </Modal>
+
+  <ConfirmDialog
+    v-if="credentialDeleteTarget"
+    :title="t('resources.deleteTitle')"
+    :message="t('resources.deleteQuestion', { name: credentialDeleteTarget.name })"
+    :hint="t('resources.deleteConsequence')"
+    :confirm-label="t('resources.delete')"
+    :busy="busy"
+    tone="danger"
+    @close="credentialDeleteTarget = null"
+    @confirm="deleteCredential"
+  />
 
   <Modal
     v-if="testTarget"
@@ -1354,6 +1602,142 @@ onMounted(() => {
   background: #eaf1fb;
   color: #2463c4;
 }
+.credential-list-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 18px;
+}
+.credential-list-head h3 {
+  margin: 0;
+  color: #183247;
+  font-size: 15px;
+}
+.credential-list-head p {
+  max-width: 430px;
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.credential-list {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.credential-list table {
+  width: 100%;
+  margin: 0;
+  table-layout: fixed;
+  white-space: normal;
+}
+.credential-name-column {
+  width: 30%;
+}
+.credential-auth-column {
+  width: 20%;
+}
+.credential-runtime-column {
+  width: 17%;
+}
+.credential-operation-column {
+  width: 64px;
+}
+.credential-list th,
+.credential-list td {
+  min-width: 0;
+  padding: 11px 10px;
+}
+.credential-list td {
+  white-space: normal;
+}
+.credential-list td > strong {
+  overflow-wrap: anywhere;
+}
+.credential-auth .status {
+  display: flex;
+  width: max-content;
+  max-width: 100%;
+  margin: 5px 0 0;
+  white-space: nowrap;
+}
+.credential-runtime .status {
+  margin: 0;
+  white-space: nowrap;
+}
+.credential-detail {
+  display: block;
+  max-width: 100%;
+  margin-top: 4px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.credential-error {
+  color: #566d82;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.credential-error .credential-detail {
+  max-width: 100%;
+}
+.credential-action-column {
+  text-align: right;
+}
+.credential-empty {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 42px 20px;
+  border: 1px dashed #cad7e4;
+  border-radius: 8px;
+  color: #71869a;
+  text-align: center;
+}
+.credential-empty strong {
+  color: #385168;
+  font-size: 14px;
+}
+.credential-empty p {
+  margin: 0;
+  font-size: 12px;
+}
+.credential-create-form {
+  display: grid;
+  gap: 14px;
+}
+.credential-create-form > .muted {
+  margin: 0;
+  line-height: 1.6;
+}
+.credential-form-row {
+  display: grid;
+  grid-template-columns: 86px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+.credential-form-label {
+  display: block;
+  margin: 0;
+  padding-top: 10px;
+  color: #485e72;
+  line-height: 1.4;
+  text-align: right;
+}
+.credential-form-control {
+  min-width: 0;
+}
+.credential-form-hint {
+  margin: -2px 0 0 100px;
+}
+.credential-create-form .form-footer {
+  margin-top: 2px;
+  padding-top: 16px;
+}
 .provider-actions {
   display: flex;
   justify-content: flex-end;
@@ -1361,7 +1745,7 @@ onMounted(() => {
 }
 .provider-form {
   display: grid;
-  gap: 20px;
+  gap: 14px;
 }
 .provider-form label {
   margin: 0;
@@ -1371,40 +1755,66 @@ onMounted(() => {
 .config-panel {
   min-width: 0;
 }
-.provider-section-head {
-  padding-bottom: 14px;
-}
-.provider-section-head,
 .mapping-editor-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 20px;
-  padding-bottom: 14px;
+  gap: 16px;
+  padding-bottom: 8px;
 }
-.provider-section-head h3,
-.mapping-editor-head h3 {
-  margin: 0;
-  color: #183247;
-  font-size: 15px;
+.mapping-editor-head > div {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  gap: 10px;
 }
-.provider-section-head p,
 .mapping-editor-head p {
-  margin: 5px 0 0;
+  margin: 0;
   color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.provider-connection-hint {
+  margin: 0 0 10px;
+  padding: 7px 10px;
+  border-left: 3px solid #8eadd7;
+  border-radius: 5px;
+  color: #60788d;
+  background: #f5f8fc;
   font-size: 12px;
   line-height: 1.55;
 }
 .connection-fields {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
 }
-.connection-fields label {
+.provider-field-row {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+}
+.provider-field-label {
+  display: block;
+  margin: 0;
+  padding-top: 10px;
+  color: #485e72;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: right;
+}
+.provider-field-control {
   min-width: 0;
 }
+.required-label::after {
+  margin-left: 4px;
+  color: var(--danger);
+  content: '*';
+}
 .config-editor {
-  margin-top: 2px;
+  margin-top: 0;
 }
 .config-tabs {
   display: flex;
@@ -1417,7 +1827,7 @@ onMounted(() => {
   position: relative;
   flex: none;
   min-width: 112px;
-  padding: 11px 16px 12px;
+  padding: 9px 15px 10px;
   border: 0;
   background: transparent;
   color: #60788d;
@@ -1443,27 +1853,30 @@ onMounted(() => {
   background: var(--blue);
 }
 .config-panel {
-  padding-top: 18px;
+  padding-top: 14px;
 }
 .config-panel:focus-visible {
   outline: 3px solid #90b7fb;
   outline-offset: 4px;
 }
+.proxy-editor {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 12px;
+}
 .proxy-switch-row {
+  align-items: center;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+}
+.proxy-switch-row .provider-field-label {
+  padding-top: 0;
+  text-align: left;
+}
+.proxy-switch-field {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-}
-.proxy-switch-row strong {
-  color: #183247;
-  font-size: 15px;
-}
-.proxy-switch-row p {
-  margin-top: 5px;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.55;
+  min-height: 40px;
 }
 .proxy-switch-control {
   position: relative;
@@ -1525,19 +1938,33 @@ onMounted(() => {
 }
 .proxy-fields {
   display: grid;
-  gap: 16px;
-  margin-top: 18px;
-  padding-top: 18px;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  gap: 12px 0;
+  margin-top: 14px;
+  padding-top: 14px;
   border-top: 1px solid #e4eaf1;
 }
 .proxy-fields > label {
   margin: 0;
 }
 .proxy-fields .field-hint {
-  margin: -9px 0 0;
+  margin: 0;
+}
+.proxy-url-row {
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+}
+.proxy-url-row .provider-field-label {
+  text-align: left;
+}
+.proxy-url-control {
+  display: grid;
+  gap: 6px;
 }
 .proxy-headers-head {
   display: flex;
+  grid-column: 1 / -1;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
@@ -1561,10 +1988,14 @@ onMounted(() => {
 }
 .proxy-header-list {
   display: grid;
-  gap: 9px;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  column-gap: 12px;
+  row-gap: 9px;
 }
 .proxy-header-row {
   display: grid;
+  grid-column: 2;
   grid-template-columns: minmax(100px, 0.7fr) minmax(160px, 1.3fr) 36px;
   align-items: end;
   gap: 10px;
@@ -1579,9 +2010,15 @@ onMounted(() => {
   min-width: 0;
   margin: 0;
 }
-.proxy-header-row label > span {
+.proxy-header-field {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+.proxy-header-field > span {
   display: block;
-  margin-bottom: 5px;
+  margin: 0;
   color: #60788d;
   font-size: 11px;
   font-weight: 600;
@@ -1603,10 +2040,7 @@ onMounted(() => {
 }
 .mapping-list {
   min-width: 0;
-  max-height: min(420px, calc(100dvh - 410px));
-  overflow-x: hidden;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
+  overflow: clip;
   border: 1px solid #d8e2ec;
   border-radius: 9px;
 }
@@ -1614,16 +2048,16 @@ onMounted(() => {
   display: grid;
   grid-template-columns: 46px minmax(200px, 0.8fr) minmax(300px, 1.4fr);
   align-items: center;
-  gap: 14px;
-  padding: 12px 14px;
+  gap: 12px;
+  padding: 4px 10px;
   border-top: 1px solid #e5ebf1;
 }
 .mapping-grid-head {
   position: sticky;
   top: 0;
   z-index: 1;
-  padding-top: 9px;
-  padding-bottom: 9px;
+  padding-top: 6px;
+  padding-bottom: 6px;
   border-top: 0;
   background: #fff;
   color: #60788d;
@@ -1631,7 +2065,7 @@ onMounted(() => {
   font-weight: 600;
 }
 .mapping-row {
-  min-height: 62px;
+  min-height: 44px;
   background: #fff;
 }
 .mapping-row.is-selected {
@@ -1652,11 +2086,14 @@ onMounted(() => {
   accent-color: var(--blue);
   cursor: pointer;
 }
+.mapping-select-all {
+  min-height: 24px;
+}
 .mapping-model-name {
   min-width: 0;
   overflow: hidden;
   color: #183247;
-  font-size: 13px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1672,6 +2109,7 @@ onMounted(() => {
   width: 100%;
   min-width: 0;
   margin: 0;
+  padding: 5px 10px;
 }
 .mapping-row:not(.is-selected) .mapping-control input {
   border-color: #e2e9f0;
@@ -1687,6 +2125,69 @@ onMounted(() => {
   text-align: center;
 }
 @media (max-width: 760px) {
+  .credential-form-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .credential-form-label {
+    padding-top: 0;
+    text-align: left;
+  }
+  .credential-form-hint {
+    margin-left: 0;
+  }
+  .credential-list-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .credential-list-head .button {
+    align-self: flex-start;
+  }
+  .credential-list {
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+  }
+  .credential-list table,
+  .credential-list tbody {
+    display: block;
+  }
+  .credential-list colgroup,
+  .credential-list thead {
+    display: none;
+  }
+  .credential-list tr {
+    display: grid;
+    gap: 8px;
+    margin-bottom: 10px;
+    padding: 13px 14px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fff;
+  }
+  .credential-list td,
+  .credential-list .credential-action-column {
+    display: grid;
+    grid-template-columns: 88px minmax(0, 1fr);
+    align-items: start;
+    gap: 10px;
+    width: auto;
+    padding: 0;
+    border: 0;
+    text-align: left;
+  }
+  .credential-list td::before {
+    content: attr(data-label);
+    color: #687e92;
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .credential-list .status {
+    margin-top: 0;
+  }
+  .credential-list .text-button {
+    justify-self: start;
+  }
   .provider-runtime-filter {
     width: 100%;
   }
@@ -1704,11 +2205,39 @@ onMounted(() => {
   .connection-fields {
     grid-template-columns: 1fr;
   }
+  .provider-field-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .provider-field-label {
+    padding-top: 0;
+    text-align: left;
+  }
+  .proxy-editor,
+  .proxy-fields,
+  .proxy-header-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .proxy-switch-row {
+    grid-column: 1;
+    grid-template-columns: auto 40px;
+    gap: 12px;
+  }
+  .proxy-url-row {
+    grid-column: 1;
+    grid-template-columns: minmax(0, 1fr);
+  }
   .mapping-editor-head {
     align-items: stretch;
     flex-direction: column;
   }
+  .mapping-editor-head > div {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
   .proxy-header-row {
+    grid-column: 1;
     grid-template-columns: minmax(0, 1fr) 36px;
   }
   .proxy-header-row label:nth-child(2) {

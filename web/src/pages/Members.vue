@@ -359,7 +359,7 @@ async function copyKey() {
             <textarea
               id="member-remark-input"
               v-model="remark"
-              rows="4"
+              rows="3"
               :disabled="busy"
             ></textarea>
           </div>
@@ -482,12 +482,12 @@ async function copyKey() {
 }
 .member-form-fields {
   display: grid;
-  gap: 18px;
+  gap: 12px;
 }
 .member-form-row {
   display: grid;
-  grid-template-columns: 88px minmax(0, 1fr);
-  gap: 18px;
+  grid-template-columns: 80px minmax(0, 1fr);
+  gap: 14px;
   align-items: start;
 }
 .member-form-label {
@@ -503,6 +503,13 @@ async function copyKey() {
 .member-form-control {
   min-width: 0;
 }
+.member-form-control > input,
+.member-form-control > textarea {
+  padding: 8px 10px;
+}
+.member-form-control > textarea {
+  min-height: 76px;
+}
 .required-label::after {
   content: '*';
   margin-left: 4px;
@@ -512,10 +519,10 @@ async function copyKey() {
   min-width: 0;
 }
 .member-group-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 8px;
-  max-height: 240px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 24px;
+  max-height: 176px;
   overflow: auto;
   padding: 0;
 }
@@ -523,8 +530,9 @@ async function copyKey() {
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 12px;
-  padding: 10px 0;
+  flex: 0 1 150px;
+  gap: 8px;
+  padding: 5px 0;
   margin: 0;
   min-width: 0;
   cursor: pointer;
@@ -541,7 +549,11 @@ async function copyKey() {
   overflow-wrap: anywhere;
 }
 .member-group-list > .empty-compact {
-  grid-column: 1 / -1;
+  flex-basis: 100%;
+}
+.member-form .form-footer {
+  margin-top: 16px;
+  padding-top: 14px;
 }
 @media (max-width: 640px) {
   .member-form-row {
@@ -551,6 +563,9 @@ async function copyKey() {
   .member-form-label {
     padding-top: 0;
     text-align: left;
+  }
+  .member-group-option {
+    flex-basis: calc(50% - 12px);
   }
 }
 </style>

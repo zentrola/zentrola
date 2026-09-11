@@ -28,6 +28,7 @@ var (
 	ErrRoute          = &Failure{"MODEL_ROUTE_UNAVAILABLE", "api_error", "No active provider route is available for the requested model. Enable a provider and configure its endpoint and model mapping.", 503}
 	ErrResource       = &Failure{"RESOURCE_UNAVAILABLE", "api_error", "No active provider API key is available. Configure or enable the provider API key.", 503}
 	ErrCredential     = &Failure{"CREDENTIAL_UNRECOVERABLE", "api_error", "The provider API key cannot be decrypted. Reconfigure the provider API key.", 503}
+	ErrSubscription   = &Failure{"SUBSCRIPTION_REFRESH_FAILED", "api_error", "The provider subscription could not be refreshed. Retry later or reconfigure the subscription.", 503}
 	ErrProxy          = &Failure{"PROXY_CONFIGURATION_UNRECOVERABLE", "api_error", "The provider proxy configuration cannot be decrypted or parsed. Reconfigure the provider proxy.", 503}
 	ErrUnavailable    = &Failure{"DEPENDENCY_UNAVAILABLE", "api_error", "An internal dependency is unavailable. Retry later or contact the administrator.", 503}
 	ErrUpstream       = &Failure{"UPSTREAM_UNAVAILABLE", "api_error", "The upstream model provider is unavailable. Retry later.", 502}
@@ -38,6 +39,9 @@ var (
 type Route struct {
 	ModelID, ProviderID, ProviderModelID, ResourceID int64
 	UpstreamModel, BaseURL, EndpointProtocol         string
+	AuthType, AuthAdapter, SubscriptionType          string
+	ResourcePriority                                 int32
+	QuotaStatus                                      string
 	Credential                                       catalog.SealedCredential
 	ProxyEnabled                                     bool
 	ProxyURL, ProxyHeaders                           catalog.SealedCredential
@@ -73,6 +77,13 @@ type ResourceBlock struct {
 type ResourceBlocker interface {
 	BlockResource(context.Context, appsec.PrincipalIdentity, int64, ResourceBlock) error
 }
+type CredentialUpdater interface {
+	UpdateResourceCredential(context.Context, Route, catalog.SealedCredential) error
+}
+type SubscriptionRefresher interface {
+	Supports(string) bool
+	RefreshIfNeeded(context.Context, []byte) ([]byte, bool, error)
+}
 type RouteState interface {
 	Acquire(context.Context, Route) (bool, error)
 	Cooldown(context.Context, Route, time.Duration) error
@@ -81,6 +92,9 @@ type RouteState interface {
 type Cipher interface {
 	Decrypt(catalog.SealedCredential, catalog.CredentialOwner) ([]byte, error)
 	DecryptProviderProxy(catalog.SealedCredential, catalog.ProviderProxyOwner) ([]byte, error)
+}
+type CredentialEncryptor interface {
+	Encrypt([]byte, catalog.CredentialOwner) (catalog.SealedCredential, error)
 }
 
 func (s *Service) decryptProxy(route Route) (*catalog.OutboundProxy, error) {
@@ -129,12 +143,16 @@ type Service struct {
 	cipher   Cipher
 	upstream Upstream
 	state    RouteState
+	refresh  SubscriptionRefresher
 	maxTries int
 }
 
 type Option func(*Service)
 
 func WithRouteState(state RouteState) Option { return func(service *Service) { service.state = state } }
+func WithSubscriptionRefresher(refresh SubscriptionRefresher) Option {
+	return func(service *Service) { service.refresh = refresh }
+}
 func WithMaxAttempts(attempts int) Option {
 	return func(service *Service) {
 		if attempts > 0 {

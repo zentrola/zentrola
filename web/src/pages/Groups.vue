@@ -262,19 +262,6 @@ function deleteGroup() {
           </div>
         </div>
         <div class="group-form-row">
-          <label class="group-form-label" for="create-group-remark-input">{{
-            t('common.remark')
-          }}</label>
-          <div class="group-form-control">
-            <textarea
-              id="create-group-remark-input"
-              v-model="remark"
-              rows="3"
-              :disabled="busy"
-            ></textarea>
-          </div>
-        </div>
-        <div class="group-form-row">
           <div id="create-models-title" class="group-form-label group-model-label required-label">
             {{ t('groups.allowedModels') }}
           </div>
@@ -359,6 +346,19 @@ function deleteGroup() {
             </div>
           </section>
         </div>
+        <div class="group-form-row">
+          <label class="group-form-label" for="create-group-remark-input">{{
+            t('common.remark')
+          }}</label>
+          <div class="group-form-control">
+            <textarea
+              id="create-group-remark-input"
+              v-model="remark"
+              rows="3"
+              :disabled="busy"
+            ></textarea>
+          </div>
+        </div>
       </div>
       <p v-if="actionError && !createModelsReady" class="form-retry">
         <button type="button" class="text-button" :disabled="busy" @click="run(loadCreateModels)">
@@ -395,19 +395,6 @@ function deleteGroup() {
               :disabled="busy"
               autofocus
             />
-          </div>
-        </div>
-        <div class="group-form-row">
-          <label class="group-form-label" for="edit-group-remark-input">{{
-            t('common.remark')
-          }}</label>
-          <div class="group-form-control">
-            <textarea
-              id="edit-group-remark-input"
-              v-model="editRemark"
-              rows="3"
-              :disabled="busy"
-            ></textarea>
           </div>
         </div>
         <div class="group-form-row">
@@ -495,6 +482,19 @@ function deleteGroup() {
               </p>
             </div>
           </section>
+        </div>
+        <div class="group-form-row">
+          <label class="group-form-label" for="edit-group-remark-input">{{
+            t('common.remark')
+          }}</label>
+          <div class="group-form-control">
+            <textarea
+              id="edit-group-remark-input"
+              v-model="editRemark"
+              rows="3"
+              :disabled="busy"
+            ></textarea>
+          </div>
         </div>
       </div>
       <p v-if="actionError && !relationReady" class="form-retry">

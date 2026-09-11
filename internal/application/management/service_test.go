@@ -4,10 +4,53 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	"github.com/zentrola/zentrola/internal/domain/admin"
 )
+
+type subscriptionAdapterStub struct{ probe SubscriptionProbe }
+
+func (subscriptionAdapterStub) Code() string              { return AuthAdapterOpenAICodex }
+func (subscriptionAdapterStub) Supports(code string) bool { return code == AuthAdapterOpenAICodex }
+func (subscriptionAdapterStub) SupportsProvider(provider Provider) bool {
+	return provider.Code == "openai-official"
+}
+func (subscriptionAdapterStub) Inspect([]byte) (SubscriptionInspection, error) {
+	return SubscriptionInspection{}, nil
+}
+func (s subscriptionAdapterStub) Probe(context.Context, []byte) (SubscriptionProbe, error) {
+	return s.probe, nil
+}
+
+type resourceCreateWriter struct {
+	Writer
+	created ResourceRecord
+	quotas  []ResourceQuota
+}
+
+func (w *resourceCreateWriter) Provider(context.Context, int64) (Provider, error) {
+	return Provider{ID: 40, Code: "openai-official"}, nil
+}
+func (w *resourceCreateWriter) CreateResource(_ context.Context, resource ResourceRecord) error {
+	w.created = resource
+	return nil
+}
+func (w *resourceCreateWriter) ReplaceResourceQuotas(_ context.Context, _ int64, quotas []ResourceQuota) error {
+	w.quotas = append([]ResourceQuota(nil), quotas...)
+	return nil
+}
+func (*resourceCreateWriter) Audit(context.Context, Audit, appsec.RequestMeta) error { return nil }
+
+type resourceCreateStore struct{ writer *resourceCreateWriter }
+
+func (s resourceCreateStore) Read(_ context.Context, _ admin.Identity, fn func(Reader) error) error {
+	return fn(s.writer)
+}
+func (s resourceCreateStore) Write(_ context.Context, _ admin.Identity, fn func(Writer) error) error {
+	return fn(s.writer)
+}
 
 type fixedMemberID struct{ id int64 }
 
@@ -62,8 +105,8 @@ func (w *credentialUpdateWriter) Audit(_ context.Context, audit Audit, _ appsec.
 
 type credentialUpdateStore struct{ writer *credentialUpdateWriter }
 
-func (s credentialUpdateStore) Read(context.Context, admin.Identity, func(Reader) error) error {
-	return nil
+func (s credentialUpdateStore) Read(_ context.Context, _ admin.Identity, fn func(Reader) error) error {
+	return fn(s.writer)
 }
 
 func (s credentialUpdateStore) Write(_ context.Context, _ admin.Identity, fn func(Writer) error) error {
@@ -115,9 +158,9 @@ func TestCreateMemberDefaultsToDisabled(t *testing.T) {
 	}
 }
 
-func TestUpdateCredentialActivatesResource(t *testing.T) {
+func TestUpdateCredentialPersistsResource(t *testing.T) {
 	writer := &credentialUpdateWriter{resource: ResourceRecord{Resource: Resource{
-		ID: 48, ProviderID: 40, Name: "深度求索 API Key", Status: "DISABLED",
+		ID: 48, ProviderID: 40, Name: "深度求索 API Key", AuthType: AuthTypeAPIKey,
 	}}}
 	service := New(credentialUpdateStore{writer: writer}, nil, providerTestCipher{}, nil)
 
@@ -131,19 +174,39 @@ func TestUpdateCredentialActivatesResource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if writer.updated.Status != "ACTIVE" {
-		t.Fatalf("updated status=%q; want ACTIVE", writer.updated.Status)
-	}
 	if string(writer.updated.Sealed.Ciphertext) != "replacement-credential" {
 		t.Fatal("updated credential was not persisted")
 	}
-	before, ok := writer.audit.Before.(map[string]string)
-	if !ok || before["status"] != "DISABLED" {
-		t.Fatalf("audit before=%#v; want disabled status", writer.audit.Before)
-	}
 	after, ok := writer.audit.After.(map[string]any)
-	if !ok || after["credentialConfigured"] != true || after["status"] != "ACTIVE" {
-		t.Fatalf("audit after=%#v; want configured active credential", writer.audit.After)
+	if !ok || after["credentialConfigured"] != true || after["authType"] != AuthTypeAPIKey {
+		t.Fatalf("audit after=%#v; want configured API key credential", writer.audit.After)
+	}
+}
+
+func TestCreatePersonalSubscriptionProbesAndPersistsQuota(t *testing.T) {
+	reset := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	percent := 20.0
+	writer := &resourceCreateWriter{}
+	service := New(resourceCreateStore{writer: writer}, fixedMemberID{id: 48}, providerTestCipher{}, nil,
+		WithSubscriptionAdapter(subscriptionAdapterStub{probe: SubscriptionProbe{
+			Inspection: SubscriptionInspection{AccountRef: "account-1", PlanCode: "plus"},
+			Credential: []byte("refreshed-auth-cache"),
+			Quotas:     []ResourceQuota{{Code: "codex.primary", Status: QuotaAvailable, UsedPercent: &percent, ResetsAt: &reset}},
+		}}),
+	)
+
+	created, err := service.CreateAuthenticationResource(context.Background(), admin.Identity{ID: 1}, CreateResourceInput{
+		ProviderID: 40, Name: "个人订阅", Credential: "imported-auth-cache",
+		AuthType: AuthTypeSubscription, AuthAdapter: AuthAdapterOpenAICodex, Priority: 10,
+	}, appsec.RequestMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.SubscriptionType == nil || *created.SubscriptionType != SubscriptionPersonal || created.QuotaStatus != QuotaAvailable || created.PlanCode == nil || *created.PlanCode != "plus" {
+		t.Fatalf("unexpected subscription resource: %+v", created)
+	}
+	if string(writer.created.Sealed.Ciphertext) != "refreshed-auth-cache" || len(writer.quotas) != 1 || writer.quotas[0].Code != "codex.primary" {
+		t.Fatalf("credential or quotas were not persisted: sealed=%q quotas=%+v", writer.created.Sealed.Ciphertext, writer.quotas)
 	}
 }
 

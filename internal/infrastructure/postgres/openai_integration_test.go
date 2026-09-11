@@ -84,17 +84,11 @@ func TestOpenAIIntegration(t *testing.T) {
 	if err := management.SetProviderStatus(ctx, actor, provider.ID, "ACTIVE", appsec.RequestMeta{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := management.SetResourceStatus(ctx, actor, resource.ID, "ACTIVE", appsec.RequestMeta{}); err != nil {
-		t.Fatal(err)
-	}
 	anthropicResource, err := management.CreateResource(ctx, actor, anthropicProvider.ID, "Anthropic resource", "anthropic-upstream-secret", appsec.RequestMeta{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := management.SetProviderStatus(ctx, actor, anthropicProvider.ID, "ACTIVE", appsec.RequestMeta{}); err != nil {
-		t.Fatal(err)
-	}
-	if err := management.SetResourceStatus(ctx, actor, anthropicResource.ID, "ACTIVE", appsec.RequestMeta{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := management.SetGroupModel(ctx, actor, group.ID, modelID, true, appsec.RequestMeta{}); err != nil {
@@ -251,10 +245,10 @@ func TestOpenAIIntegration(t *testing.T) {
 	if !strings.Contains(string(converted), `"object":"chat.completion"`) {
 		t.Fatal("Anthropic fallback did not return OpenAI response")
 	}
-	if err := management.SetResourceStatus(ctx, actor, resource.ID, "DISABLED", appsec.RequestMeta{}); err != nil {
+	if err := management.DeleteResource(ctx, actor, resource.ID, appsec.RequestMeta{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := management.SetResourceStatus(ctx, actor, anthropicResource.ID, "DISABLED", appsec.RequestMeta{}); err != nil {
+	if err := management.DeleteResource(ctx, actor, anthropicResource.ID, appsec.RequestMeta{}); err != nil {
 		t.Fatal(err)
 	}
 	list = call("disabled_models", "GET", "/v1/models", "", key.Key, 200)
@@ -263,7 +257,8 @@ func TestOpenAIIntegration(t *testing.T) {
 		t.Fatal("disabled resource still discoverable")
 	}
 	call("disabled", "POST", "/v1/chat/completions", `{"model":"deepseek-v4-flash"}`, key.Key, 503)
-	if err := management.SetResourceStatus(ctx, actor, resource.ID, "ACTIVE", appsec.RequestMeta{}); err != nil {
+	resource, err = management.CreateResource(ctx, actor, provider.ID, "OpenAI replacement resource", "openai-upstream-secret", appsec.RequestMeta{})
+	if err != nil {
 		t.Fatal(err)
 	}
 	cancelCtx, cancel := context.WithCancel(ctx)

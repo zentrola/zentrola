@@ -3870,7 +3870,7 @@
                         "AdminBearer": []
                     }
                 ],
-                "description": "凭证加密保存并默认启用；服务商停用时不会参与实际调用。",
+                "description": "创建 API Key 或个人订阅认证资源；凭证加密保存，订阅认证优先于 API Key 参与调用。",
                 "consumes": [
                     "application/json"
                 ],
@@ -4029,6 +4029,79 @@
                         }
                     }
                 }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "模型与资源"
+                ],
+                "summary": "删除资源",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "业务 ID（正整数字符串）",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/http.UpdatedResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
             }
         },
         "/api/v1/resources/{id}/credential": {
@@ -4130,15 +4203,12 @@
                 }
             }
         },
-        "/api/v1/resources/{id}/status": {
-            "patch": {
+        "/api/v1/resources/{id}/quotas": {
+            "get": {
                 "security": [
                     {
                         "AdminBearer": []
                     }
-                ],
-                "consumes": [
-                    "application/json"
                 ],
                 "produces": [
                     "application/json"
@@ -4146,7 +4216,7 @@
                 "tags": [
                     "模型与资源"
                 ],
-                "summary": "修改资源状态",
+                "summary": "资源订阅额度",
                 "parameters": [
                     {
                         "type": "string",
@@ -4154,15 +4224,6 @@
                         "name": "id",
                         "in": "path",
                         "required": true
-                    },
-                    {
-                        "description": "请求参数",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/http.UpdateStatusRequest"
-                        }
                     }
                 ],
                 "responses": {
@@ -4177,17 +4238,14 @@
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/http.UpdatedResponse"
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/management.ResourceQuota"
+                                            }
                                         }
                                     }
                                 }
                             ]
-                        },
-                        "headers": {
-                            "X-Request-ID": {
-                                "type": "string",
-                                "description": "请求追踪 ID"
-                            }
                         }
                     },
                     "400": {
@@ -4208,18 +4266,6 @@
                             "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
                         }
                     },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
-                        }
-                    },
-                    "422": {
-                        "description": "Unprocessable Entity",
-                        "schema": {
-                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
-                        }
-                    },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
@@ -4236,7 +4282,7 @@
                         "AdminBearer": []
                     }
                 ],
-                "description": "根据服务商编码选择官方模型目录适配器；当前支持 DeepSeek。创建缺失模型和映射，同编码模型更新官方名称；新模型默认停用，其他既有配置保持不变。HTTP 200 后仍需检查 data.ok 和 data.code。",
+                "description": "根据服务商编码选择官方模型目录适配器；当前支持 OpenAI、DeepSeek 和智谱 AI。创建缺失模型和映射，同编码模型更新官方名称；新模型默认停用，其他既有配置保持不变。HTTP 200 后仍需检查 data.ok 和 data.code。",
                 "produces": [
                     "application/json"
                 ],
@@ -5309,13 +5355,35 @@
                 "providerId"
             ],
             "properties": {
+                "authAdapter": {
+                    "type": "string",
+                    "example": "API_KEY"
+                },
+                "authType": {
+                    "type": "string",
+                    "enum": [
+                        "API_KEY",
+                        "SUBSCRIPTION"
+                    ],
+                    "example": "API_KEY"
+                },
                 "credential": {
                     "type": "string",
                     "example": "your-provider-api-key"
                 },
+                "effectiveAt": {
+                    "type": "string"
+                },
+                "expiresAt": {
+                    "type": "string"
+                },
                 "name": {
                     "type": "string",
                     "example": "企业模型资源"
+                },
+                "priority": {
+                    "type": "integer",
+                    "example": 100
                 },
                 "providerId": {
                     "type": "string",
@@ -5910,6 +5978,12 @@
         "management.Provider": {
             "type": "object",
             "properties": {
+                "authAdapters": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "code": {
                     "type": "string"
                 },
@@ -5961,6 +6035,12 @@
         "management.ProviderDetail": {
             "type": "object",
             "properties": {
+                "authAdapters": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "code": {
                     "type": "string"
                 },
@@ -6182,6 +6262,12 @@
         "management.Resource": {
             "type": "object",
             "properties": {
+                "authAdapter": {
+                    "type": "string"
+                },
+                "authType": {
+                    "type": "string"
+                },
                 "blockedAt": {
                     "type": "string"
                 },
@@ -6193,6 +6279,15 @@
                 },
                 "credentialConfigured": {
                     "type": "boolean"
+                },
+                "effectiveAt": {
+                    "type": "string"
+                },
+                "expiresAt": {
+                    "type": "string"
+                },
+                "externalAccountRef": {
+                    "type": "string"
                 },
                 "id": {
                     "type": "string",
@@ -6210,18 +6305,74 @@
                 "name": {
                     "type": "string"
                 },
+                "planCode": {
+                    "type": "string"
+                },
+                "priority": {
+                    "type": "integer"
+                },
                 "providerId": {
                     "type": "string",
                     "example": "0"
                 },
+                "quotaCheckedAt": {
+                    "type": "string"
+                },
+                "quotaResetsAt": {
+                    "type": "string"
+                },
+                "quotaStatus": {
+                    "type": "string"
+                },
                 "runtimeStatus": {
+                    "type": "string"
+                },
+                "subscriptionType": {
+                    "type": "string"
+                },
+                "updatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "management.ResourceQuota": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "limitValue": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "observedAt": {
+                    "type": "string"
+                },
+                "reachedType": {
+                    "type": "string"
+                },
+                "remainingValue": {
+                    "type": "string"
+                },
+                "resetsAt": {
                     "type": "string"
                 },
                 "status": {
                     "type": "string"
                 },
-                "updatedAt": {
+                "unit": {
                     "type": "string"
+                },
+                "usedPercent": {
+                    "type": "number"
+                },
+                "usedValue": {
+                    "type": "string"
+                },
+                "windowDurationSeconds": {
+                    "type": "integer"
                 }
             }
         },

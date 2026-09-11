@@ -73,6 +73,19 @@ func (s *Service) forwardCandidates(ctx context.Context, identity appsec.Princip
 			index = next
 			continue
 		}
+		if route.AuthType == "SUBSCRIPTION" {
+			credential, err = s.refreshCredential(ctx, route, credential)
+			if err != nil {
+				clear(credential)
+				s.cooldown(ctx, route, defaultRouteCooldown)
+				next := s.nextRoute(ctx, routes, index+1)
+				if next < 0 || tries >= s.maxTries {
+					return nil, err
+				}
+				index = next
+				continue
+			}
+		}
 		route.Proxy, err = s.decryptProxy(route)
 		if err != nil {
 			clear(credential)
@@ -132,6 +145,39 @@ func (s *Service) forwardCandidates(ctx context.Context, identity appsec.Princip
 	return nil, ErrUpstream
 }
 
+func (s *Service) refreshCredential(ctx context.Context, route Route, credential []byte) ([]byte, error) {
+	if s.refresh == nil || !s.refresh.Supports(route.AuthAdapter) {
+		return credential, ErrSubscription
+	}
+	updated, changed, err := s.refresh.RefreshIfNeeded(ctx, credential)
+	if err != nil {
+		clear(updated)
+		return credential, ErrSubscription
+	}
+	if !changed {
+		clear(updated)
+		return credential, nil
+	}
+	if len(updated) == 0 {
+		return credential, ErrSubscription
+	}
+	encryptor, encryptOK := s.cipher.(CredentialEncryptor)
+	updater, updateOK := s.store.(CredentialUpdater)
+	if !encryptOK || !updateOK {
+		clear(updated)
+		return credential, ErrSubscription
+	}
+	sealed, err := encryptor.Encrypt(updated, catalog.CredentialOwner{ProviderID: route.ProviderID, ResourceID: route.ResourceID})
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
+	if err != nil || updater.UpdateResourceCredential(persistCtx, route, sealed) != nil {
+		clear(updated)
+		return credential, ErrSubscription
+	}
+	clear(credential)
+	return updated, nil
+}
+
 func (s *Service) startAttempt(event *usage.Event, route Route) *usage.Attempt {
 	if event == nil {
 		return nil
@@ -175,11 +221,11 @@ func (s *Service) block(ctx context.Context, identity appsec.PrincipalIdentity, 
 }
 
 func retryableOpenError(err error) bool {
-	return errors.Is(err, ErrRoute) || errors.Is(err, ErrCredential) || errors.Is(err, ErrProxy) || errors.Is(err, ErrUpstream) || errors.Is(err, ErrTimeout)
+	return errors.Is(err, ErrRoute) || errors.Is(err, ErrCredential) || errors.Is(err, ErrSubscription) || errors.Is(err, ErrProxy) || errors.Is(err, ErrUpstream) || errors.Is(err, ErrTimeout)
 }
 
 func localOpenError(err error) bool {
-	return errors.Is(err, ErrRoute) || errors.Is(err, ErrInvalid) || errors.Is(err, ErrCredential) || errors.Is(err, ErrProxy)
+	return errors.Is(err, ErrRoute) || errors.Is(err, ErrInvalid) || errors.Is(err, ErrCredential) || errors.Is(err, ErrSubscription) || errors.Is(err, ErrProxy)
 }
 
 func failureCode(err error) string {

@@ -71,8 +71,37 @@ func TestDiscoverZhipuModels(t *testing.T) {
 	}
 }
 
+func TestDiscoverOpenAIModels(t *testing.T) {
+	var logs bytes.Buffer
+	discoverer := NewDiscoverer(slog.New(slog.NewJSONHandler(&logs, nil)))
+	discoverer.client.Transport = roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Method != http.MethodGet || request.URL.String() != "https://api.openai.com/v1/models" || request.Header.Get("Authorization") != "Bearer test-secret" || request.Header.Get("x-api-key") != "" {
+			t.Fatalf("invalid discovery request: %s %s", request.Method, request.URL.String())
+		}
+		body := `{"object":"list","data":[{"id":"text-embedding-3-small","object":"model","created":1705948997,"owned_by":"system"},{"id":"gpt-4o","object":"model","created":1715367049,"owned_by":"openai"},{"id":"gpt-4o","object":"model","created":1715367049,"owned_by":"openai"}]}`
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	})
+
+	models, result := discoverer.Discover(context.Background(), mgmt.ModelDiscoverySource{ProviderCode: catalog.OpenAIOfficialCode}, []byte("test-secret"), nil)
+	if !result.OK || result.Code != "OK" || len(models) != 2 || models[0].Code != "gpt-4o" || models[0].Name != "GPT-4o" || models[1].Code != "text-embedding-3-small" || models[1].Name != "Text embedding 3 small" {
+		t.Fatalf("unexpected discovery: %+v %+v", models, result)
+	}
+	output := logs.String()
+	for _, expected := range []string{"official model catalog response", `"provider_code":"openai-official"`, `"catalog_adapter":"openai"`, `"upstream_status":200`} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("discovery response log missing %q: %s", expected, output)
+		}
+	}
+	if strings.Contains(output, "test-secret") {
+		t.Fatalf("discovery response log leaked credential: %s", output)
+	}
+}
+
 func TestDiscovererReportsRegisteredProviderCapabilities(t *testing.T) {
 	discoverer := NewDiscoverer(nil)
+	if !discoverer.Supports(catalog.OpenAIOfficialCode) {
+		t.Fatal("OpenAI model catalog adapter should be reported as supported")
+	}
 	if !discoverer.Supports(catalog.DeepSeekOfficialCode) {
 		t.Fatal("DeepSeek model catalog adapter should be reported as supported")
 	}
@@ -108,9 +137,27 @@ func TestDiscoverRejectsUnsupportedProviderWithoutRequest(t *testing.T) {
 		t.Fatal("unsupported provider reached transport")
 		return nil, nil
 	})
-	models, result := discoverer.Discover(context.Background(), mgmt.ModelDiscoverySource{ProviderCode: "openai-official"}, []byte("test-secret"), nil)
+	models, result := discoverer.Discover(context.Background(), mgmt.ModelDiscoverySource{ProviderCode: "provider-custom"}, []byte("test-secret"), nil)
 	if result.OK || result.Code != "MODEL_CATALOG_UNSUPPORTED" || models != nil {
 		t.Fatalf("unsupported provider accepted: %+v %+v", models, result)
+	}
+}
+
+func TestDiscoverOpenAIRejectsInvalidCatalog(t *testing.T) {
+	for _, body := range []string{
+		`{"object":"list","data":[{"id":"bad model\n","object":"model","owned_by":"openai"}]}`,
+		`{"object":"list","data":[{"id":"gpt-4o","object":"unknown","owned_by":"openai"}]}`,
+		`{"object":"list","data":[{"id":"gpt-4o","object":"model"}]}`,
+		`{"object":"list"}`,
+	} {
+		discoverer := NewDiscoverer(nil)
+		discoverer.client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+		})
+		models, result := discoverer.Discover(context.Background(), mgmt.ModelDiscoverySource{ProviderCode: catalog.OpenAIOfficialCode}, []byte("test-secret"), nil)
+		if result.Code != "UPSTREAM_INVALID_RESPONSE" || result.OK || models != nil {
+			t.Fatalf("invalid catalog accepted: %q %+v %+v", body, models, result)
+		}
 	}
 }
 

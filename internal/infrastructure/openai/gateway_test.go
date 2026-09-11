@@ -2,7 +2,9 @@ package openai
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -72,6 +74,34 @@ func TestResponsesForwarding(t *testing.T) {
 		t.Fatalf("Responses forwarding failed: response=%+v err=%v", response, err)
 	}
 	response.Body.Close()
+}
+
+func TestCodexSubscriptionResponsesForwarding(t *testing.T) {
+	c := NewGatewayClient(time.Second)
+	var headers http.Header
+	c.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		headers = r.Header
+		if r.URL.String() != "https://chatgpt.com/backend-api/codex/responses" || r.Method != http.MethodPost {
+			t.Fatalf("unexpected subscription URL: %s", r.URL)
+		}
+		if !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer x.") || strings.Contains(r.Header.Get("Authorization"), "refresh") || r.Header.Get("ChatGPT-Account-Id") != "account-1" || r.Header.Get("Originator") != "zentrola" {
+			t.Fatalf("unexpected subscription headers: %+v", r.Header)
+		}
+		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"id":"resp_1"}`))}, nil
+	})
+	payload := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf(`{"exp":%d}`, time.Now().Add(time.Hour).Unix())))
+	auth := []byte(fmt.Sprintf(`{"auth_mode":"chatgpt","tokens":{"id_token":"id","access_token":"x.%s.x","refresh_token":"refresh","account_id":"account-1"}}`, payload))
+	response, err := c.Open(context.Background(), gw.Route{AuthType: "SUBSCRIPTION", AuthAdapter: "OPENAI_CODEX"}, gw.Request{
+		Protocol: gw.OpenAIResponsesProtocol, Path: "/v1/responses", Body: []byte(`{"model":"system-model","input":"hello"}`),
+	}, auth)
+	clear(auth)
+	if err != nil || response.Status != 200 {
+		t.Fatalf("subscription forwarding failed: response=%+v err=%v", response, err)
+	}
+	response.Body.Close()
+	if headers.Get("Authorization") != "" || headers.Get("ChatGPT-Account-Id") != "" {
+		t.Fatal("subscription credential retained after Close")
+	}
 }
 
 func TestRedirectAndTimeout(t *testing.T) {

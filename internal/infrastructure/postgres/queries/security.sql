@@ -54,7 +54,7 @@ request_id,request_method,request_path,ip_address,user_agent,result,error_code,b
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20);
 
 -- name: ListResourcesForCredentialCheck :many
-SELECT * FROM provider_credential WHERE is_deleted=false AND status='ACTIVE' ORDER BY id FOR UPDATE;
+SELECT * FROM provider_credential WHERE is_deleted=false ORDER BY id FOR UPDATE;
 
--- name: DisableUnrecoverableResource :exec
-UPDATE provider_credential SET status='DISABLED',updated_by='system',updated_at=$2 WHERE id=$1 AND is_deleted=false;
+-- name: DeleteUnrecoverableResource :exec
+UPDATE provider_credential SET is_deleted=true,updated_by='system',updated_at=$2 WHERE id=$1 AND is_deleted=false;
