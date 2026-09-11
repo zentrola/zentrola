@@ -301,7 +301,7 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 	redisProbeCancel()
 	gatewayService := gateway.New(
 		gatewaycache.NewGatewayStore(postgres.NewGatewayStore(pool), gatewayCache, logger), credentials, compatibleUpstream,
-		gateway.WithRouteState(routeState), gateway.WithMaxAttempts(2),
+		gateway.WithRouteState(routeState),
 		gateway.WithSubscriptionRefresher(codexSubscription),
 	)
 	usageStore := postgres.NewUsageStore(pool)

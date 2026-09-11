@@ -141,6 +141,40 @@ func TestForwardFailsOverAndRecordsEveryAttempt(t *testing.T) {
 	}
 }
 
+func TestForwardTriesEveryCandidateUntilOneSucceeds(t *testing.T) {
+	routes := append(testRoutes(), Route{
+		ModelID: 1, ProviderID: 30, ProviderModelID: 300, ResourceID: 3000,
+		UpstreamModel: "provider-c-model",
+	})
+	store := &failoverStore{routes: routes}
+	state := &failoverState{blocked: map[int64]bool{}}
+	trace := &usage.Event{}
+	var called []int64
+	service := New(store, failoverCipher{}, upstreamFunc(func(_ context.Context, route Route, _ Request, _ []byte) (*Response, error) {
+		called = append(called, route.ResourceID)
+		if route.ResourceID != 3000 {
+			return response(503, `{"error":"temporarily unavailable"}`), nil
+		}
+		return response(200, `{"content":[]}`), nil
+	}), WithRouteState(state))
+
+	got, err := testForward(t, service, trace)
+	if err != nil || got.Status != 200 {
+		t.Fatalf("status=%v err=%v", got, err)
+	}
+	defer got.Body.Close()
+	if len(called) != 3 || called[0] != 1000 || called[1] != 2000 || called[2] != 3000 {
+		t.Fatalf("calls=%v", called)
+	}
+	if len(state.cooldowns) != 2 || state.cooldowns[0] != 1000 || state.cooldowns[1] != 2000 {
+		t.Fatalf("cooldowns=%v", state.cooldowns)
+	}
+	if len(trace.Attempts) != 2 || trace.Attempts[0].AttemptNo != 1 || trace.Attempts[1].AttemptNo != 2 ||
+		trace.Attempt == nil || trace.Attempt.AttemptNo != 3 || trace.Attempt.ResourceID != 3000 {
+		t.Fatalf("trace=%+v attempts=%+v", trace.Attempt, trace.Attempts)
+	}
+}
+
 func TestForwardSkipsCoolingRoute(t *testing.T) {
 	store := &failoverStore{routes: testRoutes()}
 	state := &failoverState{blocked: map[int64]bool{1000: true}}

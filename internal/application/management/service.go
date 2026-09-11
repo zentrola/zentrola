@@ -734,6 +734,7 @@ func (s *Service) TestResource(ctx context.Context, actor admin.Identity, id int
 	}
 	var resource ResourceRecord
 	var provider Provider
+	var mappings []ProviderMapping
 	err := s.store.Read(ctx, actor, func(r Reader) error {
 		var err error
 		resource, err = r.Resource(ctx, id)
@@ -741,6 +742,10 @@ func (s *Service) TestResource(ctx context.Context, actor admin.Identity, id int
 			return err
 		}
 		provider, err = r.Provider(ctx, resource.ProviderID)
+		if err != nil {
+			return err
+		}
+		mappings, err = r.ProviderMappings(ctx, resource.ProviderID)
 		return err
 	})
 	if err != nil {
@@ -752,8 +757,15 @@ func (s *Service) TestResource(ctx context.Context, actor admin.Identity, id int
 	plain, decryptErr := s.cipher.Decrypt(resource.Sealed, owner(actor, resource.Resource))
 	if decryptErr != nil {
 		result.Code = "CREDENTIAL_UNRECOVERABLE"
+	} else if len(mappings) == 0 || strings.TrimSpace(mappings[0].UpstreamModelCode) == "" {
+		result.Code = "PROVIDER_MODEL_MAPPING_REQUIRED"
 	} else {
 		defer clear(plain)
+		protocol, baseURL := preferredProviderEndpoint(provider)
+		target := ConnectionTarget{
+			Protocol: protocol, BaseURL: baseURL, UpstreamModelCode: mappings[0].UpstreamModelCode,
+			AuthType: resource.AuthType, AuthAdapter: resource.AuthAdapter,
+		}
 		if resource.AuthType == AuthTypeSubscription {
 			startedAt := time.Now()
 			if s.subscription == nil || !s.subscription.Supports(resource.AuthAdapter) || !s.subscription.SupportsProvider(provider) {
@@ -762,7 +774,6 @@ func (s *Service) TestResource(ctx context.Context, actor admin.Identity, id int
 				result.Code = "SUBSCRIPTION_UNAVAILABLE"
 			} else {
 				subscriptionProbe = &probe
-				result.OK, result.Code = true, "OK"
 				resource.PlanCode = stringPointer(probe.Inspection.PlanCode)
 				resource.ExternalAccountRef = stringPointer(probe.Inspection.AccountRef)
 				if probe.Inspection.ExpiresAt != nil {
@@ -771,24 +782,39 @@ func (s *Service) TestResource(ctx context.Context, actor admin.Identity, id int
 				resource.QuotaStatus, resource.QuotaResetsAt = aggregateQuota(probe.Quotas)
 				now := time.Now().UTC().Truncate(time.Microsecond)
 				resource.QuotaCheckedAt = &now
+				probeCredential := plain
 				if len(probe.Credential) > 0 {
+					probeCredential = probe.Credential
+				}
+				if baseURL == "" {
+					result.Code = "PROVIDER_UNAVAILABLE"
+				} else {
+					proxy, proxyErr := s.decryptedProviderProxy(provider)
+					if proxyErr != nil {
+						result.Code = "PROXY_CONFIGURATION_UNRECOVERABLE"
+					} else {
+						result = s.tester.Test(ctx, target, probeCredential, proxy)
+					}
+				}
+				if result.OK && len(probe.Credential) > 0 {
 					refreshedSealed, probeErr = s.cipher.Encrypt(probe.Credential, owner(actor, resource.Resource))
-					clear(probe.Credential)
 					if probeErr != nil {
 						result.OK, result.Code = false, "CREDENTIAL_UNRECOVERABLE"
 						subscriptionProbe = nil
 					}
 				}
+				clear(probe.Credential)
 			}
 			result.LatencyMS = time.Since(startedAt).Milliseconds()
 		} else {
-			protocol, baseURL := preferredProviderEndpoint(provider)
-			if baseURL != "" {
+			if baseURL == "" {
+				result.Code = "PROVIDER_UNAVAILABLE"
+			} else {
 				proxy, proxyErr := s.decryptedProviderProxy(provider)
 				if proxyErr != nil {
 					result.Code = "PROXY_CONFIGURATION_UNRECOVERABLE"
 				} else {
-					result = s.tester.Test(ctx, protocol, baseURL, plain, proxy)
+					result = s.tester.Test(ctx, target, plain, proxy)
 				}
 			}
 		}
@@ -823,13 +849,30 @@ func (s *Service) TestResource(ctx context.Context, actor admin.Identity, id int
 				return err
 			}
 		}
+		now := time.Now().UTC().Truncate(time.Microsecond)
 		if result.OK {
 			if restorer, ok := w.(interface {
 				RestoreResourceRuntime(context.Context, int64, time.Time) error
 			}); ok {
-				if err := restorer.RestoreResourceRuntime(auditCtx, id, time.Now().UTC().Truncate(time.Microsecond)); err != nil {
+				if err := restorer.RestoreResourceRuntime(auditCtx, id, now); err != nil {
 					return err
 				}
+			}
+		} else if reason := connectionBlockReason(result.Code); reason != "" {
+			current.RuntimeStatus = "BLOCKED"
+			current.BlockedReason = stringPointer(reason)
+			current.BlockedAt = &now
+			current.LastErrorAt = &now
+			current.LastErrorCode = stringPointer(result.Code)
+			if result.HTTPStatus > 0 {
+				status := int32(result.HTTPStatus)
+				current.LastHTTPStatus = &status
+			} else {
+				current.LastHTTPStatus = nil
+			}
+			current.UpdatedAt = now
+			if err := w.UpdateResource(auditCtx, current); err != nil {
+				return err
 			}
 		}
 		code := ""
@@ -839,6 +882,21 @@ func (s *Service) TestResource(ctx context.Context, actor admin.Identity, id int
 		return w.Audit(auditCtx, Audit{Event: operation.ResourceConnectionTest, Target: "RESOURCE", ID: id, Name: resource.Name, After: map[string]any{"test": result, "testedUpdatedAt": resource.UpdatedAt}, ErrorCode: code}, meta)
 	})
 	return result, err
+}
+
+func connectionBlockReason(code string) string {
+	switch code {
+	case "UPSTREAM_BILLING_BLOCKED":
+		return "BILLING"
+	case "UPSTREAM_ACCOUNT_SUSPENDED":
+		return "ACCOUNT_SUSPENDED"
+	case "UPSTREAM_AUTH_FAILED":
+		return "AUTHENTICATION"
+	case "CREDENTIAL_UNRECOVERABLE":
+		return "CREDENTIAL_UNRECOVERABLE"
+	default:
+		return ""
+	}
 }
 
 func aggregateQuota(quotas []ResourceQuota) (string, *time.Time) {

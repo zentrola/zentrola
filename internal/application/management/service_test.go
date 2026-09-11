@@ -8,6 +8,7 @@ import (
 
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	"github.com/zentrola/zentrola/internal/domain/admin"
+	"github.com/zentrola/zentrola/internal/domain/catalog"
 )
 
 type subscriptionAdapterStub struct{ probe SubscriptionProbe }
@@ -55,6 +56,50 @@ func (s resourceCreateStore) Write(_ context.Context, _ admin.Identity, fn func(
 type fixedMemberID struct{ id int64 }
 
 func (g fixedMemberID) NextID(context.Context) (int64, error) { return g.id, nil }
+
+type connectionTesterFunc func(context.Context, ConnectionTarget, []byte, *catalog.OutboundProxy) ConnectionResult
+
+func (f connectionTesterFunc) Test(ctx context.Context, target ConnectionTarget, credential []byte, proxy *catalog.OutboundProxy) ConnectionResult {
+	return f(ctx, target, credential, proxy)
+}
+
+type resourceTestWriter struct {
+	Writer
+	resource ResourceRecord
+	provider Provider
+	mappings []ProviderMapping
+	updated  ResourceRecord
+	restored bool
+}
+
+func (w *resourceTestWriter) Resource(context.Context, int64) (ResourceRecord, error) {
+	return w.resource, nil
+}
+func (w *resourceTestWriter) Provider(context.Context, int64) (Provider, error) {
+	return w.provider, nil
+}
+func (w *resourceTestWriter) ProviderMappings(context.Context, int64) ([]ProviderMapping, error) {
+	return w.mappings, nil
+}
+func (w *resourceTestWriter) UpdateResource(_ context.Context, resource ResourceRecord) error {
+	w.updated = resource
+	w.resource = resource
+	return nil
+}
+func (w *resourceTestWriter) RestoreResourceRuntime(context.Context, int64, time.Time) error {
+	w.restored = true
+	return nil
+}
+func (*resourceTestWriter) Audit(context.Context, Audit, appsec.RequestMeta) error { return nil }
+
+type resourceTestStore struct{ writer *resourceTestWriter }
+
+func (s resourceTestStore) Read(_ context.Context, _ admin.Identity, fn func(Reader) error) error {
+	return fn(s.writer)
+}
+func (s resourceTestStore) Write(_ context.Context, _ admin.Identity, fn func(Writer) error) error {
+	return fn(s.writer)
+}
 
 type memberCreateWriter struct {
 	Writer
@@ -180,6 +225,36 @@ func TestUpdateCredentialPersistsResource(t *testing.T) {
 	after, ok := writer.audit.After.(map[string]any)
 	if !ok || after["credentialConfigured"] != true || after["authType"] != AuthTypeAPIKey {
 		t.Fatalf("audit after=%#v; want configured API key credential", writer.audit.After)
+	}
+}
+
+func TestResourceInferenceProbeBlocksBillingFailure(t *testing.T) {
+	updatedAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
+	writer := &resourceTestWriter{
+		resource: ResourceRecord{
+			Resource: Resource{ID: 48, ProviderID: 40, Name: "上游账号", AuthType: AuthTypeAPIKey, AuthAdapter: AuthAdapterAPIKey, RuntimeStatus: "HEALTHY", UpdatedAt: updatedAt},
+			Sealed:   catalog.SealedCredential{Ciphertext: []byte("provider-key"), KeyVersion: 1},
+		},
+		provider: Provider{ID: 40, Endpoints: []ProviderEndpoint{{ProtocolType: "ANTHROPIC", BaseURL: "https://api.anthropic.com"}}},
+		mappings: []ProviderMapping{{ProviderID: 40, UpstreamModelCode: "claude-test", Priority: 0}},
+	}
+	tester := connectionTesterFunc(func(_ context.Context, target ConnectionTarget, credential []byte, _ *catalog.OutboundProxy) ConnectionResult {
+		if target.Protocol != "ANTHROPIC" || target.UpstreamModelCode != "claude-test" || string(credential) != "provider-key" {
+			t.Fatalf("unexpected inference target: %+v", target)
+		}
+		return ConnectionResult{Code: "UPSTREAM_BILLING_BLOCKED", HTTPStatus: 402}
+	})
+	service := New(resourceTestStore{writer: writer}, nil, providerTestCipher{}, tester)
+
+	result, err := service.TestResource(context.Background(), admin.Identity{ID: 1}, 48, appsec.RequestMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.OK || writer.restored {
+		t.Fatal("billing failure must not restore the resource")
+	}
+	if writer.updated.RuntimeStatus != "BLOCKED" || writer.updated.BlockedReason == nil || *writer.updated.BlockedReason != "BILLING" || writer.updated.LastHTTPStatus == nil || *writer.updated.LastHTTPStatus != 402 {
+		t.Fatalf("unexpected blocked resource: %+v", writer.updated.Resource)
 	}
 }
 

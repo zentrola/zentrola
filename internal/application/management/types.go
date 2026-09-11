@@ -321,8 +321,17 @@ type ConnectionResult struct {
 	HTTPStatus int    `json:"httpStatus,omitempty"`
 	LatencyMS  int64  `json:"latencyMs"`
 }
+
+type ConnectionTarget struct {
+	Protocol          string
+	BaseURL           string
+	UpstreamModelCode string
+	AuthType          string
+	AuthAdapter       string
+}
+
 type ConnectionTester interface {
-	Test(context.Context, string, string, []byte, *catalog.OutboundProxy) ConnectionResult
+	Test(context.Context, ConnectionTarget, []byte, *catalog.OutboundProxy) ConnectionResult
 }
 
 type DiscoveredModel struct {

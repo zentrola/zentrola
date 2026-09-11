@@ -51,13 +51,11 @@ func (s *Service) forwardCandidates(ctx context.Context, identity appsec.Princip
 	if index < 0 {
 		return nil, ErrRoute
 	}
-	tries := 0
-	for index >= 0 && tries < s.maxTries {
-		tries++
+	for index >= 0 {
 		route := routes[index]
 		if !validModel(route.UpstreamModel) {
 			next := s.nextRoute(ctx, routes, index+1)
-			if next < 0 || tries >= s.maxTries {
+			if next < 0 {
 				return nil, ErrRoute
 			}
 			index = next
@@ -67,7 +65,7 @@ func (s *Service) forwardCandidates(ctx context.Context, identity appsec.Princip
 		if err != nil {
 			s.block(ctx, identity, route, ResourceBlock{Reason: "CREDENTIAL_UNRECOVERABLE", ErrorCode: "CREDENTIAL_UNRECOVERABLE"})
 			next := s.nextRoute(ctx, routes, index+1)
-			if next < 0 || tries >= s.maxTries {
+			if next < 0 {
 				return nil, ErrCredential
 			}
 			index = next
@@ -79,7 +77,7 @@ func (s *Service) forwardCandidates(ctx context.Context, identity appsec.Princip
 				clear(credential)
 				s.cooldown(ctx, route, defaultRouteCooldown)
 				next := s.nextRoute(ctx, routes, index+1)
-				if next < 0 || tries >= s.maxTries {
+				if next < 0 {
 					return nil, err
 				}
 				index = next
@@ -91,7 +89,7 @@ func (s *Service) forwardCandidates(ctx context.Context, identity appsec.Princip
 			clear(credential)
 			s.cooldown(ctx, route, defaultRouteCooldown)
 			next := s.nextRoute(ctx, routes, index+1)
-			if next < 0 || tries >= s.maxTries {
+			if next < 0 {
 				return nil, err
 			}
 			index = next
@@ -115,7 +113,7 @@ func (s *Service) forwardCandidates(ctx context.Context, identity appsec.Princip
 					s.cooldown(ctx, route, defaultRouteCooldown)
 				}
 				next := s.nextRoute(ctx, routes, index+1)
-				if next >= 0 && tries < s.maxTries {
+				if next >= 0 {
 					index = next
 					continue
 				}
@@ -133,7 +131,7 @@ func (s *Service) forwardCandidates(ctx context.Context, identity appsec.Princip
 		}
 		if decision.retry {
 			next := s.nextRoute(ctx, routes, index+1)
-			if next >= 0 && tries < s.maxTries {
+			if next >= 0 {
 				s.failAttempt(request.Trace, attempt, "UPSTREAM_HTTP_"+strconv.Itoa(response.Status))
 				response.Body.Close()
 				index = next

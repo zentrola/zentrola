@@ -29,10 +29,10 @@ import (
 	httptransport "github.com/zentrola/zentrola/internal/transport/http"
 )
 
-type connectionTestFunc func(context.Context, string, string, []byte, *catalog.OutboundProxy) mgmt.ConnectionResult
+type connectionTestFunc func(context.Context, mgmt.ConnectionTarget, []byte, *catalog.OutboundProxy) mgmt.ConnectionResult
 
-func (f connectionTestFunc) Test(ctx context.Context, protocol, url string, key []byte, proxy *catalog.OutboundProxy) mgmt.ConnectionResult {
-	return f(ctx, protocol, url, key, proxy)
+func (f connectionTestFunc) Test(ctx context.Context, target mgmt.ConnectionTarget, key []byte, proxy *catalog.OutboundProxy) mgmt.ConnectionResult {
+	return f(ctx, target, key, proxy)
 }
 
 type failedAuditIDs struct{}
@@ -90,8 +90,8 @@ func TestStage3Integration(t *testing.T) {
 		t.Fatal(err)
 	}
 	const credential = "stage3-private-provider-key"
-	tester := connectionTestFunc(func(_ context.Context, _ string, url string, key []byte, _ *catalog.OutboundProxy) mgmt.ConnectionResult {
-		if url != "https://provider.example.com/v1" || string(key) != credential {
+	tester := connectionTestFunc(func(_ context.Context, target mgmt.ConnectionTarget, key []byte, _ *catalog.OutboundProxy) mgmt.ConnectionResult {
+		if target.BaseURL != "https://provider.example.com/v1" || target.UpstreamModelCode == "" || string(key) != credential {
 			t.Error("unexpected connection test inputs")
 		}
 		return mgmt.ConnectionResult{OK: true, Code: "OK", HTTPStatus: 200}
@@ -362,7 +362,7 @@ func TestStage3Integration(t *testing.T) {
 	})
 
 	t.Run("connection test releases transaction and detects replacement", func(t *testing.T) {
-		changing := mgmt.New(NewManagementStore(pool, ids), ids, cipher, connectionTestFunc(func(ctx context.Context, _, _ string, _ []byte, _ *catalog.OutboundProxy) mgmt.ConnectionResult {
+		changing := mgmt.New(NewManagementStore(pool, ids), ids, cipher, connectionTestFunc(func(ctx context.Context, _ mgmt.ConnectionTarget, _ []byte, _ *catalog.OutboundProxy) mgmt.ConnectionResult {
 			if err := service.UpdateCredential(ctx, actor, first.ID, credential, appsec.RequestMeta{}); err != nil {
 				t.Error(err)
 			}

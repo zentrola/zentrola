@@ -55,7 +55,6 @@ const credentialAuthType = ref<'API_KEY' | 'SUBSCRIPTION'>('API_KEY')
 const testTarget = ref<{ provider: Provider; resource: Resource } | null>(null)
 const testResult = ref<ConnectionResult | null>(null)
 const credentialVerifiedAt = reactive<Record<string, string>>({})
-const credentialValidationResults = reactive<Record<string, boolean>>({})
 const syncTarget = ref<{ provider: Provider; resource: Resource } | null>(null)
 const syncResult = ref<ModelSyncResult | null>(null)
 const credential = ref('')
@@ -331,6 +330,13 @@ function blockedResourceReason(resource: Resource) {
   return resource.lastHttpStatus ? `${reason} · HTTP ${resource.lastHttpStatus}` : reason
 }
 
+function verificationLabel(resource: Resource) {
+  return t(
+    resource.runtimeStatus === 'BLOCKED' ? 'resources.verifyAndRestoreFor' : 'resources.verifyFor',
+    { name: resource.name },
+  )
+}
+
 function providerRuntime(provider: Provider) {
   const configured = resourcesFor(provider)
   if (!configured.length) {
@@ -375,35 +381,20 @@ function providerRuntimeLabel(provider: Provider) {
   return hint ? `${status}：${hint}` : status
 }
 
-function providerCredentialState(provider: Provider) {
-  const configured = resourcesFor(provider)
-  if (!configured.length) {
-    return {
-      key: 'missing',
-      symbol: t('common.none'),
-      label: t('resources.credentialStates.missing'),
-    }
-  }
-  if (
-    configured.some(
-      (resource) =>
-        credentialValidationResults[resource.id] ?? resource.runtimeStatus !== 'BLOCKED',
-    )
-  ) {
-    return { key: 'verified', symbol: '', label: t('resources.credentialStates.verified') }
-  }
-  return { key: 'failed', symbol: '!', label: t('resources.credentialStates.failed') }
+function providerRuntimeActionLabel(provider: Provider) {
+  return t('providers.openCredentialsFromRuntime', {
+    name: provider.name,
+    status: providerRuntimeLabel(provider),
+  })
 }
 
-function maskedCredential(resource: Resource | undefined) {
-  if (!resource) return t('common.none')
+function maskedCredential(resource: Resource) {
   return resource.authType === 'SUBSCRIPTION'
     ? t('resources.maskedToken')
     : t('resources.maskedApiKey')
 }
 
-function lastCredentialVerification(resource: Resource | undefined) {
-  if (!resource) return null
+function lastCredentialVerification(resource: Resource) {
   return credentialVerifiedAt[resource.id] || resource.quotaCheckedAt || resource.lastErrorAt
 }
 
@@ -583,30 +574,26 @@ function deleteCredential() {
   void run(async () => {
     await api(`/resources/${resourceID}`, 'DELETE')
     delete credentialVerifiedAt[resourceID]
-    delete credentialValidationResults[resourceID]
     credentialDeleteTarget.value = null
     await loadResources()
   })
 }
 
-function testConnection(provider: Provider) {
-  const resource = resourceFor(provider)
-  if (!resource) return
+function testConnection(provider: Provider, resource: Resource) {
   testTarget.value = { provider, resource }
   testResult.value = null
   actionError.value = ''
   void run(async () => {
     const result = await api<ConnectionResult>(`/resources/${resource.id}/test-connection`, 'POST')
     credentialVerifiedAt[resource.id] = new Date().toISOString()
-    credentialValidationResults[resource.id] = result.ok
     await loadResources()
     testResult.value = result
   })
 }
 
-function testCredentialFromModal(provider: Provider) {
+function testCredentialFromModal(provider: Provider, resource: Resource) {
   closeCredential()
-  testConnection(provider)
+  testConnection(provider, resource)
 }
 
 function syncModels(provider: Provider) {
@@ -791,16 +778,6 @@ onMounted(() => {
                     >
                       <Icon name="website" :size="15" /></a
                     ><button
-                      v-if="resourceFor(provider)"
-                      type="button"
-                      class="provider-quick-action provider-direct-action"
-                      :aria-label="t('providers.testConnectionFor', { name: provider.name })"
-                      :title="t('resources.test')"
-                      :disabled="busy"
-                      @click="testConnection(provider)"
-                    >
-                      <Icon name="activity" :size="16" /></button
-                    ><button
                       v-if="provider.modelSyncSupported && apiKeyResourceFor(provider)"
                       type="button"
                       class="provider-quick-action provider-direct-action"
@@ -832,14 +809,16 @@ onMounted(() => {
               />
             </td>
             <td class="provider-runtime">
-              <span
+              <button
+                type="button"
                 class="provider-runtime-state"
-                :tabindex="providerRuntimeHint(provider) ? 0 : undefined"
-                :title="providerRuntimeHint(provider) || undefined"
-                :aria-label="providerRuntimeLabel(provider)"
+                :title="providerRuntimeActionLabel(provider)"
+                :aria-label="providerRuntimeActionLabel(provider)"
+                :disabled="busy"
+                @click="configureCredential(provider)"
               >
                 <Status :value="providerRuntime(provider).status" />
-              </span>
+              </button>
             </td>
             <td class="proxy-column">
               <span
@@ -871,14 +850,12 @@ onMounted(() => {
                 v-if="endpointURL(provider, 'OPENAI') || endpointURL(provider, 'ANTHROPIC')"
                 class="endpoint-stack"
               >
-                <span
-                  v-if="endpointURL(provider, 'OPENAI')"
+                <span v-if="endpointURL(provider, 'OPENAI')"
                   ><span class="endpoint-protocol">OpenAI</span
                   ><code class="endpoint" :title="endpointURL(provider, 'OPENAI')">{{
                     endpointURL(provider, 'OPENAI')
                   }}</code></span
-                ><span
-                  v-if="endpointURL(provider, 'ANTHROPIC')"
+                ><span v-if="endpointURL(provider, 'ANTHROPIC')"
                   ><span class="endpoint-protocol">Anthropic</span
                   ><code class="endpoint" :title="endpointURL(provider, 'ANTHROPIC')">{{
                     endpointURL(provider, 'ANTHROPIC')
@@ -1161,10 +1138,19 @@ onMounted(() => {
           </div>
           <div v-if="form.proxyEnabled" class="proxy-fields">
             <div class="provider-field-row proxy-url-row">
-              <label class="provider-field-label" for="provider-proxy-url">{{
-                t('providers.proxyUrl')
-              }}</label>
-              <div class="provider-field-control proxy-url-control">
+              <div class="provider-field-label proxy-url-label">
+                <label for="provider-proxy-url">{{ t('providers.proxyUrl') }}</label>
+                <span
+                  class="provider-field-help"
+                  role="img"
+                  tabindex="0"
+                  :aria-label="t('providers.proxyUrlCredentialHint')"
+                  :title="t('providers.proxyUrlCredentialHint')"
+                  :data-tooltip="t('providers.proxyUrlCredentialHint')"
+                  >i</span
+                >
+              </div>
+              <div class="provider-field-control">
                 <input
                   id="provider-proxy-url"
                   v-model="form.proxyUrl"
@@ -1174,7 +1160,6 @@ onMounted(() => {
                   spellcheck="false"
                   :disabled="busy"
                 />
-                <p class="field-hint proxy-url-hint">{{ t('providers.proxyUrlHint') }}</p>
               </div>
             </div>
             <div class="proxy-headers-head">
@@ -1263,7 +1248,7 @@ onMounted(() => {
     v-if="credentialTarget"
     :title="t('resources.configurationTitle')"
     :busy="busy"
-    :medium="!credentialCreating"
+    :wide="!credentialCreating"
     @close="closeCredential"
   >
     <template v-if="!credentialCreating">
@@ -1282,27 +1267,8 @@ onMounted(() => {
           <dd>{{ credentialTarget.name }}</dd>
         </div>
         <div>
-          <dt>{{ t('resources.credentialStatus') }}</dt>
-          <dd>
-            <span
-              class="credential-overview-status"
-              :class="`is-${providerCredentialState(credentialTarget).key}`"
-              ><b v-if="providerCredentialState(credentialTarget).symbol" aria-hidden="true">{{
-                providerCredentialState(credentialTarget).symbol
-              }}</b
-              >{{ providerCredentialState(credentialTarget).label }}</span
-            >
-          </dd>
-        </div>
-        <div>
-          <dt>{{ t('resources.maskedCredential') }}</dt>
-          <dd>
-            <code>{{ maskedCredential(resourceFor(credentialTarget)) }}</code>
-          </dd>
-        </div>
-        <div>
-          <dt>{{ t('resources.lastVerifiedAt') }}</dt>
-          <dd>{{ date(lastCredentialVerification(resourceFor(credentialTarget))) }}</dd>
+          <dt>{{ t('common.status') }}</dt>
+          <dd><Status :value="credentialTarget.status" /></dd>
         </div>
         <div class="credential-overview-endpoints">
           <dt>{{ t('resources.baseUrl') }}</dt>
@@ -1340,16 +1306,39 @@ onMounted(() => {
                 <small v-if="resource.externalAccountRef" class="credential-detail">{{
                   resource.externalAccountRef
                 }}</small>
+                <small class="credential-detail">
+                  {{ t('resources.lastVerifiedAt') }} ·
+                  {{ date(lastCredentialVerification(resource)) }}
+                </small>
               </td>
               <td class="credential-auth" :data-label="t('resources.authType')">
                 {{ t(`resources.authTypes.${resource.authType || 'API_KEY'}`) }}
+                <small v-if="resource.planCode" class="credential-detail">{{
+                  resource.planCode
+                }}</small>
+                <small class="credential-detail credential-mask">
+                  <code>{{ maskedCredential(resource) }}</code>
+                </small>
                 <Status
                   v-if="resource.authType === 'SUBSCRIPTION'"
                   :value="resource.quotaStatus || 'UNKNOWN'"
                 />
               </td>
               <td class="credential-runtime" :data-label="t('resources.runtimeStatus')">
-                <Status :value="resource.runtimeStatus || 'HEALTHY'" />
+                <div class="credential-runtime-line">
+                  <Status :value="resource.runtimeStatus || 'HEALTHY'" />
+                  <button
+                    type="button"
+                    class="icon-button credential-verify-action"
+                    :class="{ 'is-blocked': resource.runtimeStatus === 'BLOCKED' }"
+                    :aria-label="verificationLabel(resource)"
+                    :title="verificationLabel(resource)"
+                    :disabled="busy"
+                    @click="testCredentialFromModal(credentialTarget, resource)"
+                  >
+                    <Icon name="refresh" :size="15" />
+                  </button>
+                </div>
               </td>
               <td class="credential-error" :data-label="t('resources.errorInfo')">
                 <template
@@ -1469,14 +1458,7 @@ onMounted(() => {
         </button>
       </template>
       <template v-else>
-        <button
-          type="button"
-          class="button"
-          :disabled="busy || !resourceFor(credentialTarget)"
-          @click="testCredentialFromModal(credentialTarget)"
-        >
-          {{ t('resources.test') }}</button
-        ><button type="button" class="button primary" :disabled="busy" @click="closeCredential">
+        <button type="button" class="button primary" :disabled="busy" @click="closeCredential">
           {{ t('common.save') }}
         </button>
       </template>
@@ -1628,7 +1610,14 @@ onMounted(() => {
 }
 .provider-runtime-state {
   display: inline-flex;
+  padding: 0;
+  border: 0;
   border-radius: 7px;
+  background: transparent;
+  cursor: pointer;
+}
+.provider-runtime-state:hover:not(:disabled) {
+  box-shadow: 0 0 0 2px #8eadd733;
 }
 .provider-runtime-state:focus-visible {
   outline: 2px solid #90b7fb;
@@ -1783,10 +1772,6 @@ onMounted(() => {
   color: #29445c;
   font-size: 12px;
 }
-.credential-overview dd > code {
-  color: #38556f;
-  letter-spacing: 0.04em;
-}
 .credential-overview-endpoints {
   grid-column: 1 / -1;
   border-bottom: 0 !important;
@@ -1810,38 +1795,6 @@ onMounted(() => {
   color: #38556f;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.credential-overview-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 600;
-}
-.credential-overview-status b {
-  display: inline-grid;
-  width: 17px;
-  height: 17px;
-  place-items: center;
-  border-radius: 50%;
-  font-size: 11px;
-}
-.credential-overview-status.is-verified {
-  color: #20714f;
-}
-.credential-overview-status.is-verified b {
-  background: #dcefe5;
-}
-.credential-overview-status.is-failed {
-  color: #a43b3b;
-}
-.credential-overview-status.is-failed b {
-  background: #f8e1e1;
-}
-.credential-overview-status.is-missing {
-  color: #71869a;
-}
-.credential-overview-status.is-missing b {
-  background: #e7edf2;
 }
 .credential-list {
   min-width: 0;
@@ -1899,6 +1852,10 @@ onMounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.credential-mask code {
+  color: #536d84;
+  letter-spacing: 0.04em;
+}
 .credential-error {
   color: #566d82;
   line-height: 1.5;
@@ -1909,6 +1866,19 @@ onMounted(() => {
 }
 .credential-action-column {
   text-align: right;
+}
+.credential-runtime-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.credential-verify-action {
+  width: 26px;
+  height: 26px;
+  color: var(--blue);
+}
+.credential-verify-action.is-blocked {
+  color: #b46619;
 }
 .credential-empty {
   display: grid;
@@ -2014,6 +1984,8 @@ onMounted(() => {
   padding: 6px 8px;
 }
 .provider-form {
+  --provider-field-label-width: 160px;
+
   display: grid;
   gap: 14px;
 }
@@ -2061,7 +2033,7 @@ onMounted(() => {
 }
 .provider-field-row {
   display: grid;
-  grid-template-columns: 160px minmax(0, 1fr);
+  grid-template-columns: var(--provider-field-label-width) minmax(0, 1fr);
   align-items: start;
   gap: 12px;
 }
@@ -2131,7 +2103,7 @@ onMounted(() => {
 }
 .proxy-editor {
   display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
+  grid-template-columns: var(--provider-field-label-width) minmax(0, 1fr);
   column-gap: 12px;
 }
 .proxy-switch-row {
@@ -2218,9 +2190,6 @@ onMounted(() => {
 .proxy-fields > label {
   margin: 0;
 }
-.proxy-fields .field-hint {
-  margin: 0;
-}
 .proxy-url-row {
   grid-column: 1 / -1;
   grid-template-columns: subgrid;
@@ -2228,9 +2197,59 @@ onMounted(() => {
 .proxy-url-row .provider-field-label {
   text-align: left;
 }
-.proxy-url-control {
-  display: grid;
-  gap: 6px;
+.proxy-url-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.provider-field-help {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border: 1px solid #8ca0b2;
+  border-radius: 50%;
+  color: #60788d;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+}
+.provider-field-help::after {
+  position: absolute;
+  top: 50%;
+  left: calc(100% + 8px);
+  z-index: 3;
+  width: max-content;
+  max-width: 220px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  background: #183247;
+  box-shadow: 0 4px 12px #1832472b;
+  color: #fff;
+  content: attr(data-tooltip);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.4;
+  opacity: 0;
+  pointer-events: none;
+  text-align: left;
+  transform: translate(4px, -50%);
+  transition:
+    opacity 0.15s,
+    transform 0.15s;
+}
+.provider-field-help:hover::after,
+.provider-field-help:focus-visible::after {
+  opacity: 1;
+  transform: translate(0, -50%);
+}
+.provider-field-help:focus-visible {
+  outline: 2px solid #90b7fb;
+  outline-offset: 2px;
 }
 .proxy-headers-head {
   display: flex;
@@ -2240,8 +2259,10 @@ onMounted(() => {
   gap: 16px;
 }
 .proxy-headers-head > div {
-  display: grid;
-  gap: 3px;
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  gap: 10px;
 }
 .proxy-headers-head strong {
   color: #183247;
@@ -2504,6 +2525,17 @@ onMounted(() => {
   .proxy-url-row {
     grid-column: 1;
     grid-template-columns: minmax(0, 1fr);
+  }
+  .proxy-headers-head {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .proxy-headers-head > div {
+    flex-wrap: wrap;
+  }
+  .proxy-headers-head .button {
+    align-self: flex-start;
   }
   .mapping-editor-head {
     align-items: stretch;

@@ -1,21 +1,24 @@
-// Package anthropic 提供 Anthropic 协议上游和官方账号连通性检查。
+// Package anthropic 提供 Anthropic 与 OpenAI 兼容上游的端到端推理检查。
 package anthropic
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
 	mgmt "github.com/zentrola/zentrola/internal/application/management"
 	"github.com/zentrola/zentrola/internal/domain/catalog"
+	"github.com/zentrola/zentrola/internal/infrastructure/openaicodex"
 	"github.com/zentrola/zentrola/internal/infrastructure/provider"
 )
+
+const connectionProbeMaxOutputTokens = 5
 
 type ConnectionTester struct {
 	client *http.Client
@@ -32,52 +35,71 @@ func NewConnectionTester() *ConnectionTester {
 	}
 }
 
-func connectionStatusCode(status int) string {
-	switch status {
-	case http.StatusUnauthorized, http.StatusForbidden:
-		return "UPSTREAM_AUTH_FAILED"
-	case http.StatusTooManyRequests:
-		return "UPSTREAM_RATE_LIMITED"
-	default:
-		return "UPSTREAM_UNAVAILABLE"
-	}
-}
-func (t *ConnectionTester) Test(ctx context.Context, protocol, baseURL string, credential []byte, proxy *catalog.OutboundProxy) (result mgmt.ConnectionResult) {
+func (t *ConnectionTester) Test(ctx context.Context, target mgmt.ConnectionTarget, credential []byte, proxy *catalog.OutboundProxy) (result mgmt.ConnectionResult) {
 	started := time.Now()
 	defer func() { result.LatencyMS = time.Since(started).Milliseconds() }()
-	base, allowed := allowedBaseURL(baseURL)
+	if strings.TrimSpace(target.UpstreamModelCode) == "" {
+		result.Code = "PROVIDER_MODEL_MAPPING_REQUIRED"
+		return
+	}
+	base, allowed := allowedBaseURL(target.BaseURL)
 	if !allowed {
 		result.Code = "UPSTREAM_URL_REJECTED"
 		return
 	}
-	for _, ch := range credential {
-		if ch < 33 || ch > 126 {
-			result.Code = "CREDENTIAL_INVALID"
-			return
-		}
-	}
-	if len(credential) == 0 || len(credential) > 4096 {
+	if (target.AuthType != mgmt.AuthTypeSubscription && !validProbeCredential(credential)) ||
+		(target.AuthType == mgmt.AuthTypeSubscription && (len(credential) == 0 || len(credential) > 64<<10)) {
 		result.Code = "CREDENTIAL_INVALID"
 		return
 	}
-	probeURL, bearer, format, ok := connectionProbeEndpoint(protocol, base, 1)
+
+	requestCredential := string(credential)
+	accountID := ""
+	probeURL, body, responseFormat, ok := inferenceProbe(target.Protocol, base, target.UpstreamModelCode)
+	if target.AuthType == mgmt.AuthTypeSubscription {
+		if target.AuthAdapter != openaicodex.AdapterCode || target.Protocol != "OPENAI" {
+			result.Code = "SUBSCRIPTION_ADAPTER_UNAVAILABLE"
+			return
+		}
+		accessToken, account, expiresAt, err := openaicodex.RequestCredential(credential)
+		if err != nil || expiresAt != nil && !expiresAt.After(time.Now().Add(time.Minute)) {
+			result.Code = "UPSTREAM_AUTH_FAILED"
+			return
+		}
+		requestCredential, accountID = accessToken, account
+		probeURL = "https://chatgpt.com/backend-api/codex/responses"
+		body, responseFormat, ok = openAIResponsesProbeBody(target.UpstreamModelCode), openAIResponsesInferenceProbe, true
+	}
 	if !ok {
 		result.Code = "UPSTREAM_URL_REJECTED"
 		return
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, probeURL, nil)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, probeURL, bytes.NewReader(body))
 	if err != nil {
 		result.Code = "UPSTREAM_UNAVAILABLE"
 		return
 	}
-	if bearer {
-		req.Header.Set("Authorization", "Bearer "+string(credential))
+	req.GetBody = nil
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept-Encoding", "identity")
+	if target.Protocol == "OPENAI" {
+		req.Header.Set("Authorization", "Bearer "+requestCredential)
+		if accountID != "" {
+			req.Header.Set("ChatGPT-Account-Id", accountID)
+			req.Header.Set("Originator", "zentrola")
+		}
 	} else {
-		req.Header.Set("x-api-key", string(credential))
+		req.Header.Set("x-api-key", requestCredential)
 		req.Header.Set("anthropic-version", "2023-06-01")
 	}
-	defer func() { req.Header.Del("Authorization"); req.Header.Del("x-api-key") }()
-	req.Header.Set("Accept", "application/json")
+	defer func() {
+		req.Header.Del("Authorization")
+		req.Header.Del("x-api-key")
+		req.Header.Del("ChatGPT-Account-Id")
+	}()
+
 	client, cleanup, err := provider.ClientWithProxy(t.client, proxy)
 	if err != nil {
 		result.Code = "PROXY_CONFIGURATION_UNRECOVERABLE"
@@ -91,67 +113,187 @@ func (t *ConnectionTester) Test(ctx context.Context, protocol, baseURL string, c
 	}
 	defer resp.Body.Close()
 	result.HTTPStatus = resp.StatusCode
-	switch resp.StatusCode {
-	case 200:
-		data, err := io.ReadAll(io.LimitReader(resp.Body, (64<<10)+1))
-		if err != nil {
-			result.Code = connectionErrorCode(ctx, err)
-			return
-		}
-		if len(data) > 64<<10 {
-			result.Code = "UPSTREAM_INVALID_RESPONSE"
-			return
-		}
-		if !validConnectionProbe(data, format) {
-			result.Code = "UPSTREAM_INVALID_RESPONSE"
-			return
-		}
-		result.OK = true
-		result.Code = "OK"
-	default:
-		result.Code = connectionStatusCode(resp.StatusCode)
+	data, readErr := io.ReadAll(io.LimitReader(resp.Body, (64<<10)+1))
+	if readErr != nil {
+		result.Code = connectionErrorCode(ctx, readErr)
+		return
 	}
+	if len(data) > 64<<10 {
+		result.Code = "UPSTREAM_INVALID_RESPONSE"
+		return
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		result.Code = inferenceStatusCode(resp.StatusCode, data)
+		return
+	}
+	if !validInferenceResponse(data, responseFormat) {
+		result.Code = "UPSTREAM_INVALID_RESPONSE"
+		return
+	}
+	result.OK = true
+	result.Code = "OK"
 	return
 }
 
-type connectionProbeFormat uint8
-
-const (
-	openAIConnectionProbe connectionProbeFormat = iota
-	dashScopeConnectionProbe
-)
-
-func connectionProbeEndpoint(protocol, base string, limit int) (string, bool, connectionProbeFormat, bool) {
-	if protocol == "OPENAI" {
-		if strings.Contains(base, ".aliyuncs.com/") && strings.HasSuffix(base, "/compatible-mode/v1") {
-			url := strings.TrimSuffix(base, "/compatible-mode/v1") + "/api/v1/models"
-			return url + "?providers=qwen&capabilities=TG&page_no=1&page_size=" + strconv.Itoa(limit), true, dashScopeConnectionProbe, true
+func validProbeCredential(credential []byte) bool {
+	if len(credential) == 0 || len(credential) > 4096 {
+		return false
+	}
+	for _, ch := range credential {
+		if ch < 33 || ch > 126 {
+			return false
 		}
-		return strings.TrimSuffix(base, "/") + "/models", true, openAIConnectionProbe, true
 	}
-	if protocol != "ANTHROPIC" {
-		return "", false, 0, false
-	}
-	if base == "https://api.deepseek.com/anthropic" {
-		return "https://api.deepseek.com/models", true, openAIConnectionProbe, true
-	}
-	return strings.TrimSuffix(base, "/") + "/v1/models?limit=" + strconv.Itoa(limit), false, openAIConnectionProbe, true
+	return true
 }
 
-func validConnectionProbe(data []byte, format connectionProbeFormat) bool {
-	if format == dashScopeConnectionProbe {
+type inferenceProbeFormat uint8
+
+const (
+	openAIChatInferenceProbe inferenceProbeFormat = iota
+	anthropicInferenceProbe
+	openAIResponsesInferenceProbe
+)
+
+func inferenceProbe(protocol, base, model string) (string, []byte, inferenceProbeFormat, bool) {
+	switch protocol {
+	case "OPENAI":
+		return strings.TrimSuffix(base, "/") + "/chat/completions", openAIChatProbeBody(model), openAIChatInferenceProbe, true
+	case "ANTHROPIC":
+		return strings.TrimSuffix(base, "/") + "/v1/messages", anthropicProbeBody(model), anthropicInferenceProbe, true
+	default:
+		return "", nil, 0, false
+	}
+}
+
+type probeMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+func openAIChatProbeBody(model string) []byte {
+	body, _ := json.Marshal(struct {
+		Model       string         `json:"model"`
+		Messages    []probeMessage `json:"messages"`
+		MaxTokens   int            `json:"max_tokens"`
+		Temperature float64        `json:"temperature"`
+		Stream      bool           `json:"stream"`
+	}{Model: model, Messages: []probeMessage{{Role: "user", Content: "Reply only with OK."}}, MaxTokens: connectionProbeMaxOutputTokens})
+	return body
+}
+
+func openAIResponsesProbeBody(model string) []byte {
+	body, _ := json.Marshal(struct {
+		Model           string `json:"model"`
+		Input           string `json:"input"`
+		MaxOutputTokens int    `json:"max_output_tokens"`
+		Stream          bool   `json:"stream"`
+	}{Model: model, Input: "Reply only with OK.", MaxOutputTokens: connectionProbeMaxOutputTokens})
+	return body
+}
+
+func anthropicProbeBody(model string) []byte {
+	body, _ := json.Marshal(struct {
+		Model       string         `json:"model"`
+		MaxTokens   int            `json:"max_tokens"`
+		Temperature int            `json:"temperature"`
+		Stream      bool           `json:"stream"`
+		Messages    []probeMessage `json:"messages"`
+	}{Model: model, MaxTokens: connectionProbeMaxOutputTokens, Messages: []probeMessage{{Role: "user", Content: "Reply only with OK."}}})
+	return body
+}
+
+func validInferenceResponse(data []byte, format inferenceProbeFormat) bool {
+	switch format {
+	case anthropicInferenceProbe:
 		var payload struct {
-			Success bool `json:"success"`
-			Output  *struct {
-				Models []json.RawMessage `json:"models"`
+			Type    string `json:"type"`
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		}
+		if json.Unmarshal(data, &payload) != nil || payload.Type != "message" {
+			return false
+		}
+		for _, content := range payload.Content {
+			if strings.TrimSpace(content.Text) != "" {
+				return true
+			}
+		}
+		return false
+	case openAIResponsesInferenceProbe:
+		var payload struct {
+			ID     string `json:"id"`
+			Object string `json:"object"`
+			Output []struct {
+				Content []struct {
+					Text string `json:"text"`
+				} `json:"content"`
 			} `json:"output"`
 		}
-		return json.Unmarshal(data, &payload) == nil && payload.Success && payload.Output != nil && payload.Output.Models != nil
+		if json.Unmarshal(data, &payload) != nil || payload.ID == "" || payload.Object != "response" {
+			return false
+		}
+		for _, output := range payload.Output {
+			for _, content := range output.Content {
+				if strings.TrimSpace(content.Text) != "" {
+					return true
+				}
+			}
+		}
+		return false
+	default:
+		var payload struct {
+			Choices []struct {
+				Message struct {
+					Content string `json:"content"`
+				} `json:"message"`
+			} `json:"choices"`
+		}
+		if json.Unmarshal(data, &payload) != nil {
+			return false
+		}
+		for _, choice := range payload.Choices {
+			if strings.TrimSpace(choice.Message.Content) != "" {
+				return true
+			}
+		}
+		return false
 	}
-	var payload struct {
-		Data []json.RawMessage `json:"data"`
+}
+
+func inferenceStatusCode(status int, body []byte) string {
+	lower := strings.ToLower(string(body))
+	if status == http.StatusPaymentRequired || containsProbeText(lower,
+		"insufficient_balance", "insufficient balance", "credit balance", "payment required",
+		"billing_error", "billing error", "subscription expired", "subscription has expired",
+		"plan expired", "subscription inactive", "no active subscription") {
+		return "UPSTREAM_BILLING_BLOCKED"
 	}
-	return json.Unmarshal(data, &payload) == nil && payload.Data != nil
+	if containsProbeText(lower, "account suspended", "account_suspended", "account disabled", "account_disabled") {
+		return "UPSTREAM_ACCOUNT_SUSPENDED"
+	}
+	switch status {
+	case http.StatusUnauthorized:
+		return "UPSTREAM_AUTH_FAILED"
+	case http.StatusForbidden:
+		return "UPSTREAM_MODEL_UNAVAILABLE"
+	case http.StatusTooManyRequests:
+		return "UPSTREAM_RATE_LIMITED"
+	case http.StatusNotFound:
+		return "UPSTREAM_MODEL_UNAVAILABLE"
+	default:
+		return "UPSTREAM_UNAVAILABLE"
+	}
+}
+
+func containsProbeText(value string, candidates ...string) bool {
+	for _, candidate := range candidates {
+		if strings.Contains(value, candidate) {
+			return true
+		}
+	}
+	return false
 }
 
 func connectionErrorCode(ctx context.Context, err error) string {

@@ -1584,26 +1584,65 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
     'title',
     '仅该服务商的连接测试和模型调用使用此代理，默认直连。',
   )
+  const proxySwitchBoxBeforeEnable = await proxySwitch.boundingBox()
+  const providerNameLabelBox = await dialog
+      .locator('label[for="provider-name-input"]')
+      .boundingBox(),
+    providerNameInputBox = await dialog.getByLabel('服务商名称', { exact: true }).boundingBox()
+  expect(proxySwitchBoxBeforeEnable).not.toBeNull()
+  expect(providerNameLabelBox).not.toBeNull()
+  expect(providerNameInputBox).not.toBeNull()
+  expect(Math.abs(proxySwitchBoxBeforeEnable!.x - providerNameInputBox!.x)).toBeLessThanOrEqual(1)
   await proxySwitch.check()
   await expect(dialog.locator('.proxy-url-row')).toHaveCSS('grid-template-columns', /\S+ \S+/)
   await expect(dialog.locator('.proxy-url-row .provider-field-label')).toHaveCSS(
     'text-align',
     'left',
   )
+  await expect(
+    dialog.getByText(
+      '支持 http:// 或 https://，可直接包含用户名和密码；完整地址将加密保存，之后只显示脱敏值。',
+      { exact: true },
+    ),
+  ).toHaveCount(0)
+  const proxyUrlCredentialHint = dialog.getByRole('img', {
+    name: '用户名和密码将加密保存',
+    exact: true,
+  })
+  await expect(proxyUrlCredentialHint).toHaveAttribute('tabindex', '0')
+  await expect(proxyUrlCredentialHint).toHaveAttribute('title', '用户名和密码将加密保存')
   const proxyURLLabelBox = await dialog
       .locator('.proxy-url-row .provider-field-label')
       .boundingBox(),
     proxyURLInputBox = await dialog.getByLabel('代理服务器地址', { exact: true }).boundingBox()
   expect(proxyURLLabelBox).not.toBeNull()
   expect(proxyURLInputBox).not.toBeNull()
-  expect(proxyURLInputBox!.x - proxyURLLabelBox!.x).toBeLessThan(140)
+  expect(Math.abs(proxyURLLabelBox!.width - providerNameLabelBox!.width)).toBeLessThanOrEqual(1)
+  expect(Math.abs(proxyURLInputBox!.x - providerNameInputBox!.x)).toBeLessThanOrEqual(1)
   const proxySwitchBox = await proxySwitch.boundingBox()
   expect(proxySwitchBox).not.toBeNull()
+  expect(Math.abs(proxySwitchBox!.x - proxySwitchBoxBeforeEnable!.x)).toBeLessThanOrEqual(1)
   expect(Math.abs(proxySwitchBox!.x - proxyURLInputBox!.x)).toBeLessThanOrEqual(1)
   await dialog
     .getByLabel('代理服务器地址', { exact: true })
     .fill('http://proxy-user:proxy-password@proxy.example.com:8080')
-  await dialog.getByRole('button', { name: '添加 Header', exact: true }).click()
+  const proxyHeaderHint = dialog.getByText('Header Value 加密保存，且只发送给代理服务器。', {
+    exact: true,
+  })
+  const addProxyHeaderButton = dialog.getByRole('button', { name: '添加 Header', exact: true })
+  await expect(dialog.locator('.proxy-headers-head > div')).toHaveCSS('display', 'flex')
+  const proxyHeaderHintBox = await proxyHeaderHint.boundingBox()
+  const addProxyHeaderButtonBox = await addProxyHeaderButton.boundingBox()
+  expect(proxyHeaderHintBox).not.toBeNull()
+  expect(addProxyHeaderButtonBox).not.toBeNull()
+  expect(
+    Math.abs(
+      proxyHeaderHintBox!.y +
+        proxyHeaderHintBox!.height / 2 -
+        (addProxyHeaderButtonBox!.y + addProxyHeaderButtonBox!.height / 2),
+    ),
+  ).toBeLessThanOrEqual(3)
+  await addProxyHeaderButton.click()
   await expect(dialog.locator('.proxy-header-field')).toHaveCount(2)
   await expect(dialog.locator('.proxy-header-field').first()).toHaveCSS(
     'grid-template-columns',
@@ -1675,13 +1714,13 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   const runtimeStatusBox = await row.locator('.provider-runtime-state').boundingBox()
   expect(enabledStatusBox).not.toBeNull()
   expect(runtimeStatusBox).not.toBeNull()
-  expect(runtimeStatusBox!.x - (enabledStatusBox!.x + enabledStatusBox!.width)).toBeGreaterThanOrEqual(
-    16,
-  )
+  expect(
+    runtimeStatusBox!.x - (enabledStatusBox!.x + enabledStatusBox!.width),
+  ).toBeGreaterThanOrEqual(16)
   await expect(row.locator('.provider-runtime .subline')).toHaveCount(0)
   await expect(row.locator('.provider-runtime-state')).toHaveAttribute(
     'title',
-    '尚未配置服务商凭证',
+    '查看 阿里云百炼 的凭证，当前运行状态：未配置：尚未配置服务商凭证',
   )
   await expect(
     row.getByRole('img', { name: '阿里云百炼 已启用代理访问', exact: true }),
@@ -1724,20 +1763,25 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   ).toHaveText('凭证')
   await expect(createdStatus).toBeEnabled()
   await expect(createdStatus).not.toHaveAttribute('title')
-  const testCredential = row.getByRole('button', {
-    name: '测试 阿里云百炼 的连接',
+  await expect(
+    row.getByRole('button', { name: '验证 阿里云百炼 的模型调用', exact: true }),
+  ).toHaveCount(0)
+  await row
+    .getByRole('button', {
+      name: '管理 阿里云百炼 的认证凭据',
+      exact: true,
+    })
+    .click()
+  const createdCredentialRow = modal(page)
+    .getByRole('row')
+    .filter({ hasText: '阿里云百炼 API Key' })
+  const testCredential = createdCredentialRow.getByRole('button', {
+    name: '验证 阿里云百炼 API Key 的可用性',
     exact: true,
   })
   await expect(testCredential).toBeVisible()
-  const testCredentialBox = await testCredential.boundingBox()
-  const currentProviderNameCellBox = await row.getByRole('cell').first().boundingBox()
-  expect(testCredentialBox).not.toBeNull()
-  expect(currentProviderNameCellBox).not.toBeNull()
-  expect(testCredentialBox!.x + testCredentialBox!.width).toBeLessThanOrEqual(
-    currentProviderNameCellBox!.x + currentProviderNameCellBox!.width,
-  )
   await testCredential.click()
-  await expect(modal(page).getByRole('status')).toContainText('连接测试通过')
+  await expect(modal(page).getByRole('status')).toContainText('模型调用验证通过')
   await modal(page).getByRole('button', { name: '关闭', exact: true }).last().click()
   expect(state.resources.find((resource) => resource.providerId === created.id)?.status).toBe(
     'ACTIVE',
@@ -1831,23 +1875,22 @@ test('服务商列表展示凭证聚合运行状态和错误原因', async ({ pa
   await expect(row).not.toContainText('余额或计费异常 · HTTP 402')
   await expect(row.locator('.provider-runtime-state')).toHaveAttribute(
     'title',
-    '余额或计费异常 · HTTP 402 · UPSTREAM_BILLING_BLOCKED',
+    '查看 DeepSeek 的凭证，当前运行状态：已阻断：余额或计费异常 · HTTP 402 · UPSTREAM_BILLING_BLOCKED',
   )
-  await row
-    .getByRole('button', {
-      name: '管理 DeepSeek 的认证凭据',
-      exact: true,
-    })
-    .click()
+  await row.getByRole('button', { name: /查看 DeepSeek 的凭证/ }).click()
   await expect(modal(page).getByRole('heading', { name: '服务商凭证配置' })).toBeVisible()
-  await expect(modal(page).locator('.credential-overview')).toContainText('API Key · ••••••••')
+  await expect(modal(page).locator('.credential-overview')).not.toContainText('API Key · ••••••••')
   await expect(modal(page).locator('.credential-overview')).toContainText(
     'https://api.deepseek.com',
   )
-  await expect(modal(page).getByRole('button', { name: '测试连接', exact: true })).toBeVisible()
+  await expect(
+    modal(page).getByRole('button', { name: '验证并恢复 DeepSeek API Key', exact: true }),
+  ).toBeVisible()
   await expect(modal(page).getByRole('button', { name: '保存', exact: true })).toBeVisible()
   await modal(page).screenshot({ path: '../.cache/web-visual/provider-credential-config.png' })
   const credentialRow = modal(page).getByRole('row').filter({ hasText: 'DeepSeek API Key' })
+  await expect(credentialRow).toContainText('API Key · ••••••••')
+  await expect(credentialRow).toContainText('最后验证时间')
   await expect(modal(page).getByRole('columnheader')).toHaveText([
     '认证凭据',
     '认证方式',
@@ -1930,17 +1973,26 @@ test('服务商支持个人订阅优先并保留 API Key 兜底', async ({ page 
     '操作',
   ])
   const subscriptionRow = credentialList.getByRole('row').filter({ hasText: '个人订阅' })
+  await expect(credentialList.locator('.credential-overview')).not.toContainText('Token · ••••••••')
   await expect(subscriptionRow).toContainText('OpenAI 个人订阅')
+  await expect(subscriptionRow).toContainText('Token · ••••••••')
+  await expect(subscriptionRow).toContainText('最后验证时间')
   await expect(subscriptionRow.getByRole('cell').nth(3)).toHaveText('-')
-  await expect(subscriptionRow.getByRole('button')).toHaveText(['删除'])
-  await credentialList.getByRole('button', { name: '关闭', exact: true }).click()
-  await expect(page.locator('dialog')).toHaveCount(0)
+  await expect(
+    subscriptionRow.getByRole('button', {
+      name: '验证 OpenAI 个人订阅 的可用性',
+      exact: true,
+    }),
+  ).toBeVisible()
+  await expect(subscriptionRow.getByRole('button', { name: '删除', exact: true })).toBeVisible()
   expect(state.resources).toEqual([
     expect.objectContaining({ authType: 'SUBSCRIPTION', authAdapter: 'OPENAI_CODEX' }),
   ])
 
-  await providerRow.getByRole('button', { name: '测试 OpenAI 的连接', exact: true }).click()
-  await expect(modal(page).getByRole('status')).toContainText('连接测试通过')
+  await subscriptionRow
+    .getByRole('button', { name: '验证 OpenAI 个人订阅 的可用性', exact: true })
+    .click()
+  await expect(modal(page).getByRole('status')).toContainText('模型调用验证通过')
   await modal(page).getByRole('button', { name: '关闭', exact: true }).last().click()
   expect(state.resources[0].quotaStatus).toBe('AVAILABLE')
 
@@ -2451,34 +2503,44 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
   await expect(modal(page).getByRole('status')).toContainText('官方模型目录同步完成')
   expect(state.modelSyncRequests).toHaveLength(1)
   await modal(page).getByRole('button', { name: '关闭', exact: true }).last().click()
-  const testConnection = providerRow.getByRole('button', {
-    name: '测试 DeepSeek 的连接',
+  const editCredential = providerRow.getByRole('button', {
+    name: '管理 DeepSeek 的认证凭据',
+  })
+  await editCredential.click()
+  let credentialRow = modal(page).getByRole('row').filter({ hasText: 'DeepSeek API Key' })
+  let testConnection = credentialRow.getByRole('button', {
+    name: '验证 DeepSeek API Key 的可用性',
     exact: true,
   })
   await expect(testConnection).toBeVisible()
   expect(await page.content()).not.toContain('fixture-upstream-credential')
   await testConnection.click()
-  await expect(modal(page).getByRole('status')).toContainText('连接测试通过')
+  await expect(modal(page).getByRole('status')).toContainText('模型调用验证通过')
   await modal(page).getByRole('button', { name: '关闭', exact: true }).last().click()
   state.failTest()
+  await editCredential.click()
+  credentialRow = modal(page).getByRole('row').filter({ hasText: 'DeepSeek API Key' })
+  testConnection = credentialRow.getByRole('button', {
+    name: '验证 DeepSeek API Key 的可用性',
+    exact: true,
+  })
   await testConnection.click()
   await expect(modal(page).getByRole('status')).toContainText('上游认证失败')
   await modal(page).getByRole('button', { name: '关闭', exact: true }).last().click()
-  const editCredential = providerRow.getByRole('button', {
-    name: '管理 DeepSeek 的认证凭据',
-  })
   await expect(editCredential).toHaveText('凭证')
   await expect(providerRow.getByRole('button', { name: '更新 API Key' })).toHaveCount(0)
   await editCredential.click()
-  await expect(
-    modal(page)
-      .locator('.credential-overview > div')
-      .filter({ hasText: '最后验证时间' })
-      .locator('dd'),
-  ).not.toHaveText('-')
-  const credentialRow = modal(page).getByRole('row').filter({ hasText: 'DeepSeek API Key' })
+  credentialRow = modal(page).getByRole('row').filter({ hasText: 'DeepSeek API Key' })
+  await expect(credentialRow.getByRole('cell').first()).toContainText('最后验证时间')
+  await expect(credentialRow.getByRole('cell').first()).not.toContainText('—')
   await expect(modal(page).getByLabel('API Key', { exact: true })).toHaveCount(0)
-  await expect(credentialRow.getByRole('button')).toHaveText(['删除'])
+  await expect(
+    credentialRow.getByRole('button', {
+      name: '验证 DeepSeek API Key 的可用性',
+      exact: true,
+    }),
+  ).toBeVisible()
+  await expect(credentialRow.getByRole('button', { name: '删除', exact: true })).toBeVisible()
   await credentialRow.getByRole('button', { name: '删除', exact: true }).click()
   await modal(page).getByRole('button', { name: '删除', exact: true }).click()
   await expect(modal(page).getByText('暂无认证凭据', { exact: true })).toBeVisible()

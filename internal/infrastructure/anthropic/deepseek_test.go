@@ -11,6 +11,7 @@ import (
 	"time"
 
 	gw "github.com/zentrola/zentrola/internal/application/gateway"
+	mgmt "github.com/zentrola/zentrola/internal/application/management"
 )
 
 func TestDeepSeekNativeEndpoint(t *testing.T) {
@@ -79,20 +80,21 @@ func TestAnthropicPreservesAdvisorCapability(t *testing.T) {
 	resp.Body.Close()
 }
 
-func TestDeepSeekConnectionUsesOfficialModels(t *testing.T) {
+func TestDeepSeekConnectionUsesRealInference(t *testing.T) {
 	tester := NewConnectionTester()
 	var headers http.Header
 	tester.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		headers = r.Header
-		if r.URL.String() != "https://api.deepseek.com/models" || r.Header.Get("Authorization") != "Bearer upstream-secret" || r.Header.Get("x-api-key") != "" {
-			t.Fatal("wrong account probe")
+		if r.URL.String() != "https://api.deepseek.com/anthropic/v1/messages" || r.Header.Get("x-api-key") != "upstream-secret" || r.Header.Get("Authorization") != "" {
+			t.Fatal("wrong inference probe")
 		}
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"data":[{"id":"deepseek-v4-flash"}]}`))}, nil
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"type":"message","content":[{"type":"text","text":"OK"}]}`))}, nil
 	})
-	if result := tester.Test(context.Background(), "ANTHROPIC", "https://api.deepseek.com/anthropic", []byte("upstream-secret"), nil); !result.OK {
+	target := mgmt.ConnectionTarget{Protocol: "ANTHROPIC", BaseURL: "https://api.deepseek.com/anthropic", UpstreamModelCode: "deepseek-chat", AuthType: mgmt.AuthTypeAPIKey}
+	if result := tester.Test(context.Background(), target, []byte("upstream-secret"), nil); !result.OK {
 		t.Fatal(result)
 	}
-	if headers.Get("Authorization") != "" {
+	if headers.Get("x-api-key") != "" {
 		t.Fatal("completed probe retained credential")
 	}
 }
@@ -110,7 +112,8 @@ func TestDeepSeekRejectsUntrustedURLs(t *testing.T) {
 		if _, err := client.Open(context.Background(), gw.Route{BaseURL: base}, gw.Request{Path: "/v1/messages"}, []byte("secret")); !errors.Is(err, gw.ErrRoute) {
 			t.Fatal("unsafe Gateway URL accepted")
 		}
-		if result := tester.Test(context.Background(), "ANTHROPIC", base, []byte("secret"), nil); result.Code != "UPSTREAM_URL_REJECTED" {
+		target := mgmt.ConnectionTarget{Protocol: "ANTHROPIC", BaseURL: base, UpstreamModelCode: "model", AuthType: mgmt.AuthTypeAPIKey}
+		if result := tester.Test(context.Background(), target, []byte("secret"), nil); result.Code != "UPSTREAM_URL_REJECTED" {
 			t.Fatal("unsafe probe URL accepted")
 		}
 	}

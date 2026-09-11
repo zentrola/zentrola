@@ -145,7 +145,6 @@ type Service struct {
 	upstream Upstream
 	state    RouteState
 	refresh  SubscriptionRefresher
-	maxTries int
 }
 
 type Option func(*Service)
@@ -154,16 +153,8 @@ func WithRouteState(state RouteState) Option { return func(service *Service) { s
 func WithSubscriptionRefresher(refresh SubscriptionRefresher) Option {
 	return func(service *Service) { service.refresh = refresh }
 }
-func WithMaxAttempts(attempts int) Option {
-	return func(service *Service) {
-		if attempts > 0 {
-			service.maxTries = attempts
-		}
-	}
-}
-
 func New(store Store, cipher Cipher, upstream Upstream, options ...Option) *Service {
-	service := &Service{store: store, cipher: cipher, upstream: upstream, maxTries: 2}
+	service := &Service{store: store, cipher: cipher, upstream: upstream}
 	for _, option := range options {
 		option(service)
 	}

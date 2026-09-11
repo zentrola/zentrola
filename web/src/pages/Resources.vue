@@ -157,6 +157,12 @@ function runtimeReason(resource: Resource) {
   const reason = t(i18n.global.te(key) ? key : 'resources.blockReasons.UNKNOWN_PERMANENT')
   return resource.lastHttpStatus ? `${reason} · HTTP ${resource.lastHttpStatus}` : reason
 }
+function verificationLabel(resource: Resource) {
+  return t(
+    resource.runtimeStatus === 'BLOCKED' ? 'resources.verifyAndRestoreFor' : 'resources.verifyFor',
+    { name: resource.name },
+  )
+}
 </script>
 <template>
   <PageHeader name="resources"
@@ -215,7 +221,20 @@ function runtimeReason(resource: Resource) {
               }}</small>
             </td>
             <td>
-              <Status :value="resource.runtimeStatus" />
+              <div class="resource-runtime-line">
+                <Status :value="resource.runtimeStatus" />
+                <button
+                  type="button"
+                  class="icon-button resource-verify-action"
+                  :class="{ 'is-blocked': resource.runtimeStatus === 'BLOCKED' }"
+                  :aria-label="verificationLabel(resource)"
+                  :title="verificationLabel(resource)"
+                  :disabled="busy"
+                  @click="test(resource)"
+                >
+                  <Icon name="refresh" :size="15" />
+                </button>
+              </div>
               <small
                 v-if="resource.runtimeStatus === 'BLOCKED'"
                 class="subline"
@@ -225,9 +244,7 @@ function runtimeReason(resource: Resource) {
             </td>
             <td>
               <div class="row-actions">
-                <button class="text-button" :disabled="busy" @click="test(resource)">
-                  {{ t('resources.test') }}</button
-                ><button class="text-button" @click="replace(resource)">
+                <button class="text-button" @click="replace(resource)">
                   {{ t('resources.replace') }}</button
                 ><button
                   class="text-button danger-text"
@@ -363,3 +380,19 @@ function runtimeReason(resource: Resource) {
     </footer></Modal
   >
 </template>
+
+<style scoped>
+.resource-runtime-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.resource-verify-action {
+  width: 26px;
+  height: 26px;
+  color: var(--blue);
+}
+.resource-verify-action.is-blocked {
+  color: #b46619;
+}
+</style>

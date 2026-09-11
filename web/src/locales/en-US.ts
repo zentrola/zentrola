@@ -381,6 +381,7 @@ export default {
       CREDENTIAL_DISABLED: 'Provider credential disabled',
       UNKNOWN: 'No credential is currently available',
     },
+    openCredentialsFromRuntime: 'View credentials for {name}. Current runtime status: {status}',
     proxyAccess: 'Proxy access',
     proxyEnabledFor: 'Proxy access enabled for {name}',
     proxyDisabledFor: 'Proxy access disabled for {name}',
@@ -397,7 +398,6 @@ export default {
     credentialHint:
       'Add an API key or supported subscription authentication for “{name}”. Complete credentials are never shown after saving.',
     credentialRequiredBeforeEnable: 'Configure provider credentials before enabling the provider.',
-    testConnectionFor: 'Test connection for {name}',
     syncModelsFor: 'Sync official models for {name}',
     connectionTitle: 'Basic settings',
     configTabs: 'Provider configuration',
@@ -409,8 +409,7 @@ export default {
     proxyEnabled: 'Enable proxy',
     proxyHint: 'Only connection tests and model calls for this provider use the proxy.',
     proxyUrl: 'Proxy server URL',
-    proxyUrlHint:
-      'Supports http:// and https:// and may include credentials. The complete URL is encrypted and only a masked value is shown later.',
+    proxyUrlCredentialHint: 'Usernames and passwords are stored encrypted',
     proxyUrlInvalid:
       'Enter a valid HTTP or HTTPS proxy URL without a path, query string, or fragment.',
     proxyHeaders: 'Proxy headers',
@@ -464,13 +463,6 @@ export default {
     emptyCredentialsHint: 'Select Add credential to add an API key or supported subscription.',
     provider: 'Provider',
     credential: 'Credential',
-    credentialStatus: 'Credential status',
-    credentialStates: {
-      verified: 'Configured and verified',
-      failed: 'Configured but verification failed',
-      missing: 'Not configured',
-    },
-    maskedCredential: 'Credential',
     maskedApiKey: 'API key · ••••••••',
     maskedToken: 'Token · ••••••••',
     baseUrl: 'Base URL',
@@ -488,11 +480,12 @@ export default {
     replace: 'Update credential',
     replaceHint: 'The new credential replaces the old value and will not be shown after saving.',
     createHint: 'API keys and personal subscription authentication caches are encrypted at rest.',
-    test: 'Test connection',
-    testing: 'Testing connection…',
-    testPassed: 'Connection test passed',
+    verifyFor: 'Verify availability for {name}',
+    verifyAndRestoreFor: 'Verify and restore {name}',
+    testing: 'Verifying model access…',
+    testPassed: 'Model access verified',
     testHint:
-      'Checks the upstream model list only. A pass does not guarantee inference for every model.',
+      'Sends one real request of up to 5 tokens using this credential and its first model mapping without provider failover. This may incur a minimal upstream charge. A successful check restores the resource.',
     syncModels: 'Sync models',
     syncingModels: 'Reading the official model catalog…',
     syncPassed: 'Official model catalog synchronized',
@@ -655,7 +648,12 @@ export default {
     TIMEOUT: 'The request timed out. Refresh to confirm the result before retrying.',
     UNKNOWN: 'The action failed. Try again later or use the request ID to investigate.',
     UPSTREAM_AUTH_FAILED: 'Upstream authentication failed. Check the credential.',
+    UPSTREAM_BILLING_BLOCKED:
+      'The upstream balance is insufficient, billing is unavailable, or the subscription expired.',
+    UPSTREAM_ACCOUNT_SUSPENDED: 'The upstream account is suspended or disabled.',
     UPSTREAM_RATE_LIMITED: 'The upstream provider is rate-limiting requests. Try again later.',
+    UPSTREAM_MODEL_UNAVAILABLE:
+      'The upstream model is unavailable or not permitted for this account.',
     UPSTREAM_TIMEOUT: 'The upstream connection timed out.',
     UPSTREAM_UNAVAILABLE: 'The upstream service is unavailable.',
     SUBSCRIPTION_REFRESH_FAILED:
@@ -667,5 +665,7 @@ export default {
     CREDENTIAL_INVALID: 'The credential format is invalid.',
     REQUEST_CANCELLED: 'The request was cancelled.',
     RESOURCE_CHANGED: 'The provider credential changed during testing. Test it again.',
+    PROVIDER_MODEL_MAPPING_REQUIRED:
+      'Configure at least one model mapping for this provider first.',
   },
 }
