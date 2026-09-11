@@ -42,6 +42,7 @@ type Route struct {
 	AuthType, AuthAdapter, SubscriptionType          string
 	ResourcePriority                                 int32
 	QuotaStatus                                      string
+	ExpiresAt                                        *time.Time
 	Credential                                       catalog.SealedCredential
 	ProxyEnabled                                     bool
 	ProxyURL, ProxyHeaders                           catalog.SealedCredential

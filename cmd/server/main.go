@@ -23,6 +23,7 @@ import (
 	"github.com/zentrola/zentrola/internal/domain/admin"
 	"github.com/zentrola/zentrola/internal/infrastructure/anthropic"
 	"github.com/zentrola/zentrola/internal/infrastructure/config"
+	"github.com/zentrola/zentrola/internal/infrastructure/gatewaycache"
 	"github.com/zentrola/zentrola/internal/infrastructure/idgen"
 	"github.com/zentrola/zentrola/internal/infrastructure/logging"
 	"github.com/zentrola/zentrola/internal/infrastructure/modelcatalog"
@@ -264,11 +265,25 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 	if deleted > 0 {
 		logger.Warn("resources deleted: credentials cannot be recovered", "count", deleted, "error_code", "CREDENTIAL_UNRECOVERABLE")
 	}
-	keyService := appsec.NewKeys(securityStore, ids)
+	gatewayCache := gatewaycache.New(gatewaycache.Config{
+		Host: cfg.Redis.Host, Port: cfg.Redis.Port, Database: cfg.Redis.Database, Password: cfg.Redis.Password,
+		Namespace: gatewaycache.Namespace(cfg.Environment), GenerationNamespace: gatewaycache.BaseNamespace(cfg.Environment),
+		IdentityTTL: cfg.Gateway.IdentityCacheTTL, RouteTTL: cfg.Gateway.RouteCacheTTL,
+		Logger: logger,
+	})
+	defer gatewayCache.Close()
+	cacheProbe, cacheProbeCancel := context.WithTimeout(startup, time.Second)
+	if err := gatewayCache.Ping(cacheProbe); err != nil {
+		logger.Warn("Gateway Redis cache unavailable; requests will use PostgreSQL", "error_code", "REDIS_UNAVAILABLE")
+	}
+	// 启动时递增稳定 generation，避免上次进程在失效失败后退出而遗留可见旧缓存。
+	gatewayCache.Clear(cacheProbe, "application_startup")
+	cacheProbeCancel()
+	keyService := appsec.NewKeys(gatewaycache.NewKeyStore(securityStore, gatewayCache, logger), ids)
 	connectionTester := anthropic.NewConnectionTester()
 	codexSubscription := openaicodex.New(cfg.Gateway.CodexExecutable)
 	managementService := management.New(
-		postgres.NewManagementStore(pool, ids), ids, credentials, connectionTester,
+		gatewaycache.NewManagementStore(postgres.NewManagementStore(pool, ids), gatewayCache, logger), ids, credentials, connectionTester,
 		management.WithModelDiscoverer(modelcatalog.NewDiscoverer(logger)),
 		management.WithSubscriptionAdapter(codexSubscription),
 	)
@@ -285,12 +300,12 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 	}
 	redisProbeCancel()
 	gatewayService := gateway.New(
-		postgres.NewGatewayStore(pool), credentials, compatibleUpstream,
+		gatewaycache.NewGatewayStore(postgres.NewGatewayStore(pool), gatewayCache, logger), credentials, compatibleUpstream,
 		gateway.WithRouteState(routeState), gateway.WithMaxAttempts(2),
 		gateway.WithSubscriptionRefresher(codexSubscription),
 	)
 	usageStore := postgres.NewUsageStore(pool)
-	usageWriter, err := usageapp.NewWriter(usageStore, ids, logger, usageapp.Options{QueueSize: cfg.Usage.QueueSize, BatchSize: cfg.Usage.BatchSize, FlushInterval: cfg.Usage.FlushInterval, WriteTimeout: cfg.Usage.WriteTimeout})
+	usageWriter, err := usageapp.NewWriter(usageStore, logger, usageapp.Options{QueueSize: cfg.Usage.QueueSize, BatchSize: cfg.Usage.BatchSize, FlushInterval: cfg.Usage.FlushInterval, WriteTimeout: cfg.Usage.WriteTimeout})
 	if err != nil {
 		return err
 	}

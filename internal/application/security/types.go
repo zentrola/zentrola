@@ -26,7 +26,10 @@ func (e *AccountLockedError) Error() string { return "account temporarily locked
 func (e *AccountLockedError) Unwrap() error { return ErrUnauthenticated }
 
 type RequestMeta struct{ RequestID, Method, Path, IP, UserAgent string }
-type PrincipalIdentity struct{ ID, AccessKeyID int64 }
+type PrincipalIdentity struct {
+	ID, AccessKeyID int64
+	ExpiresAt       *time.Time
+}
 
 type Passwords interface {
 	Hash(string) (string, error)

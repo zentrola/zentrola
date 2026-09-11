@@ -46,7 +46,7 @@ const gatewayCandidates = `-- name: GatewayCandidates :many
 SELECT pm.id AS provider_model_id,pm.provider_id,pm.upstream_model_code,pe.base_url,pe.protocol_type,
        p.proxy_enabled,p.proxy_url_ciphertext,p.proxy_url_nonce,p.proxy_url_key_version,
        p.proxy_headers_ciphertext,p.proxy_headers_nonce,p.proxy_headers_key_version,
-       r.id AS resource_id,r.auth_type,r.auth_adapter,r.subscription_type,r.priority AS resource_priority,
+       r.id AS resource_id,r.auth_type,r.auth_adapter,r.subscription_type,r.priority AS resource_priority,r.expires_at,
        r.quota_status,r.quota_checked_at,r.quota_resets_at,
        r.credential_ciphertext,r.credential_nonce,r.key_version
 FROM provider_model pm
@@ -89,6 +89,7 @@ type GatewayCandidatesRow struct {
 	AuthAdapter            string
 	SubscriptionType       *string
 	ResourcePriority       int32
+	ExpiresAt              pgtype.Timestamptz
 	QuotaStatus            string
 	QuotaCheckedAt         pgtype.Timestamptz
 	QuotaResetsAt          pgtype.Timestamptz
@@ -124,6 +125,7 @@ func (q *Queries) GatewayCandidates(ctx context.Context, arg GatewayCandidatesPa
 			&i.AuthAdapter,
 			&i.SubscriptionType,
 			&i.ResourcePriority,
+			&i.ExpiresAt,
 			&i.QuotaStatus,
 			&i.QuotaCheckedAt,
 			&i.QuotaResetsAt,

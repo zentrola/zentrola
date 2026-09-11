@@ -219,7 +219,7 @@ func (s *SecurityStore) Authenticate(ctx context.Context, hash []byte, now time.
 	if err != nil {
 		return appsec.PrincipalIdentity{}, appsec.ErrUnavailable
 	}
-	return appsec.PrincipalIdentity{ID: row.PrincipalID, AccessKeyID: row.ID}, nil
+	return appsec.PrincipalIdentity{ID: row.PrincipalID, AccessKeyID: row.ID, ExpiresAt: timePointer(row.ExpiresAt)}, nil
 }
 
 // RecoverCredentials 只处理不可解密的现有资源。根密钥丢失后新生成 Key 时不尝试解密旧密文。

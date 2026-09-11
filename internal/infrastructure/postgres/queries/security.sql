@@ -42,7 +42,7 @@ UPDATE principal_access_key SET status='REVOKED',revoked_at=$2,updated_by=$3,upd
 WHERE id=$1 AND is_deleted=false;
 
 -- name: AuthenticateAccessKey :one
-SELECT k.id,k.principal_id FROM principal_access_key k
+SELECT k.id,k.principal_id,k.expires_at FROM principal_access_key k
 JOIN principal p ON p.id=k.principal_id
 WHERE k.key_hash=$1 AND k.is_deleted=false AND k.status='ACTIVE' AND k.revoked_at IS NULL
 AND (k.expires_at IS NULL OR k.expires_at > sqlc.arg(now)::timestamptz)

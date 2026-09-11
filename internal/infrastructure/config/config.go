@@ -47,6 +47,7 @@ type Usage struct {
 type Gateway struct {
 	MaxBodyBytes                                                 int64
 	RequestTimeout, HeaderTimeout, BodyReadTimeout, WriteTimeout time.Duration
+	IdentityCacheTTL, RouteCacheTTL                              time.Duration
 	CodexExecutable                                              string
 	Development                                                  bool
 }
@@ -273,12 +274,14 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 			FlushInterval: duration("USAGE_FLUSH_INTERVAL", "500ms"), WriteTimeout: duration("USAGE_WRITE_TIMEOUT", "3s"), ShutdownTimeout: duration("USAGE_SHUTDOWN_TIMEOUT", "5s"),
 		},
 		Gateway: Gateway{
-			MaxBodyBytes:    int64(integer("GATEWAY_MAX_BODY_BYTES", "33554432", 128<<20)),
-			RequestTimeout:  duration("GATEWAY_REQUEST_TIMEOUT", "15m"),
-			HeaderTimeout:   duration("GATEWAY_HEADER_TIMEOUT", "120s"),
-			BodyReadTimeout: duration("GATEWAY_BODY_READ_TIMEOUT", "30s"),
-			WriteTimeout:    duration("GATEWAY_WRITE_TIMEOUT", "30s"),
-			CodexExecutable: strings.TrimSpace(get("CODEX_EXECUTABLE", "codex")),
+			MaxBodyBytes:     int64(integer("GATEWAY_MAX_BODY_BYTES", "33554432", 128<<20)),
+			RequestTimeout:   duration("GATEWAY_REQUEST_TIMEOUT", "15m"),
+			HeaderTimeout:    duration("GATEWAY_HEADER_TIMEOUT", "120s"),
+			BodyReadTimeout:  duration("GATEWAY_BODY_READ_TIMEOUT", "30s"),
+			WriteTimeout:     duration("GATEWAY_WRITE_TIMEOUT", "30s"),
+			IdentityCacheTTL: duration("GATEWAY_IDENTITY_CACHE_TTL", "10m"),
+			RouteCacheTTL:    duration("GATEWAY_ROUTE_CACHE_TTL", "1m"),
+			CodexExecutable:  strings.TrimSpace(get("CODEX_EXECUTABLE", "codex")),
 		},
 		Security: Security{
 			MasterKey: get("ACP_MASTER_KEY", ""), ExternalMasterKeyPath: get("ACP_MASTER_KEY_FILE", ""), MasterKeyPath: get("MASTER_KEY_PATH", "data/secrets/master.key"),

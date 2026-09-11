@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"reflect"
@@ -29,6 +30,7 @@ type SecurityHandlers struct {
 	OpenAI      *GatewayHandler
 	Usage       *usageapp.QueryService
 	UsageWriter *usageapp.Writer
+	logger      *slog.Logger
 }
 type adminIdentityKey struct{}
 type principalIdentityKey struct{}
@@ -205,16 +207,29 @@ func (s *SecurityHandlers) adminAuth(next http.Handler) http.Handler {
 }
 func (s *SecurityHandlers) gatewayAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger := s.gatewayLogger()
+		logger.InfoContext(r.Context(), "gateway request received",
+			"gateway_protocol", "anthropic", "method", r.Method, "path", r.URL.Path)
 		keys := r.Header.Values("X-Api-Key")
 		auth := r.Header.Values("Authorization")
 		var key string
+		credentialSource := "invalid"
 		if len(keys) == 1 && len(auth) == 0 {
 			key = keys[0]
+			credentialSource = "x-api-key"
 		} else if len(keys) == 0 && len(auth) == 1 {
 			key = bearer(r)
+			credentialSource = "bearer"
 		}
 		identity, err := s.Keys.Authenticate(r.Context(), key)
 		if err != nil {
+			errorCode := "DEPENDENCY_UNAVAILABLE"
+			if errors.Is(err, appsec.ErrUnauthenticated) {
+				errorCode = "UNAUTHENTICATED"
+			}
+			logger.WarnContext(r.Context(), "gateway authentication failed",
+				"gateway_protocol", "anthropic", "credential_source", credentialSource,
+				"error_code", errorCode)
 			if errors.Is(err, appsec.ErrUnauthenticated) {
 				writeGatewayError(w, gw.ErrAuthentication)
 			} else {
@@ -222,15 +237,23 @@ func (s *SecurityHandlers) gatewayAuth(next http.Handler) http.Handler {
 			}
 			return
 		}
+		logger.InfoContext(r.Context(), "gateway authentication succeeded",
+			"gateway_protocol", "anthropic", "credential_source", credentialSource,
+			"principal_id", identity.ID, "access_key_id", identity.AccessKeyID)
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), principalIdentityKey{}, identity)))
 	})
 }
 
 func (s *SecurityHandlers) openaiAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger := s.gatewayLogger()
+		logger.InfoContext(r.Context(), "gateway request received",
+			"gateway_protocol", "openai", "method", r.Method, "path", r.URL.Path)
 		key := bearer(r)
+		credentialSource := "bearer"
 		if len(r.Header.Values("X-Api-Key")) > 0 {
 			key = ""
+			credentialSource = "invalid"
 		}
 		identity, err := s.Keys.Authenticate(r.Context(), key)
 		if err != nil {
@@ -238,11 +261,24 @@ func (s *SecurityHandlers) openaiAuth(next http.Handler) http.Handler {
 			if errors.Is(err, appsec.ErrUnauthenticated) {
 				failure = gw.ErrAuthentication
 			}
+			logger.WarnContext(r.Context(), "gateway authentication failed",
+				"gateway_protocol", "openai", "credential_source", credentialSource,
+				"error_code", failure.Code)
 			writeOpenAIError(w, failure)
 			return
 		}
+		logger.InfoContext(r.Context(), "gateway authentication succeeded",
+			"gateway_protocol", "openai", "credential_source", credentialSource,
+			"principal_id", identity.ID, "access_key_id", identity.AccessKeyID)
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), principalIdentityKey{}, identity)))
 	})
+}
+
+func (s *SecurityHandlers) gatewayLogger() *slog.Logger {
+	if s.logger != nil {
+		return s.logger
+	}
+	return slog.Default()
 }
 func (s *SecurityHandlers) createKey(w http.ResponseWriter, r *http.Request) {
 	id, err := positiveID(chi.URLParam(r, "id"))

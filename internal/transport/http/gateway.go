@@ -123,6 +123,8 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			reject(gw.ErrInvalid)
 			return
 		}
+		g.logger.InfoContext(r.Context(), "gateway model list request started",
+			"protocol", protocol, "principal_id", identity.ID, "access_key_id", identity.AccessKeyID)
 		models, err := g.service.Models(r.Context(), identity)
 		if err != nil {
 			failure := gw.ErrUnavailable
@@ -133,6 +135,9 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			reject(failure)
 			return
 		}
+		g.logger.InfoContext(r.Context(), "gateway model list request completed",
+			"protocol", protocol, "principal_id", identity.ID, "access_key_id", identity.AccessKeyID,
+			"model_count", len(models))
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
 		_ = json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": models})
@@ -193,6 +198,9 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), g.cfg.RequestTimeout)
 	defer cancel()
 	addAccessLogFields(r.Context(), "protocol", protocol)
+	g.logger.InfoContext(r.Context(), "gateway forwarding started",
+		"protocol", protocol, "path", path,
+		"principal_id", identity.ID, "access_key_id", identity.AccessKeyID)
 	upstreamStarted := time.Now()
 	upstream, err := g.service.Forward(ctx, identity, gw.Request{Path: path, Version: version, Beta: beta, BetaQuery: query, Development: g.cfg.Development, Body: body, RequestID: logging.RequestID(r.Context()), ProtocolHeaders: nativeHeaders, Trace: trace, Protocol: protocol})
 	addAccessLogFields(r.Context(), "upstream_headers_ms", time.Since(upstreamStarted).Milliseconds())
@@ -206,7 +214,10 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			failure = gw.ErrTimeout
 		}
-		attributes := []any{"error_code", failure.Code}
+		attributes := []any{
+			"error_code", failure.Code, "protocol", protocol,
+			"principal_id", identity.ID, "access_key_id", identity.AccessKeyID,
+		}
 		if g.cfg.Development {
 			parse := gw.Parse
 			if protocol == gw.OpenAIProtocol || protocol == gw.OpenAIResponsesProtocol {
@@ -214,10 +225,7 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			parsed, parseErr := parse(body)
 			attributes = append(attributes,
-				"protocol", protocol,
 				"path", path,
-				"principal_id", identity.ID,
-				"access_key_id", identity.AccessKeyID,
 			)
 			if parseErr == nil {
 				attributes = append(attributes, "requested_model", parsed.Model)
@@ -235,6 +243,10 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer upstream.Body.Close()
+	g.logger.InfoContext(r.Context(), "gateway upstream response opened",
+		"protocol", protocol, "upstream_status", upstream.Status,
+		"principal_id", identity.ID, "access_key_id", identity.AccessKeyID,
+		"upstream_headers_ms", time.Since(upstreamStarted).Milliseconds())
 	addAccessLogFields(r.Context(), "upstream_status", upstream.Status)
 	if upstreamRequestID := safeUpstreamRequestID(upstream.Headers); upstreamRequestID != "" {
 		addAccessLogFields(r.Context(), "upstream_request_id", upstreamRequestID)

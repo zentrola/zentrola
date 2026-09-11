@@ -35,7 +35,7 @@ func (s *GatewayStore) ResolveCandidates(ctx context.Context, identity appsec.Pr
 		return nil, gw.ErrInvalid
 	}
 	preferredProtocol := gatewayEndpointProtocols(protocol)[0]
-	// 使用每次请求的一致性快照，不缓存身份、授权或路由，也不在网络转发期间占用连接。
+	// 缓存未命中时使用一致性快照加载身份、授权与路由，不在网络转发期间占用连接。
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return nil, gw.ErrUnavailable
@@ -99,7 +99,7 @@ func (s *GatewayStore) ResolveCandidates(ctx context.Context, identity appsec.Pr
 			ModelID: m.ID, ProviderID: row.ProviderID, ProviderModelID: row.ProviderModelID, ResourceID: row.ResourceID,
 			UpstreamModel: row.UpstreamModelCode, BaseURL: row.BaseUrl, EndpointProtocol: row.ProtocolType,
 			AuthType: row.AuthType, AuthAdapter: row.AuthAdapter, ResourcePriority: row.ResourcePriority,
-			QuotaStatus:  row.QuotaStatus,
+			QuotaStatus: row.QuotaStatus, ExpiresAt: timePointer(row.ExpiresAt),
 			Credential:   catalog.SealedCredential{Ciphertext: row.CredentialCiphertext, Nonce: row.CredentialNonce, KeyVersion: row.KeyVersion},
 			ProxyEnabled: row.ProxyEnabled,
 		}

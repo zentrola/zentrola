@@ -60,6 +60,7 @@ func NewRouter(logger *slog.Logger, readiness *health.Service, corsConfig config
 		writeJSON(w, r, status, response{Code: code, Data: report})
 	})
 	if len(security) > 0 && security[0] != nil {
+		security[0].logger = logger
 		security[0].mount(r)
 	}
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {

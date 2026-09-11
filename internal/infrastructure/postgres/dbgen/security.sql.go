@@ -68,7 +68,7 @@ func (q *Queries) AppendSecurityOperation(ctx context.Context, arg AppendSecurit
 }
 
 const authenticateAccessKey = `-- name: AuthenticateAccessKey :one
-SELECT k.id,k.principal_id FROM principal_access_key k
+SELECT k.id,k.principal_id,k.expires_at FROM principal_access_key k
 JOIN principal p ON p.id=k.principal_id
 WHERE k.key_hash=$1 AND k.is_deleted=false AND k.status='ACTIVE' AND k.revoked_at IS NULL
 AND (k.expires_at IS NULL OR k.expires_at > $2::timestamptz)
@@ -83,12 +83,13 @@ type AuthenticateAccessKeyParams struct {
 type AuthenticateAccessKeyRow struct {
 	ID          int64
 	PrincipalID int64
+	ExpiresAt   pgtype.Timestamptz
 }
 
 func (q *Queries) AuthenticateAccessKey(ctx context.Context, arg AuthenticateAccessKeyParams) (AuthenticateAccessKeyRow, error) {
 	row := q.db.QueryRow(ctx, authenticateAccessKey, arg.KeyHash, arg.Now)
 	var i AuthenticateAccessKeyRow
-	err := row.Scan(&i.ID, &i.PrincipalID)
+	err := row.Scan(&i.ID, &i.PrincipalID, &i.ExpiresAt)
 	return i, err
 }
 

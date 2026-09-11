@@ -25,6 +25,8 @@ func TestConfigValidation(t *testing.T) {
 		{"invalid log file backups", "LOG_FILE_MAX_BACKUPS", "0", "LOG_FILE_MAX_BACKUPS"},
 		{"invalid boolean", "CORS_ENABLED", "maybe", "CORS_ENABLED"},
 		{"unbounded gateway", "GATEWAY_REQUEST_TIMEOUT", "0s", "GATEWAY_REQUEST_TIMEOUT"},
+		{"invalid identity cache TTL", "GATEWAY_IDENTITY_CACHE_TTL", "0s", "GATEWAY_IDENTITY_CACHE_TTL"},
+		{"invalid route cache TTL", "GATEWAY_ROUTE_CACHE_TTL", "0s", "GATEWAY_ROUTE_CACHE_TTL"},
 		{"oversized body limit", "GATEWAY_MAX_BODY_BYTES", "2147483647", "GATEWAY_MAX_BODY_BYTES"},
 		{"empty usage queue", "USAGE_QUEUE_SIZE", "0", "USAGE_QUEUE_SIZE"},
 		{"oversized usage batch", "USAGE_BATCH_SIZE", "10001", "USAGE_BATCH_SIZE"},
