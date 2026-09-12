@@ -125,7 +125,6 @@ Zentrola 遵循 Client-native First 和 Thin Gateway 原则：客户端已经具
 
 当前尚未完成：
 
-- Claude Code 和 Codex 正式客户端的完整 E2E 验收
 - OpenAI Responses Native Path
 - APPLICATION Principal 与 App Key 管理闭环
 - 按延迟、成本等综合策略动态排序，以及实时限流
@@ -133,7 +132,7 @@ Zentrola 遵循 Client-native First 和 Thin Gateway 原则：客户端已经具
 - Enterprise Knowledge、Skill Registry 和 Managed MCP
 - SSO、OIDC、LDAP、SCIM 和高可用部署
 
-Provider 端点按 `OPENAI` 和 `ANTHROPIC` 两类上游协议保存；其中 `ANTHROPIC` 即 Claude Code 使用的 Anthropic Messages 兼容协议。Gateway 客户端入口分别处理 OpenAI Chat Completions、OpenAI Responses 和 Anthropic Messages；路由优先选择与客户端相同的上游协议，缺少同协议端点时才转换为另一协议，并将响应转换回客户端原协议。正式 Codex 客户端的完整 E2E 仍需单独实现和验收。
+Provider 端点按 `OPENAI` 和 `ANTHROPIC` 两类上游协议保存；其中 `ANTHROPIC` 即 Claude Code 使用的 Anthropic Messages 兼容协议。Gateway 客户端入口分别处理 OpenAI Chat Completions、OpenAI Responses 和 Anthropic Messages；路由优先选择与客户端相同的上游协议，缺少同协议端点时才转换为另一协议，并将响应转换回客户端原协议。
 
 ## 发布包结构
 
@@ -495,7 +494,7 @@ docker compose stop postgres
 
 Backend 的 `pretty` 控制台访问日志使用固定紧凑格式，包含请求时间、Trace/Span ID、HTTP 方法、请求路径、`status`、`cost`，以及经过白名单过滤的请求与响应 Header 摘要。`Authorization`、Cookie、API Key 等敏感 Header 永不记录。请求和响应字节数仍保留在 JSON 结构化日志中，便于统计但不占用控制台位置。
 
-`APP_ENV=dev` 时还会输出 `request_body` 和 `response_body` 调试摘要。JSON 中的密码、Token、Credential、Virtual Key、prompt、消息内容和模型输出会自动替换为 `[REDACTED]`；超过 8 KiB 的 JSON、SSE 和其他非 JSON 报文只记录类型及字节数。`APP_ENV=test` 或 `APP_ENV=prod` 时不采集请求和响应报文。
+`APP_ENV=dev` 时还会输出未经脱敏的 `request_body` 和 `response_body` JSON 调试摘要，可能包含密码、Token、Credential、Virtual Key、prompt、消息内容和模型输出；只应在受控的本地开发环境使用，相关日志不得提交或对外发送。敏感 Header 仍由白名单排除。超过 8 KiB 的 JSON、SSE 和其他非 JSON 报文只记录类型及字节数。`APP_ENV=test` 或 `APP_ENV=prod` 时不采集请求和响应报文；正式环境如需采集正文，必须先接入 `redactJSON` 脱敏。
 
 控制台与日志文件由同一个结构化日志记录生成，因此消息、级别、OpenTelemetry `trace_id` / `span_id` 和业务字段保持一致。控制台支持适合人工阅读的彩色 `pretty` 格式，日志文件固定使用一行一条记录的 JSON Lines：
 

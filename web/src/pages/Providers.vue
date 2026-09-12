@@ -55,7 +55,7 @@ const credentialAuthType = ref<'API_KEY' | 'SUBSCRIPTION'>('API_KEY')
 const testTarget = ref<{ provider: Provider; resource: Resource } | null>(null)
 const testResult = ref<ConnectionResult | null>(null)
 const credentialVerifiedAt = reactive<Record<string, string>>({})
-const syncTarget = ref<{ provider: Provider; resource: Resource } | null>(null)
+const syncTarget = ref<{ provider: Provider } | null>(null)
 const syncResult = ref<ModelSyncResult | null>(null)
 const credential = ref('')
 const activeConfigTab = ref<'models' | 'proxy'>('models')
@@ -597,13 +597,11 @@ function testCredentialFromModal(provider: Provider, resource: Resource) {
 }
 
 function syncModels(provider: Provider) {
-  const resource = apiKeyResourceFor(provider)
-  if (!resource) return
-  syncTarget.value = { provider, resource }
+  syncTarget.value = { provider }
   syncResult.value = null
   actionError.value = ''
   void run(async () => {
-    const result = await api<ModelSyncResult>(`/resources/${resource.id}/sync-models`, 'POST')
+    const result = await api<ModelSyncResult>(`/providers/${provider.id}/sync-models`, 'POST')
     syncResult.value = result
     if (result.ok) await loadModels()
   })
@@ -778,7 +776,7 @@ onMounted(() => {
                     >
                       <Icon name="website" :size="15" /></a
                     ><button
-                      v-if="provider.modelSyncSupported && apiKeyResourceFor(provider)"
+                      v-if="provider.modelSyncSupported"
                       type="button"
                       class="provider-quick-action provider-direct-action"
                       :aria-label="t('providers.syncModelsFor', { name: provider.name })"

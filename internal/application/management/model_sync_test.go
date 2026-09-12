@@ -78,6 +78,12 @@ func (providerCapabilityStore) Write(context.Context, admin.Identity, func(Write
 
 func (s *syncState) Resource(context.Context, int64) (ResourceRecord, error) { return s.resource, nil }
 func (s *syncState) Provider(context.Context, int64) (Provider, error)       { return s.provider, nil }
+func (s *syncState) Resources(_ context.Context, page Page) ([]Resource, error) {
+	if page.After != 0 || s.resource.ID == 0 {
+		return []Resource{}, nil
+	}
+	return []Resource{s.resource.Resource}, nil
+}
 func (s *syncState) Models(_ context.Context, page Page, _ string) ([]Model, error) {
 	if page.After != 0 {
 		return []Model{}, nil
@@ -112,7 +118,7 @@ func (s *syncState) Audit(_ context.Context, audit Audit, _ appsec.RequestMeta) 
 func TestSyncResourceModelsCreatesMissingEntriesAndRefreshesExistingNames(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	state := &syncState{
-		resource: ResourceRecord{Resource: Resource{ID: 10, ProviderID: 20, Name: "Official key", UpdatedAt: now}},
+		resource: ResourceRecord{Resource: Resource{ID: 10, ProviderID: 20, Name: "Official key", AuthType: AuthTypeAPIKey, UpdatedAt: now}},
 		provider: Provider{ID: 20, Code: catalog.DeepSeekOfficialCode, Name: "Official", Endpoints: []ProviderEndpoint{{ProtocolType: "OPENAI", BaseURL: "https://api.example.com/v1"}}},
 		models: []Model{{
 			ID: 30, Code: "existing", Name: "管理员名称", Status: "ACTIVE",
@@ -132,7 +138,7 @@ func TestSyncResourceModelsCreatesMissingEntriesAndRefreshesExistingNames(t *tes
 	service := New(syncStore{state}, ids, syncCipher{}, nil, WithModelDiscoverer(discoverer))
 	actor := admin.Identity{ID: 1}
 
-	result, err := service.SyncResourceModels(context.Background(), actor, 10, appsec.RequestMeta{})
+	result, err := service.SyncProviderModels(context.Background(), actor, 20, appsec.RequestMeta{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +163,7 @@ func TestSyncResourceModelsCreatesMissingEntriesAndRefreshesExistingNames(t *tes
 		t.Fatalf("successful sync was not audited: %+v", state.audits)
 	}
 
-	result, err = service.SyncResourceModels(context.Background(), actor, 10, appsec.RequestMeta{})
+	result, err = service.SyncProviderModels(context.Background(), actor, 20, appsec.RequestMeta{})
 	if err != nil || result.Created != 0 || result.Updated != 0 || result.Mapped != 0 || len(state.models) != 3 || len(state.mappings) != 3 {
 		t.Fatalf("sync is not idempotent: result=%+v err=%v", result, err)
 	}

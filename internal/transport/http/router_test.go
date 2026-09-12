@@ -229,7 +229,7 @@ func TestMiddlewarePreservesStreamingAndCancellation(t *testing.T) {
 	}
 }
 
-func TestDevelopmentAccessLogCapturesRedactedBodies(t *testing.T) {
+func TestDevelopmentAccessLogCapturesBodiesWithoutRedaction(t *testing.T) {
 	provider := telemetry.Setup()
 	t.Cleanup(func() { _ = telemetry.Shutdown(context.Background(), provider) })
 	var logs bytes.Buffer
@@ -246,7 +246,12 @@ func TestDevelopmentAccessLogCapturesRedactedBodies(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 
 	output := logs.String()
-	for _, required := range []string{"request_time", "method", "trace_id", "span_id", "duration_ms", "path", "status", "request_bytes", "response_bytes", "request_body", "response_body", "claude-sonnet", "MODEL_PERMISSION_DENIED"} {
+	for _, required := range []string{
+		"request_time", "method", "trace_id", "span_id", "duration_ms", "path", "status",
+		"request_bytes", "response_bytes", "request_body", "response_body", "claude-sonnet",
+		"MODEL_PERMISSION_DENIED", "private-prompt", "request-secret", "response-secret",
+		"future-schema-secret", "unknown-content-secret",
+	} {
 		if !strings.Contains(output, required) {
 			t.Fatalf("development access log missing %s: %s", required, output)
 		}
@@ -254,10 +259,8 @@ func TestDevelopmentAccessLogCapturesRedactedBodies(t *testing.T) {
 	if strings.Count(output, `"trace_id"`) != 1 || strings.Count(output, `"span_id"`) != 1 {
 		t.Fatalf("trace and span IDs must each appear once: %s", output)
 	}
-	for _, secret := range []string{"query-secret", "private-prompt", "request-secret", "response-secret", "future-schema-secret", "unknown-content-secret"} {
-		if strings.Contains(output, secret) {
-			t.Fatalf("development access log leaked %s", secret)
-		}
+	if strings.Contains(output, "query-secret") {
+		t.Fatalf("development access log included URL query: %s", output)
 	}
 }
 

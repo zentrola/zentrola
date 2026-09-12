@@ -33,7 +33,7 @@ async function signIn(page: Page) {
   await page.getByLabel('管理员账号').fill('admin')
   await page.getByLabel('密码', { exact: true }).fill('test-password')
   await page.getByRole('button', { name: '登录控制台' }).click()
-  await expect(page.getByRole('heading', { name: '控制面板', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '仪表盘', exact: true })).toBeVisible()
 }
 const stored = (page: Page) => page.evaluate((key) => localStorage.getItem(key), sessionKey)
 
@@ -50,7 +50,7 @@ test('刷新及关闭后重新打开恢复身份和路由，不重新登录或�
   await page.close()
   const reopened = await context.newPage()
   await reopened.goto('/')
-  await expect(reopened.getByRole('heading', { name: '控制面板', exact: true })).toBeVisible()
+  await expect(reopened.getByRole('heading', { name: '仪表盘', exact: true })).toBeVisible()
   expect(state.loginCalls).toBe(1)
   expect(state.meCalls).toBe(3)
   await reopened.getByRole('button', { name: '账号菜单' }).click()
@@ -86,7 +86,7 @@ test('恢复时服务暂时不可用保留凭证，重试成功后进入控制�
   expect(await stored(page)).toBe(saved)
   state.meStatus = 200
   await page.getByRole('button', { name: '重试' }).click()
-  await expect(page.getByRole('heading', { name: '控制面板', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '仪表盘', exact: true })).toBeVisible()
   expect(state.loginCalls).toBe(1)
 })
 
@@ -115,7 +115,7 @@ test('恢复后的会话按原到期时间退出并清除存储', async ({ page,
   await page.clock.install()
   await signIn(page)
   await page.reload()
-  await expect(page.getByRole('heading', { name: '控制面板', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '仪表盘', exact: true })).toBeVisible()
   await page.clock.fastForward(8 * 3600000 + 1000)
   await expect(page.getByRole('button', { name: '登录控制台' })).toBeVisible()
   await expect(page.getByRole('alert')).toContainText('登录已失效')
@@ -127,7 +127,7 @@ test('退出登录同步其他标签页', async ({ page, context }) => {
   await signIn(page)
   const other = await context.newPage()
   await other.goto('/')
-  await expect(other.getByRole('heading', { name: '控制面板', exact: true })).toBeVisible()
+  await expect(other.getByRole('heading', { name: '仪表盘', exact: true })).toBeVisible()
   await page.getByRole('button', { name: '账号菜单' }).click()
   await page.getByRole('menuitem', { name: '注销登录' }).click()
   await expect(other.getByRole('button', { name: '登录控制台' })).toBeVisible()

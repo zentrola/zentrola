@@ -58,10 +58,10 @@ const weekdays = computed(() =>
 )
 function resetTimes() {
   const now = new Date()
-  const yesterday = new Date(now)
-  yesterday.setDate(yesterday.getDate() - 1)
+  const weekStart = new Date(now)
+  weekStart.setDate(weekStart.getDate() - 6)
   to.value = dateValue(now)
-  from.value = dateValue(yesterday)
+  from.value = dateValue(weekStart)
 }
 function dateValue(value: Date) {
   const offset = value.getTimezoneOffset() * 60000

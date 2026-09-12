@@ -25,6 +25,61 @@ func preferredProviderEndpoint(provider Provider) (string, string) {
 	return "", ""
 }
 
+func (s *Service) SyncProviderModels(ctx context.Context, actor admin.Identity, id int64, meta appsec.RequestMeta) (ModelSyncResult, error) {
+	if id <= 0 {
+		return ModelSyncResult{}, appsec.ErrInvalidArgument
+	}
+	if s.discoverer == nil {
+		return ModelSyncResult{}, ErrProvider
+	}
+
+	var resourceID int64
+	err := s.store.Read(ctx, actor, func(reader Reader) error {
+		provider, err := reader.Provider(ctx, id)
+		if err != nil {
+			return err
+		}
+		if !s.discoverer.Supports(provider.Code) {
+			return ErrProvider
+		}
+
+		var after int64
+		var selected Resource
+		for {
+			resources, err := reader.Resources(ctx, Page{After: after, Limit: 100})
+			if err != nil {
+				return err
+			}
+			for _, resource := range resources {
+				if resource.ProviderID != id ||
+					(resource.AuthType != AuthTypeAPIKey && resource.AuthType != "") {
+					continue
+				}
+				if resourceID == 0 || resource.Priority < selected.Priority {
+					selected = resource
+					resourceID = resource.ID
+				}
+			}
+			if len(resources) < 100 {
+				break
+			}
+			next := resources[len(resources)-1].ID
+			if next <= 0 || next == after {
+				return errors.New("resource pagination did not advance")
+			}
+			after = next
+		}
+		if resourceID == 0 {
+			return ErrProviderCredentialRequired
+		}
+		return nil
+	})
+	if err != nil {
+		return ModelSyncResult{}, err
+	}
+	return s.SyncResourceModels(ctx, actor, resourceID, meta)
+}
+
 func (s *Service) SyncResourceModels(ctx context.Context, actor admin.Identity, id int64, meta appsec.RequestMeta) (ModelSyncResult, error) {
 	if id <= 0 {
 		return ModelSyncResult{}, appsec.ErrInvalidArgument
