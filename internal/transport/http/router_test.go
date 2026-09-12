@@ -83,6 +83,9 @@ func TestHealthAndRequestCorrelation(t *testing.T) {
 		if traceID == "" || spanID == "" || !strings.Contains(logs.String(), traceID) || !strings.Contains(logs.String(), spanID) {
 			t.Fatal("OpenTelemetry trace context missing in response or log")
 		}
+		if wantID := "req_" + traceID + "_" + spanID; id != wantID {
+			t.Fatalf("request ID %q does not match trace context; want %q", id, wantID)
+		}
 		if strings.Contains(rec.Body.String(), "database-secret") {
 			t.Fatal("dependency secret leaked in response")
 		}
@@ -91,6 +94,37 @@ func TestHealthAndRequestCorrelation(t *testing.T) {
 		if strings.Contains(logs.String(), secret) {
 			t.Fatalf("secret leaked: %s", secret)
 		}
+	}
+}
+
+func TestRequestIDDistinguishesServerSpansWithinTrace(t *testing.T) {
+	provider := telemetry.Setup()
+	t.Cleanup(func() { _ = telemetry.Shutdown(context.Background(), provider) })
+	router := NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), health.New(), config.CORS{}, time.Second, "prod")
+	const traceID = "4bf92f3577b34da6a3ce929d0e0e4736"
+	const traceparent = "00-" + traceID + "-00f067aa0ba902b7-01"
+
+	requestIDs := map[string]bool{}
+	serverSpanIDs := map[string]bool{}
+	for range 2 {
+		req := httptest.NewRequest(http.MethodGet, "/health/live", nil)
+		req.Header.Set("traceparent", traceparent)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		serverSpanID := rec.Header().Get("X-Span-ID")
+		requestID := rec.Header().Get("X-Request-ID")
+		if got := rec.Header().Get("X-Trace-ID"); got != traceID {
+			t.Fatalf("trace ID=%q; want %q", got, traceID)
+		}
+		if want := "req_" + traceID + "_" + serverSpanID; requestID != want {
+			t.Fatalf("request ID=%q; want %q", requestID, want)
+		}
+		if serverSpanIDs[serverSpanID] || requestIDs[requestID] {
+			t.Fatalf("server span did not uniquely identify request: span=%q request=%q", serverSpanID, requestID)
+		}
+		serverSpanIDs[serverSpanID] = true
+		requestIDs[requestID] = true
 	}
 }
 

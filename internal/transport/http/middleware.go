@@ -25,12 +25,18 @@ import (
 
 func requestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var entropy [16]byte
-		// Go 的 crypto/rand.Read 保证填满缓冲区，无法获取安全随机数时终止进程。
-		_, _ = rand.Read(entropy[:])
-		id := "req_" + hex.EncodeToString(entropy[:])
+		spanContext := trace.SpanContextFromContext(r.Context())
+		id := ""
+		if spanContext.IsValid() {
+			id = "req_" + spanContext.TraceID().String() + "_" + spanContext.SpanID().String()
+		} else {
+			var entropy [16]byte
+			// Go 的 crypto/rand.Read 保证填满缓冲区，无法获取安全随机数时终止进程。
+			_, _ = rand.Read(entropy[:])
+			id = "req_" + hex.EncodeToString(entropy[:])
+		}
 		w.Header().Set("X-Request-ID", id)
-		if spanContext := trace.SpanContextFromContext(r.Context()); spanContext.IsValid() {
+		if spanContext.IsValid() {
 			w.Header().Set("X-Trace-ID", spanContext.TraceID().String())
 			w.Header().Set("X-Span-ID", spanContext.SpanID().String())
 		}

@@ -510,7 +510,7 @@ LOG_FILE_MAX_BACKUPS=10
 
 `LOG_COLOR=auto` 只在真实终端启用 ANSI 颜色；也可设置为 `always` 或 `never`。`LOG_FILE_PATH` 为空时不创建日志文件。文件达到 `LOG_FILE_MAX_SIZE_MB` 后依次轮转为 `.1`、`.2`，最多保留 `LOG_FILE_MAX_BACKUPS` 份。同一日志路径由进程独占；第二个进程配置相同路径时会拒绝启动，避免并发轮转破坏文件。多实例部署应使用不同路径，或统一输出 stdout JSON。
 
-Backend 使用 OpenTelemetry 为每个入站 HTTP 请求创建 Server Span，并通过 W3C `traceparent` 延续客户端 Trace；调用 Anthropic、OpenAI 或 DeepSeek 时自动创建子 Client Span并向上游传播。响应头 `X-Trace-ID` 和 `X-Span-ID` 便于直接排障。原有 `X-Request-ID` 与响应体 `requestId` 作为客户端和数据库兼容字段继续保留，但不再作为日志主关联字段。
+Backend 使用 OpenTelemetry 为每个入站 HTTP 请求创建 Server Span，并通过 W3C `traceparent` 延续客户端 Trace；调用 Anthropic、OpenAI 或 DeepSeek 时自动创建子 Client Span并向上游传播。响应头 `X-Trace-ID` 和 `X-Span-ID` 便于直接排障。`X-Request-ID` 与响应体 `requestId` 使用 `req_<traceId>_<serverSpanId>` 格式，既能关联 Trace，又能区分同一 Trace 内的多次入站请求；OpenTelemetry 上下文不可用时回退为随机 `req_<32 hex>`。日志仍以 `trace_id` 作为主关联字段。
 
 JSON 文件通过有界异步队列写入，请求 goroutine 不直接等待磁盘；关闭服务时会先 flush。队列满时保留同步控制台日志、丢弃对应文件副本，并向 `stderr` 输出一次明确告警。
 
