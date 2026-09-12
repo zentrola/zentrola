@@ -52,6 +52,8 @@ const credentialTarget = ref<Provider | null>(null)
 const credentialDeleteTarget = ref<Resource | null>(null)
 const credentialCreating = ref(false)
 const credentialAuthType = ref<'API_KEY' | 'SUBSCRIPTION'>('API_KEY')
+const testSelectionTarget = ref<Provider | null>(null)
+const selectedTestResourceID = ref('')
 const testTarget = ref<{ provider: Provider; resource: Resource } | null>(null)
 const testResult = ref<ConnectionResult | null>(null)
 const credentialVerifiedAt = reactive<Record<string, string>>({})
@@ -584,11 +586,46 @@ function testConnection(provider: Provider, resource: Resource) {
   testResult.value = null
   actionError.value = ''
   void run(async () => {
-    const result = await api<ConnectionResult>(`/resources/${resource.id}/test-connection`, 'POST')
-    credentialVerifiedAt[resource.id] = new Date().toISOString()
-    await loadResources()
-    testResult.value = result
+    try {
+      const result = await api<ConnectionResult>(
+        `/resources/${resource.id}/test-connection`,
+        'POST',
+      )
+      credentialVerifiedAt[resource.id] = new Date().toISOString()
+      await loadResources()
+      testResult.value = result
+    } catch (error) {
+      testTarget.value = null
+      throw error
+    }
   })
+}
+
+function testProviderConnection(provider: Provider) {
+  const candidates = resourcesFor(provider)
+  if (!candidates.length) return
+  if (candidates.length === 1) {
+    testConnection(provider, candidates[0])
+    return
+  }
+  testSelectionTarget.value = provider
+  selectedTestResourceID.value = resourceFor(provider)?.id ?? candidates[0].id
+}
+
+function closeTestSelection() {
+  testSelectionTarget.value = null
+  selectedTestResourceID.value = ''
+}
+
+function testSelectedProviderCredential() {
+  if (!testSelectionTarget.value) return
+  const provider = testSelectionTarget.value
+  const resource = resourcesFor(provider).find(
+    (candidate) => candidate.id === selectedTestResourceID.value,
+  )
+  if (!resource) return
+  closeTestSelection()
+  testConnection(provider, resource)
 }
 
 function testCredentialFromModal(provider: Provider, resource: Resource) {
@@ -601,15 +638,24 @@ function syncModels(provider: Provider) {
   syncResult.value = null
   actionError.value = ''
   void run(async () => {
-    const result = await api<ModelSyncResult>(`/providers/${provider.id}/sync-models`, 'POST')
-    syncResult.value = result
-    if (result.ok) await loadModels()
+    try {
+      const result = await api<ModelSyncResult>(`/providers/${provider.id}/sync-models`, 'POST')
+      syncResult.value = result
+      if (result.ok) await loadModels()
+    } catch (error) {
+      syncTarget.value = null
+      throw error
+    }
   })
 }
 
-function resultMessage(result: ConnectionResult) {
+function resultMessage(result: ConnectionResult, resource?: Resource) {
   return result.ok
-    ? t('resources.testPassed')
+    ? t(
+        resource?.authType === 'SUBSCRIPTION'
+          ? 'resources.subscriptionTestPassed'
+          : 'resources.testPassed',
+      )
     : t(i18n.global.te(`errors.${result.code}`) ? `errors.${result.code}` : 'errors.UNKNOWN')
 }
 
@@ -765,26 +811,37 @@ onMounted(() => {
                 <div>
                   <span class="provider-name-line"
                     ><strong>{{ provider.name }}</strong
-                    ><a
-                      v-if="provider.website"
-                      class="provider-quick-action provider-website-action"
-                      :href="provider.website"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      :aria-label="t('providers.openWebsiteFor', { name: provider.name })"
-                      :title="t('providers.visitWebsite')"
-                    >
-                      <Icon name="website" :size="15" /></a
-                    ><button
-                      v-if="provider.modelSyncSupported"
-                      type="button"
-                      class="provider-quick-action provider-direct-action"
-                      :aria-label="t('providers.syncModelsFor', { name: provider.name })"
-                      :title="t('resources.syncModels')"
-                      :disabled="busy"
-                      @click="syncModels(provider)"
-                    >
-                      <Icon name="refresh" :size="16" /></button
+                    ><span class="provider-name-actions"
+                      ><a
+                        v-if="provider.website"
+                        class="provider-quick-action provider-website-action"
+                        :href="provider.website"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        :aria-label="t('providers.openWebsiteFor', { name: provider.name })"
+                        :title="t('providers.visitWebsite')"
+                      >
+                        <Icon name="website" :size="15" /></a
+                      ><button
+                        v-if="resourceFor(provider)"
+                        type="button"
+                        class="provider-quick-action provider-direct-action"
+                        :aria-label="t('providers.testConnectionFor', { name: provider.name })"
+                        :title="t('resources.test')"
+                        :disabled="busy"
+                        @click="testProviderConnection(provider)"
+                      >
+                        <Icon name="activity" :size="16" /></button
+                      ><button
+                        v-if="provider.modelSyncSupported"
+                        type="button"
+                        class="provider-quick-action provider-direct-action"
+                        :aria-label="t('providers.syncModelsFor', { name: provider.name })"
+                        :title="t('resources.syncModels')"
+                        :disabled="busy"
+                        @click="syncModels(provider)"
+                      >
+                        <Icon name="refresh" :size="16" /></button></span
                   ></span>
                   <small>{{ provider.code }}</small>
                 </div>
@@ -1243,6 +1300,62 @@ onMounted(() => {
   />
 
   <Modal
+    v-if="testSelectionTarget"
+    :title="t('resources.selectTestCredentialTitle', { name: testSelectionTarget.name })"
+    :busy="busy"
+    medium
+    @close="closeTestSelection"
+  >
+    <p class="muted credential-test-selection-hint">
+      {{ t('resources.selectTestCredentialHint') }}
+    </p>
+    <div
+      class="credential-test-options"
+      role="radiogroup"
+      :aria-label="t('resources.selectTestCredential')"
+    >
+      <label
+        v-for="resource in resourcesFor(testSelectionTarget)"
+        :key="resource.id"
+        class="credential-test-option"
+        :class="{ 'is-selected': selectedTestResourceID === resource.id }"
+      >
+        <input
+          v-model="selectedTestResourceID"
+          type="radio"
+          name="provider-test-credential"
+          :value="resource.id"
+          :aria-label="t('resources.selectCredentialForTest', { name: resource.name })"
+        />
+        <span class="credential-test-option-main">
+          <strong>{{ resource.name }}</strong>
+          <small>{{ t(`resources.authTypes.${resource.authType || 'API_KEY'}`) }}</small>
+        </span>
+        <span class="credential-test-option-status">
+          <Status :value="resource.runtimeStatus || 'HEALTHY'" />
+          <Status
+            v-if="resource.authType === 'SUBSCRIPTION'"
+            :value="resource.quotaStatus || 'UNKNOWN'"
+          />
+        </span>
+      </label>
+    </div>
+    <footer class="form-footer">
+      <button type="button" class="button" :disabled="busy" @click="closeTestSelection">
+        {{ t('common.cancel') }}
+      </button>
+      <button
+        type="button"
+        class="button primary"
+        :disabled="busy || !selectedTestResourceID"
+        @click="testSelectedProviderCredential"
+      >
+        {{ t('resources.startTest') }}
+      </button>
+    </footer>
+  </Modal>
+
+  <Modal
     v-if="credentialTarget"
     :title="t('resources.configurationTitle')"
     :busy="busy"
@@ -1481,10 +1594,18 @@ onMounted(() => {
     :busy="busy"
     @close="testTarget = null"
   >
-    <p v-if="busy" role="status">{{ t('resources.testing') }}</p>
+    <p v-if="busy" role="status">
+      {{
+        t(
+          testTarget.resource.authType === 'SUBSCRIPTION'
+            ? 'resources.subscriptionTesting'
+            : 'resources.testing',
+        )
+      }}
+    </p>
     <template v-if="testResult">
       <div class="alert" :class="testResult.ok ? 'success' : 'error'" role="status">
-        {{ resultMessage(testResult) }}
+        {{ resultMessage(testResult, testTarget.resource) }}
       </div>
       <dl class="detail-grid">
         <dt>{{ t('common.code') }}</dt>
@@ -1495,7 +1616,15 @@ onMounted(() => {
         <dd>{{ testResult.latencyMs }} ms</dd>
       </dl>
     </template>
-    <p class="muted">{{ t('resources.testHint') }}</p>
+    <p class="muted">
+      {{
+        t(
+          testTarget.resource.authType === 'SUBSCRIPTION'
+            ? 'resources.subscriptionTestHint'
+            : 'resources.testHint',
+        )
+      }}
+    </p>
     <footer class="form-footer">
       <button class="button" :disabled="busy" @click="testTarget = null">{{ t('close') }}</button>
     </footer>
@@ -1635,8 +1764,21 @@ onMounted(() => {
   overflow: hidden;
 }
 .provider-name-line strong {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.person > div {
+  flex: 1;
+  min-width: 0;
+}
+.provider-name-actions {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
 }
 .provider-quick-action {
   display: inline-grid;
@@ -1869,6 +2011,60 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+.credential-test-selection-hint {
+  margin-bottom: 14px;
+}
+.credential-test-options {
+  overflow: hidden;
+  border: 1px solid #dbe4ed;
+  border-radius: 8px;
+}
+.credential-test-option {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  padding: 13px 14px;
+  cursor: pointer;
+  background: #fff;
+}
+.credential-test-option + .credential-test-option {
+  border-top: 1px solid #e5ebf1;
+}
+.credential-test-option:hover {
+  background: #f7faff;
+}
+.credential-test-option.is-selected {
+  background: #edf4ff;
+}
+.credential-test-option input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--blue);
+}
+.credential-test-option-main {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+.credential-test-option-main strong,
+.credential-test-option-main small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.credential-test-option-main small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.credential-test-option-status {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
 }
 .credential-verify-action {
   width: 26px;
@@ -2411,6 +2607,13 @@ onMounted(() => {
   text-align: center;
 }
 @media (max-width: 760px) {
+  .credential-test-option {
+    grid-template-columns: 20px minmax(0, 1fr);
+  }
+  .credential-test-option-status {
+    grid-column: 2;
+    justify-content: flex-start;
+  }
   .credential-overview {
     grid-template-columns: minmax(0, 1fr);
   }

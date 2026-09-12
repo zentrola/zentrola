@@ -141,6 +141,17 @@ func TestProviderCredentialRequiredReturnsConflict(t *testing.T) {
 	}
 }
 
+func TestModelSyncCredentialRequiredReturnsConflict(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/providers/8/sync-models", nil)
+
+	securityError(recorder, request, mgmt.ErrModelSyncCredentialRequired)
+
+	if recorder.Code != http.StatusConflict || !strings.Contains(recorder.Body.String(), `"code":"MODEL_SYNC_CREDENTIAL_REQUIRED"`) {
+		t.Fatalf("unexpected response: status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestInvalidPathIDStopsBeforeApplication(t *testing.T) {
 	called := false
 	handler := statusEndpoint(func(context.Context, admin.Identity, int64, string, appsec.RequestMeta) error {

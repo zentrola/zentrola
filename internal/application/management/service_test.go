@@ -69,6 +69,7 @@ type resourceTestWriter struct {
 	provider Provider
 	mappings []ProviderMapping
 	updated  ResourceRecord
+	quotas   []ResourceQuota
 	restored bool
 }
 
@@ -84,6 +85,10 @@ func (w *resourceTestWriter) ProviderMappings(context.Context, int64) ([]Provide
 func (w *resourceTestWriter) UpdateResource(_ context.Context, resource ResourceRecord) error {
 	w.updated = resource
 	w.resource = resource
+	return nil
+}
+func (w *resourceTestWriter) ReplaceResourceQuotas(_ context.Context, _ int64, quotas []ResourceQuota) error {
+	w.quotas = append([]ResourceQuota(nil), quotas...)
 	return nil
 }
 func (w *resourceTestWriter) RestoreResourceRuntime(context.Context, int64, time.Time) error {
@@ -255,6 +260,52 @@ func TestResourceInferenceProbeBlocksBillingFailure(t *testing.T) {
 	}
 	if writer.updated.RuntimeStatus != "BLOCKED" || writer.updated.BlockedReason == nil || *writer.updated.BlockedReason != "BILLING" || writer.updated.LastHTTPStatus == nil || *writer.updated.LastHTTPStatus != 402 {
 		t.Fatalf("unexpected blocked resource: %+v", writer.updated.Resource)
+	}
+}
+
+func TestPersonalSubscriptionConnectionUsesQuotaProbeWithoutModelMapping(t *testing.T) {
+	updatedAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
+	reset := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	percent := 20.0
+	writer := &resourceTestWriter{
+		resource: ResourceRecord{
+			Resource: Resource{
+				ID: 48, ProviderID: 40, Name: "OpenAI 个人订阅",
+				AuthType: AuthTypeSubscription, AuthAdapter: AuthAdapterOpenAICodex,
+				RuntimeStatus: "HEALTHY", UpdatedAt: updatedAt,
+			},
+			Sealed: catalog.SealedCredential{Ciphertext: []byte("imported-auth-cache"), KeyVersion: 1},
+		},
+		provider: Provider{ID: 40, Code: "openai-official"},
+	}
+	service := New(
+		resourceTestStore{writer: writer},
+		nil,
+		providerTestCipher{},
+		nil,
+		WithSubscriptionAdapter(subscriptionAdapterStub{probe: SubscriptionProbe{
+			Inspection: SubscriptionInspection{AccountRef: "account-1", PlanCode: "plus"},
+			Credential: []byte("refreshed-auth-cache"),
+			Quotas: []ResourceQuota{{
+				Code: "codex.primary", Status: QuotaAvailable, UsedPercent: &percent, ResetsAt: &reset,
+			}},
+		}}),
+	)
+
+	result, err := service.TestResource(
+		context.Background(),
+		admin.Identity{ID: 1},
+		48,
+		appsec.RequestMeta{},
+	)
+	if err != nil || !result.OK || result.Code != "OK" {
+		t.Fatalf("unexpected subscription test result: %+v err=%v", result, err)
+	}
+	if !writer.restored || writer.updated.QuotaStatus != QuotaAvailable || len(writer.quotas) != 1 {
+		t.Fatalf("subscription state was not refreshed: updated=%+v quotas=%+v", writer.updated.Resource, writer.quotas)
+	}
+	if string(writer.updated.Sealed.Ciphertext) != "refreshed-auth-cache" {
+		t.Fatalf("refreshed credential was not persisted: %q", writer.updated.Sealed.Ciphertext)
 	}
 }
 

@@ -398,6 +398,7 @@ export default {
     credentialHint:
       'Add an API key or supported subscription authentication for “{name}”. Complete credentials are never shown after saving.',
     credentialRequiredBeforeEnable: 'Configure provider credentials before enabling the provider.',
+    testConnectionFor: 'Test connection for {name}',
     syncModelsFor: 'Sync official models for {name}',
     connectionTitle: 'Basic settings',
     configTabs: 'Provider configuration',
@@ -482,10 +483,20 @@ export default {
     createHint: 'API keys and personal subscription authentication caches are encrypted at rest.',
     verifyFor: 'Verify availability for {name}',
     verifyAndRestoreFor: 'Verify and restore {name}',
+    selectTestCredentialTitle: '{name} / Select test credential',
+    selectTestCredentialHint:
+      'This provider has multiple credentials. Select the credential to use for this connection test.',
+    selectTestCredential: 'Test credential',
+    selectCredentialForTest: 'Test connection with {name}',
+    startTest: 'Start test',
     testing: 'Verifying model access…',
     testPassed: 'Model access verified',
     testHint:
       'Sends one real request of up to 5 tokens using this credential and its first model mapping without provider failover. This may incur a minimal upstream charge. A successful check restores the resource.',
+    subscriptionTesting: 'Verifying personal subscription…',
+    subscriptionTestPassed: 'Personal subscription verified',
+    subscriptionTestHint:
+      'Verifies subscription authentication through the ChatGPT quota endpoint and refreshes quota status without making a model request.',
     syncModels: 'Sync models',
     syncingModels: 'Reading the official model catalog…',
     syncPassed: 'Official model catalog synchronized',
@@ -642,6 +653,7 @@ export default {
     PROVIDER_UNAVAILABLE: 'The upstream provider is disabled.',
     CREDENTIAL_UNRECOVERABLE: 'The credential cannot be decrypted. Enter it again.',
     PROVIDER_CREDENTIAL_REQUIRED: 'Configure a provider key before enabling the provider.',
+    MODEL_SYNC_CREDENTIAL_REQUIRED: 'Configure a provider key before synchronizing models.',
     PROXY_CONFIGURATION_UNRECOVERABLE:
       'The proxy configuration cannot be decrypted. Save the provider proxy configuration again.',
     SERVICE_UNAVAILABLE: 'The service is temporarily unavailable. Try again later.',
