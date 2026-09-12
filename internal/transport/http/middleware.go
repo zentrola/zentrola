@@ -223,7 +223,7 @@ func redactJSON(value any) any {
 	return value
 }
 
-func bodyLogValue(capture *bodyCapture, contentType string) string {
+func bodyLogValue(capture *bodyCapture, contentType string, redact bool) string {
 	if capture == nil || capture.total == 0 {
 		return ""
 	}
@@ -240,11 +240,14 @@ func bodyLogValue(capture *bodyCapture, contentType string) string {
 	if err := decoder.Decode(&value); err != nil {
 		return fmt.Sprintf("[OMITTED invalid_json bytes=%d]", capture.total)
 	}
-	redacted, err := json.Marshal(redactJSON(value))
+	if redact {
+		value = redactJSON(value)
+	}
+	encoded, err := json.Marshal(value)
 	if err != nil {
 		return fmt.Sprintf("[OMITTED unencodable_json bytes=%d]", capture.total)
 	}
-	return string(redacted)
+	return string(encoded)
 }
 
 func accessLog(logger *slog.Logger, environments ...string) func(http.Handler) http.Handler {
@@ -291,8 +294,8 @@ func accessLog(logger *slog.Logger, environments ...string) func(http.Handler) h
 				}
 				if development {
 					attributes = append(attributes,
-						"request_body", bodyLogValue(requestBody, r.Header.Get("Content-Type")),
-						"response_body", bodyLogValue(responseBody, wrapped.Header().Get("Content-Type")),
+						"request_body", bodyLogValue(requestBody, r.Header.Get("Content-Type"), false),
+						"response_body", bodyLogValue(responseBody, wrapped.Header().Get("Content-Type"), false),
 					)
 				}
 				attributes = append(attributes, accessLogExtraFields(r.Context())...)

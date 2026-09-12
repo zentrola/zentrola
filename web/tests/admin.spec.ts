@@ -268,6 +268,19 @@ async function fixture(page: Page) {
       if (!row) return reply(null, 404, 'NOT_FOUND')
       return reply({ ...row, mappings: providerMappings.get(row.id) || [] })
     }
+    if (segments[0] === 'providers' && segments[2] === 'sync-models' && method === 'POST') {
+      modelSyncRequests.push(segments[1])
+      return reply({
+        ok: !failedTest,
+        code: failedTest ? 'UPSTREAM_AUTH_FAILED' : 'OK',
+        httpStatus: failedTest ? 401 : 200,
+        latencyMs: 160,
+        discovered: failedTest ? 0 : 2,
+        created: failedTest ? 0 : 1,
+        updated: 0,
+        mapped: failedTest ? 0 : 1,
+      })
+    }
     if (path === '/providers/initialize' && method === 'POST') {
       const templates = [
         ['openai-official', 'OpenAI', 'OpenAI', 'https://api.openai.com/v1', 'https://openai.com'],
@@ -621,19 +634,6 @@ async function fixture(page: Page) {
         latencyMs: 140,
       })
     }
-    if (segments[2] === 'sync-models') {
-      modelSyncRequests.push(segments[1])
-      return reply({
-        ok: !failedTest,
-        code: failedTest ? 'UPSTREAM_AUTH_FAILED' : 'OK',
-        httpStatus: failedTest ? 401 : 200,
-        latencyMs: 160,
-        discovered: failedTest ? 0 : 2,
-        created: failedTest ? 0 : 1,
-        updated: 0,
-        mapped: failedTest ? 0 : 1,
-      })
-    }
     return reply(null, 404, 'NOT_FOUND')
   })
   return {
@@ -668,7 +668,7 @@ async function signIn(page: Page, destination: 'home' | 'members' = 'members') {
   await page.getByLabel('管理员账号').fill('admin')
   await page.getByLabel('密码', { exact: true }).fill('fixture-password')
   await page.getByRole('button', { name: '登录控制台' }).click()
-  await expect(page.getByRole('heading', { name: '控制面板', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '仪表盘', exact: true })).toBeVisible()
   if (destination === 'home') return
   await page.getByRole('link', { name: '用户管理', exact: true }).click()
   await expect(page.getByRole('heading', { name: '用户管理', exact: true })).toBeVisible()
@@ -1394,6 +1394,17 @@ test('模型新增编辑、模态校验、冲突恢复和窄屏表单', async ({
   expect(state.models.some((model) => model.id === created.id)).toBe(false)
 })
 
+test('服务商同步入口只由后端能力参数控制', async ({ page }) => {
+  await fixture(page)
+  await signIn(page, 'home')
+  await page.getByRole('link', { name: '服务商', exact: true }).click()
+
+  const row = page.getByRole('row').filter({ hasText: 'DeepSeek' })
+  await expect(
+    row.getByRole('button', { name: '同步 DeepSeek 的官方模型', exact: true }),
+  ).toBeVisible()
+})
+
 test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => {
   const state = await fixture(page)
   await signIn(page)
@@ -1878,7 +1889,7 @@ test('服务商列表展示凭证聚合运行状态和错误原因', async ({ pa
     '查看 DeepSeek 的凭证，当前运行状态：已阻断：余额或计费异常 · HTTP 402 · UPSTREAM_BILLING_BLOCKED',
   )
   await row.getByRole('button', { name: /查看 DeepSeek 的凭证/ }).click()
-  await expect(modal(page).getByRole('heading', { name: '服务商凭证配置' })).toBeVisible()
+  await expect(modal(page).getByRole('heading', { name: '凭证配置' })).toBeVisible()
   await expect(modal(page).locator('.credential-overview')).not.toContainText('API Key · ••••••••')
   await expect(modal(page).locator('.credential-overview')).toContainText(
     'https://api.deepseek.com',
@@ -2611,6 +2622,18 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
   const defaultDates = (await dateRangeButton.textContent())?.match(/\d{4}\/\d{2}\/\d{2}/g) || [],
     [defaultStart = '', defaultEnd = ''] = defaultDates
   expect(defaultDates).toHaveLength(2)
+  expect(
+    Date.parse(defaultEnd.replaceAll('/', '-')) - Date.parse(defaultStart.replaceAll('/', '-')),
+  ).toBe(6 * 86400000)
+  await expect
+    .poll(() => {
+      const initialUsageQuery = state.usageQueries.at(-1)
+      return (
+        Date.parse(initialUsageQuery?.get('to') || '') -
+        Date.parse(initialUsageQuery?.get('from') || '')
+      )
+    })
+    .toBe(7 * 86400000)
   await dateRangeButton.click()
   const dateRangeDialog = page.getByRole('dialog', { name: '选择起止日期' })
   await expect(dateRangeDialog.locator('.calendar-panel')).toHaveCount(2)

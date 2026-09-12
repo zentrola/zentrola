@@ -1,7 +1,7 @@
 <script setup lang="ts">
 withDefaults(defineProps<{ name: string; size?: number }>(), { size: 20 })
 const paths: Record<string, string> = {
-  home: 'M3 11.5 12 4l9 7.5V21h-6v-6H9v6H3v-9.5Z',
+  home: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z',
   members:
     'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M16 3a4 4 0 0 1 0 8M22 21v-2a4 4 0 0 0-3-3.87M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0',
   groups: 'M3 7h7l2 2h9v11H3zM3 7V4h6l2 3',
@@ -15,7 +15,7 @@ const paths: Record<string, string> = {
   edit: 'M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4L16.5 3.5Z',
   resources: 'M8 3v5m8-5v5M5 8h14v3a7 7 0 0 1-14 0V8Zm7 10v4',
   usage: 'M4 3v18h17M8 16v-5m5 5V7m5 9V3',
-  operations: 'M6 3h12v18H6zM9 7h6m-6 5h6m-6 5h4',
+  operations: 'M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2',
   plus: 'M12 5v14M5 12h14',
   search: 'M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0',
   calendar: 'M7 3v3m10-3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v14H4V6a1 1 0 0 1 1-1Z',

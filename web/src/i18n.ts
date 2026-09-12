@@ -101,7 +101,7 @@ export const i18n = createI18n({
         retryIn: '{time} 后重试',
       },
       nav: {
-        home: '控制面板',
+        home: '仪表盘',
         members: '用户管理',
         groups: '用户分组',
         models: '模型',
@@ -475,7 +475,7 @@ export const i18n = createI18n({
       resources: {
         create: '添加服务商凭证',
         manageCredentials: '管理认证凭据',
-        configurationTitle: '服务商凭证配置',
+        configurationTitle: '凭证配置',
         addCredential: '新增凭据',
         listHint: '凭据保存后仅展示非敏感信息；如需更换，请删除后重新添加。',
         emptyCredentials: '暂无认证凭据',

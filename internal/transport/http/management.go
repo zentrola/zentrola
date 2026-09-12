@@ -473,6 +473,30 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 		data, err := m.ResourceQuotas(req.Context(), adminFrom(req), id)
 		adminResult(w, req, 200, data, err)
 	})
+	// @Summary 同步服务商官方模型目录
+	// @Tags 模型与资源
+	// @Description 由后端选择服务商的 API Key 凭据并同步官方模型目录；当前支持 OpenAI、DeepSeek 和智谱 AI。
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "服务商 ID（正整数字符串）"
+	// @Success 200 {object} response{data=mgmt.ModelSyncResult}
+	// @Header all {string} X-Request-ID "请求追踪 ID"
+	// @Failure 400 {object} response
+	// @Failure 401 {object} response
+	// @Failure 404 {object} response
+	// @Failure 409 {object} response
+	// @Failure 422 {object} response
+	// @Failure 503 {object} response
+	// @Router /api/v1/providers/{id}/sync-models [post]
+	r.Post("/providers/{id}/sync-models", func(w http.ResponseWriter, req *http.Request) {
+		id, err := routeID(req, "id")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		data, err := m.SyncProviderModels(req.Context(), adminFrom(req), id, requestMeta(req))
+		adminResult(w, req, 200, data, err)
+	})
 	// @Summary 服务商详情
 	// @Tags 模型与资源
 	// @Produce json

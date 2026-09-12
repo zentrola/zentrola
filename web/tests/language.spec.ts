@@ -15,8 +15,7 @@ test('首次按浏览器语言选择英文，手动切换后记住偏好并覆�
         token: 'language-test-token',
         expiresAt: new Date(Date.now() + 3600000).toISOString(),
       })
-    if (path.endsWith('/me'))
-      return reply({ id: '1', username: 'admin', displayName: 'Admin' })
+    if (path.endsWith('/me')) return reply({ id: '1', username: 'admin', displayName: 'Admin' })
     return reply({ items: [], nextCursor: null, total: 0 })
   })
 
@@ -34,7 +33,10 @@ test('首次按浏览器语言选择英文，手动切换后记住偏好并覆�
   await expect(page.locator('html')).toHaveAttribute('lang', 'en-US')
   await expect(page).toHaveTitle('Zentrola · Admin Console')
 
-  await page.getByRole('group', { name: 'Language' }).getByRole('button', { name: '中' }).click()
+  const languageMenu = page.getByRole('button', { name: 'Language' })
+  await expect(languageMenu).toContainText('English')
+  await languageMenu.click()
+  await page.getByRole('menuitemradio', { name: '简体中文' }).click()
   await expect(page.getByRole('heading', { name: '企业 AI Coding 能力治理平台' })).toBeVisible()
   await expect(page.getByText('同时支持 OpenAI / Anthropic 双协议')).toBeVisible()
   await expect(page.getByText('继续使用现有客户端与工作流，无需改变使用习惯。')).toBeVisible()
@@ -43,7 +45,10 @@ test('首次按浏览器语言选择英文，手动切换后记住偏好并覆�
   await page.reload()
   await expect(page.getByRole('heading', { name: '欢迎回来' })).toBeVisible()
 
-  await page.getByRole('group', { name: '界面语言' }).getByRole('button', { name: 'EN' }).click()
+  const localeMenu = page.getByRole('button', { name: '界面语言' })
+  await expect(localeMenu).toContainText('简体中文')
+  await localeMenu.click()
+  await page.getByRole('menuitemradio', { name: 'English' }).click()
   await page.getByLabel('Administrator username').fill('admin')
   await page.getByLabel('Password', { exact: true }).fill('language-test-password')
   await page.getByRole('button', { name: 'Sign in to console' }).click()
