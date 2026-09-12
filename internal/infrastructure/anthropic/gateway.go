@@ -13,6 +13,7 @@ import (
 	"time"
 
 	gw "github.com/zentrola/zentrola/internal/application/gateway"
+	"github.com/zentrola/zentrola/internal/domain/catalog"
 	"github.com/zentrola/zentrola/internal/infrastructure/provider"
 )
 
@@ -36,7 +37,9 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 	if input.Path != "/v1/messages" && input.Path != "/v1/messages/count_tokens" {
 		return nil, gw.ErrInvalid
 	}
-	if baseURL == "https://api.deepseek.com/anthropic" {
+	// 根据服务商能力自动过滤不支持的功能
+	capabilities := catalog.GetProviderCapabilities(baseURL)
+	if !capabilities.SupportsAdvisor {
 		adapted, removedTools, removedBeta, err := adaptDeepSeekRequest(input)
 		if err != nil {
 			return nil, err
@@ -44,7 +47,7 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 		input = adapted
 		if input.Development && (removedTools > 0 || removedBeta) {
 			slog.InfoContext(ctx, "gateway compatibility applied",
-				"provider", "deepseek-official",
+				"base_url", baseURL,
 				"removed_tool_type", "advisor_20260301",
 				"removed_tool_count", removedTools,
 				"removed_beta", removedBeta,
