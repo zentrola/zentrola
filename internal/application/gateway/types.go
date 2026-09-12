@@ -136,6 +136,7 @@ type Response struct {
 	Headers         map[string][]string
 	Body            io.ReadCloser
 	RequestedStream bool
+	ErrorType       string
 }
 type Upstream interface {
 	Open(context.Context, Route, Request, []byte) (*Response, error)

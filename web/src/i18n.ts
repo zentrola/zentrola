@@ -575,6 +575,8 @@ export const i18n = createI18n({
         noAttempt: '未发起上游调用',
         attempt: '上游调用',
         errorType: '错误码',
+        errorInfo: '错误信息',
+        upstreamHTTPError: '上游服务返回 HTTP {status}。',
         filters: '筛选用量',
       },
       operations: {

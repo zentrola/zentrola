@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { api, all, errorText } from '../api'
 import { useCollection, date, count } from '../composables'
-import { t } from '../i18n'
+import { i18n, t } from '../i18n'
 import { showErrorToast } from '../toast'
 import type { Usage, Member, Model, Page, Resource } from '../types'
 import Icon from '../components/Icon.vue'
@@ -36,6 +36,16 @@ const memberAutocomplete = ref<HTMLElement | null>(null),
   datePickerValidation = ref('')
 let memberSearchTimer: ReturnType<typeof setTimeout> | undefined,
   memberSearchRevision = 0
+
+function errorDescription(errorType: string | null) {
+  if (!errorType) return t('common.none')
+  const key = `errors.${errorType}`
+  if (i18n.global.te(key)) return t(key)
+  const upstreamHTTPStatus = errorType.match(/^UPSTREAM_HTTP_(\d{3})$/)?.[1]
+  return upstreamHTTPStatus
+    ? t('usage.upstreamHTTPError', { status: upstreamHTTPStatus })
+    : t('errors.UNKNOWN')
+}
 const { items, cursor, page, pageSize, total, loading, error, load, previous, retry, setPageSize } =
   useCollection<Usage>(() => `/usage?${query.value}`)
 const dateRangeText = computed(() => {
@@ -501,6 +511,8 @@ onBeforeUnmount(() => {
       <dd><Status :value="selected.status" /></dd>
       <dt>{{ t('usage.errorType') }}</dt>
       <dd>{{ selected.errorType || t('common.none') }}</dd>
+      <dt>{{ t('usage.errorInfo') }}</dt>
+      <dd>{{ errorDescription(selected.errorType) }}</dd>
       <dt>{{ t('usage.time') }}</dt>
       <dd>{{ date(selected.requestAt) }}</dd>
       <dt>{{ t('usage.latency') }}</dt>

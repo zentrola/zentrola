@@ -306,7 +306,10 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		streamInferred = true
 	}
 	if trace != nil {
-		trace.ErrorType = "UPSTREAM_HTTP_" + strconv.Itoa(upstream.Status)
+		trace.ErrorType = upstream.ErrorType
+		if trace.ErrorType == "" {
+			trace.ErrorType = "UPSTREAM_HTTP_" + strconv.Itoa(upstream.Status)
+		}
 		if upstream.Status >= 200 && upstream.Status < 300 {
 			trace.ErrorType = "UPSTREAM_RESPONSE_INCOMPLETE"
 			encoding := http.Header(upstream.Headers).Get("Content-Encoding")

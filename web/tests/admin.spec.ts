@@ -251,13 +251,13 @@ async function fixture(page: Page) {
             clientProtocol: 'OPENAI',
             requestAt: stamp,
             completedAt: stamp,
-            status: 'SUCCESS',
+            status: 'FAILED',
             inputTokens: 0,
             outputTokens: null,
             cachedInputTokens: 0,
             latencyMs: 218,
             attemptNo: 1,
-            errorType: null,
+            errorType: 'UPSTREAM_BILLING_BLOCKED',
           },
         ])
       }
@@ -2645,6 +2645,8 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
   await expect(usageRow.locator('td').nth(7)).toHaveText('0')
   await page.getByRole('button', { name: '详情', exact: true }).click()
   await expect(modal(page).getByText('req_live_compatible')).toBeVisible()
+  await expect(modal(page)).toContainText('UPSTREAM_BILLING_BLOCKED')
+  await expect(modal(page)).toContainText('上游余额不足、计费异常或订阅已过期。')
   await modal(page).getByRole('button', { name: '关闭', exact: true }).click()
   await page.screenshot({ path: 'test-results/visual/usage.png', fullPage: true })
   expect(

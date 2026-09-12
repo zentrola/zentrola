@@ -122,6 +122,7 @@ func (s *Service) forwardCandidates(ctx context.Context, identity appsec.Princip
 		}
 
 		decision := inspectResponse(response)
+		response.ErrorType = decision.errorCode
 		if decision.permanent != nil {
 			s.block(ctx, identity, route, *decision.permanent)
 		} else if decision.retry {
@@ -132,7 +133,7 @@ func (s *Service) forwardCandidates(ctx context.Context, identity appsec.Princip
 		if decision.retry {
 			next := s.nextRoute(ctx, routes, index+1)
 			if next >= 0 {
-				s.failAttempt(request.Trace, attempt, "UPSTREAM_HTTP_"+strconv.Itoa(response.Status))
+				s.failAttempt(request.Trace, attempt, responseErrorType(response))
 				response.Body.Close()
 				index = next
 				continue
@@ -238,6 +239,7 @@ type responseDecision struct {
 	retry     bool
 	cooldown  time.Duration
 	permanent *ResourceBlock
+	errorCode string
 }
 
 func inspectResponse(response *Response) responseDecision {
@@ -252,7 +254,7 @@ func inspectResponse(response *Response) responseDecision {
 	response.Body = body
 	lower := strings.ToLower(string(prefix))
 	block := func(reason, code string) responseDecision {
-		return responseDecision{retry: true, permanent: &ResourceBlock{Reason: reason, ErrorCode: code, HTTPStatus: int32(status)}}
+		return responseDecision{retry: true, permanent: &ResourceBlock{Reason: reason, ErrorCode: code, HTTPStatus: int32(status)}, errorCode: code}
 	}
 	if status == http.StatusUnauthorized {
 		return block("AUTHENTICATION", "UPSTREAM_AUTHENTICATION_FAILED")
@@ -267,6 +269,16 @@ func inspectResponse(response *Response) responseDecision {
 		return responseDecision{retry: true, cooldown: retryAfter(response.Headers)}
 	}
 	return responseDecision{}
+}
+
+func responseErrorType(response *Response) string {
+	if response != nil && response.ErrorType != "" {
+		return response.ErrorType
+	}
+	if response == nil {
+		return "UPSTREAM_UNAVAILABLE"
+	}
+	return "UPSTREAM_HTTP_" + strconv.Itoa(response.Status)
 }
 
 func retryAfter(headers map[string][]string) time.Duration {

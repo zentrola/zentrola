@@ -192,13 +192,14 @@ func TestForwardSkipsCoolingRoute(t *testing.T) {
 
 func TestForwardBlocksPermanentFailureAndUsesNextProvider(t *testing.T) {
 	store := &failoverStore{routes: testRoutes()}
+	trace := &usage.Event{}
 	service := New(store, failoverCipher{}, upstreamFunc(func(_ context.Context, route Route, _ Request, _ []byte) (*Response, error) {
 		if route.ResourceID == 1000 {
 			return response(402, `{"error":{"message":"insufficient balance"}}`), nil
 		}
 		return response(200, `{}`), nil
 	}))
-	got, err := testForward(t, service, nil)
+	got, err := testForward(t, service, trace)
 	if err != nil || got.Status != 200 {
 		t.Fatalf("status=%v err=%v", got, err)
 	}
@@ -206,6 +207,21 @@ func TestForwardBlocksPermanentFailureAndUsesNextProvider(t *testing.T) {
 	if len(store.blocks) != 1 || store.blocks[0].Reason != "BILLING" || store.blocks[0].HTTPStatus != 402 {
 		t.Fatalf("blocks=%+v", store.blocks)
 	}
+	if len(trace.Attempts) != 1 || trace.Attempts[0].ErrorType != "UPSTREAM_BILLING_BLOCKED" {
+		t.Fatalf("attempts=%+v", trace.Attempts)
+	}
+}
+
+func TestForwardClassifiesFinalPaymentFailure(t *testing.T) {
+	store := &failoverStore{routes: testRoutes()[:1]}
+	service := New(store, failoverCipher{}, upstreamFunc(func(_ context.Context, _ Route, _ Request, _ []byte) (*Response, error) {
+		return response(402, `{"error":{"message":"insufficient balance"}}`), nil
+	}))
+	got, err := testForward(t, service, &usage.Event{})
+	if err != nil || got.Status != 402 || got.ErrorType != "UPSTREAM_BILLING_BLOCKED" {
+		t.Fatalf("response=%+v err=%v", got, err)
+	}
+	got.Body.Close()
 }
 
 func TestForwardDoesNotSwitchOnClientRequestError(t *testing.T) {

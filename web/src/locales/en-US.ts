@@ -560,6 +560,8 @@ export default {
     noAttempt: 'No upstream attempt',
     attempt: 'Upstream attempt',
     errorType: 'Error code',
+    errorInfo: 'Error details',
+    upstreamHTTPError: 'The upstream service returned HTTP {status}.',
     filters: 'Usage filters',
   },
   operations: {
