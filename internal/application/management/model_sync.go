@@ -70,7 +70,7 @@ func (s *Service) SyncProviderModels(ctx context.Context, actor admin.Identity, 
 			after = next
 		}
 		if resourceID == 0 {
-			return ErrProviderCredentialRequired
+			return ErrModelSyncCredentialRequired
 		}
 		return nil
 	})

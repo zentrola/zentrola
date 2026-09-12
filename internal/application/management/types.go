@@ -14,10 +14,11 @@ import (
 )
 
 var (
-	ErrConflict                   = errors.New("conflict")
-	ErrCredential                 = errors.New("credential unrecoverable")
-	ErrProvider                   = errors.New("provider unavailable")
-	ErrProviderCredentialRequired = errors.New("provider credential required")
+	ErrConflict                    = errors.New("conflict")
+	ErrCredential                  = errors.New("credential unrecoverable")
+	ErrProvider                    = errors.New("provider unavailable")
+	ErrProviderCredentialRequired  = errors.New("provider credential required")
+	ErrModelSyncCredentialRequired = errors.New("model sync credential required")
 )
 
 const (

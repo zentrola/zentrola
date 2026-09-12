@@ -85,7 +85,7 @@ func managementError(err error) error {
 			return appsec.ErrInvalidArgument
 		}
 	}
-	for _, known := range []error{appsec.ErrInvalidArgument, appsec.ErrUnauthenticated, appsec.ErrNotFound, appsec.ErrUnavailable, mgmt.ErrConflict, mgmt.ErrCredential, mgmt.ErrProvider, mgmt.ErrProviderCredentialRequired} {
+	for _, known := range []error{appsec.ErrInvalidArgument, appsec.ErrUnauthenticated, appsec.ErrNotFound, appsec.ErrUnavailable, mgmt.ErrConflict, mgmt.ErrCredential, mgmt.ErrProvider, mgmt.ErrProviderCredentialRequired, mgmt.ErrModelSyncCredentialRequired} {
 		if errors.Is(err, known) {
 			return known
 		}

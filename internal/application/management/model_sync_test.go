@@ -2,6 +2,7 @@ package management
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -166,6 +167,29 @@ func TestSyncResourceModelsCreatesMissingEntriesAndRefreshesExistingNames(t *tes
 	result, err = service.SyncProviderModels(context.Background(), actor, 20, appsec.RequestMeta{})
 	if err != nil || result.Created != 0 || result.Updated != 0 || result.Mapped != 0 || len(state.models) != 3 || len(state.mappings) != 3 {
 		t.Fatalf("sync is not idempotent: result=%+v err=%v", result, err)
+	}
+}
+
+func TestSyncProviderModelsRequiresSyncCredential(t *testing.T) {
+	state := &syncState{
+		provider: Provider{ID: 20, Code: catalog.DeepSeekOfficialCode, Name: "DeepSeek"},
+	}
+	service := New(
+		syncStore{state},
+		&syncIDs{},
+		syncCipher{},
+		nil,
+		WithModelDiscoverer(&syncDiscoverer{}),
+	)
+
+	_, err := service.SyncProviderModels(
+		context.Background(),
+		admin.Identity{ID: 1},
+		20,
+		appsec.RequestMeta{},
+	)
+	if !errors.Is(err, ErrModelSyncCredentialRequired) {
+		t.Fatalf("error=%v; want model sync credential required", err)
 	}
 }
 

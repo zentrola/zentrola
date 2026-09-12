@@ -270,6 +270,15 @@ async function fixture(page: Page) {
     }
     if (segments[0] === 'providers' && segments[2] === 'sync-models' && method === 'POST') {
       modelSyncRequests.push(segments[1])
+      if (
+        !resources.some(
+          (resource) =>
+            resource.providerId === segments[1] &&
+            (resource.authType === 'API_KEY' || !resource.authType),
+        )
+      ) {
+        return reply(null, 409, 'MODEL_SYNC_CREDENTIAL_REQUIRED')
+      }
       return reply({
         ok: !failedTest,
         code: failedTest ? 'UPSTREAM_AUTH_FAILED' : 'OK',
@@ -856,8 +865,10 @@ test('首页展示本月指标、应用接入、配置脚本和分项排行榜',
   )
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(modal(page)).toBeVisible()
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+    .toBe(true)
   await page.screenshot({ path: '../.cache/web-visual/home-setup-mobile.png', fullPage: true })
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
 })
 
 test('首页在启用服务商不可用时提醒管理员', async ({ page }) => {
@@ -1400,9 +1411,17 @@ test('服务商同步入口只由后端能力参数控制', async ({ page }) => 
   await page.getByRole('link', { name: '服务商', exact: true }).click()
 
   const row = page.getByRole('row').filter({ hasText: 'DeepSeek' })
-  await expect(
-    row.getByRole('button', { name: '同步 DeepSeek 的官方模型', exact: true }),
-  ).toBeVisible()
+  const syncModelsButton = row.getByRole('button', {
+    name: '同步 DeepSeek 的官方模型',
+    exact: true,
+  })
+  await expect(syncModelsButton).toBeVisible()
+  await expect(row.locator('.provider-name-actions').getByRole('button')).toHaveCount(1)
+  await expect(syncModelsButton.locator('svg')).toBeVisible()
+  await expect(syncModelsButton.locator('path')).toHaveAttribute('d', /\S+/)
+  await syncModelsButton.click()
+  await expect(page.locator('.toast')).toContainText('请先配置服务商密钥，再同步模型。')
+  await expect(page.getByRole('dialog', { name: 'DeepSeek / 模型同步结果' })).toHaveCount(0)
 })
 
 test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => {
@@ -2003,7 +2022,10 @@ test('服务商支持个人订阅优先并保留 API Key 兜底', async ({ page 
   await subscriptionRow
     .getByRole('button', { name: '验证 OpenAI 个人订阅 的可用性', exact: true })
     .click()
-  await expect(modal(page).getByRole('status')).toContainText('模型调用验证通过')
+  await expect(modal(page).getByRole('status')).toContainText('个人订阅验证通过')
+  await expect(modal(page)).toContainText(
+    '通过 ChatGPT 额度接口验证订阅认证并刷新额度状态，不会发起模型调用。',
+  )
   await modal(page).getByRole('button', { name: '关闭', exact: true }).last().click()
   expect(state.resources[0].quotaStatus).toBe('AVAILABLE')
 
@@ -2027,6 +2049,19 @@ test('服务商支持个人订阅优先并保留 API Key 兜底', async ({ page 
     ]),
   )
 
+  await providerRow.getByRole('button', { name: '测试 OpenAI 的连接', exact: true }).click()
+  const testSelectionDialog = page.getByRole('dialog', {
+    name: 'OpenAI / 选择测试凭证',
+  })
+  await expect(testSelectionDialog).toBeVisible()
+  await expect(testSelectionDialog.getByRole('radio')).toHaveCount(2)
+  await testSelectionDialog
+    .getByRole('radio', { name: '使用 OpenAI API Key 测试连接', exact: true })
+    .check()
+  await testSelectionDialog.getByRole('button', { name: '开始测试', exact: true }).click()
+  await expect(modal(page).getByRole('status')).toContainText('模型调用验证通过')
+  await modal(page).getByRole('button', { name: '关闭', exact: true }).last().click()
+
   await providerRow
     .getByRole('button', {
       name: '管理 OpenAI 的认证凭据',
@@ -2048,7 +2083,8 @@ test('服务商支持个人订阅优先并保留 API Key 兜底', async ({ page 
 test('状态 switch 直接生效且危险操作仍需确认', async ({ page }) => {
   await fixture(page)
   await signIn(page)
-  await page.getByRole('button', { name: 'EN', exact: true }).click()
+  await page.getByRole('button', { name: '界面语言', exact: true }).click()
+  await page.getByRole('menuitemradio', { name: 'English', exact: true }).click()
   await page.getByRole('link', { name: 'Providers', exact: true }).click()
   const row = page.getByRole('row').filter({ hasText: 'DeepSeek' })
   const status = row.getByRole('switch', { name: 'Status for DeepSeek' })
@@ -2509,6 +2545,15 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
   await expect(page.locator('.toast-success')).toContainText('已保存')
   await modal(page).getByRole('button', { name: '关闭', exact: true }).click()
   await expect(page.locator('dialog')).toHaveCount(0)
+  const testProviderConnection = providerRow.getByRole('button', {
+    name: '测试 DeepSeek 的连接',
+    exact: true,
+  })
+  await expect(testProviderConnection).toBeVisible()
+  await expect(testProviderConnection.locator('svg')).toBeVisible()
+  await testProviderConnection.click()
+  await expect(modal(page).getByRole('status')).toContainText('模型调用验证通过')
+  await modal(page).getByRole('button', { name: '关闭', exact: true }).last().click()
   expect(state.modelSyncRequests).toHaveLength(0)
   await providerRow.getByRole('button', { name: '同步 DeepSeek 的官方模型', exact: true }).click()
   await expect(modal(page).getByRole('status')).toContainText('官方模型目录同步完成')

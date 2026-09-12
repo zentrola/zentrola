@@ -430,6 +430,8 @@ func securityError(w http.ResponseWriter, r *http.Request, err error) {
 		status, code, message = http.StatusConflict, "PROVIDER_UNAVAILABLE", "Provider is unavailable."
 	case errors.Is(err, mgmt.ErrProviderCredentialRequired):
 		status, code, message = http.StatusConflict, "PROVIDER_CREDENTIAL_REQUIRED", "Configure a provider credential before enabling the provider."
+	case errors.Is(err, mgmt.ErrModelSyncCredentialRequired):
+		status, code, message = http.StatusConflict, "MODEL_SYNC_CREDENTIAL_REQUIRED", "Configure a provider credential before synchronizing models."
 	}
 	writeJSON(w, r, status, response{Code: code, Message: message})
 }

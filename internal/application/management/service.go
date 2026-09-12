@@ -757,6 +757,34 @@ func (s *Service) TestResource(ctx context.Context, actor admin.Identity, id int
 	plain, decryptErr := s.cipher.Decrypt(resource.Sealed, owner(actor, resource.Resource))
 	if decryptErr != nil {
 		result.Code = "CREDENTIAL_UNRECOVERABLE"
+	} else if resource.AuthType == AuthTypeSubscription {
+		defer clear(plain)
+		startedAt := time.Now()
+		if s.subscription == nil || !s.subscription.Supports(resource.AuthAdapter) || !s.subscription.SupportsProvider(provider) {
+			result.Code = "SUBSCRIPTION_ADAPTER_UNAVAILABLE"
+		} else if probe, probeErr := s.subscription.Probe(ctx, plain); probeErr != nil {
+			result.Code = "SUBSCRIPTION_UNAVAILABLE"
+		} else {
+			subscriptionProbe = &probe
+			resource.PlanCode = stringPointer(probe.Inspection.PlanCode)
+			resource.ExternalAccountRef = stringPointer(probe.Inspection.AccountRef)
+			if probe.Inspection.ExpiresAt != nil {
+				resource.ExpiresAt = probe.Inspection.ExpiresAt
+			}
+			resource.QuotaStatus, resource.QuotaResetsAt = aggregateQuota(probe.Quotas)
+			now := time.Now().UTC().Truncate(time.Microsecond)
+			resource.QuotaCheckedAt = &now
+			result.OK, result.Code = true, "OK"
+			if len(probe.Credential) > 0 {
+				refreshedSealed, probeErr = s.cipher.Encrypt(probe.Credential, owner(actor, resource.Resource))
+				if probeErr != nil {
+					result.OK, result.Code = false, "CREDENTIAL_UNRECOVERABLE"
+					subscriptionProbe = nil
+				}
+			}
+			clear(probe.Credential)
+		}
+		result.LatencyMS = time.Since(startedAt).Milliseconds()
 	} else if len(mappings) == 0 || strings.TrimSpace(mappings[0].UpstreamModelCode) == "" {
 		result.Code = "PROVIDER_MODEL_MAPPING_REQUIRED"
 	} else {
@@ -766,56 +794,14 @@ func (s *Service) TestResource(ctx context.Context, actor admin.Identity, id int
 			Protocol: protocol, BaseURL: baseURL, UpstreamModelCode: mappings[0].UpstreamModelCode,
 			AuthType: resource.AuthType, AuthAdapter: resource.AuthAdapter,
 		}
-		if resource.AuthType == AuthTypeSubscription {
-			startedAt := time.Now()
-			if s.subscription == nil || !s.subscription.Supports(resource.AuthAdapter) || !s.subscription.SupportsProvider(provider) {
-				result.Code = "SUBSCRIPTION_ADAPTER_UNAVAILABLE"
-			} else if probe, probeErr := s.subscription.Probe(ctx, plain); probeErr != nil {
-				result.Code = "SUBSCRIPTION_UNAVAILABLE"
-			} else {
-				subscriptionProbe = &probe
-				resource.PlanCode = stringPointer(probe.Inspection.PlanCode)
-				resource.ExternalAccountRef = stringPointer(probe.Inspection.AccountRef)
-				if probe.Inspection.ExpiresAt != nil {
-					resource.ExpiresAt = probe.Inspection.ExpiresAt
-				}
-				resource.QuotaStatus, resource.QuotaResetsAt = aggregateQuota(probe.Quotas)
-				now := time.Now().UTC().Truncate(time.Microsecond)
-				resource.QuotaCheckedAt = &now
-				probeCredential := plain
-				if len(probe.Credential) > 0 {
-					probeCredential = probe.Credential
-				}
-				if baseURL == "" {
-					result.Code = "PROVIDER_UNAVAILABLE"
-				} else {
-					proxy, proxyErr := s.decryptedProviderProxy(provider)
-					if proxyErr != nil {
-						result.Code = "PROXY_CONFIGURATION_UNRECOVERABLE"
-					} else {
-						result = s.tester.Test(ctx, target, probeCredential, proxy)
-					}
-				}
-				if result.OK && len(probe.Credential) > 0 {
-					refreshedSealed, probeErr = s.cipher.Encrypt(probe.Credential, owner(actor, resource.Resource))
-					if probeErr != nil {
-						result.OK, result.Code = false, "CREDENTIAL_UNRECOVERABLE"
-						subscriptionProbe = nil
-					}
-				}
-				clear(probe.Credential)
-			}
-			result.LatencyMS = time.Since(startedAt).Milliseconds()
+		if baseURL == "" {
+			result.Code = "PROVIDER_UNAVAILABLE"
 		} else {
-			if baseURL == "" {
-				result.Code = "PROVIDER_UNAVAILABLE"
+			proxy, proxyErr := s.decryptedProviderProxy(provider)
+			if proxyErr != nil {
+				result.Code = "PROXY_CONFIGURATION_UNRECOVERABLE"
 			} else {
-				proxy, proxyErr := s.decryptedProviderProxy(provider)
-				if proxyErr != nil {
-					result.Code = "PROXY_CONFIGURATION_UNRECOVERABLE"
-				} else {
-					result = s.tester.Test(ctx, target, plain, proxy)
-				}
+				result = s.tester.Test(ctx, target, plain, proxy)
 			}
 		}
 	}
