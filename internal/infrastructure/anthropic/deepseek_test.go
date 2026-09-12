@@ -80,6 +80,29 @@ func TestAnthropicPreservesAdvisorCapability(t *testing.T) {
 	resp.Body.Close()
 }
 
+func TestUnknownProviderRemovesAdvisorForSafety(t *testing.T) {
+	// 未知服务商默认移除 advisor，避免向不支持的端点发送导致报错
+	client := NewGatewayClient(time.Second)
+	client.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		data, _ := io.ReadAll(r.Body)
+		if bytes.Contains(data, []byte(`"type":"advisor_20260301"`)) {
+			t.Fatalf("advisor tool reached unknown provider: %s", data)
+		}
+		if !bytes.Contains(data, []byte(`"name":"read"`)) {
+			t.Fatalf("other tools were lost: %s", data)
+		}
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"type":"message"}`))}, nil
+	})
+	body := []byte(`{"model":"some-model","tools":[{"name":"read","input_schema":{"type":"object"}},{"type":"advisor_20260301","name":"advisor","model":"claude-opus-5"}],"messages":[{"role":"user","content":"test"}]}`)
+	resp, err := client.Open(context.Background(), gw.Route{BaseURL: "https://api.unknown-provider.com/v1"}, gw.Request{
+		Path: "/v1/messages", Body: body, Beta: "advisor-tool-2026-03-01",
+	}, []byte("test-key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+}
+
 func TestDeepSeekConnectionUsesRealInference(t *testing.T) {
 	tester := NewConnectionTester()
 	var headers http.Header
