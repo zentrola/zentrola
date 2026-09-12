@@ -132,9 +132,10 @@ type Request struct {
 	ProtocolHeaders                map[string][]string
 }
 type Response struct {
-	Status  int
-	Headers map[string][]string
-	Body    io.ReadCloser
+	Status          int
+	Headers         map[string][]string
+	Body            io.ReadCloser
+	RequestedStream bool
 }
 type Upstream interface {
 	Open(context.Context, Route, Request, []byte) (*Response, error)
@@ -192,7 +193,11 @@ func (s *Service) Forward(ctx context.Context, identity appsec.PrincipalIdentity
 	if request.Trace != nil && len(routes) > 0 {
 		request.Trace.ModelID = routes[0].ModelID
 	}
-	return s.forwardCandidates(ctx, identity, request, parsed, routes)
+	response, err := s.forwardCandidates(ctx, identity, request, parsed, routes)
+	if response != nil {
+		response.RequestedStream = parsed.Stream
+	}
+	return response, err
 }
 
 func (s *Service) Models(ctx context.Context, identity appsec.PrincipalIdentity) ([]Model, error) {

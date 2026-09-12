@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	gw "github.com/zentrola/zentrola/internal/application/gateway"
@@ -20,6 +22,8 @@ import (
 	"github.com/zentrola/zentrola/internal/infrastructure/config"
 	"github.com/zentrola/zentrola/internal/infrastructure/logging"
 )
+
+const openAICompletionDrainLimit = 2 * time.Second
 
 type GatewayHandler struct {
 	service  *gw.Service
@@ -195,14 +199,55 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), g.cfg.RequestTimeout)
+	// Responses 客户端可能在收到工具调用后立即关闭下游连接，而最终 usage
+	// 位于紧随其后的 response.completed。上游上下文因此不能被客户端取消
+	// 直接截断；响应尚未打开时仍立即取消，打开后只保留一个很短的收尾窗口。
+	retainOpenAICompletion := protocol == gw.OpenAIResponsesProtocol
+	upstreamParent := r.Context()
+	if retainOpenAICompletion {
+		upstreamParent = context.WithoutCancel(r.Context())
+	}
+	ctx, cancel := context.WithTimeout(upstreamParent, g.cfg.RequestTimeout)
 	defer cancel()
+	var upstreamOpened, completionDrainStarted atomic.Bool
+	var startCompletionDrain func(string)
+	if retainOpenAICompletion {
+		drainTimeout := min(g.cfg.WriteTimeout, openAICompletionDrainLimit)
+		if drainTimeout <= 0 {
+			drainTimeout = openAICompletionDrainLimit
+		}
+		var drainOnce sync.Once
+		startCompletionDrain = func(reason string) {
+			drainOnce.Do(func() {
+				completionDrainStarted.Store(true)
+				g.logOpenAIResponsesDiagnostic(r.Context(), slog.LevelWarn, "completion_drain_started", nil,
+					"reason", reason,
+					"upstream_opened", upstreamOpened.Load(),
+					"drain_timeout_ms", drainTimeout.Milliseconds(),
+					"observer_snapshot_deferred", true,
+				)
+				time.AfterFunc(drainTimeout, cancel)
+			})
+		}
+		stopClientCancellation := context.AfterFunc(r.Context(), func() {
+			if upstreamOpened.Load() {
+				startCompletionDrain("request_context_cancelled")
+				return
+			}
+			g.logOpenAIResponsesDiagnostic(r.Context(), slog.LevelWarn, "cancelled_before_upstream_opened", nil)
+			cancel()
+		})
+		defer stopClientCancellation()
+	}
 	addAccessLogFields(r.Context(), "protocol", protocol)
 	g.logger.InfoContext(r.Context(), "gateway forwarding started",
 		"protocol", protocol, "path", path,
 		"principal_id", identity.ID, "access_key_id", identity.AccessKeyID)
 	upstreamStarted := time.Now()
 	upstream, err := g.service.Forward(ctx, identity, gw.Request{Path: path, Version: version, Beta: beta, BetaQuery: query, Development: g.cfg.Development, Body: body, RequestID: logging.RequestID(r.Context()), ProtocolHeaders: nativeHeaders, Trace: trace, Protocol: protocol})
+	if retainOpenAICompletion && err == nil && upstream != nil {
+		upstreamOpened.Store(true)
+	}
 	addAccessLogFields(r.Context(), "upstream_headers_ms", time.Since(upstreamStarted).Milliseconds())
 	addUsageRouteFields(r.Context(), trace)
 	if err != nil {
@@ -251,39 +296,72 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if upstreamRequestID := safeUpstreamRequestID(upstream.Headers); upstreamRequestID != "" {
 		addAccessLogFields(r.Context(), "upstream_request_id", upstreamRequestID)
 	}
+	requestedStream := upstream.RequestedStream
+	responseContentType := http.Header(upstream.Headers).Get("Content-Type")
+	responseMedia, _, _ := mime.ParseMediaType(responseContentType)
+	responseStream := responseMedia == "text/event-stream"
+	streamInferred := false
+	if responseContentType == "" && protocol == gw.OpenAIResponsesProtocol && requestedStream {
+		responseStream = true
+		streamInferred = true
+	}
 	if trace != nil {
 		trace.ErrorType = "UPSTREAM_HTTP_" + strconv.Itoa(upstream.Status)
 		if upstream.Status >= 200 && upstream.Status < 300 {
 			trace.ErrorType = "UPSTREAM_RESPONSE_INCOMPLETE"
-			media, _, _ := mime.ParseMediaType(http.Header(upstream.Headers).Get("Content-Type"))
 			encoding := http.Header(upstream.Headers).Get("Content-Encoding")
 			if encoding == "" || encoding == "identity" {
-				observer = gw.NewUsageObserver(media == "text/event-stream")
+				observer = gw.NewUsageObserver(responseStream)
 				if protocol == gw.OpenAIResponsesProtocol {
-					observer = gw.NewOpenAIResponsesUsageObserver(media == "text/event-stream")
+					if responseContentType == "" {
+						observer = gw.NewAutoOpenAIResponsesUsageObserver(requestedStream)
+					} else {
+						observer = gw.NewOpenAIResponsesUsageObserver(responseStream)
+					}
 				} else if protocol == gw.OpenAIProtocol {
-					observer = gw.NewOpenAIUsageObserver(media == "text/event-stream")
+					observer = gw.NewOpenAIUsageObserver(responseStream)
 				}
 			}
 		}
 	}
+	if retainOpenAICompletion {
+		g.logOpenAIResponsesDiagnostic(r.Context(), slog.LevelInfo, "upstream_opened", observer,
+			"upstream_status", upstream.Status,
+			"content_type", responseContentType,
+			"content_encoding", http.Header(upstream.Headers).Get("Content-Encoding"),
+			"media_type", responseMedia,
+			"requested_stream", requestedStream,
+			"stream_inferred", streamInferred,
+		)
+	}
 	copyUpstreamHeaders(w.Header(), upstream.Headers)
+	if responseStream && w.Header().Get("Content-Type") == "" {
+		w.Header().Set("Content-Type", "text/event-stream")
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Accel-Buffering", "no")
 	defer controller.SetWriteDeadline(time.Time{})
 	_ = controller.SetWriteDeadline(time.Now().Add(g.cfg.WriteTimeout))
 	w.WriteHeader(upstream.Status)
+	downstreamOpen := true
 	if err := controller.Flush(); err != nil {
 		interrupted("CLIENT_WRITE_FAILED")
-		cancel()
-		return
+		if retainOpenAICompletion && observer != nil {
+			downstreamOpen = false
+			startCompletionDrain("initial_flush_failed")
+		} else {
+			cancel()
+			return
+		}
 	}
 	// 固定缓冲区逐块转发，包括 SSE 未知事件、工具 JSON 增量和非流式原生错误。
 	buffer := make([]byte, 32<<10)
 	firstByteObserved := false
+	var upstreamBytes int64
 	for {
 		n, readErr := upstream.Body.Read(buffer)
 		if n > 0 {
+			upstreamBytes += int64(n)
 			if !firstByteObserved {
 				firstByteObserved = true
 				addAccessLogFields(r.Context(), "first_byte_ms", accessLogElapsed(r.Context(), time.Now()))
@@ -291,26 +369,74 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if observer != nil {
 				observer.Feed(buffer[:n])
 			}
-			_ = controller.SetWriteDeadline(time.Now().Add(g.cfg.WriteTimeout))
-			if _, err := w.Write(buffer[:n]); err != nil {
-				interrupted("CLIENT_WRITE_FAILED")
-				cancel()
-				return
+			if downstreamOpen {
+				_ = controller.SetWriteDeadline(time.Now().Add(g.cfg.WriteTimeout))
+				if _, err := w.Write(buffer[:n]); err != nil {
+					interrupted("CLIENT_WRITE_FAILED")
+					if retainOpenAICompletion && observer != nil {
+						downstreamOpen = false
+						startCompletionDrain("client_write_failed")
+					} else {
+						cancel()
+						return
+					}
+				} else if err := controller.Flush(); err != nil {
+					interrupted("CLIENT_WRITE_FAILED")
+					if retainOpenAICompletion && observer != nil {
+						downstreamOpen = false
+						startCompletionDrain("client_flush_failed")
+					} else {
+						cancel()
+						return
+					}
+				}
 			}
-			if err := controller.Flush(); err != nil {
-				interrupted("CLIENT_WRITE_FAILED")
-				cancel()
+			// 流式协议的完成事件本身就是响应终点。客户端收到终点后可能立即
+			// 关闭连接，使下一次上游读取返回 context canceled；不要因此把
+			// 已完整交付的调用覆盖成 CANCELLED。
+			if trace != nil && observer != nil && observer.Complete() {
+				trace.Status = usage.Success
+				trace.ErrorType = ""
+				addUsageTokenFields(r.Context(), trace, observer)
+				if retainOpenAICompletion {
+					g.logOpenAIResponsesDiagnostic(r.Context(), slog.LevelInfo, "completion_observed", observer,
+						"upstream_bytes", upstreamBytes,
+						"downstream_open", downstreamOpen,
+						"request_context_cancelled", r.Context().Err() != nil,
+					)
+				}
 				return
 			}
 		}
 		if readErr != nil {
 			if readErr != io.EOF {
+				if retainOpenAICompletion && completionDrainStarted.Load() && errors.Is(ctx.Err(), context.Canceled) {
+					if r.Context().Err() != nil {
+						interrupted("UPSTREAM_STREAM_INTERRUPTED")
+					}
+					addUsageTokenFields(r.Context(), trace, observer)
+					g.logOpenAIResponsesDiagnostic(r.Context(), slog.LevelWarn, "completion_drain_ended_without_completion", observer,
+						"upstream_bytes", upstreamBytes,
+						"downstream_open", downstreamOpen,
+						"request_context_cancelled", r.Context().Err() != nil,
+					)
+					return
+				}
 				interrupted("UPSTREAM_STREAM_INTERRUPTED")
 				if trace != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
 					trace.Status = usage.Failed
 					trace.ErrorType = "UPSTREAM_TIMEOUT"
 				}
 				g.logger.WarnContext(r.Context(), "gateway response interrupted", "error_code", "UPSTREAM_STREAM_INTERRUPTED")
+				if retainOpenAICompletion {
+					g.logOpenAIResponsesDiagnostic(r.Context(), slog.LevelWarn, "upstream_read_interrupted", observer,
+						"upstream_bytes", upstreamBytes,
+						"downstream_open", downstreamOpen,
+						"request_context_cancelled", r.Context().Err() != nil,
+						"upstream_context_cancelled", errors.Is(ctx.Err(), context.Canceled),
+						"upstream_context_timed_out", errors.Is(ctx.Err(), context.DeadlineExceeded),
+					)
+				}
 				// HTTP 状态和流已经开始，不能追加另一份 JSON 或伪造结束事件。
 				panic(http.ErrAbortHandler)
 			}
@@ -327,9 +453,61 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				trace.Status = usage.Success
 				trace.ErrorType = ""
 			}
+			if retainOpenAICompletion {
+				level, stage := slog.LevelInfo, "upstream_eof"
+				if observer == nil || !observer.Complete() {
+					level, stage = slog.LevelWarn, "upstream_eof_without_completion"
+				}
+				g.logOpenAIResponsesDiagnostic(r.Context(), level, stage, observer,
+					"upstream_bytes", upstreamBytes,
+					"downstream_open", downstreamOpen,
+					"request_context_cancelled", r.Context().Err() != nil,
+				)
+			}
 			return
 		}
 	}
+}
+
+func (g *GatewayHandler) logOpenAIResponsesDiagnostic(ctx context.Context, level slog.Level, stage string, observer *gw.UsageObserver, fields ...any) {
+	if !g.cfg.Development {
+		return
+	}
+	attributes := []any{
+		"request_id", logging.RequestID(ctx),
+		"stage", stage,
+		"observer_enabled", observer != nil,
+	}
+	if observer != nil {
+		diagnostic := observer.Diagnostics()
+		attributes = append(attributes,
+			"stream", diagnostic.Stream,
+			"started", diagnostic.Started,
+			"stopped", diagnostic.Stopped,
+			"failed", diagnostic.Failed,
+			"bad_usage", diagnostic.BadUsage,
+			"json_complete", diagnostic.JSONComplete,
+			"json_invalid", diagnostic.JSONInvalid,
+			"input_seen", diagnostic.InputSeen,
+			"output_seen", diagnostic.OutputSeen,
+			"cached_seen", diagnostic.CachedSeen,
+			"event_count", diagnostic.EventCount,
+			"last_event", diagnostic.LastEvent,
+			"complete", observer.Complete(),
+		)
+		input, output, cached := observer.Tokens(observer.Complete())
+		if input != nil {
+			attributes = append(attributes, "input_tokens", *input)
+		}
+		if output != nil {
+			attributes = append(attributes, "output_tokens", *output)
+		}
+		if cached != nil {
+			attributes = append(attributes, "cached_input_tokens", *cached)
+		}
+	}
+	attributes = append(attributes, fields...)
+	g.logger.Log(ctx, level, "openai responses diagnostic", attributes...)
 }
 
 func addUsageRouteFields(ctx context.Context, event *usage.Event) {

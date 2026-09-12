@@ -13,11 +13,31 @@ type UsageObserver struct {
 	openai                        bool
 	responses                     bool
 	stream                        bool
+	autoDetect, formatDetected    bool
+	fallbackStream                bool
+	prefix                        []byte
 	line, data                    []byte
 	drop                          bool
 	start, stop, failed, badUsage bool
 	input, output, cached         *int64
+	eventCount                    int64
+	lastEvent                     string
 	json                          metadataJSON
+}
+
+type UsageDiagnostics struct {
+	Stream       bool
+	Started      bool
+	Stopped      bool
+	Failed       bool
+	BadUsage     bool
+	JSONComplete bool
+	JSONInvalid  bool
+	InputSeen    bool
+	OutputSeen   bool
+	CachedSeen   bool
+	EventCount   int64
+	LastEvent    string
 }
 
 func NewOpenAIUsageObserver(stream bool) *UsageObserver {
@@ -60,6 +80,15 @@ func NewOpenAIResponsesUsageObserver(stream bool) *UsageObserver {
 	return o
 }
 
+// NewAutoOpenAIResponsesUsageObserver 在上游未声明 Content-Type 时，通过最多
+// 4 KiB 的响应前缀识别 JSON 或 SSE。无法识别时使用请求声明作为兜底。
+func NewAutoOpenAIResponsesUsageObserver(fallbackStream bool) *UsageObserver {
+	o := NewOpenAIResponsesUsageObserver(fallbackStream)
+	o.autoDetect = true
+	o.fallbackStream = fallbackStream
+	return o
+}
+
 func NewUsageObserver(stream bool) *UsageObserver {
 	o := &UsageObserver{stream: stream}
 	o.json.kindKey = "type"
@@ -79,6 +108,61 @@ func NewUsageObserver(stream bool) *UsageObserver {
 	return o
 }
 func (o *UsageObserver) Feed(p []byte) {
+	if o.autoDetect && !o.formatDetected {
+		o.detectAndFeed(p)
+		return
+	}
+	o.feed(p)
+}
+
+const responseFormatDetectionLimit = 4 << 10
+
+func (o *UsageObserver) detectAndFeed(p []byte) {
+	remaining := responseFormatDetectionLimit - len(o.prefix)
+	if remaining > len(p) {
+		remaining = len(p)
+	}
+	o.prefix = append(o.prefix, p[:remaining]...)
+	stream, detected := detectResponseStream(o.prefix, o.fallbackStream)
+	if !detected && len(o.prefix) < responseFormatDetectionLimit {
+		return
+	}
+	if !detected {
+		stream = o.fallbackStream
+	}
+	o.stream = stream
+	o.formatDetected = true
+	prefix := o.prefix
+	o.prefix = nil
+	o.feed(prefix)
+	if remaining < len(p) {
+		o.feed(p[remaining:])
+	}
+}
+
+func detectResponseStream(prefix []byte, fallbackStream bool) (stream, detected bool) {
+	prefix = bytes.TrimLeft(prefix, " \r\n\t")
+	if len(prefix) == 0 {
+		return false, false
+	}
+	if prefix[0] == '{' {
+		return false, true
+	}
+	if prefix[0] == ':' {
+		return true, true
+	}
+	for _, marker := range [][]byte{[]byte("event:"), []byte("data:"), []byte("id:"), []byte("retry:")} {
+		if bytes.HasPrefix(prefix, marker) {
+			return true, true
+		}
+		if bytes.HasPrefix(marker, prefix) {
+			return false, false
+		}
+	}
+	return fallbackStream, true
+}
+
+func (o *UsageObserver) feed(p []byte) {
 	if !o.stream {
 		o.json.feed(p)
 		return
@@ -131,8 +215,15 @@ func (o *UsageObserver) event(raw []byte) {
 				Error json.RawMessage `json:"error"`
 			}
 			if json.Unmarshal(raw, &event) != nil {
+				o.eventCount++
+				o.lastEvent = "[invalid-json]"
 				o.badUsage = true
 				return
+			}
+			o.eventCount++
+			o.lastEvent = event.Type
+			if len(o.lastEvent) > 128 {
+				o.lastEvent = o.lastEvent[:128] + "..."
 			}
 			switch event.Type {
 			case "response.created", "response.in_progress":
@@ -239,6 +330,19 @@ func (o *UsageObserver) update(raw []byte) {
 					dst = &o.input
 				case "output_tokens":
 					dst = &o.output
+				case "input_tokens_details":
+					var details struct {
+						Cached json.RawMessage `json:"cached_tokens"`
+					}
+					if json.Unmarshal(value, &details) != nil {
+						o.badUsage = true
+						continue
+					}
+					if len(details.Cached) == 0 {
+						continue
+					}
+					dst = &o.cached
+					value = details.Cached
 				default:
 					continue
 				}
@@ -319,6 +423,26 @@ func (o *UsageObserver) Tokens(complete bool) (*int64, *int64, *int64) {
 		return o.input, nil, o.cached
 	}
 	return o.input, o.output, o.cached
+}
+
+func (o *UsageObserver) Diagnostics() UsageDiagnostics {
+	if o == nil {
+		return UsageDiagnostics{}
+	}
+	return UsageDiagnostics{
+		Stream:       o.stream,
+		Started:      o.start,
+		Stopped:      o.stop,
+		Failed:       o.failed,
+		BadUsage:     o.badUsage,
+		JSONComplete: o.json.complete,
+		JSONInvalid:  o.json.invalid,
+		InputSeen:    o.input != nil,
+		OutputSeen:   o.output != nil,
+		CachedSeen:   o.cached != nil,
+		EventCount:   o.eventCount,
+		LastEvent:    o.lastEvent,
+	}
 }
 
 type metadataJSON struct {

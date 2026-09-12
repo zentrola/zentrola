@@ -71,20 +71,63 @@ func TestOpenAIRequestNullStreamAndOpaqueRewrite(t *testing.T) {
 }
 
 func TestOpenAIResponsesUsageFormats(t *testing.T) {
-	jsonBody := `{"object":"response","usage":{"input_tokens":12,"output_tokens":9,"total_tokens":21}}`
+	jsonBody := `{"object":"response","usage":{"input_tokens":12,"input_tokens_details":{"cached_tokens":4},"output_tokens":9,"total_tokens":21}}`
 	observer := NewOpenAIResponsesUsageObserver(false)
 	observer.Feed([]byte(jsonBody))
-	input, output, _ := observer.Tokens(observer.Complete())
-	if !observer.Complete() || input == nil || *input != 12 || output == nil || *output != 9 {
+	input, output, cached := observer.Tokens(observer.Complete())
+	if !observer.Complete() || input == nil || *input != 12 || output == nil || *output != 9 || cached == nil || *cached != 4 {
 		t.Fatal("Responses JSON usage not collected")
 	}
 
 	stream := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"usage\":null}}\n\n" +
-		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":12,\"output_tokens\":9,\"total_tokens\":21}}}\n\n"
+		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":12,\"input_tokens_details\":{\"cached_tokens\":4},\"output_tokens\":9,\"total_tokens\":21}}}\n\n"
 	observer = NewOpenAIResponsesUsageObserver(true)
 	observer.Feed([]byte(stream))
-	input, output, _ = observer.Tokens(observer.Complete())
-	if !observer.Complete() || input == nil || *input != 12 || output == nil || *output != 9 {
+	input, output, cached = observer.Tokens(observer.Complete())
+	if !observer.Complete() || input == nil || *input != 12 || output == nil || *output != 9 || cached == nil || *cached != 4 {
 		t.Fatal("Responses stream usage not collected")
+	}
+	diagnostics := observer.Diagnostics()
+	if !diagnostics.Stream || !diagnostics.Started || !diagnostics.Stopped || diagnostics.Failed || diagnostics.BadUsage ||
+		diagnostics.EventCount != 2 || diagnostics.LastEvent != "response.completed" ||
+		!diagnostics.InputSeen || !diagnostics.OutputSeen || !diagnostics.CachedSeen {
+		t.Fatalf("Responses stream diagnostics incomplete: %+v", diagnostics)
+	}
+}
+
+func TestOpenAIResponsesUsageAutoDetectsSSEAndJSON(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		fallbackStream bool
+		body           string
+		wantStream     bool
+	}{
+		{
+			name:           "SSE overrides JSON fallback",
+			fallbackStream: false,
+			body: " \r\nevent: response.created\n" +
+				"data: {\"type\":\"response.created\",\"response\":{\"usage\":null}}\n\n" +
+				"event: response.completed\n" +
+				"data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":12,\"output_tokens\":9}}}\n\n",
+			wantStream: true,
+		},
+		{
+			name:           "JSON overrides SSE fallback",
+			fallbackStream: true,
+			body:           " \r\n{\"object\":\"response\",\"usage\":{\"input_tokens\":12,\"output_tokens\":9}}",
+			wantStream:     false,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			observer := NewAutoOpenAIResponsesUsageObserver(test.fallbackStream)
+			for _, b := range []byte(test.body) {
+				observer.Feed([]byte{b})
+			}
+			input, output, _ := observer.Tokens(observer.Complete())
+			if !observer.Complete() || observer.Diagnostics().Stream != test.wantStream ||
+				input == nil || *input != 12 || output == nil || *output != 9 {
+				t.Fatalf("auto-detected usage incorrectly: diagnostics=%+v", observer.Diagnostics())
+			}
+		})
 	}
 }
