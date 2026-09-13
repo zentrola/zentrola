@@ -5,7 +5,6 @@ import (
 	"crypto/aes"
 	stdcipher "crypto/cipher"
 	"encoding/base64"
-	"path/filepath"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
@@ -93,7 +92,7 @@ func TestOrganizationRemovalPreservesExistingCredential(t *testing.T) {
 	const providerID int64 = 102
 	const resourceID int64 = 103
 	masterBytes := bytes.Repeat([]byte{5}, 32)
-	master, err := cryptosec.LoadMasterKey(base64.StdEncoding.EncodeToString(masterBytes), "", filepath.Join(t.TempDir(), "master.key"))
+	master, err := cryptosec.LoadMasterKey(base64.StdEncoding.EncodeToString(masterBytes))
 	if err != nil {
 		t.Fatal(err)
 	}

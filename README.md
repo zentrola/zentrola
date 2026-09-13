@@ -94,6 +94,7 @@ REDIS_DB=2
 REDIS_PASSWORD=replace-with-a-redis-password
 
 ADMIN_JWT_SECRET=replace-with-at-least-32-random-bytes-in-base64
+MASTER_KEY=replace-with-another-32-random-bytes-in-base64
 
 CORS_ENABLED=true
 CORS_ALLOWED_ORIGINS=http://127.0.0.1:9528
@@ -102,7 +103,7 @@ WEB_API_BASE_URL=http://127.0.0.1:9527
 WEB_GATEWAY_BASE_URL=http://127.0.0.1:9527
 ```
 
-Keep `ADMIN_JWT_SECRET`, the database password, provider credentials, and the generated master key separate.
+Keep `ADMIN_JWT_SECRET`, `MASTER_KEY`, the database password, and provider credentials separate. `MASTER_KEY` is read only from `.env` and must be backed up with the database; existing provider credentials cannot be recovered if it is lost.
 
 The repository's `compose.yaml` is an optional PostgreSQL-only example:
 

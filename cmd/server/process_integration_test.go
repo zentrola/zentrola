@@ -72,7 +72,7 @@ func TestProcessLifecycleIntegration(t *testing.T) {
 		"POSTGRES_USER": cfg.Postgres.User, "POSTGRES_PASSWORD": cfg.Postgres.Password, "POSTGRES_SSLMODE": cfg.Postgres.SSLMode, "POSTGRES_MAX_CONNS": "3",
 		"PGOPTIONS": "-c search_path=" + schema, "MIGRATIONS_AUTO_APPLY": "true", "LOG_FORMAT": "json", "HTTP_ADDR": "127.0.0.1:8080",
 		"STARTUP_TIMEOUT": "15s", "SHUTDOWN_TIMEOUT": "5s", "USAGE_SHUTDOWN_TIMEOUT": "5s", "ZENTROLA_BACKGROUND_CHILD": "",
-		"ADMIN_JWT_SECRET": randomTestSecret(), "ACP_MASTER_KEY": randomTestSecret(), "ACP_MASTER_KEY_FILE": "",
+		"ADMIN_JWT_SECRET": randomTestSecret(),
 	} {
 		t.Setenv(key, value)
 	}
@@ -88,7 +88,7 @@ func TestProcessLifecycleIntegration(t *testing.T) {
 		t.Fatal("database isolation not established")
 	}
 	file := filepath.Join(root, ".env")
-	contents := []byte("APP_ENV=dev\nHTTP_ADDR=127.0.0.1:8080\n")
+	contents := []byte("APP_ENV=dev\nHTTP_ADDR=127.0.0.1:8080\nMASTER_KEY=" + randomTestSecret() + "\n")
 	if err := os.WriteFile(file, contents, 0600); err != nil {
 		t.Fatal(err)
 	}

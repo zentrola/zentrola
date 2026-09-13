@@ -222,41 +222,20 @@ func (s *SecurityStore) Authenticate(ctx context.Context, hash []byte, now time.
 	return appsec.PrincipalIdentity{ID: row.PrincipalID, AccessKeyID: row.ID, ExpiresAt: timePointer(row.ExpiresAt)}, nil
 }
 
-// RecoverCredentials 只处理不可解密的现有资源。根密钥丢失后新生成 Key 时不尝试解密旧密文。
-func (s *SecurityStore) RecoverCredentials(ctx context.Context, cipher *cryptosec.Credentials, newMaster bool) (int, error) {
-	tx, err := s.pool.Begin(ctx)
+// ValidateCredentials 确认 MASTER_KEY 可以解密全部现有凭据，失败时不修改数据。
+func (s *SecurityStore) ValidateCredentials(ctx context.Context, cipher *cryptosec.Credentials) error {
+	resources, err := dbgen.New(s.pool).ListResourcesForCredentialCheck(ctx)
 	if err != nil {
-		return 0, appsec.ErrUnavailable
+		return appsec.ErrUnavailable
 	}
-	defer tx.Rollback(context.Background())
-	ctx = idgen.WithQuerier(ctx, tx)
-	q := dbgen.New(tx)
-	resources, err := q.ListResourcesForCredentialCheck(ctx)
-	if err != nil {
-		return 0, appsec.ErrUnavailable
-	}
-	deleted := 0
 	for _, r := range resources {
-		if !newMaster {
-			plain, err := cipher.Decrypt(cryptosec.SealedCredential{Ciphertext: r.CredentialCiphertext, Nonce: r.CredentialNonce, KeyVersion: r.KeyVersion}, cryptosec.CredentialOwner{ProviderID: r.ProviderID, ResourceID: r.ID})
-			clear(plain)
-			if err == nil {
-				continue
-			}
+		plain, err := cipher.Decrypt(cryptosec.SealedCredential{Ciphertext: r.CredentialCiphertext, Nonce: r.CredentialNonce, KeyVersion: r.KeyVersion}, cryptosec.CredentialOwner{ProviderID: r.ProviderID, ResourceID: r.ID})
+		clear(plain)
+		if err != nil {
+			return errors.New("MASTER_KEY cannot decrypt existing provider credentials")
 		}
-		if err := q.DeleteUnrecoverableResource(ctx, dbgen.DeleteUnrecoverableResourceParams{ID: r.ID, UpdatedAt: pgTime(time.Now().UTC())}); err != nil {
-			return 0, appsec.ErrUnavailable
-		}
-		actor := admin.Identity{DisplayName: "system"}
-		if err := s.appendLog(ctx, q, actor, "RESOURCE", operation.ResourceDelete, "RESOURCE", r.ID, r.ResourceName, "SUCCESS", "", appsec.RequestMeta{}, nil, []byte(`{"deleted":true}`), "CREDENTIAL_UNRECOVERABLE"); err != nil {
-			return 0, appsec.ErrUnavailable
-		}
-		deleted++
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return 0, appsec.ErrUnavailable
-	}
-	return deleted, nil
+	return nil
 }
 
 func validateActor(ctx context.Context, q *dbgen.Queries, actor admin.Identity) error {

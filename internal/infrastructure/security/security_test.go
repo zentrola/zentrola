@@ -4,11 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/binary"
-	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -17,90 +13,21 @@ import (
 	"github.com/zentrola/zentrola/internal/domain/catalog"
 )
 
-func TestMasterPersistenceAndPriority(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "secrets", "master.key")
-	first, err := LoadMasterKey("", "", path)
-	if err != nil {
-		t.Fatal(err)
+func TestLoadMasterKey(t *testing.T) {
+	encoded := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))
+	master, err := LoadMasterKey(" \n" + encoded + "\n")
+	if err != nil || !bytes.Equal(master.value, bytes.Repeat([]byte{7}, 32)) {
+		t.Fatal("valid MASTER_KEY was not loaded", err)
 	}
-	if !first.Created {
-		t.Fatal("first key was not generated")
+	if _, err := LoadMasterKey(""); err == nil || !strings.Contains(err.Error(), "MASTER_KEY is required") {
+		t.Fatal("missing MASTER_KEY was accepted", err)
 	}
-	second, err := LoadMasterKey("", "", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if second.Created || !bytes.Equal(first.value, second.value) {
-		t.Fatal("persistent key changed")
-	}
-	if runtime.GOOS != "windows" {
-		info, _ := os.Stat(path)
-		if info.Mode().Perm() != 0600 {
-			t.Fatal("key permissions are not 0600")
-		}
-	}
-	envKey := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))
-	override, err := LoadMasterKey(envKey, "missing", path)
-	if err != nil || !bytes.Equal(override.value, bytes.Repeat([]byte{7}, 32)) {
-		t.Fatal("environment priority failed", err)
-	}
-	external := filepath.Join(t.TempDir(), "external.key")
-	if err := os.WriteFile(external, []byte(envKey), 0600); err != nil {
-		t.Fatal(err)
-	}
-	override, err = LoadMasterKey("", external, path)
-	if err != nil || !bytes.Equal(override.value, bytes.Repeat([]byte{7}, 32)) {
-		t.Fatal("external secret priority failed", err)
-	}
-	if _, err := LoadMasterKey("invalid-secret", "", path); err == nil || strings.Contains(err.Error(), "invalid-secret") {
-		t.Fatal("invalid key leaked or silently fell back")
-	}
-	if err := os.WriteFile(path, []byte("corrupt-secret"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := LoadMasterKey("", "", path); err == nil {
-		t.Fatal("corrupt file was overwritten")
-	}
-	data, _ := os.ReadFile(path)
-	if string(data) != "corrupt-secret" {
-		t.Fatal("corrupt file must be preserved")
-	}
-}
-func TestConcurrentMasterCreation(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "master.key")
-	var wg sync.WaitGroup
-	results := make(chan *MasterKey, 8)
-	for range 8 {
-		wg.Go(func() {
-			key, err := LoadMasterKey("", "", path)
-			if err != nil {
-				t.Error(err)
-				return
-			}
-			results <- key
-		})
-	}
-	wg.Wait()
-	close(results)
-	var expected []byte
-	created := 0
-	for key := range results {
-		if expected == nil {
-			expected = key.value
-		}
-		if !bytes.Equal(expected, key.value) {
-			t.Fatal("concurrent creators selected different keys")
-		}
-		if key.Created {
-			created++
-		}
-	}
-	if created != 1 {
-		t.Fatalf("expected one published key, got %d", created)
+	if _, err := LoadMasterKey("invalid-secret"); err == nil || strings.Contains(err.Error(), "invalid-secret") {
+		t.Fatal("invalid key leaked or was accepted", err)
 	}
 }
 func TestCredentialAEAD(t *testing.T) {
-	master, _ := decodeMaster(base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32)), false)
+	master, _ := decodeMaster(base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32)))
 	c, err := NewCredentials(master)
 	if err != nil {
 		t.Fatal(err)
@@ -114,7 +41,7 @@ func TestCredentialAEAD(t *testing.T) {
 	if err != nil || string(plain) != "provider-secret" || sealed.KeyVersion != 2 {
 		t.Fatal("round trip failed", err)
 	}
-	other, _ := decodeMaster(base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{2}, 32)), false)
+	other, _ := decodeMaster(base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{2}, 32)))
 	wrong, _ := NewCredentials(other)
 	if _, err := wrong.Decrypt(sealed, owner); err == nil {
 		t.Fatal("wrong key accepted")
@@ -148,7 +75,7 @@ func TestCredentialAEAD(t *testing.T) {
 }
 
 func TestProviderProxyAEADUsesIndependentOwner(t *testing.T) {
-	master, _ := decodeMaster(base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)), false)
+	master, _ := decodeMaster(base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)))
 	c, _ := NewCredentials(master)
 	owner := catalog.ProviderProxyOwner{ProviderID: 81, Field: "url"}
 	secret := []byte("http://user:password@proxy.example.com:8080")
