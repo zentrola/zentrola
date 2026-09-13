@@ -107,21 +107,40 @@ func TestLogConfiguration(t *testing.T) {
 func TestLoadEnvironmentOverridesFile(t *testing.T) {
 	t.Setenv("APP_ENV", "dev")
 	path := filepath.Join(t.TempDir(), ".env")
-	if err := os.WriteFile(path, []byte("POSTGRES_PASSWORD=file-secret\nHTTP_ADDR=:8001\nLOG_LEVEL=debug\n"), 0600); err != nil {
+	if err := os.WriteFile(path, []byte("POSTGRES_PASSWORD=file-secret\nHTTP_ADDR=:8001\nLOG_LEVEL=debug\nMASTER_KEY=file-master\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("HTTP_ADDR", ":8002")
 	t.Setenv("POSTGRES_PASSWORD", "env-secret")
+	t.Setenv("MASTER_KEY", "environment-master")
 	cfg, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.HTTPAddr != ":8002" || cfg.Postgres.Password != "env-secret" {
+	if cfg.HTTPAddr != ":8002" || cfg.Postgres.Password != "env-secret" || cfg.Security.MasterKey != "file-master" {
 		t.Fatal("environment did not override file")
 	}
 	t.Setenv("POSTGRES_PASSWORD", "")
 	if _, err := Load(path); err == nil {
 		t.Fatal("empty environment secret must not fall back to file")
+	}
+}
+
+func TestMasterKeyOnlyLoadsFromSelectedConfigFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".env")
+	if err := os.WriteFile(path, []byte("APP_ENV=prod\nPOSTGRES_PASSWORD=test-only\nMASTER_KEY=common-master\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path+".prod", []byte("MASTER_KEY=overlay-master\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MASTER_KEY", "environment-master")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Security.MasterKey != "common-master" {
+		t.Fatalf("got MASTER_KEY %q, want selected config file value", cfg.Security.MasterKey)
 	}
 }
 

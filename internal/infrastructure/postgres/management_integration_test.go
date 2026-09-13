@@ -9,7 +9,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http/httptest"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -81,7 +80,7 @@ func TestStage3Integration(t *testing.T) {
 	if err := admins.Bootstrap(ctx, "admin", "test-stage3-password"); err != nil {
 		t.Fatal(err)
 	}
-	master, err := cryptosec.LoadMasterKey("", "", filepath.Join(t.TempDir(), "master.key"))
+	master, err := cryptosec.LoadMasterKey("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
 	if err != nil {
 		t.Fatal(err)
 	}

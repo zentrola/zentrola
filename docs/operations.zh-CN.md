@@ -39,6 +39,8 @@ curl -i http://127.0.0.1:9527/health/ready
 
 `MIGRATIONS_AUTO_APPLY=true` 会在 Backend 启动时执行前向迁移。生产环境如果需要受控变更，可以关闭自动迁移，并在启动新版本前执行 `zentrola migrate`。
 
+从使用 `data/secrets/master.key` 的旧版本升级时，必须在首次启动新版前，将该文件的原内容完整写入所选通用配置文件的 `MASTER_KEY`。不要生成新值；确认新版可以读取已有 Provider Credential 后，再按秘密管理流程归档旧文件。
+
 每次升级前：
 
 1. 阅读 Release Notes。
@@ -52,17 +54,17 @@ curl -i http://127.0.0.1:9527/health/ready
 
 ## 备份与恢复
 
-默认 Master Key 路径为：
+Master Key 仅保存在所选通用配置文件中，默认为：
 
 ```text
-data/secrets/master.key
+.env 中的 MASTER_KEY
 ```
 
 PostgreSQL 中的 Provider Credential 必须使用原 Master Key 才能解密，因此有效恢复集包括：
 
 - PostgreSQL 数据
 - 加密 Provider Credential 时使用的原 Master Key
-- 通过合规秘密管理流程保存的部署配置
+- 包含 `MASTER_KEY` 的原始部署配置
 
 应在隔离环境定期验证恢复流程，并通过权限控制和加密保护备份。只有数据库而没有原 Master Key 时，相关 Provider Credential 必须重新录入。
 

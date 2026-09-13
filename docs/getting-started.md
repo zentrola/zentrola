@@ -36,7 +36,7 @@ Only the executables for the selected operating system are included. Rename `.en
 
 ## 3. Configure the Backend
 
-Set a PostgreSQL connection and an independent Admin JWT signing secret:
+Set a PostgreSQL connection, an independent Admin JWT signing secret, and a master key:
 
 ```dotenv
 APP_ENV=prod
@@ -55,11 +55,12 @@ REDIS_DB=2
 REDIS_PASSWORD=replace-with-a-redis-password
 
 ADMIN_JWT_SECRET=replace-with-at-least-32-random-bytes-in-base64
+MASTER_KEY=replace-with-another-32-random-bytes-in-base64
 ```
 
 Use `POSTGRES_PORT=15432` with the repository's Compose example. Use TLS and `POSTGRES_SSLMODE` appropriate to the production database.
 
-When neither `ACP_MASTER_KEY` nor `ACP_MASTER_KEY_FILE` is provided, the Backend creates `data/secrets/master.key`. This key encrypts provider credentials and must be backed up with the database.
+`MASTER_KEY` encrypts provider credentials. It must contain 32 random bytes encoded as Base64 and is read only from the selected common configuration file (`.env` by default); neither system environment variables nor `.env.{APP_ENV}` can override it. The Backend refuses to start when the value is missing or cannot decrypt existing credentials. Back it up together with the database.
 
 ## 4. Configure Admin Web
 

@@ -136,7 +136,7 @@ func run(args []string, output io.Writer) (runErr error) {
 
 func runService(command commandOptions, selection configSelection, cfg config.Config, managed *managedProcess, output io.Writer) (runErr error) {
 	mode := command.name
-	// 显式指定配置后，Master Key 等相对运行路径也必须稳定。
+	// 显式指定配置后，配置中的相对运行路径必须稳定。
 	if selection.pinned {
 		previous, err := os.Getwd()
 		if err != nil {
@@ -146,6 +146,14 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 			return errors.New("cannot enter the config file directory")
 		}
 		defer os.Chdir(previous)
+	}
+	var master *cryptosec.MasterKey
+	if mode == "serve" || mode == "start" {
+		loadedMaster, err := cryptosec.LoadMasterKey(cfg.Security.MasterKey)
+		if err != nil {
+			return err
+		}
+		master = loadedMaster
 	}
 	var logFile *logging.AsyncWriter
 	if cfg.LogFilePath != "" {
@@ -231,10 +239,6 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 		reset := appsec.NewPasswordReset(postgres.NewSecurityStore(pool, ids), passwords)
 		return resetPassword(startup, output, command.username, reset.Reset)
 	}
-	master, err := cryptosec.LoadMasterKey(cfg.Security.MasterKey, cfg.Security.ExternalMasterKeyPath, cfg.Security.MasterKeyPath)
-	if err != nil {
-		return err
-	}
 	credentials, err := cryptosec.NewCredentials(master)
 	if err != nil {
 		return err
@@ -259,12 +263,8 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 	if setup.Required {
 		logger.Info("administrator setup required; open the management page to create the first administrator")
 	}
-	deleted, err := securityStore.RecoverCredentials(startup, credentials, master.Created)
-	if err != nil {
+	if err := securityStore.ValidateCredentials(startup, credentials); err != nil {
 		return err
-	}
-	if deleted > 0 {
-		logger.Warn("resources deleted: credentials cannot be recovered", "count", deleted, "error_code", "CREDENTIAL_UNRECOVERABLE")
 	}
 	gatewayCache := gatewaycache.New(gatewaycache.Config{
 		Host: cfg.Redis.Host, Port: cfg.Redis.Port, Database: cfg.Redis.Database, Password: cfg.Redis.Password,

@@ -39,6 +39,8 @@ curl -i http://127.0.0.1:9527/health/ready
 
 `MIGRATIONS_AUTO_APPLY=true` applies forward migrations when the Backend starts. For controlled production changes, disable automatic migration and run `zentrola migrate` before starting the new version.
 
+When upgrading from a version that used `data/secrets/master.key`, copy that file's exact content into `MASTER_KEY` in the selected common configuration file before the first new-version startup. Do not generate a replacement. Archive the old file through the approved secret-management process only after confirming that the new version can read existing provider credentials.
+
 Before every upgrade:
 
 1. Read the release notes.
@@ -52,17 +54,17 @@ Do not run destructive or down migrations against production data unless the rel
 
 ## Backup and recovery
 
-The default master-key path is:
+The master key is stored only in the selected common configuration file, which defaults to:
 
 ```text
-data/secrets/master.key
+MASTER_KEY in .env
 ```
 
 Provider credentials in PostgreSQL cannot be decrypted without the original master key. A valid recovery set therefore includes:
 
 - PostgreSQL data
 - the exact master key used to encrypt provider credentials
-- the deployment configuration, stored through an approved secret-management process
+- the original deployment configuration containing `MASTER_KEY`
 
 Test restoration in an isolated environment. Protect backups with access controls and encryption. If only PostgreSQL is restored without the key, affected provider credentials must be entered again.
 

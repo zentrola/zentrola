@@ -36,7 +36,7 @@ dist/
 
 ## 3. 配置 Backend
 
-配置 PostgreSQL 和独立的 Admin JWT 签名密钥：
+配置 PostgreSQL、独立的 Admin JWT 签名密钥和 Master Key：
 
 ```dotenv
 APP_ENV=prod
@@ -55,11 +55,12 @@ REDIS_DB=2
 REDIS_PASSWORD=请替换为Redis密码
 
 ADMIN_JWT_SECRET=请替换为至少32个随机字节的Base64字符串
+MASTER_KEY=请替换为另一组32个随机字节的Base64字符串
 ```
 
 使用仓库 Compose 示例时设置 `POSTGRES_PORT=15432`。生产数据库应启用 TLS，并选择合适的 `POSTGRES_SSLMODE`。
 
-未设置 `ACP_MASTER_KEY` 或 `ACP_MASTER_KEY_FILE` 时，Backend 会生成 `data/secrets/master.key`。该文件用于加密 Provider Credential，必须与数据库一起备份。
+`MASTER_KEY` 用于加密 Provider Credential，必须是 32 个随机字节的 Base64，并且只从所选通用配置文件（默认 `.env`）读取。系统环境变量和 `.env.{APP_ENV}` 都不能覆盖它。缺失或无法解密已有凭据时 Backend 会拒绝启动；该值必须与数据库一起备份。
 
 ## 4. 配置 Admin Web
 

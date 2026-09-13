@@ -9,7 +9,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http/httptest"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -250,7 +249,7 @@ func TestStage2Integration(t *testing.T) {
 		}
 	})
 	t.Run("credential recovery preserves admin access", func(t *testing.T) {
-		master, err := cryptosec.LoadMasterKey("", "", filepath.Join(t.TempDir(), "master.key"))
+		master, err := cryptosec.LoadMasterKey("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -261,11 +260,23 @@ func TestStage2Integration(t *testing.T) {
 		if _, err := pool.Exec(ctx, `INSERT INTO provider_credential (id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,created_by,updated_by,created_at,updated_at) VALUES ($1,$2,'Test Resource',$3,$4,$5,'ACTIVE','system','system',now(),now())`, resourceID, providerID, sealed.Ciphertext, sealed.Nonce, sealed.KeyVersion); err != nil {
 			t.Fatal(err)
 		}
-		if n, err := store.RecoverCredentials(ctx, c, false); err != nil || n != 0 {
-			t.Fatal("valid resource was disabled", err)
+		if err := store.ValidateCredentials(ctx, c); err != nil {
+			t.Fatal("valid resource was rejected", err)
 		}
-		if n, err := store.RecoverCredentials(ctx, c, true); err != nil || n != 1 {
-			t.Fatal("new root key did not exclude old ciphertext", err)
+		otherMaster, err := cryptosec.LoadMasterKey("AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=")
+		if err != nil {
+			t.Fatal(err)
+		}
+		otherCipher, err := cryptosec.NewCredentials(otherMaster)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.ValidateCredentials(ctx, otherCipher); err == nil {
+			t.Fatal("wrong MASTER_KEY was accepted")
+		}
+		var isDeleted bool
+		if err := pool.QueryRow(ctx, `SELECT is_deleted FROM provider_credential WHERE id=$1`, resourceID).Scan(&isDeleted); err != nil || isDeleted {
+			t.Fatal("credential validation failure modified the resource", err)
 		}
 		if err := admins.Check(ctx); err != nil {
 			t.Fatal("credential recovery disabled admin plane")

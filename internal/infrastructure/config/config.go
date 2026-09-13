@@ -54,12 +54,10 @@ type Gateway struct {
 }
 
 type Security struct {
-	MasterKey             string
-	ExternalMasterKeyPath string
-	MasterKeyPath         string
-	JWTSecret             string
-	MaxLoginFailures      int64
-	LoginLockDuration     time.Duration
+	MasterKey         string
+	JWTSecret         string
+	MaxLoginFailures  int64
+	LoginLockDuration time.Duration
 }
 
 type Postgres struct {
@@ -84,7 +82,8 @@ type CORS struct {
 	Origins []string
 }
 
-// Load 不修改进程环境，优先级为 System ENV > .env.{环境} > .env > 默认值。
+// Load 不修改进程环境。除 MASTER_KEY 固定来自所选配置文件外，
+// 其他配置的优先级为 System ENV > .env.{环境} > .env > 默认值。
 // path 指向通用文件；环境文件在同一目录中，名称为 path + "." + 环境。
 func Load(path string) (Config, error) {
 	return load(path, os.LookupEnv)
@@ -143,6 +142,8 @@ func layeredLookup(path string, systemLookup func(string) (string, bool)) (func(
 	if err != nil {
 		return nil, err
 	}
+	// Master Key 固定来自所选通用配置文件，不允许环境覆盖文件或进程环境改变它。
+	masterKey, masterKeyConfigured := values["MASTER_KEY"]
 	environment, ok := systemLookup("APP_ENV")
 	if !ok {
 		environment, ok = values["APP_ENV"]
@@ -167,6 +168,9 @@ func layeredLookup(path string, systemLookup func(string) (string, bool)) (func(
 	return func(key string) (string, bool) {
 		if key == "APP_ENV" {
 			return environment, true
+		}
+		if key == "MASTER_KEY" {
+			return masterKey, masterKeyConfigured
 		}
 		if value, ok := systemLookup(key); ok {
 			return value, true
@@ -288,7 +292,7 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 			SubscriptionRunTimeout:      duration("CODEX_SUBSCRIPTION_REFRESH_RUN_TIMEOUT", "4m"),
 		},
 		Security: Security{
-			MasterKey: get("ACP_MASTER_KEY", ""), ExternalMasterKeyPath: get("ACP_MASTER_KEY_FILE", ""), MasterKeyPath: get("MASTER_KEY_PATH", "data/secrets/master.key"),
+			MasterKey:        get("MASTER_KEY", ""),
 			JWTSecret:        get("ADMIN_JWT_SECRET", ""),
 			MaxLoginFailures: int64(integer("ADMIN_LOGIN_MAX_FAILURES", "5", 1000)), LoginLockDuration: duration("ADMIN_LOGIN_LOCK_DURATION", "15m"),
 		},

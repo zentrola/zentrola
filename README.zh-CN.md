@@ -94,6 +94,7 @@ REDIS_DB=2
 REDIS_PASSWORD=请替换为Redis密码
 
 ADMIN_JWT_SECRET=请替换为至少32个随机字节的Base64字符串
+MASTER_KEY=请替换为另一组32个随机字节的Base64字符串
 
 CORS_ENABLED=true
 CORS_ALLOWED_ORIGINS=http://127.0.0.1:9528
@@ -102,7 +103,7 @@ WEB_API_BASE_URL=http://127.0.0.1:9527
 WEB_GATEWAY_BASE_URL=http://127.0.0.1:9527
 ```
 
-`ADMIN_JWT_SECRET`、数据库密码、Provider Credential 和自动生成的 Master Key 必须彼此独立。
+`ADMIN_JWT_SECRET`、`MASTER_KEY`、数据库密码和 Provider Credential 必须彼此独立。`MASTER_KEY` 只从 `.env` 读取，必须与数据库一起备份；丢失后已有 Provider Credential 无法恢复。
 
 仓库中的 `compose.yaml` 是一个可选的 PostgreSQL 安装示例：
 
