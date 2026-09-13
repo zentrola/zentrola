@@ -10,7 +10,7 @@
 /.cache/
 /data/
 # 本地开发资料，不纳入开源仓库。
-/docs/
+/development-docs/
 coverage.out
 *.test
 *.exe
