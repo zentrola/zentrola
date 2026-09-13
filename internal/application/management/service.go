@@ -16,12 +16,12 @@ import (
 )
 
 type Service struct {
-	store        Store
-	ids          shared.IDGenerator
-	cipher       Cipher
-	tester       ConnectionTester
-	discoverer   ModelDiscoverer
-	subscription SubscriptionAdapter
+	store         Store
+	ids           shared.IDGenerator
+	cipher        Cipher
+	tester        ConnectionTester
+	discoverer    ModelDiscoverer
+	subscriptions []SubscriptionAdapter
 }
 
 type Option func(*Service)
@@ -31,7 +31,11 @@ func WithModelDiscoverer(discoverer ModelDiscoverer) Option {
 }
 
 func WithSubscriptionAdapter(adapter SubscriptionAdapter) Option {
-	return func(service *Service) { service.subscription = adapter }
+	return func(service *Service) {
+		if adapter != nil {
+			service.subscriptions = append(service.subscriptions, adapter)
+		}
+	}
 }
 
 func New(store Store, ids shared.IDGenerator, cipher Cipher, tester ConnectionTester, options ...Option) *Service {
@@ -45,10 +49,21 @@ func New(store Store, ids shared.IDGenerator, cipher Cipher, tester ConnectionTe
 func (s *Service) withProviderCapabilities(provider Provider) Provider {
 	provider.ModelSyncSupported = s.discoverer != nil && s.discoverer.Supports(provider.Code)
 	provider.AuthAdapters = []string{AuthAdapterAPIKey}
-	if s.subscription != nil && s.subscription.SupportsProvider(provider) {
-		provider.AuthAdapters = append(provider.AuthAdapters, s.subscription.Code())
+	for _, adapter := range s.subscriptions {
+		if adapter.SupportsProvider(provider) {
+			provider.AuthAdapters = append(provider.AuthAdapters, adapter.Code())
+		}
 	}
 	return provider
+}
+
+func (s *Service) subscriptionAdapter(code string) SubscriptionAdapter {
+	for _, adapter := range s.subscriptions {
+		if adapter.Supports(code) {
+			return adapter
+		}
+	}
+	return nil
 }
 
 func validText(s string, max int) bool {
@@ -537,16 +552,18 @@ func (s *Service) CreateAuthenticationResource(ctx context.Context, actor admin.
 	defer func() { clear(plain) }()
 	var inspection SubscriptionInspection
 	var subscriptionProbe *SubscriptionProbe
+	var subscription SubscriptionAdapter
 	switch input.AuthType {
 	case AuthTypeAPIKey:
 		if input.AuthAdapter != AuthAdapterAPIKey || !validCredential(input.Credential) {
 			return Resource{}, appsec.ErrInvalidArgument
 		}
 	case AuthTypeSubscription:
-		if !validSubscriptionCredential(input.Credential) || s.subscription == nil || !s.subscription.Supports(input.AuthAdapter) {
+		subscription = s.subscriptionAdapter(input.AuthAdapter)
+		if !validSubscriptionCredential(input.Credential) || subscription == nil {
 			return Resource{}, appsec.ErrInvalidArgument
 		}
-		if _, err := s.subscription.Inspect(plain); err != nil {
+		if _, err := subscription.Inspect(plain); err != nil {
 			return Resource{}, appsec.ErrInvalidArgument
 		}
 		var provider Provider
@@ -557,10 +574,14 @@ func (s *Service) CreateAuthenticationResource(ctx context.Context, actor admin.
 		}); err != nil {
 			return Resource{}, err
 		}
-		if !s.subscription.SupportsProvider(provider) {
+		if !subscription.SupportsProvider(provider) {
 			return Resource{}, appsec.ErrInvalidArgument
 		}
-		probe, err := s.subscription.Probe(ctx, plain)
+		subscriptionProxy, proxyErr := s.decryptedProviderProxy(provider)
+		if proxyErr != nil {
+			return Resource{}, ErrProvider
+		}
+		probe, err := subscription.Probe(ctx, plain, subscriptionProxy)
 		if err != nil {
 			return Resource{}, appsec.ErrUnavailable
 		}
@@ -593,6 +614,8 @@ func (s *Service) CreateAuthenticationResource(ctx context.Context, actor admin.
 		resource.SubscriptionType = &subscriptionType
 		resource.ExternalAccountRef = stringPointer(inspection.AccountRef)
 		resource.PlanCode = stringPointer(inspection.PlanCode)
+		resource.CredentialRefreshedAt = inspection.CredentialRefreshedAt
+		resource.CredentialExpiresAt = inspection.CredentialExpiresAt
 		if resource.ExpiresAt == nil {
 			resource.ExpiresAt = inspection.ExpiresAt
 		}
@@ -654,13 +677,18 @@ func (s *Service) UpdateCredential(ctx context.Context, actor admin.Identity, id
 			return appsec.ErrInvalidArgument
 		}
 	} else {
-		if !validSubscriptionCredential(credential) || s.subscription == nil || !s.subscription.Supports(original.AuthAdapter) || !s.subscription.SupportsProvider(provider) {
+		subscription := s.subscriptionAdapter(original.AuthAdapter)
+		if !validSubscriptionCredential(credential) || subscription == nil || !subscription.SupportsProvider(provider) {
 			return appsec.ErrInvalidArgument
 		}
-		if _, err := s.subscription.Inspect(plain); err != nil {
+		if _, err := subscription.Inspect(plain); err != nil {
 			return appsec.ErrInvalidArgument
 		}
-		probe, err := s.subscription.Probe(ctx, plain)
+		proxy, err := s.decryptedProviderProxy(provider)
+		if err != nil {
+			return ErrProvider
+		}
+		probe, err := subscription.Probe(ctx, plain, proxy)
 		if err != nil || len(probe.Credential) == 0 {
 			clear(probe.Credential)
 			return appsec.ErrUnavailable
@@ -686,6 +714,8 @@ func (s *Service) UpdateCredential(ctx context.Context, actor admin.Identity, id
 		if subscriptionProbe != nil {
 			record.ExternalAccountRef = stringPointer(subscriptionProbe.Inspection.AccountRef)
 			record.PlanCode = stringPointer(subscriptionProbe.Inspection.PlanCode)
+			record.CredentialRefreshedAt = subscriptionProbe.Inspection.CredentialRefreshedAt
+			record.CredentialExpiresAt = subscriptionProbe.Inspection.CredentialExpiresAt
 			if subscriptionProbe.Inspection.ExpiresAt != nil {
 				record.ExpiresAt = subscriptionProbe.Inspection.ExpiresAt
 			}
@@ -707,6 +737,51 @@ func (s *Service) UpdateCredential(ctx context.Context, actor admin.Identity, id
 			After: map[string]any{"credentialConfigured": true, "authType": record.AuthType},
 		}, meta)
 	})
+}
+
+// ExportSubscriptionCredential 解密可导出的个人订阅凭据；返回值含敏感信息，调用方使用后必须清零。
+func (s *Service) ExportSubscriptionCredential(ctx context.Context, actor admin.Identity, id int64, meta appsec.RequestMeta) ([]byte, error) {
+	if id <= 0 {
+		return nil, appsec.ErrInvalidArgument
+	}
+	var credential []byte
+	err := s.store.Write(ctx, actor, func(w Writer) error {
+		resource, err := w.Resource(ctx, id)
+		if err != nil {
+			return err
+		}
+		if resource.AuthType != AuthTypeSubscription || resource.AuthAdapter != AuthAdapterOpenAICodex ||
+			resource.SubscriptionType == nil || *resource.SubscriptionType != SubscriptionPersonal {
+			return ErrCredentialExportUnsupported
+		}
+		credential, err = s.cipher.Decrypt(resource.Sealed, owner(actor, resource.Resource))
+		if err != nil {
+			return ErrCredential
+		}
+		if exporter, ok := s.subscriptionAdapter(resource.AuthAdapter).(SubscriptionCredentialExporter); ok {
+			exported, exportErr := exporter.ExportCredential(credential)
+			if exportErr != nil {
+				return ErrCredential
+			}
+			clear(credential)
+			credential = exported
+		}
+		return w.Audit(ctx, Audit{
+			Event:  operation.ResourceCredentialExport,
+			Target: "RESOURCE",
+			ID:     id,
+			Name:   resource.Name,
+			After: map[string]string{
+				"authType":    resource.AuthType,
+				"authAdapter": resource.AuthAdapter,
+			},
+		}, meta)
+	})
+	if err != nil {
+		clear(credential)
+		return nil, err
+	}
+	return credential, nil
 }
 
 func (s *Service) DeleteResource(ctx context.Context, actor admin.Identity, id int64, meta appsec.RequestMeta) error {
@@ -760,29 +835,37 @@ func (s *Service) TestResource(ctx context.Context, actor admin.Identity, id int
 	} else if resource.AuthType == AuthTypeSubscription {
 		defer clear(plain)
 		startedAt := time.Now()
-		if s.subscription == nil || !s.subscription.Supports(resource.AuthAdapter) || !s.subscription.SupportsProvider(provider) {
+		subscription := s.subscriptionAdapter(resource.AuthAdapter)
+		if subscription == nil || !subscription.SupportsProvider(provider) {
 			result.Code = "SUBSCRIPTION_ADAPTER_UNAVAILABLE"
-		} else if probe, probeErr := s.subscription.Probe(ctx, plain); probeErr != nil {
-			result.Code = "SUBSCRIPTION_UNAVAILABLE"
 		} else {
-			subscriptionProbe = &probe
-			resource.PlanCode = stringPointer(probe.Inspection.PlanCode)
-			resource.ExternalAccountRef = stringPointer(probe.Inspection.AccountRef)
-			if probe.Inspection.ExpiresAt != nil {
-				resource.ExpiresAt = probe.Inspection.ExpiresAt
-			}
-			resource.QuotaStatus, resource.QuotaResetsAt = aggregateQuota(probe.Quotas)
-			now := time.Now().UTC().Truncate(time.Microsecond)
-			resource.QuotaCheckedAt = &now
-			result.OK, result.Code = true, "OK"
-			if len(probe.Credential) > 0 {
-				refreshedSealed, probeErr = s.cipher.Encrypt(probe.Credential, owner(actor, resource.Resource))
-				if probeErr != nil {
-					result.OK, result.Code = false, "CREDENTIAL_UNRECOVERABLE"
-					subscriptionProbe = nil
+			proxy, proxyErr := s.decryptedProviderProxy(provider)
+			if proxyErr != nil {
+				result.Code = "PROXY_CONFIGURATION_UNRECOVERABLE"
+			} else if probe, probeErr := subscription.Probe(ctx, plain, proxy); probeErr != nil {
+				result.Code = "SUBSCRIPTION_UNAVAILABLE"
+			} else {
+				subscriptionProbe = &probe
+				resource.PlanCode = stringPointer(probe.Inspection.PlanCode)
+				resource.ExternalAccountRef = stringPointer(probe.Inspection.AccountRef)
+				resource.CredentialRefreshedAt = probe.Inspection.CredentialRefreshedAt
+				resource.CredentialExpiresAt = probe.Inspection.CredentialExpiresAt
+				if probe.Inspection.ExpiresAt != nil {
+					resource.ExpiresAt = probe.Inspection.ExpiresAt
 				}
+				resource.QuotaStatus, resource.QuotaResetsAt = aggregateQuota(probe.Quotas)
+				now := time.Now().UTC().Truncate(time.Microsecond)
+				resource.QuotaCheckedAt = &now
+				result.OK, result.Code = true, "OK"
+				if len(probe.Credential) > 0 {
+					refreshedSealed, probeErr = s.cipher.Encrypt(probe.Credential, owner(actor, resource.Resource))
+					if probeErr != nil {
+						result.OK, result.Code = false, "CREDENTIAL_UNRECOVERABLE"
+						subscriptionProbe = nil
+					}
+				}
+				clear(probe.Credential)
 			}
-			clear(probe.Credential)
 		}
 		result.LatencyMS = time.Since(startedAt).Milliseconds()
 	} else if len(mappings) == 0 || strings.TrimSpace(mappings[0].UpstreamModelCode) == "" {
@@ -820,6 +903,8 @@ func (s *Service) TestResource(ctx context.Context, actor admin.Identity, id int
 		if result.OK && subscriptionProbe != nil {
 			current.PlanCode = resource.PlanCode
 			current.ExternalAccountRef = resource.ExternalAccountRef
+			current.CredentialRefreshedAt = resource.CredentialRefreshedAt
+			current.CredentialExpiresAt = resource.CredentialExpiresAt
 			current.ExpiresAt = resource.ExpiresAt
 			current.QuotaStatus = resource.QuotaStatus
 			current.QuotaCheckedAt = resource.QuotaCheckedAt

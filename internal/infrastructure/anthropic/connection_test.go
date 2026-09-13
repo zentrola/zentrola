@@ -13,6 +13,7 @@ import (
 	"time"
 
 	mgmt "github.com/zentrola/zentrola/internal/application/management"
+	"github.com/zentrola/zentrola/internal/infrastructure/anthropicclaude"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -59,6 +60,24 @@ func TestAnthropicConnectionUsesRealInference(t *testing.T) {
 				t.Fatalf("unexpected result: %+v", result)
 			}
 		})
+	}
+}
+
+func TestClaudeSubscriptionConnectionUsesOAuthBearer(t *testing.T) {
+	tester := NewConnectionTester()
+	tester.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Header.Get("Authorization") != "Bearer sk-ant-oat01-test" || r.Header.Get("x-api-key") != "" ||
+			r.Header.Get("anthropic-beta") != anthropicclaude.OAuthBeta {
+			t.Fatalf("unexpected Claude OAuth headers: %+v", r.Header)
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"type":"message","content":[{"type":"text","text":"OK"}]}`)), Header: make(http.Header)}, nil
+	})
+	result := tester.Test(context.Background(), mgmt.ConnectionTarget{
+		Protocol: "ANTHROPIC", BaseURL: "https://api.anthropic.com", UpstreamModelCode: "claude-test",
+		AuthType: mgmt.AuthTypeSubscription, AuthAdapter: anthropicclaude.AdapterCode,
+	}, []byte(`{"kind":"claude_code_setup_token","access_token":"sk-ant-oat01-test"}`), nil)
+	if !result.OK {
+		t.Fatalf("unexpected result: %+v", result)
 	}
 }
 

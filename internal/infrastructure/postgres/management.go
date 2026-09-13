@@ -85,7 +85,7 @@ func managementError(err error) error {
 			return appsec.ErrInvalidArgument
 		}
 	}
-	for _, known := range []error{appsec.ErrInvalidArgument, appsec.ErrUnauthenticated, appsec.ErrNotFound, appsec.ErrUnavailable, mgmt.ErrConflict, mgmt.ErrCredential, mgmt.ErrProvider, mgmt.ErrProviderCredentialRequired, mgmt.ErrModelSyncCredentialRequired} {
+	for _, known := range []error{appsec.ErrInvalidArgument, appsec.ErrUnauthenticated, appsec.ErrNotFound, appsec.ErrUnavailable, mgmt.ErrConflict, mgmt.ErrCredential, mgmt.ErrProvider, mgmt.ErrProviderCredentialRequired, mgmt.ErrModelSyncCredentialRequired, mgmt.ErrCredentialExportUnsupported} {
 		if errors.Is(err, known) {
 			return known
 		}
@@ -198,6 +198,7 @@ func resourceView(r dbgen.ManageResourcesRow) mgmt.Resource {
 		PlanCode: r.PlanCode, ExternalAccountRef: r.ExternalAccountRef, Priority: r.Priority,
 		EffectiveAt: timePointer(r.EffectiveAt), ExpiresAt: timePointer(r.ExpiresAt),
 		QuotaStatus: r.QuotaStatus, QuotaCheckedAt: timePointer(r.QuotaCheckedAt), QuotaResetsAt: timePointer(r.QuotaResetsAt),
+		CredentialRefreshedAt: timePointer(r.CredentialRefreshedAt), CredentialExpiresAt: timePointer(r.CredentialExpiresAt),
 		RuntimeStatus: r.RuntimeStatus, BlockedReason: r.BlockedReason,
 		BlockedAt: timePointer(r.BlockedAt), LastErrorAt: timePointer(r.LastErrorAt),
 		LastHTTPStatus: r.LastHttpStatus, LastErrorCode: r.LastErrorCode,
@@ -425,6 +426,7 @@ func (s *managementSession) Resource(ctx context.Context, id int64) (mgmt.Resour
 		PlanCode: r.PlanCode, ExternalAccountRef: r.ExternalAccountRef, Priority: r.Priority,
 		EffectiveAt: timePointer(r.EffectiveAt), ExpiresAt: timePointer(r.ExpiresAt),
 		QuotaStatus: r.QuotaStatus, QuotaCheckedAt: timePointer(r.QuotaCheckedAt), QuotaResetsAt: timePointer(r.QuotaResetsAt),
+		CredentialRefreshedAt: timePointer(r.CredentialRefreshedAt), CredentialExpiresAt: timePointer(r.CredentialExpiresAt),
 		RuntimeStatus: r.RuntimeStatus, BlockedReason: r.BlockedReason,
 		BlockedAt: timePointer(r.BlockedAt), LastErrorAt: timePointer(r.LastErrorAt),
 		LastHTTPStatus: r.LastHttpStatus, LastErrorCode: r.LastErrorCode,
@@ -643,6 +645,7 @@ func (s *managementSession) CreateResource(ctx context.Context, r mgmt.ResourceR
 		ExternalAccountRef: r.ExternalAccountRef, Priority: r.Priority,
 		EffectiveAt: nullableTime(r.EffectiveAt), ExpiresAt: nullableTime(r.ExpiresAt),
 		QuotaStatus: r.QuotaStatus, QuotaCheckedAt: nullableTime(r.QuotaCheckedAt), QuotaResetsAt: nullableTime(r.QuotaResetsAt),
+		CredentialRefreshedAt: nullableTime(r.CredentialRefreshedAt), CredentialExpiresAt: nullableTime(r.CredentialExpiresAt),
 		CredentialCiphertext: r.Sealed.Ciphertext, CredentialNonce: r.Sealed.Nonce,
 		KeyVersion: r.Sealed.KeyVersion, CreatedBy: actorRef(s.actor.ID), CreatedAt: pgTime(r.CreatedAt),
 	})
@@ -653,6 +656,7 @@ func (s *managementSession) UpdateResource(ctx context.Context, r mgmt.ResourceR
 		SubscriptionType: r.SubscriptionType, PlanCode: r.PlanCode, ExternalAccountRef: r.ExternalAccountRef,
 		Priority: r.Priority, EffectiveAt: nullableTime(r.EffectiveAt), ExpiresAt: nullableTime(r.ExpiresAt),
 		QuotaStatus: r.QuotaStatus, QuotaCheckedAt: nullableTime(r.QuotaCheckedAt), QuotaResetsAt: nullableTime(r.QuotaResetsAt),
+		CredentialRefreshedAt: nullableTime(r.CredentialRefreshedAt), CredentialExpiresAt: nullableTime(r.CredentialExpiresAt),
 		CredentialCiphertext: r.Sealed.Ciphertext, CredentialNonce: r.Sealed.Nonce,
 		KeyVersion: r.Sealed.KeyVersion, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(r.UpdatedAt),
 	})

@@ -22,6 +22,7 @@ import (
 	usageapp "github.com/zentrola/zentrola/internal/application/usage"
 	"github.com/zentrola/zentrola/internal/domain/admin"
 	"github.com/zentrola/zentrola/internal/infrastructure/anthropic"
+	"github.com/zentrola/zentrola/internal/infrastructure/anthropicclaude"
 	"github.com/zentrola/zentrola/internal/infrastructure/config"
 	"github.com/zentrola/zentrola/internal/infrastructure/gatewaycache"
 	"github.com/zentrola/zentrola/internal/infrastructure/idgen"
@@ -281,11 +282,16 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 	cacheProbeCancel()
 	keyService := appsec.NewKeys(gatewaycache.NewKeyStore(securityStore, gatewayCache, logger), ids)
 	connectionTester := anthropic.NewConnectionTester()
-	codexSubscription := openaicodex.New(cfg.Gateway.CodexExecutable)
+	codexSubscription := openaicodex.New(
+		cfg.Gateway.CodexExecutable,
+		openaicodex.WithRefreshAhead(cfg.Gateway.SubscriptionRefreshAhead),
+	)
+	claudeSubscription := anthropicclaude.New()
 	managementService := management.New(
 		gatewaycache.NewManagementStore(postgres.NewManagementStore(pool, ids), gatewayCache, logger), ids, credentials, connectionTester,
 		management.WithModelDiscoverer(modelcatalog.NewDiscoverer(logger)),
 		management.WithSubscriptionAdapter(codexSubscription),
+		management.WithSubscriptionAdapter(claudeSubscription),
 	)
 	anthropicClient := anthropic.NewGatewayClient(cfg.Gateway.HeaderTimeout)
 	defer anthropicClient.CloseIdleConnections()
@@ -303,7 +309,25 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 		gatewaycache.NewGatewayStore(postgres.NewGatewayStore(pool), gatewayCache, logger), credentials, compatibleUpstream,
 		gateway.WithRouteState(routeState),
 		gateway.WithSubscriptionRefresher(codexSubscription),
+		gateway.WithSubscriptionRefresher(claudeSubscription),
 	)
+	subscriptionWorker, err := gateway.NewSubscriptionRefreshWorker(
+		gatewayService, logger, cfg.Gateway.SubscriptionRefreshInterval, cfg.Gateway.SubscriptionRunTimeout,
+	)
+	if err != nil {
+		return err
+	}
+	logger.Info("subscription refresh worker started",
+		"refresh_ahead", cfg.Gateway.SubscriptionRefreshAhead,
+		"interval", cfg.Gateway.SubscriptionRefreshInterval,
+		"run_timeout", cfg.Gateway.SubscriptionRunTimeout)
+	defer func() {
+		workerShutdown, workerCancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+		defer workerCancel()
+		if err := subscriptionWorker.Close(workerShutdown); err != nil {
+			runErr = errors.Join(runErr, errors.New("cannot stop subscription refresh worker"))
+		}
+	}()
 	usageStore := postgres.NewUsageStore(pool)
 	usageWriter, err := usageapp.NewWriter(usageStore, logger, usageapp.Options{QueueSize: cfg.Usage.QueueSize, BatchSize: cfg.Usage.BatchSize, FlushInterval: cfg.Usage.FlushInterval, WriteTimeout: cfg.Usage.WriteTimeout})
 	if err != nil {

@@ -266,8 +266,10 @@ func (r CreateResourceRequest) Valid() bool {
 	if r.AuthType == "API_KEY" {
 		return r.AuthAdapter == "API_KEY" && validCredential(r.Credential)
 	}
-	return r.AuthType == "SUBSCRIPTION" && r.AuthAdapter == "OPENAI_CODEX" &&
-		len(r.Credential) > 0 && len(r.Credential) <= 64<<10 && utf8.ValidString(r.Credential) && !strings.ContainsRune(r.Credential, 0)
+	return r.AuthType == "SUBSCRIPTION" &&
+		(r.AuthAdapter == "OPENAI_CODEX" || r.AuthAdapter == "ANTHROPIC_CLAUDE_CODE") &&
+		len(r.Credential) > 0 && len(r.Credential) <= 64<<10 && utf8.ValidString(r.Credential) &&
+		!strings.ContainsRune(r.Credential, 0)
 }
 
 type UpdateCredentialRequest struct {

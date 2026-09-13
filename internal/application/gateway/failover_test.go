@@ -51,19 +51,19 @@ func (c failoverCipher) Decrypt(_ catalog.SealedCredential, owner catalog.Creden
 	return []byte("secret"), nil
 }
 
-func (failoverCipher) DecryptProviderProxy(catalog.SealedCredential, catalog.ProviderProxyOwner) ([]byte, error) {
-	return nil, errors.New("unexpected proxy decryption")
+func (failoverCipher) DecryptProviderProxy(sealed catalog.SealedCredential, _ catalog.ProviderProxyOwner) ([]byte, error) {
+	return append([]byte(nil), sealed.Ciphertext...), nil
 }
 
 func (failoverCipher) Encrypt(plain []byte, _ catalog.CredentialOwner) (catalog.SealedCredential, error) {
 	return catalog.SealedCredential{Ciphertext: append([]byte(nil), plain...), Nonce: make([]byte, 12), KeyVersion: 2}, nil
 }
 
-type subscriptionRefreshFunc func(context.Context, []byte) ([]byte, bool, error)
+type subscriptionRefreshFunc func(context.Context, []byte, *catalog.OutboundProxy) ([]byte, bool, error)
 
 func (subscriptionRefreshFunc) Supports(code string) bool { return code == "OPENAI_CODEX" }
-func (f subscriptionRefreshFunc) RefreshIfNeeded(ctx context.Context, credential []byte) ([]byte, bool, error) {
-	return f(ctx, credential)
+func (f subscriptionRefreshFunc) RefreshIfNeeded(ctx context.Context, credential []byte, proxy *catalog.OutboundProxy) ([]byte, bool, error) {
+	return f(ctx, credential, proxy)
 }
 
 type upstreamFunc func(context.Context, Route, Request, []byte) (*Response, error)
@@ -281,13 +281,18 @@ func TestForwardRefreshesSubscriptionCredentialAndPersistsIt(t *testing.T) {
 	route := testRoutes()[0]
 	route.AuthType = "SUBSCRIPTION"
 	route.AuthAdapter = "OPENAI_CODEX"
+	route.ProxyEnabled = true
+	route.ProxyURL = catalog.SealedCredential{Ciphertext: []byte("http://proxy.example.com:8080"), KeyVersion: 1}
 	store := &failoverStore{routes: []Route{route}}
 	service := New(store, failoverCipher{}, upstreamFunc(func(_ context.Context, got Route, _ Request, credential []byte) (*Response, error) {
-		if got.ResourceID != route.ResourceID || string(credential) != "refreshed-auth-cache" {
+		if got.ResourceID != route.ResourceID || string(credential) != "refreshed-auth-cache" || got.Proxy == nil || got.Proxy.URL != "http://proxy.example.com:8080" {
 			t.Fatalf("unexpected refreshed route or credential: %+v %q", got, credential)
 		}
 		return response(200, `{}`), nil
-	}), WithSubscriptionRefresher(subscriptionRefreshFunc(func(context.Context, []byte) ([]byte, bool, error) {
+	}), WithSubscriptionRefresher(subscriptionRefreshFunc(func(_ context.Context, _ []byte, proxy *catalog.OutboundProxy) ([]byte, bool, error) {
+		if proxy == nil || proxy.URL != "http://proxy.example.com:8080" {
+			t.Fatalf("subscription refresh did not receive provider proxy: %+v", proxy)
+		}
 		return []byte("refreshed-auth-cache"), true, nil
 	})))
 
@@ -314,7 +319,7 @@ func TestForwardFallsBackToAPIKeyWhenSubscriptionRefreshFails(t *testing.T) {
 	service := New(store, failoverCipher{}, upstreamFunc(func(_ context.Context, route Route, _ Request, _ []byte) (*Response, error) {
 		called = append(called, route.ResourceID)
 		return response(200, `{}`), nil
-	}), WithRouteState(state), WithSubscriptionRefresher(subscriptionRefreshFunc(func(context.Context, []byte) ([]byte, bool, error) {
+	}), WithRouteState(state), WithSubscriptionRefresher(subscriptionRefreshFunc(func(context.Context, []byte, *catalog.OutboundProxy) ([]byte, bool, error) {
 		return nil, false, errors.New("refresh failed")
 	})))
 

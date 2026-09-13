@@ -47,7 +47,7 @@ SELECT pm.id AS provider_model_id,pm.provider_id,pm.upstream_model_code,pe.base_
        p.proxy_enabled,p.proxy_url_ciphertext,p.proxy_url_nonce,p.proxy_url_key_version,
        p.proxy_headers_ciphertext,p.proxy_headers_nonce,p.proxy_headers_key_version,
        r.id AS resource_id,r.auth_type,r.auth_adapter,r.subscription_type,r.priority AS resource_priority,r.expires_at,
-       r.quota_status,r.quota_checked_at,r.quota_resets_at,
+       r.quota_status,r.quota_checked_at,r.quota_resets_at,r.credential_refreshed_at,r.credential_expires_at,
        r.credential_ciphertext,r.credential_nonce,r.key_version
 FROM provider_model pm
 JOIN provider p ON p.id=pm.provider_id
@@ -93,6 +93,8 @@ type GatewayCandidatesRow struct {
 	QuotaStatus            string
 	QuotaCheckedAt         pgtype.Timestamptz
 	QuotaResetsAt          pgtype.Timestamptz
+	CredentialRefreshedAt  pgtype.Timestamptz
+	CredentialExpiresAt    pgtype.Timestamptz
 	CredentialCiphertext   []byte
 	CredentialNonce        []byte
 	KeyVersion             int32
@@ -129,6 +131,8 @@ func (q *Queries) GatewayCandidates(ctx context.Context, arg GatewayCandidatesPa
 			&i.QuotaStatus,
 			&i.QuotaCheckedAt,
 			&i.QuotaResetsAt,
+			&i.CredentialRefreshedAt,
+			&i.CredentialExpiresAt,
 			&i.CredentialCiphertext,
 			&i.CredentialNonce,
 			&i.KeyVersion,
@@ -179,6 +183,31 @@ func (q *Queries) GatewayModel(ctx context.Context, modelCode string) (GatewayMo
 	return i, err
 }
 
+const gatewayResourceCredential = `-- name: GatewayResourceCredential :one
+SELECT credential_ciphertext,credential_nonce,key_version
+FROM provider_credential
+WHERE id=$1 AND provider_id=$2
+  AND NOT is_deleted AND auth_type='SUBSCRIPTION'
+`
+
+type GatewayResourceCredentialParams struct {
+	ResourceID int64
+	ProviderID int64
+}
+
+type GatewayResourceCredentialRow struct {
+	CredentialCiphertext []byte
+	CredentialNonce      []byte
+	KeyVersion           int32
+}
+
+func (q *Queries) GatewayResourceCredential(ctx context.Context, arg GatewayResourceCredentialParams) (GatewayResourceCredentialRow, error) {
+	row := q.db.QueryRow(ctx, gatewayResourceCredential, arg.ResourceID, arg.ProviderID)
+	var i GatewayResourceCredentialRow
+	err := row.Scan(&i.CredentialCiphertext, &i.CredentialNonce, &i.KeyVersion)
+	return i, err
+}
+
 const gatewayRouteExists = `-- name: GatewayRouteExists :one
 SELECT EXISTS(
     SELECT 1
@@ -195,6 +224,95 @@ func (q *Queries) GatewayRouteExists(ctx context.Context, modelID int64) (bool, 
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
+}
+
+const listGatewaySubscriptionCredentials = `-- name: ListGatewaySubscriptionCredentials :many
+SELECT r.id AS resource_id,r.provider_id,r.auth_adapter,r.credential_refreshed_at,r.credential_expires_at,
+       p.proxy_enabled,p.proxy_url_ciphertext,p.proxy_url_nonce,p.proxy_url_key_version,
+       p.proxy_headers_ciphertext,p.proxy_headers_nonce,p.proxy_headers_key_version,
+       r.credential_ciphertext,r.credential_nonce,r.key_version
+FROM provider_credential r
+JOIN provider p ON p.id=r.provider_id
+WHERE r.id>$1
+  AND NOT r.is_deleted AND r.auth_type='SUBSCRIPTION' AND r.subscription_type='PERSONAL'
+  AND r.runtime_status='HEALTHY'
+  AND (r.effective_at IS NULL OR r.effective_at<=now())
+  AND (r.expires_at IS NULL OR r.expires_at>now())
+  AND (r.credential_expires_at IS NULL OR r.credential_expires_at<=$2::timestamptz)
+  AND NOT p.is_deleted AND p.status='ACTIVE'
+ORDER BY r.id
+LIMIT $3
+`
+
+type ListGatewaySubscriptionCredentialsParams struct {
+	AfterID       int64
+	RefreshBefore pgtype.Timestamptz
+	PageLimit     int32
+}
+
+type ListGatewaySubscriptionCredentialsRow struct {
+	ResourceID             int64
+	ProviderID             int64
+	AuthAdapter            string
+	CredentialRefreshedAt  pgtype.Timestamptz
+	CredentialExpiresAt    pgtype.Timestamptz
+	ProxyEnabled           bool
+	ProxyUrlCiphertext     []byte
+	ProxyUrlNonce          []byte
+	ProxyUrlKeyVersion     *int32
+	ProxyHeadersCiphertext []byte
+	ProxyHeadersNonce      []byte
+	ProxyHeadersKeyVersion *int32
+	CredentialCiphertext   []byte
+	CredentialNonce        []byte
+	KeyVersion             int32
+}
+
+func (q *Queries) ListGatewaySubscriptionCredentials(ctx context.Context, arg ListGatewaySubscriptionCredentialsParams) ([]ListGatewaySubscriptionCredentialsRow, error) {
+	rows, err := q.db.Query(ctx, listGatewaySubscriptionCredentials, arg.AfterID, arg.RefreshBefore, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListGatewaySubscriptionCredentialsRow{}
+	for rows.Next() {
+		var i ListGatewaySubscriptionCredentialsRow
+		if err := rows.Scan(
+			&i.ResourceID,
+			&i.ProviderID,
+			&i.AuthAdapter,
+			&i.CredentialRefreshedAt,
+			&i.CredentialExpiresAt,
+			&i.ProxyEnabled,
+			&i.ProxyUrlCiphertext,
+			&i.ProxyUrlNonce,
+			&i.ProxyUrlKeyVersion,
+			&i.ProxyHeadersCiphertext,
+			&i.ProxyHeadersNonce,
+			&i.ProxyHeadersKeyVersion,
+			&i.CredentialCiphertext,
+			&i.CredentialNonce,
+			&i.KeyVersion,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockGatewaySubscriptionRefresh = `-- name: LockGatewaySubscriptionRefresh :one
+SELECT pg_advisory_lock(-($1::bigint))
+`
+
+func (q *Queries) LockGatewaySubscriptionRefresh(ctx context.Context, resourceID int64) (interface{}, error) {
+	row := q.db.QueryRow(ctx, lockGatewaySubscriptionRefresh, resourceID)
+	var pg_advisory_lock interface{}
+	err := row.Scan(&pg_advisory_lock)
+	return pg_advisory_lock, err
 }
 
 const openAIModels = `-- name: OpenAIModels :many
@@ -240,20 +358,34 @@ func (q *Queries) OpenAIModels(ctx context.Context, principalID int64) ([]OpenAI
 	return items, nil
 }
 
+const unlockGatewaySubscriptionRefresh = `-- name: UnlockGatewaySubscriptionRefresh :one
+SELECT pg_advisory_unlock(-($1::bigint))
+`
+
+func (q *Queries) UnlockGatewaySubscriptionRefresh(ctx context.Context, resourceID int64) (bool, error) {
+	row := q.db.QueryRow(ctx, unlockGatewaySubscriptionRefresh, resourceID)
+	var pg_advisory_unlock bool
+	err := row.Scan(&pg_advisory_unlock)
+	return pg_advisory_unlock, err
+}
+
 const updateGatewayResourceCredential = `-- name: UpdateGatewayResourceCredential :execrows
 UPDATE provider_credential
 SET credential_ciphertext=$1,credential_nonce=$2,
-    key_version=$3,updated_by='system',updated_at=$4
-WHERE id=$5 AND provider_id=$6 AND NOT is_deleted
+    key_version=$3,credential_refreshed_at=$4,
+    credential_expires_at=$5,updated_by='system',updated_at=$6
+WHERE id=$7 AND provider_id=$8 AND NOT is_deleted
 `
 
 type UpdateGatewayResourceCredentialParams struct {
-	CredentialCiphertext []byte
-	CredentialNonce      []byte
-	KeyVersion           int32
-	UpdatedAt            pgtype.Timestamptz
-	ResourceID           int64
-	ProviderID           int64
+	CredentialCiphertext  []byte
+	CredentialNonce       []byte
+	KeyVersion            int32
+	CredentialRefreshedAt pgtype.Timestamptz
+	CredentialExpiresAt   pgtype.Timestamptz
+	UpdatedAt             pgtype.Timestamptz
+	ResourceID            int64
+	ProviderID            int64
 }
 
 func (q *Queries) UpdateGatewayResourceCredential(ctx context.Context, arg UpdateGatewayResourceCredentialParams) (int64, error) {
@@ -261,6 +393,38 @@ func (q *Queries) UpdateGatewayResourceCredential(ctx context.Context, arg Updat
 		arg.CredentialCiphertext,
 		arg.CredentialNonce,
 		arg.KeyVersion,
+		arg.CredentialRefreshedAt,
+		arg.CredentialExpiresAt,
+		arg.UpdatedAt,
+		arg.ResourceID,
+		arg.ProviderID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const updateGatewayResourceCredentialRefreshMetadata = `-- name: UpdateGatewayResourceCredentialRefreshMetadata :execrows
+UPDATE provider_credential
+SET credential_refreshed_at=$1,
+    credential_expires_at=$2,updated_by='system',updated_at=$3
+WHERE id=$4 AND provider_id=$5 AND NOT is_deleted
+  AND credential_expires_at IS NULL
+`
+
+type UpdateGatewayResourceCredentialRefreshMetadataParams struct {
+	CredentialRefreshedAt pgtype.Timestamptz
+	CredentialExpiresAt   pgtype.Timestamptz
+	UpdatedAt             pgtype.Timestamptz
+	ResourceID            int64
+	ProviderID            int64
+}
+
+func (q *Queries) UpdateGatewayResourceCredentialRefreshMetadata(ctx context.Context, arg UpdateGatewayResourceCredentialRefreshMetadataParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateGatewayResourceCredentialRefreshMetadata,
+		arg.CredentialRefreshedAt,
+		arg.CredentialExpiresAt,
 		arg.UpdatedAt,
 		arg.ResourceID,
 		arg.ProviderID,

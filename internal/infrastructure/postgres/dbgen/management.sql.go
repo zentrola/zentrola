@@ -343,31 +343,33 @@ const manageCreateResource = `-- name: ManageCreateResource :exec
 INSERT INTO provider_credential(
     id,provider_id,resource_name,auth_type,auth_adapter,subscription_type,plan_code,
     external_account_ref,priority,effective_at,expires_at,quota_status,quota_checked_at,
-    quota_resets_at,credential_ciphertext,credential_nonce,key_version,created_by,updated_by,
-    created_at,updated_at)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$18,$19,$19)
+    quota_resets_at,credential_refreshed_at,credential_expires_at,
+    credential_ciphertext,credential_nonce,key_version,created_by,updated_by,created_at,updated_at)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$20,$21,$21)
 `
 
 type ManageCreateResourceParams struct {
-	ID                   int64
-	ProviderID           int64
-	ResourceName         string
-	AuthType             string
-	AuthAdapter          string
-	SubscriptionType     *string
-	PlanCode             *string
-	ExternalAccountRef   *string
-	Priority             int32
-	EffectiveAt          pgtype.Timestamptz
-	ExpiresAt            pgtype.Timestamptz
-	QuotaStatus          string
-	QuotaCheckedAt       pgtype.Timestamptz
-	QuotaResetsAt        pgtype.Timestamptz
-	CredentialCiphertext []byte
-	CredentialNonce      []byte
-	KeyVersion           int32
-	CreatedBy            string
-	CreatedAt            pgtype.Timestamptz
+	ID                    int64
+	ProviderID            int64
+	ResourceName          string
+	AuthType              string
+	AuthAdapter           string
+	SubscriptionType      *string
+	PlanCode              *string
+	ExternalAccountRef    *string
+	Priority              int32
+	EffectiveAt           pgtype.Timestamptz
+	ExpiresAt             pgtype.Timestamptz
+	QuotaStatus           string
+	QuotaCheckedAt        pgtype.Timestamptz
+	QuotaResetsAt         pgtype.Timestamptz
+	CredentialRefreshedAt pgtype.Timestamptz
+	CredentialExpiresAt   pgtype.Timestamptz
+	CredentialCiphertext  []byte
+	CredentialNonce       []byte
+	KeyVersion            int32
+	CreatedBy             string
+	CreatedAt             pgtype.Timestamptz
 }
 
 func (q *Queries) ManageCreateResource(ctx context.Context, arg ManageCreateResourceParams) error {
@@ -386,6 +388,8 @@ func (q *Queries) ManageCreateResource(ctx context.Context, arg ManageCreateReso
 		arg.QuotaStatus,
 		arg.QuotaCheckedAt,
 		arg.QuotaResetsAt,
+		arg.CredentialRefreshedAt,
+		arg.CredentialExpiresAt,
 		arg.CredentialCiphertext,
 		arg.CredentialNonce,
 		arg.KeyVersion,
@@ -1561,7 +1565,7 @@ func (q *Queries) ManageRemoveMember(ctx context.Context, arg ManageRemoveMember
 }
 
 const manageResource = `-- name: ManageResource :one
-SELECT id, is_deleted, provider_id, resource_name, credential_ciphertext, credential_nonce, key_version, created_by, updated_by, created_at, updated_at, runtime_status, blocked_reason, blocked_at, last_error_at, last_http_status, last_error_code, auth_type, auth_adapter, subscription_type, plan_code, external_account_ref, priority, effective_at, expires_at, quota_status, quota_checked_at, quota_resets_at FROM provider_credential WHERE id=$1 AND is_deleted=false
+SELECT id, is_deleted, provider_id, resource_name, credential_ciphertext, credential_nonce, key_version, created_by, updated_by, created_at, updated_at, runtime_status, blocked_reason, blocked_at, last_error_at, last_http_status, last_error_code, auth_type, auth_adapter, subscription_type, plan_code, external_account_ref, priority, effective_at, expires_at, quota_status, quota_checked_at, quota_resets_at, credential_refreshed_at, credential_expires_at FROM provider_credential WHERE id=$1 AND is_deleted=false
 `
 
 func (q *Queries) ManageResource(ctx context.Context, id int64) (ProviderCredential, error) {
@@ -1596,6 +1600,8 @@ func (q *Queries) ManageResource(ctx context.Context, id int64) (ProviderCredent
 		&i.QuotaStatus,
 		&i.QuotaCheckedAt,
 		&i.QuotaResetsAt,
+		&i.CredentialRefreshedAt,
+		&i.CredentialExpiresAt,
 	)
 	return i, err
 }
@@ -1644,7 +1650,8 @@ func (q *Queries) ManageResourceQuotas(ctx context.Context, providerCredentialID
 const manageResources = `-- name: ManageResources :many
 SELECT id,provider_id,resource_name,auth_type,auth_adapter,subscription_type,plan_code,
        external_account_ref,priority,effective_at,expires_at,quota_status,quota_checked_at,
-       quota_resets_at,runtime_status,blocked_reason,blocked_at,last_error_at,last_http_status,
+       quota_resets_at,credential_refreshed_at,credential_expires_at,
+       runtime_status,blocked_reason,blocked_at,last_error_at,last_http_status,
        last_error_code,created_at,updated_at FROM provider_credential
 WHERE is_deleted=false AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2
 `
@@ -1655,28 +1662,30 @@ type ManageResourcesParams struct {
 }
 
 type ManageResourcesRow struct {
-	ID                 int64
-	ProviderID         int64
-	ResourceName       string
-	AuthType           string
-	AuthAdapter        string
-	SubscriptionType   *string
-	PlanCode           *string
-	ExternalAccountRef *string
-	Priority           int32
-	EffectiveAt        pgtype.Timestamptz
-	ExpiresAt          pgtype.Timestamptz
-	QuotaStatus        string
-	QuotaCheckedAt     pgtype.Timestamptz
-	QuotaResetsAt      pgtype.Timestamptz
-	RuntimeStatus      string
-	BlockedReason      *string
-	BlockedAt          pgtype.Timestamptz
-	LastErrorAt        pgtype.Timestamptz
-	LastHttpStatus     *int32
-	LastErrorCode      *string
-	CreatedAt          pgtype.Timestamptz
-	UpdatedAt          pgtype.Timestamptz
+	ID                    int64
+	ProviderID            int64
+	ResourceName          string
+	AuthType              string
+	AuthAdapter           string
+	SubscriptionType      *string
+	PlanCode              *string
+	ExternalAccountRef    *string
+	Priority              int32
+	EffectiveAt           pgtype.Timestamptz
+	ExpiresAt             pgtype.Timestamptz
+	QuotaStatus           string
+	QuotaCheckedAt        pgtype.Timestamptz
+	QuotaResetsAt         pgtype.Timestamptz
+	CredentialRefreshedAt pgtype.Timestamptz
+	CredentialExpiresAt   pgtype.Timestamptz
+	RuntimeStatus         string
+	BlockedReason         *string
+	BlockedAt             pgtype.Timestamptz
+	LastErrorAt           pgtype.Timestamptz
+	LastHttpStatus        *int32
+	LastErrorCode         *string
+	CreatedAt             pgtype.Timestamptz
+	UpdatedAt             pgtype.Timestamptz
 }
 
 func (q *Queries) ManageResources(ctx context.Context, arg ManageResourcesParams) ([]ManageResourcesRow, error) {
@@ -1703,6 +1712,8 @@ func (q *Queries) ManageResources(ctx context.Context, arg ManageResourcesParams
 			&i.QuotaStatus,
 			&i.QuotaCheckedAt,
 			&i.QuotaResetsAt,
+			&i.CredentialRefreshedAt,
+			&i.CredentialExpiresAt,
 			&i.RuntimeStatus,
 			&i.BlockedReason,
 			&i.BlockedAt,
@@ -1933,36 +1944,39 @@ const manageUpdateResource = `-- name: ManageUpdateResource :exec
 UPDATE provider_credential SET resource_name=$2,auth_type=$3,auth_adapter=$4,subscription_type=$5,
 plan_code=$6,external_account_ref=$7,priority=$8,effective_at=$9,expires_at=$10,
 quota_status=$11,quota_checked_at=$12,quota_resets_at=$13,
-credential_ciphertext=$14,credential_nonce=$15,key_version=$16,
-runtime_status=CASE WHEN credential_ciphertext IS DISTINCT FROM $14 THEN 'HEALTHY' ELSE runtime_status END,
-blocked_reason=CASE WHEN credential_ciphertext IS DISTINCT FROM $14 THEN NULL ELSE blocked_reason END,
-blocked_at=CASE WHEN credential_ciphertext IS DISTINCT FROM $14 THEN NULL ELSE blocked_at END,
-last_error_at=CASE WHEN credential_ciphertext IS DISTINCT FROM $14 THEN NULL ELSE last_error_at END,
-last_http_status=CASE WHEN credential_ciphertext IS DISTINCT FROM $14 THEN NULL ELSE last_http_status END,
-last_error_code=CASE WHEN credential_ciphertext IS DISTINCT FROM $14 THEN NULL ELSE last_error_code END,
-updated_by=$17,updated_at=$18
+credential_refreshed_at=$14,credential_expires_at=$15,
+credential_ciphertext=$16,credential_nonce=$17,key_version=$18,
+runtime_status=CASE WHEN credential_ciphertext IS DISTINCT FROM $16 THEN 'HEALTHY' ELSE runtime_status END,
+blocked_reason=CASE WHEN credential_ciphertext IS DISTINCT FROM $16 THEN NULL ELSE blocked_reason END,
+blocked_at=CASE WHEN credential_ciphertext IS DISTINCT FROM $16 THEN NULL ELSE blocked_at END,
+last_error_at=CASE WHEN credential_ciphertext IS DISTINCT FROM $16 THEN NULL ELSE last_error_at END,
+last_http_status=CASE WHEN credential_ciphertext IS DISTINCT FROM $16 THEN NULL ELSE last_http_status END,
+last_error_code=CASE WHEN credential_ciphertext IS DISTINCT FROM $16 THEN NULL ELSE last_error_code END,
+updated_by=$19,updated_at=$20
 WHERE id=$1 AND is_deleted=false
 `
 
 type ManageUpdateResourceParams struct {
-	ID                   int64
-	ResourceName         string
-	AuthType             string
-	AuthAdapter          string
-	SubscriptionType     *string
-	PlanCode             *string
-	ExternalAccountRef   *string
-	Priority             int32
-	EffectiveAt          pgtype.Timestamptz
-	ExpiresAt            pgtype.Timestamptz
-	QuotaStatus          string
-	QuotaCheckedAt       pgtype.Timestamptz
-	QuotaResetsAt        pgtype.Timestamptz
-	CredentialCiphertext []byte
-	CredentialNonce      []byte
-	KeyVersion           int32
-	UpdatedBy            string
-	UpdatedAt            pgtype.Timestamptz
+	ID                    int64
+	ResourceName          string
+	AuthType              string
+	AuthAdapter           string
+	SubscriptionType      *string
+	PlanCode              *string
+	ExternalAccountRef    *string
+	Priority              int32
+	EffectiveAt           pgtype.Timestamptz
+	ExpiresAt             pgtype.Timestamptz
+	QuotaStatus           string
+	QuotaCheckedAt        pgtype.Timestamptz
+	QuotaResetsAt         pgtype.Timestamptz
+	CredentialRefreshedAt pgtype.Timestamptz
+	CredentialExpiresAt   pgtype.Timestamptz
+	CredentialCiphertext  []byte
+	CredentialNonce       []byte
+	KeyVersion            int32
+	UpdatedBy             string
+	UpdatedAt             pgtype.Timestamptz
 }
 
 func (q *Queries) ManageUpdateResource(ctx context.Context, arg ManageUpdateResourceParams) error {
@@ -1980,6 +1994,8 @@ func (q *Queries) ManageUpdateResource(ctx context.Context, arg ManageUpdateReso
 		arg.QuotaStatus,
 		arg.QuotaCheckedAt,
 		arg.QuotaResetsAt,
+		arg.CredentialRefreshedAt,
+		arg.CredentialExpiresAt,
 		arg.CredentialCiphertext,
 		arg.CredentialNonce,
 		arg.KeyVersion,

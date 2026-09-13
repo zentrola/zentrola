@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { all, api, errorText } from '../api'
+import { all, api, download, errorText } from '../api'
 import { date, useAction, useCollection, useListSearch, validText } from '../composables'
 import { i18n, t } from '../i18n'
 import { showErrorToast, showSuccessToast } from '../toast'
@@ -55,7 +55,7 @@ const credentialAuthType = ref<'API_KEY' | 'SUBSCRIPTION'>('API_KEY')
 type SubscriptionInputMode = 'UPLOAD' | 'PASTE'
 const subscriptionInputMode = ref<SubscriptionInputMode>('UPLOAD')
 const subscriptionFileName = ref('')
-const subscriptionUploadCommands = [
+const codexSubscriptionUploadCommands = [
   { platform: 'macOS', command: 'open ~/.codex' },
   {
     platform: 'Windows PowerShell',
@@ -63,7 +63,7 @@ const subscriptionUploadCommands = [
   },
   { platform: 'Linux', command: 'xdg-open ~/.codex' },
 ] as const
-const subscriptionPasteCommands = [
+const codexSubscriptionPasteCommands = [
   { platform: 'macOS', command: 'pbcopy < ~/.codex/auth.json' },
   {
     platform: 'Windows PowerShell',
@@ -71,9 +71,17 @@ const subscriptionPasteCommands = [
   },
   { platform: 'Linux', command: 'cat ~/.codex/auth.json' },
 ] as const
-const subscriptionCommands = computed(() =>
-  subscriptionInputMode.value === 'UPLOAD' ? subscriptionUploadCommands : subscriptionPasteCommands,
+const claudeSubscriptionCommands = [{ platform: '', command: 'claude setup-token' }] as const
+const subscriptionAdapter = computed(
+  () => credentialTarget.value?.authAdapters?.find((adapter) => adapter !== 'API_KEY') ?? '',
 )
+const claudeSubscription = computed(() => subscriptionAdapter.value === 'ANTHROPIC_CLAUDE_CODE')
+const subscriptionCommands = computed(() => {
+  if (claudeSubscription.value) return claudeSubscriptionCommands
+  return subscriptionInputMode.value === 'UPLOAD'
+    ? codexSubscriptionUploadCommands
+    : codexSubscriptionPasteCommands
+})
 const testSelectionTarget = ref<Provider | null>(null)
 const selectedTestResourceID = ref('')
 const testTarget = ref<{ provider: Provider; resource: Resource } | null>(null)
@@ -591,12 +599,27 @@ function closeCredential() {
 function validSubscriptionCredential(value: string) {
   const size = new TextEncoder().encode(value).length
   if (!value.trim() || size > 65536) return false
+  if (claudeSubscription.value) {
+    const token = value.trim()
+    return (
+      token.startsWith('sk-ant-oat') &&
+      token.length > 'sk-ant-oat'.length &&
+      token.length <= 4096 &&
+      /^[\x21-\x7e]+$/.test(token)
+    )
+  }
   try {
     const parsed = JSON.parse(value)
     return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
   } catch {
     return false
   }
+}
+
+function subscriptionRequiredKey() {
+  return claudeSubscription.value
+    ? 'resources.claudeSubscriptionRequired'
+    : 'resources.subscriptionRequired'
 }
 
 function saveCredential() {
@@ -609,7 +632,7 @@ function saveCredential() {
       t(
         credentialAuthType.value === 'API_KEY'
           ? 'resources.credentialRequired'
-          : 'resources.subscriptionRequired',
+          : subscriptionRequiredKey(),
       ),
     )
     return
@@ -621,7 +644,8 @@ function saveCredential() {
       name: `${provider.name} ${t(`resources.authTypes.${credentialAuthType.value}`)}`,
       credential: credential.value,
       authType: credentialAuthType.value,
-      authAdapter: credentialAuthType.value === 'SUBSCRIPTION' ? 'OPENAI_CODEX' : 'API_KEY',
+      authAdapter:
+        credentialAuthType.value === 'SUBSCRIPTION' ? subscriptionAdapter.value : 'API_KEY',
     })
     await loadResources()
     credentialCreating.value = false
@@ -637,7 +661,7 @@ async function importSubscription(event: Event) {
   const file = input.files?.[0]
   if (!file) return
   if (file.size > 65536) {
-    showErrorToast(t('resources.subscriptionRequired'))
+    showErrorToast(t(subscriptionRequiredKey()))
     input.value = ''
     subscriptionFileName.value = ''
     credential.value = ''
@@ -645,6 +669,29 @@ async function importSubscription(event: Event) {
   }
   credential.value = await file.text()
   subscriptionFileName.value = file.name
+}
+
+function exportableSubscription(resource: Resource) {
+  return (
+    resource.authType === 'SUBSCRIPTION' &&
+    resource.authAdapter === 'OPENAI_CODEX' &&
+    resource.subscriptionType === 'PERSONAL'
+  )
+}
+
+function exportSubscription(resource: Resource) {
+  void run(async () => {
+    const blob = await download(`/resources/${resource.id}/credential/export`)
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'auth.json'
+    document.body.append(link)
+    link.click()
+    link.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 0)
+    showSuccessToast(t('resources.exported'))
+  })
 }
 
 function deleteCredential() {
@@ -887,41 +934,42 @@ onMounted(() => {
                 <span class="avatar">{{ provider.name.slice(0, 1) }}</span>
                 <div>
                   <span class="provider-name-line"
-                    ><strong>{{ provider.name }}</strong
-                    ><span class="provider-name-actions"
-                      ><a
-                        v-if="provider.website"
-                        class="provider-quick-action provider-website-action"
-                        :href="provider.website"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        :aria-label="t('providers.openWebsiteFor', { name: provider.name })"
-                        :title="t('providers.visitWebsite')"
-                      >
-                        <Icon name="website" :size="15" /></a
-                      ><button
-                        v-if="resourceFor(provider)"
-                        type="button"
-                        class="provider-quick-action provider-direct-action"
-                        :aria-label="t('providers.testConnectionFor', { name: provider.name })"
-                        :title="t('resources.test')"
-                        :disabled="busy"
-                        @click="testProviderConnection(provider)"
-                      >
-                        <Icon name="activity" :size="16" /></button
-                      ><button
-                        v-if="provider.modelSyncSupported"
-                        type="button"
-                        class="provider-quick-action provider-direct-action"
-                        :aria-label="t('providers.syncModelsFor', { name: provider.name })"
-                        :title="t('resources.syncModels')"
-                        :disabled="busy"
-                        @click="syncModels(provider)"
-                      >
-                        <Icon name="refresh" :size="16" /></button></span
-                  ></span>
+                    ><strong>{{ provider.name }}</strong></span
+                  >
                   <small>{{ provider.code }}</small>
                 </div>
+                <span class="provider-name-actions"
+                  ><a
+                    v-if="provider.website"
+                    class="provider-quick-action provider-website-action"
+                    :href="provider.website"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    :aria-label="t('providers.openWebsiteFor', { name: provider.name })"
+                    :title="t('providers.visitWebsite')"
+                  >
+                    <Icon name="website" :size="15" /></a
+                  ><button
+                    v-if="resourceFor(provider)"
+                    type="button"
+                    class="provider-quick-action provider-direct-action"
+                    :aria-label="t('providers.testConnectionFor', { name: provider.name })"
+                    :title="t('resources.test')"
+                    :disabled="busy"
+                    @click="testProviderConnection(provider)"
+                  >
+                    <Icon name="activity" :size="16" /></button
+                  ><button
+                    v-if="provider.modelSyncSupported"
+                    type="button"
+                    class="provider-quick-action provider-direct-action"
+                    :aria-label="t('providers.syncModelsFor', { name: provider.name })"
+                    :title="t('resources.syncModels')"
+                    :disabled="busy"
+                    @click="syncModels(provider)"
+                  >
+                    <Icon name="refresh" :size="16" /></button
+                ></span>
               </div>
             </td>
             <td>
@@ -1544,14 +1592,26 @@ onMounted(() => {
                 <span v-else>{{ t('common.none') }}</span>
               </td>
               <td class="credential-action-column" :data-label="t('common.actions')">
-                <button
-                  type="button"
-                  class="text-button danger"
-                  :disabled="busy"
-                  @click="credentialDeleteTarget = resource"
-                >
-                  {{ t('resources.delete') }}
-                </button>
+                <div class="row-actions">
+                  <button
+                    v-if="exportableSubscription(resource)"
+                    type="button"
+                    class="text-button"
+                    :aria-label="t('resources.exportFor', { name: resource.name })"
+                    :disabled="busy"
+                    @click="exportSubscription(resource)"
+                  >
+                    {{ t('resources.export') }}
+                  </button>
+                  <button
+                    type="button"
+                    class="text-button danger"
+                    :disabled="busy"
+                    @click="credentialDeleteTarget = resource"
+                  >
+                    {{ t('resources.delete') }}
+                  </button>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -1583,7 +1643,7 @@ onMounted(() => {
           >
             <option value="API_KEY">{{ t('resources.authTypes.API_KEY') }}</option>
             <option
-              v-if="credentialTarget.authAdapters?.includes('OPENAI_CODEX')"
+              v-if="credentialTarget.authAdapters?.some((adapter) => adapter !== 'API_KEY')"
               value="SUBSCRIPTION"
             >
               {{ t('resources.authTypes.SUBSCRIPTION') }}
@@ -1613,6 +1673,7 @@ onMounted(() => {
       </p>
       <section v-else class="subscription-import">
         <div
+          v-if="!claudeSubscription"
           class="subscription-input-tabs"
           role="tablist"
           :aria-label="t('resources.subscriptionMethodLabel')"
@@ -1649,8 +1710,13 @@ onMounted(() => {
           </button>
         </div>
 
-        <details :key="subscriptionInputMode" class="subscription-source-guide">
-          <summary>
+        <component
+          :is="claudeSubscription ? 'div' : 'details'"
+          :key="subscriptionInputMode"
+          class="subscription-source-guide"
+          :class="{ 'subscription-source-guide-static': claudeSubscription }"
+        >
+          <summary v-if="!claudeSubscription">
             <Icon name="arrow" :size="13" />
             <span>{{
               t(
@@ -1660,25 +1726,46 @@ onMounted(() => {
               )
             }}</span>
           </summary>
+          <p v-else class="subscription-command-title">
+            {{ t('resources.claudeSubscriptionCommandTitle') }}
+          </p>
           <div class="subscription-command-list">
-            <div v-for="item in subscriptionCommands" :key="item.platform">
-              <span>{{ item.platform }}</span>
+            <div
+              v-for="item in subscriptionCommands"
+              :key="item.platform"
+              :class="{ 'subscription-command-item-direct': !item.platform }"
+            >
+              <span v-if="item.platform">{{ item.platform }}</span>
               <code :title="item.command">{{ item.command }}</code>
               <button
                 type="button"
                 class="icon-button subscription-command-copy"
-                :aria-label="t('resources.copySubscriptionCommand', { platform: item.platform })"
-                :title="t('resources.copySubscriptionCommand', { platform: item.platform })"
+                :aria-label="
+                  t(
+                    item.platform
+                      ? 'resources.copySubscriptionCommand'
+                      : 'resources.copyClaudeSubscriptionCommand',
+                    { platform: item.platform },
+                  )
+                "
+                :title="
+                  t(
+                    item.platform
+                      ? 'resources.copySubscriptionCommand'
+                      : 'resources.copyClaudeSubscriptionCommand',
+                    { platform: item.platform },
+                  )
+                "
                 @click="copySubscriptionCommand(item.command)"
               >
                 <Icon name="copy" :size="14" />
               </button>
             </div>
           </div>
-        </details>
+        </component>
 
         <div
-          v-if="subscriptionInputMode === 'UPLOAD'"
+          v-if="!claudeSubscription && subscriptionInputMode === 'UPLOAD'"
           id="subscription-upload-panel"
           class="subscription-input-panel"
           role="tabpanel"
@@ -1701,26 +1788,48 @@ onMounted(() => {
               <small>{{ t('resources.subscriptionFileLimit') }}</small>
             </span>
           </label>
-          <p class="field-hint">{{ t('resources.subscriptionUploadHint') }}</p>
+          <p class="field-hint">
+            {{ t('resources.subscriptionUploadHint') }}
+          </p>
         </div>
 
         <div
           v-else
           id="subscription-paste-panel"
           class="subscription-input-panel"
-          role="tabpanel"
-          aria-labelledby="subscription-paste-tab"
+          :role="claudeSubscription ? undefined : 'tabpanel'"
+          :aria-labelledby="claudeSubscription ? undefined : 'subscription-paste-tab'"
         >
-          <p class="subscription-paste-intro">{{ t('resources.subscriptionPasteHint') }}</p>
+          <p class="subscription-paste-intro">
+            {{
+              t(
+                claudeSubscription
+                  ? 'resources.claudeSubscriptionPasteHint'
+                  : 'resources.subscriptionPasteHint',
+              )
+            }}
+          </p>
           <textarea
             id="credential-auth-content"
             v-model="credential"
             rows="8"
             autocomplete="off"
             required
-            :aria-label="t('resources.subscriptionPasteLabel')"
+            :aria-label="
+              t(
+                claudeSubscription
+                  ? 'resources.claudeSubscriptionPasteLabel'
+                  : 'resources.subscriptionPasteLabel',
+              )
+            "
             :disabled="busy"
-            :placeholder="t('resources.subscriptionPastePlaceholder')"
+            :placeholder="
+              t(
+                claudeSubscription
+                  ? 'resources.claudeSubscriptionPastePlaceholder'
+                  : 'resources.subscriptionPastePlaceholder',
+              )
+            "
             spellcheck="false"
           ></textarea>
         </div>
@@ -1791,7 +1900,9 @@ onMounted(() => {
       {{
         t(
           testTarget.resource.authType === 'SUBSCRIPTION'
-            ? 'resources.subscriptionTestHint'
+            ? testTarget.resource.authAdapter === 'ANTHROPIC_CLAUDE_CODE'
+              ? 'resources.claudeSubscriptionTestHint'
+              : 'resources.subscriptionTestHint'
             : 'resources.testHint',
         )
       }}
@@ -2370,6 +2481,14 @@ onMounted(() => {
   line-height: 1.4;
   list-style: none;
 }
+.subscription-source-guide-static {
+  padding-top: 10px;
+}
+.subscription-command-title {
+  margin: 0 12px 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
 .subscription-source-guide summary::-webkit-details-marker {
   display: none;
 }
@@ -2402,6 +2521,15 @@ onMounted(() => {
   min-width: 0;
   gap: 7px;
   padding: 7px 0;
+}
+.subscription-command-list > .subscription-command-item-direct {
+  grid-template-columns: minmax(0, 1fr) 28px;
+}
+.subscription-command-item-direct code {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .subscription-command-list > div + div {
   border-top: 1px solid #e1e9f2;
@@ -3087,6 +3215,9 @@ onMounted(() => {
   }
   .credential-list .text-button {
     justify-self: start;
+  }
+  .credential-list .row-actions {
+    justify-content: flex-start;
   }
   .provider-runtime-filter {
     width: 100%;

@@ -91,7 +91,9 @@ func (d *Discoverer) Discover(ctx context.Context, source mgmt.ModelDiscoverySou
 	defer req.Header.Del("Authorization")
 	req.Header.Set("Accept", "application/json")
 
-	client, cleanup, err := provider.ClientWithProxy(d.client, proxy)
+	client, cleanup, err := provider.ClientWithProxy(ctx, d.client, proxy, provider.ProxyRequestLog{
+		Logger: d.logger, Operation: "model_catalog_sync", ProviderCode: source.ProviderCode,
+	})
 	if err != nil {
 		result.Code = "PROXY_CONFIGURATION_UNRECOVERABLE"
 		return

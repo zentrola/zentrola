@@ -14,6 +14,7 @@ import (
 
 	mgmt "github.com/zentrola/zentrola/internal/application/management"
 	"github.com/zentrola/zentrola/internal/domain/catalog"
+	"github.com/zentrola/zentrola/internal/infrastructure/anthropicclaude"
 	"github.com/zentrola/zentrola/internal/infrastructure/openaicodex"
 	"github.com/zentrola/zentrola/internal/infrastructure/provider"
 )
@@ -55,20 +56,38 @@ func (t *ConnectionTester) Test(ctx context.Context, target mgmt.ConnectionTarge
 
 	requestCredential := string(credential)
 	accountID := ""
+	oauthBearer := false
 	probeURL, body, responseFormat, ok := inferenceProbe(target.Protocol, base, target.UpstreamModelCode)
 	if target.AuthType == mgmt.AuthTypeSubscription {
-		if target.AuthAdapter != openaicodex.AdapterCode || target.Protocol != "OPENAI" {
+		switch target.AuthAdapter {
+		case openaicodex.AdapterCode:
+			if target.Protocol != "OPENAI" {
+				result.Code = "SUBSCRIPTION_ADAPTER_UNAVAILABLE"
+				return
+			}
+			accessToken, account, expiresAt, err := openaicodex.RequestCredential(credential)
+			if err != nil || expiresAt != nil && !expiresAt.After(time.Now().Add(time.Minute)) {
+				result.Code = "UPSTREAM_AUTH_FAILED"
+				return
+			}
+			requestCredential, accountID = accessToken, account
+			probeURL = "https://chatgpt.com/backend-api/codex/responses"
+			body, responseFormat, ok = openAIResponsesProbeBody(target.UpstreamModelCode), openAIResponsesInferenceProbe, true
+		case anthropicclaude.AdapterCode:
+			if target.Protocol != "ANTHROPIC" {
+				result.Code = "SUBSCRIPTION_ADAPTER_UNAVAILABLE"
+				return
+			}
+			accessToken, err := anthropicclaude.RequestCredential(credential)
+			if err != nil {
+				result.Code = "UPSTREAM_AUTH_FAILED"
+				return
+			}
+			requestCredential, oauthBearer = accessToken, true
+		default:
 			result.Code = "SUBSCRIPTION_ADAPTER_UNAVAILABLE"
 			return
 		}
-		accessToken, account, expiresAt, err := openaicodex.RequestCredential(credential)
-		if err != nil || expiresAt != nil && !expiresAt.After(time.Now().Add(time.Minute)) {
-			result.Code = "UPSTREAM_AUTH_FAILED"
-			return
-		}
-		requestCredential, accountID = accessToken, account
-		probeURL = "https://chatgpt.com/backend-api/codex/responses"
-		body, responseFormat, ok = openAIResponsesProbeBody(target.UpstreamModelCode), openAIResponsesInferenceProbe, true
 	}
 	if !ok {
 		result.Code = "UPSTREAM_URL_REJECTED"
@@ -84,11 +103,15 @@ func (t *ConnectionTester) Test(ctx context.Context, target mgmt.ConnectionTarge
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Accept-Encoding", "identity")
-	if target.Protocol == "OPENAI" {
+	if target.Protocol == "OPENAI" || oauthBearer {
 		req.Header.Set("Authorization", "Bearer "+requestCredential)
 		if accountID != "" {
 			req.Header.Set("ChatGPT-Account-Id", accountID)
 			req.Header.Set("Originator", "zentrola")
+		}
+		if oauthBearer {
+			req.Header.Set("anthropic-version", "2023-06-01")
+			req.Header.Set("anthropic-beta", anthropicclaude.OAuthBeta)
 		}
 	} else {
 		req.Header.Set("x-api-key", requestCredential)
@@ -100,7 +123,9 @@ func (t *ConnectionTester) Test(ctx context.Context, target mgmt.ConnectionTarge
 		req.Header.Del("ChatGPT-Account-Id")
 	}()
 
-	client, cleanup, err := provider.ClientWithProxy(t.client, proxy)
+	client, cleanup, err := provider.ClientWithProxy(ctx, t.client, proxy, provider.ProxyRequestLog{
+		Operation: "provider_connection_test", Protocol: target.Protocol,
+	})
 	if err != nil {
 		result.Code = "PROXY_CONFIGURATION_UNRECOVERABLE"
 		return

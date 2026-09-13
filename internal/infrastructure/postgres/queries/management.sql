@@ -178,7 +178,8 @@ WHERE id=$1 AND provider_id=$2 AND is_deleted=false;
 -- name: ManageResources :many
 SELECT id,provider_id,resource_name,auth_type,auth_adapter,subscription_type,plan_code,
        external_account_ref,priority,effective_at,expires_at,quota_status,quota_checked_at,
-       quota_resets_at,runtime_status,blocked_reason,blocked_at,last_error_at,last_http_status,
+       quota_resets_at,credential_refreshed_at,credential_expires_at,
+       runtime_status,blocked_reason,blocked_at,last_error_at,last_http_status,
        last_error_code,created_at,updated_at FROM provider_credential
 WHERE is_deleted=false AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2;
 -- name: ManageResource :one
@@ -187,21 +188,22 @@ SELECT * FROM provider_credential WHERE id=$1 AND is_deleted=false;
 INSERT INTO provider_credential(
     id,provider_id,resource_name,auth_type,auth_adapter,subscription_type,plan_code,
     external_account_ref,priority,effective_at,expires_at,quota_status,quota_checked_at,
-    quota_resets_at,credential_ciphertext,credential_nonce,key_version,created_by,updated_by,
-    created_at,updated_at)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$18,$19,$19);
+    quota_resets_at,credential_refreshed_at,credential_expires_at,
+    credential_ciphertext,credential_nonce,key_version,created_by,updated_by,created_at,updated_at)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$20,$21,$21);
 -- name: ManageUpdateResource :exec
 UPDATE provider_credential SET resource_name=$2,auth_type=$3,auth_adapter=$4,subscription_type=$5,
 plan_code=$6,external_account_ref=$7,priority=$8,effective_at=$9,expires_at=$10,
 quota_status=$11,quota_checked_at=$12,quota_resets_at=$13,
-credential_ciphertext=$14,credential_nonce=$15,key_version=$16,
-runtime_status=CASE WHEN credential_ciphertext IS DISTINCT FROM $14 THEN 'HEALTHY' ELSE runtime_status END,
-blocked_reason=CASE WHEN credential_ciphertext IS DISTINCT FROM $14 THEN NULL ELSE blocked_reason END,
-blocked_at=CASE WHEN credential_ciphertext IS DISTINCT FROM $14 THEN NULL ELSE blocked_at END,
-last_error_at=CASE WHEN credential_ciphertext IS DISTINCT FROM $14 THEN NULL ELSE last_error_at END,
-last_http_status=CASE WHEN credential_ciphertext IS DISTINCT FROM $14 THEN NULL ELSE last_http_status END,
-last_error_code=CASE WHEN credential_ciphertext IS DISTINCT FROM $14 THEN NULL ELSE last_error_code END,
-updated_by=$17,updated_at=$18
+credential_refreshed_at=$14,credential_expires_at=$15,
+credential_ciphertext=$16,credential_nonce=$17,key_version=$18,
+runtime_status=CASE WHEN credential_ciphertext IS DISTINCT FROM $16 THEN 'HEALTHY' ELSE runtime_status END,
+blocked_reason=CASE WHEN credential_ciphertext IS DISTINCT FROM $16 THEN NULL ELSE blocked_reason END,
+blocked_at=CASE WHEN credential_ciphertext IS DISTINCT FROM $16 THEN NULL ELSE blocked_at END,
+last_error_at=CASE WHEN credential_ciphertext IS DISTINCT FROM $16 THEN NULL ELSE last_error_at END,
+last_http_status=CASE WHEN credential_ciphertext IS DISTINCT FROM $16 THEN NULL ELSE last_http_status END,
+last_error_code=CASE WHEN credential_ciphertext IS DISTINCT FROM $16 THEN NULL ELSE last_error_code END,
+updated_by=$19,updated_at=$20
 WHERE id=$1 AND is_deleted=false;
 
 -- name: ManageDeleteResource :execrows
