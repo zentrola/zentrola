@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-This directory contains user-facing documentation for installing, configuring, and operating Zentrola. Internal implementation notes belong in `development-docs/` and are not part of the published documentation.
+This directory contains user-facing documentation for installing, configuring, and operating Zentrola. Internal implementation notes belong in `../dev-docs` and are not part of the published documentation.
 
 ## Start here
 
