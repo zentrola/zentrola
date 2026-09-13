@@ -13,6 +13,7 @@ WHERE (u.id<sqlc.arg(after_id)::bigint OR sqlc.arg(after_id)::bigint=0)
 AND u.started_at>=sqlc.arg(from_time)::timestamptz AND u.started_at<sqlc.arg(to_time)::timestamptz
 AND (sqlc.narg(principal_id)::bigint IS NULL OR u.principal_id=sqlc.narg(principal_id))
 AND (sqlc.narg(model_id)::bigint IS NULL OR u.model_id=sqlc.narg(model_id))
+AND (sqlc.narg(provider_id)::bigint IS NULL OR u.provider_id=sqlc.narg(provider_id))
 AND (sqlc.narg(resource_id)::bigint IS NULL OR u.provider_credential_id=sqlc.narg(resource_id))
 ORDER BY u.id DESC LIMIT sqlc.arg(page_limit)::int;
 
@@ -22,7 +23,71 @@ FROM usage_record u
 WHERE u.started_at>=sqlc.arg(from_time)::timestamptz AND u.started_at<sqlc.arg(to_time)::timestamptz
 AND (sqlc.narg(principal_id)::bigint IS NULL OR u.principal_id=sqlc.narg(principal_id))
 AND (sqlc.narg(model_id)::bigint IS NULL OR u.model_id=sqlc.narg(model_id))
+AND (sqlc.narg(provider_id)::bigint IS NULL OR u.provider_id=sqlc.narg(provider_id))
 AND (sqlc.narg(resource_id)::bigint IS NULL OR u.provider_credential_id=sqlc.narg(resource_id));
+
+-- name: UsageMemberStatistics :many
+SELECT u.principal_id AS entity_id,
+       p.name,
+       ''::text AS code,
+       COUNT(DISTINCT u.request_id)::bigint AS metric_count,
+       COUNT(DISTINCT u.request_id) FILTER (WHERE u.status='SUCCESS') AS successful,
+       COALESCE(SUM(u.input_tokens), 0)::bigint AS input_tokens,
+       COALESCE(SUM(u.output_tokens), 0)::bigint AS output_tokens,
+       COALESCE(SUM(u.cached_input_tokens), 0)::bigint AS cached_input_tokens,
+       COALESCE(SUM(COALESCE(u.input_tokens, 0) + COALESCE(u.output_tokens, 0)), 0)::bigint AS tokens,
+       SUM(SUM(COALESCE(u.input_tokens, 0) + COALESCE(u.output_tokens, 0))) OVER ()::bigint AS overall_tokens,
+       COALESCE(ROUND(AVG(u.latency_ms)), 0)::bigint AS average_latency_ms,
+       COUNT(*) OVER ()::bigint AS total_count
+FROM usage_record u
+JOIN principal p ON p.id=u.principal_id
+WHERE u.started_at>=sqlc.arg(from_time)::timestamptz
+  AND u.started_at<sqlc.arg(to_time)::timestamptz
+GROUP BY u.principal_id, p.name
+ORDER BY tokens DESC, metric_count DESC, u.principal_id DESC
+LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::bigint;
+
+-- name: UsageModelStatistics :many
+SELECT m.id AS entity_id,
+       m.display_name AS name,
+       m.model_code AS code,
+       COUNT(DISTINCT u.request_id)::bigint AS metric_count,
+       COUNT(DISTINCT u.request_id) FILTER (WHERE u.status='SUCCESS') AS successful,
+       COALESCE(SUM(u.input_tokens), 0)::bigint AS input_tokens,
+       COALESCE(SUM(u.output_tokens), 0)::bigint AS output_tokens,
+       COALESCE(SUM(u.cached_input_tokens), 0)::bigint AS cached_input_tokens,
+       COALESCE(SUM(COALESCE(u.input_tokens, 0) + COALESCE(u.output_tokens, 0)), 0)::bigint AS tokens,
+       SUM(SUM(COALESCE(u.input_tokens, 0) + COALESCE(u.output_tokens, 0))) OVER ()::bigint AS overall_tokens,
+       COALESCE(ROUND(AVG(u.latency_ms)), 0)::bigint AS average_latency_ms,
+       COUNT(*) OVER ()::bigint AS total_count
+FROM usage_record u
+JOIN model m ON m.id=u.model_id
+WHERE u.started_at>=sqlc.arg(from_time)::timestamptz
+  AND u.started_at<sqlc.arg(to_time)::timestamptz
+GROUP BY m.id, m.display_name, m.model_code
+ORDER BY metric_count DESC, tokens DESC, m.id DESC
+LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::bigint;
+
+-- name: UsageProviderStatistics :many
+SELECT p.id AS entity_id,
+       p.provider_name AS name,
+       p.provider_code AS code,
+       COUNT(*)::bigint AS metric_count,
+       COUNT(*) FILTER (WHERE u.status='SUCCESS') AS successful,
+       COALESCE(SUM(u.input_tokens), 0)::bigint AS input_tokens,
+       COALESCE(SUM(u.output_tokens), 0)::bigint AS output_tokens,
+       COALESCE(SUM(u.cached_input_tokens), 0)::bigint AS cached_input_tokens,
+       COALESCE(SUM(COALESCE(u.input_tokens, 0) + COALESCE(u.output_tokens, 0)), 0)::bigint AS tokens,
+       SUM(SUM(COALESCE(u.input_tokens, 0) + COALESCE(u.output_tokens, 0))) OVER ()::bigint AS overall_tokens,
+       COALESCE(ROUND(AVG(u.latency_ms)), 0)::bigint AS average_latency_ms,
+       COUNT(*) OVER ()::bigint AS total_count
+FROM usage_record u
+JOIN provider p ON p.id=u.provider_id
+WHERE u.started_at>=sqlc.arg(from_time)::timestamptz
+  AND u.started_at<sqlc.arg(to_time)::timestamptz
+GROUP BY p.id, p.provider_name, p.provider_code
+ORDER BY metric_count DESC, tokens DESC, p.id DESC
+LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::bigint;
 
 -- name: UsageDashboardCounts :one
 SELECT

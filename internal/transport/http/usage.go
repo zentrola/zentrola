@@ -37,6 +37,68 @@ func (s *SecurityHandlers) mountUsage(r chi.Router) {
 		result, err := s.Usage.Dashboard(req.Context(), adminFrom(req), from, to)
 		adminResult(w, req, http.StatusOK, result, err)
 	})
+	// @Summary 用量统计排行
+	// @Tags 用量统计
+	// @Description 按用户、客户端逻辑模型或服务商聚合指定时间范围内的请求、Token、成功率和平均耗时，并按维度主指标倒序分页。
+	// @Produce json
+	// @Security AdminBearer
+	// @Param dimension query string true "统计维度" Enums(member,model,provider)
+	// @Param after query int false "上一页 nextCursor，表示排行偏移量" minimum(0) default(0)
+	// @Param limit query int false "每页数量" minimum(1) maximum(100) default(50)
+	// @Param from query string true "起始时间 RFC3339"
+	// @Param to query string true "结束时间 RFC3339"
+	// @Success 200 {object} response{data=PageResponse[app.StatisticRow]}
+	// @Failure 400,401,503 {object} response
+	// @Router /api/v1/usage/statistics [get]
+	r.Get("/usage/statistics", func(w http.ResponseWriter, req *http.Request) {
+		f := app.StatisticFilter{Limit: 50, ProbeNext: true}
+		values := req.URL.Query()
+		for key, list := range values {
+			if len(list) != 1 {
+				securityError(w, req, appsec.ErrInvalidArgument)
+				return
+			}
+			value := strings.TrimSpace(list[0])
+			switch key {
+			case "dimension":
+				f.Dimension = app.StatisticDimension(value)
+			case "from", "to":
+				parsed, err := time.Parse(time.RFC3339Nano, value)
+				if err != nil {
+					securityError(w, req, appsec.ErrInvalidArgument)
+					return
+				}
+				if key == "from" {
+					f.From = parsed
+				} else {
+					f.To = parsed
+				}
+			case "after", "limit":
+				n, err := strconv.ParseInt(value, 10, 64)
+				if err != nil || n < 0 || (key == "limit" && (n == 0 || n > 100)) {
+					securityError(w, req, appsec.ErrInvalidArgument)
+					return
+				}
+				if key == "after" {
+					f.After = n
+				} else {
+					f.Limit = int32(n)
+				}
+			default:
+				securityError(w, req, appsec.ErrInvalidArgument)
+				return
+			}
+		}
+		page, err := s.Usage.Statistics(req.Context(), adminFrom(req), f)
+		rows := page.Items
+		var next *string
+		if len(rows) > int(f.Limit) {
+			rows = rows[:f.Limit]
+			value := strconv.FormatInt(f.After+int64(f.Limit), 10)
+			next = &value
+		}
+		adminResult(w, req, http.StatusOK, PageResponse[app.StatisticRow]{Items: rows, NextCursor: next, Total: page.Total}, err)
+	})
 	// @Summary 用量记录
 	// @Tags 用量统计
 	// @Description 查询当前部署实例；按 ID 倒序分页，最新记录在前；时间区间最长 366 天。
@@ -48,6 +110,7 @@ func (s *SecurityHandlers) mountUsage(r chi.Router) {
 	// @Param to query string false "结束时间 RFC3339，默认当前时间"
 	// @Param memberId query string false "成员 ID"
 	// @Param modelId query string false "模型 ID"
+	// @Param providerId query string false "服务商 ID"
 	// @Param resourceId query string false "资源 ID"
 	// @Success 200 {object} response{data=PageResponse[app.Row]}
 	// @Header all {string} X-Request-ID "请求追踪 ID"
@@ -77,7 +140,7 @@ func (s *SecurityHandlers) mountUsage(r chi.Router) {
 				} else {
 					f.To = t
 				}
-			case "memberId", "modelId", "resourceId", "after", "limit":
+			case "memberId", "modelId", "providerId", "resourceId", "after", "limit":
 				n, err := strconv.ParseInt(v, 10, 64)
 				if err != nil || n < 0 || (key != "after" && n == 0) || (key == "limit" && n > 100) {
 					securityError(w, req, appsec.ErrInvalidArgument)
@@ -88,6 +151,8 @@ func (s *SecurityHandlers) mountUsage(r chi.Router) {
 					f.PrincipalID = &n
 				case "modelId":
 					f.ModelID = &n
+				case "providerId":
+					f.ProviderID = &n
 				case "resourceId":
 					f.ResourceID = &n
 				case "after":

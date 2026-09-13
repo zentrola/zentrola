@@ -20,9 +20,41 @@ func (s *queryStoreStub) Query(context.Context, admin.Identity, Filter) (Page, e
 	return Page{}, nil
 }
 
+func (s *queryStoreStub) Statistics(context.Context, admin.Identity, StatisticFilter) (StatisticPage, error) {
+	return StatisticPage{}, nil
+}
+
 func (s *queryStoreStub) Dashboard(_ context.Context, _ admin.Identity, from, to time.Time) (Dashboard, error) {
 	s.from, s.to = from, to
 	return s.dashboard, nil
+}
+
+func TestStatisticsValidatesDimensionAndPagination(t *testing.T) {
+	from := time.Date(2026, 9, 8, 0, 0, 0, 0, time.UTC)
+	valid := StatisticFilter{Dimension: StatisticMember, From: from, To: from.Add(24 * time.Hour), Limit: 20}
+	service := NewQuery(&queryStoreStub{})
+	if _, err := service.Statistics(context.Background(), admin.Identity{ID: 1}, valid); err != nil {
+		t.Fatalf("valid statistics filter failed: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name   string
+		actor  admin.Identity
+		filter StatisticFilter
+		want   error
+	}{
+		{"missing identity", admin.Identity{}, valid, appsec.ErrUnauthenticated},
+		{"invalid dimension", admin.Identity{ID: 1}, StatisticFilter{Dimension: "resource", From: from, To: from.Add(time.Hour), Limit: 20}, appsec.ErrInvalidArgument},
+		{"negative offset", admin.Identity{ID: 1}, StatisticFilter{Dimension: StatisticModel, From: from, To: from.Add(time.Hour), After: -1, Limit: 20}, appsec.ErrInvalidArgument},
+		{"oversized page", admin.Identity{ID: 1}, StatisticFilter{Dimension: StatisticProvider, From: from, To: from.Add(time.Hour), Limit: 101}, appsec.ErrInvalidArgument},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := service.Statistics(context.Background(), tc.actor, tc.filter)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("got %v, want %v", err, tc.want)
+			}
+		})
+	}
 }
 
 func TestDashboardValidatesIdentityAndRange(t *testing.T) {

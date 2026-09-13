@@ -134,6 +134,23 @@ function monthQuery() {
   return new URLSearchParams({ from: from.toISOString(), to: to.toISOString() }).toString()
 }
 
+function statisticsRoute(dimension: 'member' | 'model' | 'provider') {
+  const now = currentMonth.value
+  const dateValue = (value: Date) => {
+    const offset = value.getTimezoneOffset() * 60000
+    return new Date(value.getTime() - offset).toISOString().slice(0, 10)
+  }
+  return {
+    name: 'usage',
+    query: {
+      view: 'statistics',
+      dimension,
+      from: dateValue(new Date(now.getFullYear(), now.getMonth(), 1)),
+      to: dateValue(new Date(now.getFullYear(), now.getMonth() + 1, 0)),
+    },
+  }
+}
+
 async function loadDashboard(current: number) {
   error.value = ''
   try {
@@ -369,7 +386,10 @@ onMounted(load)
         <div>
           <h2>{{ t('home.tokenRanking') }}</h2>
         </div>
-        <span>Top 10</span>
+        <div class="ranking-head-actions">
+          <span>Top 10</span>
+          <RouterLink :to="statisticsRoute('member')">{{ t('home.viewAll') }}</RouterLink>
+        </div>
       </div>
       <ol v-if="summary?.tokenRanking.length" class="ranking-list token-ranking">
         <li v-for="(item, index) in summary.tokenRanking" :key="item.principalId">
@@ -401,7 +421,10 @@ onMounted(load)
         <div>
           <h2>{{ t('home.clientModelRanking') }}</h2>
         </div>
-        <span>Top 10</span>
+        <div class="ranking-head-actions">
+          <span>Top 10</span>
+          <RouterLink :to="statisticsRoute('model')">{{ t('home.viewAll') }}</RouterLink>
+        </div>
       </div>
       <ol v-if="summary?.clientModelRanking.length" class="ranking-list model-ranking">
         <li v-for="(item, index) in summary.clientModelRanking" :key="item.modelId">
@@ -434,7 +457,10 @@ onMounted(load)
         <div>
           <h2>{{ t('home.providerRanking') }}</h2>
         </div>
-        <span>Top 10</span>
+        <div class="ranking-head-actions">
+          <span>Top 10</span>
+          <RouterLink :to="statisticsRoute('provider')">{{ t('home.viewAll') }}</RouterLink>
+        </div>
       </div>
       <ol v-if="summary?.providerRanking.length" class="ranking-list provider-ranking">
         <li v-for="(item, index) in summary.providerRanking" :key="item.providerId">

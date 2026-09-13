@@ -338,6 +338,10 @@ func TestStage5Integration(t *testing.T) {
 	}{
 		{"/api/v1/usage?memberId=" + fmt.Sprint(member.ID) + "&modelId=" + fmt.Sprint(modelID) + "&resourceId=" + fmt.Sprint(resource.ID) + "&limit=2", true, 200},
 		{"/api/v1/usage/dashboard" + dashboardRange, true, 200},
+		{"/api/v1/usage/statistics" + dashboardRange + "&dimension=member&limit=1", true, 200},
+		{"/api/v1/usage/statistics" + dashboardRange + "&dimension=model&limit=1", true, 200},
+		{"/api/v1/usage/statistics" + dashboardRange + "&dimension=provider&limit=1", true, 200},
+		{"/api/v1/usage/statistics" + dashboardRange + "&dimension=resource", true, 400},
 		{"/api/v1/usage/dashboard", true, 400},
 		{"/api/v1/usage/writer", true, 200}, {"/api/v1/usage", false, 401}, {"/api/v1/usage?limit=101", true, 400}, {"/api/v1/usage?resourceId=-1", true, 400}, {"/api/v1/usage?from=invalid", true, 400}, {"/api/v1/usage?limit=1&limit=2", true, 400},
 	} {
@@ -359,6 +363,19 @@ func TestStage5Integration(t *testing.T) {
 	filtered, err := app.NewQuery(store).Query(ctx, actor, filter)
 	if err != nil || len(filtered.Items) != 7 || filtered.Total != 7 {
 		t.Fatal("combined filters did not isolate attempts")
+	}
+	providerFilter := app.Filter{From: time.Now().Add(-time.Hour), To: time.Now().Add(time.Hour), Limit: 100, ProviderID: &backupProvider.ID}
+	providerUsage, err := app.NewQuery(store).Query(ctx, actor, providerFilter)
+	if err != nil || len(providerUsage.Items) != 1 || providerUsage.Items[0].ProviderID != backupProvider.ID {
+		t.Fatal("provider filter did not isolate attempts")
+	}
+	for _, dimension := range []app.StatisticDimension{app.StatisticMember, app.StatisticModel, app.StatisticProvider} {
+		statistics, statisticErr := app.NewQuery(store).Statistics(ctx, actor, app.StatisticFilter{
+			Dimension: dimension, From: time.Now().Add(-time.Hour), To: time.Now().Add(time.Hour), Limit: 100,
+		})
+		if statisticErr != nil || len(statistics.Items) == 0 || statistics.Total == 0 || statistics.Items[0].OverallTokens != 65 {
+			t.Fatalf("%s statistics aggregation failed: result=%+v err=%v", dimension, statistics, statisticErr)
+		}
 	}
 	for i := 1; i < len(filtered.Items); i++ {
 		if filtered.Items[i-1].ID <= filtered.Items[i].ID {

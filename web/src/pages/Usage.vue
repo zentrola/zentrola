@@ -1,24 +1,37 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { api, all, errorText } from '../api'
 import { useCollection, date, count } from '../composables'
-import { i18n, t } from '../i18n'
+import { activeLocale, i18n, t } from '../i18n'
 import { showErrorToast } from '../toast'
-import type { Usage, Member, Model, Page, Resource } from '../types'
+import type { Usage, UsageStatistic, Member, Model, Page, Provider, Resource } from '../types'
 import Icon from '../components/Icon.vue'
 import Status from '../components/Status.vue'
 import Modal from '../components/Modal.vue'
 import PageHeader from '../components/PageHeader.vue'
 import ListFooter from '../components/ListFooter.vue'
 import TableScroll from '../components/TableScroll.vue'
+
+type UsageView = 'statistics' | 'records'
+type StatisticDimension = 'member' | 'model' | 'provider'
+const statisticDimensions: StatisticDimension[] = ['member', 'model', 'provider']
+
+const route = useRoute(),
+  router = useRouter()
+const activeView = ref<UsageView>('statistics'),
+  statisticDimension = ref<StatisticDimension>('member'),
+  statisticsQuery = ref('')
 const memberID = ref(''),
   memberName = ref(''),
   modelID = ref(''),
+  providerID = ref(''),
   from = ref(''),
   to = ref(''),
   query = ref(''),
   lookupError = ref('')
 const models = ref<Model[]>([]),
+  providers = ref<Provider[]>([]),
   resources = ref<Resource[]>([]),
   selected = ref<Usage | null>(null)
 const memberAutocomplete = ref<HTMLElement | null>(null),
@@ -46,8 +59,35 @@ function errorDescription(errorType: string | null) {
     ? t('usage.upstreamHTTPError', { status: upstreamHTTPStatus })
     : t('errors.UNKNOWN')
 }
-const { items, cursor, page, pageSize, total, loading, error, load, previous, retry, setPageSize } =
-  useCollection<Usage>(() => `/usage?${query.value}`)
+const {
+  items: recordItems,
+  cursor: recordCursor,
+  page: recordPage,
+  pageSize: recordPageSize,
+  total: recordTotal,
+  loading: recordsLoading,
+  error: recordsError,
+  load: loadRecords,
+  previous: previousRecords,
+  retry: retryRecords,
+  setPageSize: setRecordPageSize,
+} = useCollection<Usage>(() => `/usage?${query.value}`)
+const {
+  items: statistics,
+  cursor: statisticCursor,
+  page: statisticPage,
+  pageSize: statisticPageSize,
+  total: statisticTotal,
+  loading: statisticsLoading,
+  error: statisticsError,
+  load: loadStatistics,
+  previous: previousStatistics,
+  retry: retryStatistics,
+  setPageSize: setStatisticPageSize,
+} = useCollection<UsageStatistic>(() => `/usage/statistics?${statisticsQuery.value}`)
+const loading = computed(() =>
+  activeView.value === 'statistics' ? statisticsLoading.value : recordsLoading.value,
+)
 const dateRangeText = computed(() => {
   if (!from.value || !to.value) return t('usage.dateRangePlaceholder')
   return `${from.value.replaceAll('-', '/')} — ${to.value.replaceAll('-', '/')}`
@@ -127,34 +167,103 @@ function dateBounds(startValue: string, endValue: string) {
     return null
   return { start, end }
 }
-function search() {
+function rangeParams() {
+  const bounds = dateBounds(from.value, to.value)
+  if (!bounds) {
+    showErrorToast(t('usage.invalidRange'))
+    return null
+  }
+  return new URLSearchParams({
+    from: new Date(bounds.start).toISOString(),
+    to: new Date(bounds.end).toISOString(),
+  })
+}
+function syncRoute() {
+  const routeQuery: Record<string, string> = {
+    view: activeView.value,
+    from: from.value,
+    to: to.value,
+  }
+  if (activeView.value === 'statistics') routeQuery.dimension = statisticDimension.value
+  if (activeView.value === 'records') {
+    if (memberID.value) {
+      routeQuery.memberId = memberID.value
+      routeQuery.memberName = memberName.value
+    }
+    if (modelID.value) routeQuery.modelId = modelID.value
+    if (providerID.value) routeQuery.providerId = providerID.value
+  }
+  void router.replace({ name: 'usage', query: routeQuery })
+}
+function searchRecords() {
   if (memberName.value && !memberID.value) {
     showErrorToast(t('usage.selectMember'))
     return
   }
-  const bounds = dateBounds(from.value, to.value)
-  if (!bounds) {
-    showErrorToast(t('usage.invalidRange'))
-    return
-  }
-  const params = new URLSearchParams({
-    from: new Date(bounds.start).toISOString(),
-    to: new Date(bounds.end).toISOString(),
-  })
+  const params = rangeParams()
+  if (!params) return
   for (const [key, value] of [
     ['memberId', memberID.value],
     ['modelId', modelID.value],
+    ['providerId', providerID.value],
   ])
     if (value) params.set(key, value)
   query.value = params.toString()
-  void load()
+  syncRoute()
+  void loadRecords()
+}
+function searchStatistics() {
+  const params = rangeParams()
+  if (!params) return
+  params.set('dimension', statisticDimension.value)
+  statisticsQuery.value = params.toString()
+  syncRoute()
+  void loadStatistics()
+}
+function search() {
+  if (activeView.value === 'statistics') searchStatistics()
+  else searchRecords()
 }
 function reset() {
   memberID.value = ''
   memberName.value = ''
   modelID.value = ''
+  providerID.value = ''
   resetTimes()
   search()
+}
+function selectView(view: UsageView) {
+  if (loading.value || activeView.value === view) return
+  activeView.value = view
+  search()
+}
+function selectStatisticDimension(dimension: StatisticDimension) {
+  if (statisticsLoading.value || statisticDimension.value === dimension) return
+  statisticDimension.value = dimension
+  searchStatistics()
+}
+function viewStatisticRecords(item: UsageStatistic) {
+  memberID.value = ''
+  memberName.value = ''
+  modelID.value = ''
+  providerID.value = ''
+  if (statisticDimension.value === 'member') {
+    memberID.value = item.entityId
+    memberName.value = item.name
+  } else if (statisticDimension.value === 'model') modelID.value = item.entityId
+  else providerID.value = item.entityId
+  activeView.value = 'records'
+  searchRecords()
+}
+function percentage(value: number, totalValue: number) {
+  if (totalValue <= 0) return '0%'
+  return new Intl.NumberFormat(activeLocale.value, {
+    style: 'percent',
+    maximumFractionDigits: 1,
+  }).format(value / totalValue)
+}
+function statisticRank(index: number) {
+  return (statisticPage.value - 1) * statisticPageSize.value + index + 1
 }
 function onMemberInput() {
   memberID.value = ''
@@ -247,8 +356,9 @@ function closeFloatingPanels(event: PointerEvent) {
 async function lookups() {
   lookupError.value = ''
   try {
-    ;[models.value, resources.value] = await Promise.all([
+    ;[models.value, providers.value, resources.value] = await Promise.all([
       all<Model>('/models'),
+      all<Provider>('/providers'),
       all<Resource>('/resources'),
     ])
   } catch (e) {
@@ -258,10 +368,30 @@ async function lookups() {
 function label(list: { id: string; name: string }[], id: string | null) {
   return id === null ? t('common.none') : list.find((x) => x.id === id)?.name || id
 }
+function routeValue(name: string) {
+  const value = route.query[name]
+  return typeof value === 'string' ? value : ''
+}
+function applyRoute() {
+  activeView.value = routeValue('view') === 'records' ? 'records' : 'statistics'
+  const dimension = routeValue('dimension')
+  if (dimension === 'model' || dimension === 'provider') statisticDimension.value = dimension
+  const routeFrom = routeValue('from'),
+    routeTo = routeValue('to')
+  if (/^\d{4}-\d{2}-\d{2}$/.test(routeFrom) && /^\d{4}-\d{2}-\d{2}$/.test(routeTo)) {
+    from.value = routeFrom
+    to.value = routeTo
+  } else resetTimes()
+  memberID.value = routeValue('memberId')
+  memberName.value = routeValue('memberName')
+  modelID.value = routeValue('modelId')
+  providerID.value = routeValue('providerId')
+}
 onMounted(() => {
   document.addEventListener('pointerdown', closeFloatingPanels)
   void lookups()
-  reset()
+  applyRoute()
+  search()
 })
 onBeforeUnmount(() => {
   clearTimeout(memberSearchTimer)
@@ -271,13 +401,39 @@ onBeforeUnmount(() => {
 </script>
 <template>
   <PageHeader name="usage" />
+  <div class="usage-view-tabs" role="tablist" :aria-label="t('nav.usage')">
+    <button
+      type="button"
+      role="tab"
+      :disabled="loading"
+      :aria-selected="activeView === 'statistics'"
+      :class="{ selected: activeView === 'statistics' }"
+      @click="selectView('statistics')"
+    >
+      <Icon name="home" :size="17" />{{ t('usage.statistics') }}
+    </button>
+    <button
+      type="button"
+      role="tab"
+      :disabled="loading"
+      :aria-selected="activeView === 'records'"
+      :class="{ selected: activeView === 'records' }"
+      @click="selectView('records')"
+    >
+      <Icon name="usage" :size="17" />{{ t('usage.records') }}
+    </button>
+  </div>
   <section class="panel usage-list-panel">
     <form
       class="table-toolbar usage-filters"
-      :aria-label="t('usage.filters')"
+      :aria-label="t(activeView === 'statistics' ? 'usage.statisticsFilters' : 'usage.filters')"
       @submit.prevent="search"
     >
-      <div ref="memberAutocomplete" class="filter-field member-filter-field">
+      <div
+        v-if="activeView === 'records'"
+        ref="memberAutocomplete"
+        class="filter-field member-filter-field"
+      >
         <span class="filter-label">{{ t('usage.member') }}</span>
         <div class="member-autocomplete" @keydown.esc="memberSuggestionsOpen = false">
           <Icon class="member-search-icon" name="search" :size="18" />
@@ -323,12 +479,21 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </div>
-      <label class="model-filter-field">
+      <label v-if="activeView === 'records'" class="model-filter-field">
         <span class="filter-label">{{ t('usage.model') }}</span>
         <select v-model="modelID">
           <option value="">{{ t('common.all') }}</option>
           <option v-for="model in models" :key="model.id" :value="model.id">
             {{ model.name }}
+          </option>
+        </select>
+      </label>
+      <label v-if="activeView === 'records'" class="provider-filter-field">
+        <span class="filter-label">{{ t('usage.provider') }}</span>
+        <select v-model="providerID">
+          <option value="">{{ t('common.all') }}</option>
+          <option v-for="provider in providers" :key="provider.id" :value="provider.id">
+            {{ provider.name }}
           </option>
         </select>
       </label>
@@ -422,70 +587,162 @@ onBeforeUnmount(() => {
     <p v-if="lookupError" class="alert error" role="alert">
       {{ lookupError }}<button class="text-button" @click="lookups">{{ t('common.retry') }}</button>
     </p>
-    <p v-if="error" class="alert error" role="alert">
-      {{ error }}<button class="text-button" @click="retry">{{ t('common.retry') }}</button>
+    <p v-if="activeView === 'statistics' && statisticsError" class="alert error" role="alert">
+      {{ statisticsError
+      }}<button class="text-button" @click="retryStatistics">{{ t('common.retry') }}</button>
     </p>
-    <TableScroll has-actions>
-      <table class="usage-table">
-        <thead>
-          <tr>
-            <th>{{ t('usage.time') }}</th>
-            <th>{{ t('usage.member') }}</th>
-            <th>{{ t('usage.model') }}</th>
-            <th>{{ t('usage.protocol') }}</th>
-            <th>{{ t('common.status') }}</th>
-            <th class="numeric">{{ t('usage.input') }}</th>
-            <th class="numeric">{{ t('usage.output') }}</th>
-            <th class="numeric">{{ t('usage.cached') }}</th>
-            <th class="align-right">{{ t('common.actions') }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="row in items" :key="row.id">
-            <td>
-              {{ date(row.requestAt) }}<small class="subline">{{ row.latencyMs }} ms</small>
-            </td>
-            <td>{{ row.principalName || row.principalId }}</td>
-            <td>
-              {{ label(models, row.modelId)
-              }}<small class="subline">{{ label(resources, row.resourceId) }}</small>
-            </td>
-            <td>
-              <span class="protocol-label">{{
-                row.clientProtocol === 'OPENAI'
-                  ? 'OpenAI'
-                  : row.clientProtocol === 'ANTHROPIC'
-                    ? 'Anthropic'
-                    : row.clientProtocol
-              }}</span>
-            </td>
-            <td><Status :value="row.status" /></td>
-            <td class="numeric">{{ count(row.inputTokens) }}</td>
-            <td class="numeric">{{ count(row.outputTokens) }}</td>
-            <td class="numeric">{{ count(row.cachedInputTokens) }}</td>
-            <td class="align-right">
-              <button class="text-button" @click="selected = row">{{ t('common.details') }}</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </TableScroll>
-    <div v-if="!items.length" class="empty-state">
-      <Icon name="usage" :size="32" />
-      <h3>{{ t(loading ? 'common.loading' : 'common.empty') }}</h3>
-      <p v-if="!loading">{{ t('usage.empty') }}</p>
-    </div>
-    <ListFooter
-      :cursor="cursor"
-      :page="page"
-      :page-size="pageSize"
-      :total="total"
-      :loading="loading"
-      @first="load()"
-      @previous="previous"
-      @more="load(true)"
-      @page-size="setPageSize"
-    />
+    <p v-if="activeView === 'records' && recordsError" class="alert error" role="alert">
+      {{ recordsError
+      }}<button class="text-button" @click="retryRecords">{{ t('common.retry') }}</button>
+    </p>
+    <template v-if="activeView === 'statistics'">
+      <div class="statistics-heading">
+        <div>
+          <h2>{{ t('usage.statistics') }}</h2>
+          <p>{{ t('usage.rankingDescription') }}</p>
+        </div>
+        <div class="dimension-tabs" role="tablist" :aria-label="t('usage.statistics')">
+          <button
+            v-for="dimension in statisticDimensions"
+            :key="dimension"
+            type="button"
+            role="tab"
+            :disabled="statisticsLoading"
+            :aria-selected="statisticDimension === dimension"
+            :class="{ selected: statisticDimension === dimension }"
+            @click="selectStatisticDimension(dimension)"
+          >
+            {{ t(`usage.${dimension}Ranking`) }}
+          </button>
+        </div>
+      </div>
+      <TableScroll has-actions>
+        <table class="statistics-table">
+          <thead>
+            <tr>
+              <th class="rank-column">{{ t('usage.rank') }}</th>
+              <th>{{ t(`usage.${statisticDimension}`) }}</th>
+              <th class="numeric">
+                {{ t(statisticDimension === 'provider' ? 'usage.calls' : 'usage.requests') }}
+              </th>
+              <th class="numeric">{{ t('usage.input') }}</th>
+              <th class="numeric">{{ t('usage.output') }}</th>
+              <th class="numeric">{{ t('usage.cached') }}</th>
+              <th class="numeric">{{ t('usage.totalTokens') }}</th>
+              <th class="numeric">{{ t('usage.share') }}</th>
+              <th class="numeric">{{ t('usage.successRate') }}</th>
+              <th class="numeric">{{ t('usage.averageLatency') }}</th>
+              <th class="align-right">{{ t('common.actions') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(row, index) in statistics" :key="row.entityId">
+              <td class="rank-column">
+                <span class="table-rank">{{ statisticRank(index) }}</span>
+              </td>
+              <td>
+                <strong>{{ row.name }}</strong
+                ><small v-if="row.code" class="subline">{{ row.code }}</small>
+              </td>
+              <td class="numeric">{{ count(row.count) }}</td>
+              <td class="numeric">{{ count(row.inputTokens) }}</td>
+              <td class="numeric">{{ count(row.outputTokens) }}</td>
+              <td class="numeric">{{ count(row.cachedInputTokens) }}</td>
+              <td class="numeric statistic-total">{{ count(row.tokens) }}</td>
+              <td class="numeric">{{ percentage(row.tokens, row.overallTokens) }}</td>
+              <td class="numeric">{{ percentage(row.successful, row.count) }}</td>
+              <td class="numeric">{{ count(row.averageLatencyMs) }} ms</td>
+              <td class="align-right">
+                <button class="text-button" @click="viewStatisticRecords(row)">
+                  {{ t('usage.viewRecords') }}
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </TableScroll>
+      <div v-if="!statistics.length" class="empty-state">
+        <Icon name="usage" :size="32" />
+        <h3>{{ t(statisticsLoading ? 'common.loading' : 'common.empty') }}</h3>
+        <p v-if="!statisticsLoading">{{ t('usage.statisticsEmpty') }}</p>
+      </div>
+      <ListFooter
+        :cursor="statisticCursor"
+        :page="statisticPage"
+        :page-size="statisticPageSize"
+        :total="statisticTotal"
+        :loading="statisticsLoading"
+        @first="loadStatistics()"
+        @previous="previousStatistics"
+        @more="loadStatistics(true)"
+        @page-size="setStatisticPageSize"
+      />
+    </template>
+    <template v-else>
+      <TableScroll has-actions>
+        <table class="usage-table">
+          <thead>
+            <tr>
+              <th>{{ t('usage.time') }}</th>
+              <th>{{ t('usage.member') }}</th>
+              <th>{{ t('usage.model') }}</th>
+              <th>{{ t('usage.protocol') }}</th>
+              <th>{{ t('common.status') }}</th>
+              <th class="numeric">{{ t('usage.input') }}</th>
+              <th class="numeric">{{ t('usage.output') }}</th>
+              <th class="numeric">{{ t('usage.cached') }}</th>
+              <th class="align-right">{{ t('common.actions') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in recordItems" :key="row.id">
+              <td>
+                {{ date(row.requestAt) }}<small class="subline">{{ row.latencyMs }} ms</small>
+              </td>
+              <td>{{ row.principalName || row.principalId }}</td>
+              <td>
+                {{ label(models, row.modelId)
+                }}<small class="subline">{{ label(resources, row.resourceId) }}</small>
+              </td>
+              <td>
+                <span class="protocol-label">{{
+                  row.clientProtocol === 'OPENAI'
+                    ? 'OpenAI'
+                    : row.clientProtocol === 'ANTHROPIC'
+                      ? 'Anthropic'
+                      : row.clientProtocol
+                }}</span>
+              </td>
+              <td><Status :value="row.status" /></td>
+              <td class="numeric">{{ count(row.inputTokens) }}</td>
+              <td class="numeric">{{ count(row.outputTokens) }}</td>
+              <td class="numeric">{{ count(row.cachedInputTokens) }}</td>
+              <td class="align-right">
+                <button class="text-button" @click="selected = row">
+                  {{ t('common.details') }}
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </TableScroll>
+      <div v-if="!recordItems.length" class="empty-state">
+        <Icon name="usage" :size="32" />
+        <h3>{{ t(recordsLoading ? 'common.loading' : 'common.empty') }}</h3>
+        <p v-if="!recordsLoading">{{ t('usage.empty') }}</p>
+      </div>
+      <ListFooter
+        :cursor="recordCursor"
+        :page="recordPage"
+        :page-size="recordPageSize"
+        :total="recordTotal"
+        :loading="recordsLoading"
+        @first="loadRecords()"
+        @previous="previousRecords"
+        @more="loadRecords(true)"
+        @page-size="setRecordPageSize"
+      />
+    </template>
   </section>
   <Modal v-if="selected" :title="t('common.details')" wide @close="selected = null"
     ><dl class="detail-grid">

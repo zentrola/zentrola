@@ -80,7 +80,7 @@ func (s *UsageStore) Query(ctx context.Context, actor admin.Identity, f app.Filt
 	if f.ProbeNext {
 		pageLimit++
 	}
-	rows, err := q.QueryUsage(ctx, dbgen.QueryUsageParams{AfterID: f.After, FromTime: ts(f.From), ToTime: ts(f.To), PrincipalID: f.PrincipalID, ModelID: f.ModelID, ResourceID: f.ResourceID, PageLimit: pageLimit})
+	rows, err := q.QueryUsage(ctx, dbgen.QueryUsageParams{AfterID: f.After, FromTime: ts(f.From), ToTime: ts(f.To), PrincipalID: f.PrincipalID, ModelID: f.ModelID, ProviderID: f.ProviderID, ResourceID: f.ResourceID, PageLimit: pageLimit})
 	if err != nil {
 		return app.Page{}, appsec.ErrUnavailable
 	}
@@ -88,7 +88,7 @@ func (s *UsageStore) Query(ctx context.Context, actor admin.Identity, f app.Filt
 	for _, r := range rows {
 		result = append(result, app.Row{ID: r.ID, RequestID: r.RequestID, ClientProtocol: r.ClientProtocol, PrincipalID: r.PrincipalID, PrincipalName: r.PrincipalName, ModelID: r.ModelID, RequestAt: r.StartedAt.Time, CompletedAt: r.CompletedAt.Time, LatencyMS: r.LatencyMs, Status: r.Status, ErrorType: r.ErrorType, AttemptNo: r.AttemptNo, ProviderID: r.ProviderID, ProviderModelID: r.ProviderModelID, ResourceID: r.ResourceID, InputTokens: r.InputTokens, OutputTokens: r.OutputTokens, CachedInputTokens: r.CachedInputTokens})
 	}
-	total, err := q.CountUsage(ctx, dbgen.CountUsageParams{FromTime: ts(f.From), ToTime: ts(f.To), PrincipalID: f.PrincipalID, ModelID: f.ModelID, ResourceID: f.ResourceID})
+	total, err := q.CountUsage(ctx, dbgen.CountUsageParams{FromTime: ts(f.From), ToTime: ts(f.To), PrincipalID: f.PrincipalID, ModelID: f.ModelID, ProviderID: f.ProviderID, ResourceID: f.ResourceID})
 	if err != nil {
 		return app.Page{}, appsec.ErrUnavailable
 	}
@@ -96,6 +96,66 @@ func (s *UsageStore) Query(ctx context.Context, actor admin.Identity, f app.Filt
 		return app.Page{}, appsec.ErrUnavailable
 	}
 	return app.Page{Items: result, Total: total}, nil
+}
+
+func (s *UsageStore) Statistics(ctx context.Context, actor admin.Identity, f app.StatisticFilter) (app.StatisticPage, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return app.StatisticPage{}, appsec.ErrUnavailable
+	}
+	defer tx.Rollback(context.Background())
+	q := dbgen.New(tx)
+	if err = validateActor(ctx, q, actor); err != nil {
+		return app.StatisticPage{}, managementError(err)
+	}
+	ts := func(t time.Time) pgtype.Timestamptz { return pgtype.Timestamptz{Time: t, Valid: true} }
+	pageLimit := f.Limit
+	if f.ProbeNext {
+		pageLimit++
+	}
+	result := make([]app.StatisticRow, 0, pageLimit)
+	var total int64
+	appendRow := func(entityID int64, name, code string, metricCount, successful, inputTokens, outputTokens, cachedInputTokens, tokens, overallTokens, averageLatencyMS, totalCount int64) {
+		result = append(result, app.StatisticRow{
+			EntityID: entityID, Name: name, Code: code, Count: metricCount,
+			Successful: successful, InputTokens: inputTokens, OutputTokens: outputTokens,
+			CachedInputTokens: cachedInputTokens, Tokens: tokens, OverallTokens: overallTokens,
+			AverageLatencyMS: averageLatencyMS,
+		})
+		total = totalCount
+	}
+	switch f.Dimension {
+	case app.StatisticMember:
+		rows, queryErr := q.UsageMemberStatistics(ctx, dbgen.UsageMemberStatisticsParams{FromTime: ts(f.From), ToTime: ts(f.To), PageOffset: f.After, PageLimit: pageLimit})
+		if queryErr != nil {
+			return app.StatisticPage{}, appsec.ErrUnavailable
+		}
+		for _, row := range rows {
+			appendRow(row.EntityID, row.Name, row.Code, row.MetricCount, row.Successful, row.InputTokens, row.OutputTokens, row.CachedInputTokens, row.Tokens, row.OverallTokens, row.AverageLatencyMs, row.TotalCount)
+		}
+	case app.StatisticModel:
+		rows, queryErr := q.UsageModelStatistics(ctx, dbgen.UsageModelStatisticsParams{FromTime: ts(f.From), ToTime: ts(f.To), PageOffset: f.After, PageLimit: pageLimit})
+		if queryErr != nil {
+			return app.StatisticPage{}, appsec.ErrUnavailable
+		}
+		for _, row := range rows {
+			appendRow(row.EntityID, row.Name, row.Code, row.MetricCount, row.Successful, row.InputTokens, row.OutputTokens, row.CachedInputTokens, row.Tokens, row.OverallTokens, row.AverageLatencyMs, row.TotalCount)
+		}
+	case app.StatisticProvider:
+		rows, queryErr := q.UsageProviderStatistics(ctx, dbgen.UsageProviderStatisticsParams{FromTime: ts(f.From), ToTime: ts(f.To), PageOffset: f.After, PageLimit: pageLimit})
+		if queryErr != nil {
+			return app.StatisticPage{}, appsec.ErrUnavailable
+		}
+		for _, row := range rows {
+			appendRow(row.EntityID, row.Name, row.Code, row.MetricCount, row.Successful, row.InputTokens, row.OutputTokens, row.CachedInputTokens, row.Tokens, row.OverallTokens, row.AverageLatencyMs, row.TotalCount)
+		}
+	default:
+		return app.StatisticPage{}, appsec.ErrInvalidArgument
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return app.StatisticPage{}, appsec.ErrUnavailable
+	}
+	return app.StatisticPage{Items: result, Total: total}, nil
 }
 
 func (s *UsageStore) Dashboard(ctx context.Context, actor admin.Identity, from, to time.Time) (app.Dashboard, error) {

@@ -1224,6 +1224,33 @@ tbody tr:hover {
   margin: 0;
   overflow-wrap: anywhere;
 }
+.usage-view-tabs {
+  display: inline-flex;
+  gap: 3px;
+  margin: -10px 0 18px;
+  padding: 4px;
+  border: 1px solid #dce5ee;
+  border-radius: 8px;
+  background: #eaf0f6;
+}
+.usage-view-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 7px 14px;
+  border: 0;
+  border-radius: 5px;
+  color: #607488;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+}
+.usage-view-tabs button.selected {
+  color: #214f7c;
+  background: #fff;
+  box-shadow: 0 1px 3px #17334d14;
+}
 .usage-filters {
   display: flex;
   justify-content: flex-start;
@@ -1247,6 +1274,10 @@ tbody tr:hover {
   flex: 1 1 210px;
   max-width: 290px;
 }
+.usage-filters .provider-filter-field {
+  flex: 1 1 190px;
+  max-width: 260px;
+}
 .usage-filters .date-range-field {
   flex: 1 1 330px;
   max-width: 480px;
@@ -1254,7 +1285,8 @@ tbody tr:hover {
 .usage-filters .filter-label {
   white-space: nowrap;
 }
-.usage-filters .model-filter-field .filter-label {
+.usage-filters .model-filter-field .filter-label,
+.usage-filters .provider-filter-field .filter-label {
   font-weight: 400;
 }
 .member-autocomplete,
@@ -1458,6 +1490,86 @@ tbody tr:hover {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.statistics-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 20px 22px 14px;
+  border-top: 1px solid #edf1f5;
+  border-bottom: 1px solid #edf1f5;
+}
+.statistics-heading h2 {
+  color: #294259;
+  font-size: 16px;
+}
+.statistics-heading p {
+  max-width: 680px;
+  margin-top: 5px;
+  color: #718496;
+  font-size: 12px;
+}
+.dimension-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 6px;
+  background: #f0f4f8;
+}
+.dimension-tabs button {
+  min-height: 31px;
+  padding: 6px 11px;
+  border: 0;
+  border-radius: 4px;
+  color: #65798d;
+  background: transparent;
+  font-size: 12px;
+}
+.dimension-tabs button.selected {
+  color: #235d9c;
+  background: #fff;
+  font-weight: 650;
+  box-shadow: 0 1px 2px #17334d12;
+}
+.statistics-table th,
+.statistics-table td {
+  padding-left: 16px;
+  padding-right: 16px;
+}
+.statistics-table td {
+  font-size: 12px;
+}
+.statistics-table .rank-column {
+  width: 68px;
+  padding-left: 22px;
+  color: #71869a;
+}
+.table-rank {
+  display: inline-flex;
+  min-width: 25px;
+  height: 25px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: #587087;
+  background: #eff4f8;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.statistics-table tr:nth-child(-n + 3) .table-rank {
+  color: #1f5d9f;
+  background: #e5effc;
+}
+.statistics-table td strong {
+  color: #294259;
+  font-weight: 620;
+}
+.statistics-table .statistic-total {
+  color: #245b91;
+  font-weight: 650;
 }
 .protocol-label {
   font-size: 10px;
@@ -2277,6 +2389,29 @@ tbody tr:hover {
   font-size: 11px;
   font-weight: 650;
 }
+.ranking-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ranking-head-actions > span {
+  padding: 3px 8px;
+  border-radius: 5px;
+  color: #53708b;
+  background: #edf3fb;
+  font-size: 11px;
+  font-weight: 650;
+}
+.ranking-head-actions a {
+  color: #376b9c;
+  font-size: 12px;
+  font-weight: 600;
+}
+.ranking-head-actions a:hover {
+  color: var(--blue);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 .ranking-list {
   list-style: none;
   margin: 0;
@@ -2573,6 +2708,15 @@ tbody tr:hover {
   .usage-filters .date-range-field {
     max-width: none;
   }
+  .statistics-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .dimension-tabs {
+    max-width: 100%;
+    overflow-x: auto;
+  }
   .login-shell {
     display: block;
     min-height: 100dvh;
@@ -2746,6 +2890,24 @@ tbody tr:hover {
   }
   .usage-filters .filter-actions .button {
     flex: 1;
+  }
+  .usage-view-tabs {
+    display: flex;
+    width: 100%;
+  }
+  .usage-view-tabs button {
+    flex: 1;
+    justify-content: center;
+  }
+  .statistics-heading {
+    padding: 17px 15px 12px;
+  }
+  .dimension-tabs {
+    width: 100%;
+  }
+  .dimension-tabs button {
+    flex: 1;
+    white-space: nowrap;
   }
   .calendar-panels {
     grid-template-columns: 1fr;
