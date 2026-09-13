@@ -120,7 +120,7 @@ PostgreSQL integration tests require `ZENTROLA_INTEGRATION=1`. Default Playwrigh
 
 - Update both English and Simplified Chinese versions when user-visible behavior changes.
 - Keep the root README concise and move detailed user guidance to `docs/`.
-- Keep design notes, phase reports, real-provider test notes, and implementation checklists in `development-docs/`.
+- Keep design notes, phase reports, real-provider test notes, and implementation checklists in `dev-docs`.
 - Never include credentials, JWTs, Virtual Keys, private prompts, model responses, or sensitive screenshots.
 
 ## Commits and pull requests

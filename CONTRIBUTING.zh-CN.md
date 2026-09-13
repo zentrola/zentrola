@@ -120,7 +120,7 @@ PostgreSQL 集成测试需要设置 `ZENTROLA_INTEGRATION=1`。默认 Playwright
 
 - 用户可见行为变化时，同时更新英文和简体中文版本。
 - 根 README 保持精简，详细用户说明放入 `docs/`。
-- 设计记录、阶段报告、真实服务商测试记录和实现清单保留在 `development-docs/`。
+- 设计记录、阶段报告、真实服务商测试记录和实现清单保留在 `dev-docs`。
 - 文档不得包含 Credential、JWT、Virtual Key、私有 prompt、模型输出或敏感截图。
 
 ## Commit 与 Pull Request
