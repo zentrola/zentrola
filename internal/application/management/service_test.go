@@ -11,7 +11,10 @@ import (
 	"github.com/zentrola/zentrola/internal/domain/catalog"
 )
 
-type subscriptionAdapterStub struct{ probe SubscriptionProbe }
+type subscriptionAdapterStub struct {
+	probe   SubscriptionProbe
+	onProbe func(*catalog.OutboundProxy)
+}
 
 func (subscriptionAdapterStub) Code() string              { return AuthAdapterOpenAICodex }
 func (subscriptionAdapterStub) Supports(code string) bool { return code == AuthAdapterOpenAICodex }
@@ -21,8 +24,33 @@ func (subscriptionAdapterStub) SupportsProvider(provider Provider) bool {
 func (subscriptionAdapterStub) Inspect([]byte) (SubscriptionInspection, error) {
 	return SubscriptionInspection{}, nil
 }
-func (s subscriptionAdapterStub) Probe(context.Context, []byte) (SubscriptionProbe, error) {
+func (s subscriptionAdapterStub) Probe(_ context.Context, _ []byte, proxy *catalog.OutboundProxy) (SubscriptionProbe, error) {
+	if s.onProbe != nil {
+		s.onProbe(proxy)
+	}
 	return s.probe, nil
+}
+
+type claudeSubscriptionAdapterStub struct{ subscriptionAdapterStub }
+
+func (claudeSubscriptionAdapterStub) Code() string              { return AuthAdapterClaudeCode }
+func (claudeSubscriptionAdapterStub) Supports(code string) bool { return code == AuthAdapterClaudeCode }
+func (claudeSubscriptionAdapterStub) SupportsProvider(provider Provider) bool {
+	return provider.Code == catalog.AnthropicOfficialCode
+}
+
+func TestProviderCapabilitiesIncludeMatchingSubscriptionAdapter(t *testing.T) {
+	service := &Service{subscriptions: []SubscriptionAdapter{
+		subscriptionAdapterStub{}, claudeSubscriptionAdapterStub{},
+	}}
+	openAI := service.withProviderCapabilities(Provider{Code: catalog.OpenAIOfficialCode})
+	if len(openAI.AuthAdapters) != 2 || openAI.AuthAdapters[1] != AuthAdapterOpenAICodex {
+		t.Fatalf("unexpected OpenAI adapters: %v", openAI.AuthAdapters)
+	}
+	claude := service.withProviderCapabilities(Provider{Code: catalog.AnthropicOfficialCode})
+	if len(claude.AuthAdapters) != 2 || claude.AuthAdapters[1] != AuthAdapterClaudeCode {
+		t.Fatalf("unexpected Anthropic adapters: %v", claude.AuthAdapters)
+	}
 }
 
 type resourceCreateWriter struct {
@@ -233,6 +261,56 @@ func TestUpdateCredentialPersistsResource(t *testing.T) {
 	}
 }
 
+func TestExportSubscriptionCredentialReturnsAuthFileAndAudits(t *testing.T) {
+	subscriptionType := SubscriptionPersonal
+	writer := &credentialUpdateWriter{resource: ResourceRecord{
+		Resource: Resource{
+			ID: 48, ProviderID: 40, Name: "OpenAI 个人订阅", AuthType: AuthTypeSubscription,
+			AuthAdapter: AuthAdapterOpenAICodex, SubscriptionType: &subscriptionType,
+		},
+		Sealed: catalog.SealedCredential{Ciphertext: []byte(`{"auth_mode":"chatgpt"}`), KeyVersion: 1},
+	}}
+	service := New(credentialUpdateStore{writer: writer}, nil, providerTestCipher{}, nil)
+
+	credential, err := service.ExportSubscriptionCredential(
+		context.Background(),
+		admin.Identity{ID: 1},
+		48,
+		appsec.RequestMeta{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clear(credential)
+	if got := string(credential); got != `{"auth_mode":"chatgpt"}` {
+		t.Fatalf("credential=%q; want exported auth.json", got)
+	}
+	if writer.audit.Event != "RESOURCE_CREDENTIAL_EXPORT" || writer.audit.ID != 48 {
+		t.Fatalf("audit=%+v; want credential export event", writer.audit)
+	}
+	if after, ok := writer.audit.After.(map[string]string); !ok || after["authAdapter"] != AuthAdapterOpenAICodex {
+		t.Fatalf("audit after=%#v; want non-sensitive adapter metadata", writer.audit.After)
+	}
+}
+
+func TestExportSubscriptionCredentialRejectsAPIKey(t *testing.T) {
+	writer := &credentialUpdateWriter{resource: ResourceRecord{Resource: Resource{
+		ID: 48, ProviderID: 40, Name: "OpenAI API Key", AuthType: AuthTypeAPIKey,
+		AuthAdapter: AuthAdapterAPIKey,
+	}}}
+	service := New(credentialUpdateStore{writer: writer}, nil, providerTestCipher{}, nil)
+
+	credential, err := service.ExportSubscriptionCredential(
+		context.Background(),
+		admin.Identity{ID: 1},
+		48,
+		appsec.RequestMeta{},
+	)
+	if !errors.Is(err, ErrCredentialExportUnsupported) || credential != nil {
+		t.Fatalf("credential=%q error=%v; want unsupported export", credential, err)
+	}
+}
+
 func TestResourceInferenceProbeBlocksBillingFailure(t *testing.T) {
 	updatedAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	writer := &resourceTestWriter{
@@ -276,8 +354,12 @@ func TestPersonalSubscriptionConnectionUsesQuotaProbeWithoutModelMapping(t *test
 			},
 			Sealed: catalog.SealedCredential{Ciphertext: []byte("imported-auth-cache"), KeyVersion: 1},
 		},
-		provider: Provider{ID: 40, Code: "openai-official"},
+		provider: Provider{
+			ID: 40, Code: "openai-official", ProxyEnabled: true,
+			ProxyURLSealed: catalog.SealedCredential{Ciphertext: []byte("http://proxy.example.com:8080"), KeyVersion: 1},
+		},
 	}
+	proxySeen := false
 	service := New(
 		resourceTestStore{writer: writer},
 		nil,
@@ -289,6 +371,8 @@ func TestPersonalSubscriptionConnectionUsesQuotaProbeWithoutModelMapping(t *test
 			Quotas: []ResourceQuota{{
 				Code: "codex.primary", Status: QuotaAvailable, UsedPercent: &percent, ResetsAt: &reset,
 			}},
+		}, onProbe: func(proxy *catalog.OutboundProxy) {
+			proxySeen = proxy != nil && proxy.URL == "http://proxy.example.com:8080"
 		}}),
 	)
 
@@ -301,7 +385,7 @@ func TestPersonalSubscriptionConnectionUsesQuotaProbeWithoutModelMapping(t *test
 	if err != nil || !result.OK || result.Code != "OK" {
 		t.Fatalf("unexpected subscription test result: %+v err=%v", result, err)
 	}
-	if !writer.restored || writer.updated.QuotaStatus != QuotaAvailable || len(writer.quotas) != 1 {
+	if !proxySeen || !writer.restored || writer.updated.QuotaStatus != QuotaAvailable || len(writer.quotas) != 1 {
 		t.Fatalf("subscription state was not refreshed: updated=%+v quotas=%+v", writer.updated.Resource, writer.quotas)
 	}
 	if string(writer.updated.Sealed.Ciphertext) != "refreshed-auth-cache" {

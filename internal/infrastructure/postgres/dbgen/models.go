@@ -338,6 +338,10 @@ type ProviderCredential struct {
 	QuotaCheckedAt pgtype.Timestamptz
 	// 额度预计重置时间；NULL=上游未提供或不适用
 	QuotaResetsAt pgtype.Timestamptz
+	// 订阅认证文件的最近刷新时间；OpenAI Codex 取自 auth.json.last_refresh，缺失时取 access token iat
+	CredentialRefreshedAt pgtype.Timestamptz
+	// 订阅短期访问凭据到期时间；OpenAI Codex 取自 access token exp，用于 SQL 筛选待刷新凭据
+	CredentialExpiresAt pgtype.Timestamptz
 }
 
 // Provider 认证资源最近观测到的额度窗口；只保存当前状态，不作为 Usage 事实

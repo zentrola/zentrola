@@ -300,6 +300,38 @@ func (s *GatewayStore) UpdateResourceCredential(ctx context.Context, route gw.Ro
 	return nil
 }
 
+func (s *GatewayStore) UpdateResourceCredentialRefreshMetadata(ctx context.Context, route gw.Route) error {
+	next, ok := s.next.(gw.CredentialRefreshMetadataUpdater)
+	if !ok {
+		return gw.ErrUnavailable
+	}
+	return next.UpdateResourceCredentialRefreshMetadata(ctx, route)
+}
+
+func (s *GatewayStore) LoadResourceCredential(ctx context.Context, route gw.Route) (catalog.SealedCredential, error) {
+	next, ok := s.next.(gw.CredentialLoader)
+	if !ok {
+		return catalog.SealedCredential{}, gw.ErrUnavailable
+	}
+	return next.LoadResourceCredential(ctx, route)
+}
+
+func (s *GatewayStore) LockSubscriptionRefresh(ctx context.Context, resourceID int64) (context.Context, func(), error) {
+	next, ok := s.next.(gw.SubscriptionRefreshLocker)
+	if !ok {
+		return ctx, nil, gw.ErrUnavailable
+	}
+	return next.LockSubscriptionRefresh(ctx, resourceID)
+}
+
+func (s *GatewayStore) ListSubscriptionCredentials(ctx context.Context, after int64, limit int32, refreshBefore time.Time) ([]gw.SubscriptionCredential, error) {
+	next, ok := s.next.(gw.SubscriptionCredentialLister)
+	if !ok {
+		return nil, gw.ErrUnavailable
+	}
+	return next.ListSubscriptionCredentials(ctx, after, limit, refreshBefore)
+}
+
 func (s *GatewayStore) logRoutePopulation(ctx context.Context, key, generation string, value []gw.Route, identity appsec.PrincipalIdentity, model, protocol string) {
 	if s.cache.SetRoutes(ctx, key, generation, value) {
 		s.logger.InfoContext(ctx, "gateway routes cached after database load",

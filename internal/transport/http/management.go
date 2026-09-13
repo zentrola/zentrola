@@ -709,6 +709,40 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 		input.Credential = ""
 		adminResult(w, req, 200, UpdatedResponse{Updated: true}, err)
 	})
+	// @Summary 导出个人订阅认证文件
+	// @Tags 模型与资源
+	// @Description 仅支持导出 OpenAI OPENAI_CODEX 个人订阅凭据；响应为 auth.json 附件，并记录审计日志。
+	// @Produce application/octet-stream
+	// @Security AdminBearer
+	// @Param id path string true "业务 ID（正整数字符串）"
+	// @Success 200 {file} binary
+	// @Header 200 {string} Content-Disposition "attachment; filename=auth.json"
+	// @Failure 400 {object} response
+	// @Failure 401 {object} response
+	// @Failure 404 {object} response
+	// @Failure 409 {object} response
+	// @Failure 422 {object} response
+	// @Failure 503 {object} response
+	// @Router /api/v1/resources/{id}/credential/export [get]
+	r.Get("/resources/{id}/credential/export", func(w http.ResponseWriter, req *http.Request) {
+		id, err := routeID(req, "id")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		credential, err := m.ExportSubscriptionCredential(req.Context(), adminFrom(req), id, requestMeta(req))
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		defer clear(credential)
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", `attachment; filename="auth.json"`)
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Content-Length", strconv.Itoa(len(credential)))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(credential)
+	})
 	// @Summary 测试资源连接
 	// @Tags 模型与资源
 	// @Description 使用已保存凭证访问上游模型列表；请求会产生外部网络调用。HTTP 200 后仍需检查 data.ok 和 data.code。

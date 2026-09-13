@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"sync"
 	"time"
 
 	appsec "github.com/zentrola/zentrola/internal/application/security"
@@ -43,6 +44,7 @@ type Route struct {
 	ResourcePriority                                 int32
 	QuotaStatus                                      string
 	ExpiresAt                                        *time.Time
+	CredentialRefreshedAt, CredentialExpiresAt       *time.Time
 	Credential                                       catalog.SealedCredential
 	ProxyEnabled                                     bool
 	ProxyURL, ProxyHeaders                           catalog.SealedCredential
@@ -81,9 +83,40 @@ type ResourceBlocker interface {
 type CredentialUpdater interface {
 	UpdateResourceCredential(context.Context, Route, catalog.SealedCredential) error
 }
+type CredentialRefreshMetadataUpdater interface {
+	UpdateResourceCredentialRefreshMetadata(context.Context, Route) error
+}
+type CredentialLoader interface {
+	LoadResourceCredential(context.Context, Route) (catalog.SealedCredential, error)
+}
+type SubscriptionRefreshLocker interface {
+	LockSubscriptionRefresh(context.Context, int64) (context.Context, func(), error)
+}
+type SubscriptionCredential struct {
+	ProviderID, ResourceID int64
+	AuthAdapter            string
+	CredentialRefreshedAt  *time.Time
+	CredentialExpiresAt    *time.Time
+	Credential             catalog.SealedCredential
+	ProxyEnabled           bool
+	ProxyURL               catalog.SealedCredential
+	ProxyHeaders           catalog.SealedCredential
+}
+type SubscriptionCredentialLister interface {
+	ListSubscriptionCredentials(context.Context, int64, int32, time.Time) ([]SubscriptionCredential, error)
+}
 type SubscriptionRefresher interface {
 	Supports(string) bool
-	RefreshIfNeeded(context.Context, []byte) ([]byte, bool, error)
+	RefreshIfNeeded(context.Context, []byte, *catalog.OutboundProxy) ([]byte, bool, error)
+}
+type SubscriptionRefreshInspector interface {
+	NeedsRefresh([]byte) (bool, error)
+}
+type SubscriptionRefreshPlanner interface {
+	RefreshBefore(time.Time) time.Time
+}
+type SubscriptionRefreshMetadataInspector interface {
+	CredentialRefreshMetadata([]byte) (refreshedAt, expiresAt *time.Time, err error)
 }
 type RouteState interface {
 	Acquire(context.Context, Route) (bool, error)
@@ -142,18 +175,32 @@ type Upstream interface {
 	Open(context.Context, Route, Request, []byte) (*Response, error)
 }
 type Service struct {
-	store    Store
-	cipher   Cipher
-	upstream Upstream
-	state    RouteState
-	refresh  SubscriptionRefresher
+	store     Store
+	cipher    Cipher
+	upstream  Upstream
+	state     RouteState
+	refresh   []SubscriptionRefresher
+	refreshMu sync.Mutex
 }
 
 type Option func(*Service)
 
 func WithRouteState(state RouteState) Option { return func(service *Service) { service.state = state } }
 func WithSubscriptionRefresher(refresh SubscriptionRefresher) Option {
-	return func(service *Service) { service.refresh = refresh }
+	return func(service *Service) {
+		if refresh != nil {
+			service.refresh = append(service.refresh, refresh)
+		}
+	}
+}
+
+func (s *Service) subscriptionRefresher(code string) SubscriptionRefresher {
+	for _, refresh := range s.refresh {
+		if refresh.Supports(code) {
+			return refresh
+		}
+	}
+	return nil
 }
 func New(store Store, cipher Cipher, upstream Upstream, options ...Option) *Service {
 	service := &Service{store: store, cipher: cipher, upstream: upstream}

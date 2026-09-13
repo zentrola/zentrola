@@ -459,7 +459,7 @@ export default {
     configurationTitle: 'Provider credential configuration',
     addCredential: 'Add credential',
     listHint:
-      'Only non-sensitive details are shown after saving. To replace a credential, delete it and add a new one.',
+      'Only non-sensitive details are shown after saving. OpenAI personal subscriptions can be exported as auth.json; a successful connection test refreshes quota status, quota reset time, and check time.',
     emptyCredentials: 'No credentials yet',
     emptyCredentialsHint: 'Select Add credential to add an API key or supported subscription.',
     provider: 'Provider',
@@ -483,6 +483,7 @@ export default {
     subscriptionFolderCommandTitle: 'Cannot find the file? View folder commands',
     subscriptionCommandTitle: 'View commands to copy file content',
     copySubscriptionCommand: 'Copy {platform} command',
+    copyClaudeSubscriptionCommand: 'Copy Claude Code command',
     subscriptionChooseFile: 'Choose auth.json',
     subscriptionFileLimit: 'JSON file, up to 64 KiB',
     subscriptionUploadHint:
@@ -490,6 +491,13 @@ export default {
     subscriptionPasteLabel: 'auth.json content',
     subscriptionPastePlaceholder: 'Paste the complete JSON content of auth.json',
     subscriptionPasteHint: 'Run the command above, then paste the content into this field.',
+    claudeSubscriptionCommandTitle: 'Run this command to generate a long-lived OAuth token',
+    claudeSubscriptionPasteLabel: 'Claude Code OAuth token',
+    claudeSubscriptionPastePlaceholder: 'Paste the complete token printed by claude setup-token',
+    claudeSubscriptionPasteHint: 'Run the command above, then paste the output token here.',
+    export: 'Export',
+    exportFor: 'Export auth.json for {name}',
+    exported: 'auth.json exported',
     quota: 'Subscription quota',
     configured: 'Configured',
     missing: 'Not configured',
@@ -512,7 +520,9 @@ export default {
     subscriptionTesting: 'Verifying personal subscription…',
     subscriptionTestPassed: 'Personal subscription verified',
     subscriptionTestHint:
-      'Verifies subscription authentication through the ChatGPT quota endpoint and refreshes quota status without making a model request.',
+      'Verifies subscription authentication through the ChatGPT quota endpoint. On success, it updates quota status, quota reset time, and check time without making a model request.',
+    claudeSubscriptionTestHint:
+      'Verifies the long-lived OAuth token through the Claude usage endpoint. On success, it updates quota status, quota reset time, and check time without making a model request.',
     syncModels: 'Sync models',
     syncingModels: 'Reading the official model catalog…',
     syncPassed: 'Official model catalog synchronized',
@@ -527,11 +537,12 @@ export default {
     limit:
       'A provider may have multiple credentials. Personal subscriptions are preferred while quota is available, with API keys as fallback.',
     credentialHint:
-      'Visible only while entered. The complete credential is never returned after saving.',
+      'API keys are visible only while entered. Saved OpenAI personal subscriptions can be exported as auth.json.',
     result: 'Connection test result',
     latency: 'Latency',
     credentialRequired: 'Use 1–4096 visible, non-whitespace ASCII characters.',
     subscriptionRequired: 'Enter or upload a valid Codex auth.json no larger than 64 KiB.',
+    claudeSubscriptionRequired: 'Enter a valid Claude Code OAuth token no larger than 64 KiB.',
     delete: 'Delete',
     deleteTitle: 'Delete credential',
     deleteQuestion: 'Delete “{name}”?',
@@ -655,6 +666,7 @@ export default {
       PROVIDER_STATUS_CHANGE: 'Change provider status',
       RESOURCE_CREATE: 'Add provider credential',
       RESOURCE_CREDENTIAL_UPDATE: 'Update provider credential',
+      RESOURCE_CREDENTIAL_EXPORT: 'Export personal subscription credential',
       RESOURCE_STATUS_CHANGE: 'Change provider credential status',
       RESOURCE_CONNECTION_TEST: 'Test provider connection',
       MODEL_CATALOG_SYNC: 'Sync official model catalog',
@@ -684,6 +696,7 @@ export default {
     CONFLICT: 'The action conflicts with an existing code, state, or enabled provider credential.',
     PROVIDER_UNAVAILABLE: 'The upstream provider is disabled.',
     CREDENTIAL_UNRECOVERABLE: 'The credential cannot be decrypted. Enter it again.',
+    CREDENTIAL_EXPORT_UNSUPPORTED: 'Only OpenAI personal subscription credentials can be exported.',
     PROVIDER_CREDENTIAL_REQUIRED: 'Configure a provider key before enabling the provider.',
     MODEL_SYNC_CREDENTIAL_REQUIRED: 'Configure a provider key before synchronizing models.',
     PROXY_CONFIGURATION_UNRECOVERABLE:

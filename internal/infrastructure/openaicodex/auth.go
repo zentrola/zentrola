@@ -19,11 +19,14 @@ import (
 	"time"
 
 	mgmt "github.com/zentrola/zentrola/internal/application/management"
+	"github.com/zentrola/zentrola/internal/domain/catalog"
+	"github.com/zentrola/zentrola/internal/infrastructure/provider"
 )
 
 const (
 	AdapterCode          = mgmt.AuthAdapterOpenAICodex
 	defaultUsageEndpoint = "https://chatgpt.com/backend-api/wham/usage"
+	defaultRefreshAhead  = 30 * time.Minute
 )
 
 var errInvalidCredential = errors.New("invalid Codex ChatGPT credential")
@@ -32,17 +35,33 @@ type Adapter struct {
 	executable    string
 	client        *http.Client
 	usageEndpoint string
+	refreshAhead  time.Duration
 }
 
-func New(executable string) *Adapter {
+type Option func(*Adapter)
+
+func WithRefreshAhead(value time.Duration) Option {
+	return func(adapter *Adapter) {
+		if value > 0 {
+			adapter.refreshAhead = value
+		}
+	}
+}
+
+func New(executable string, options ...Option) *Adapter {
 	if strings.TrimSpace(executable) == "" {
 		executable = "codex"
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
-	return &Adapter{
+	transport.Proxy = nil
+	adapter := &Adapter{
 		executable: executable, usageEndpoint: defaultUsageEndpoint,
-		client: &http.Client{Transport: transport, Timeout: 20 * time.Second},
+		client: &http.Client{Transport: transport, Timeout: 20 * time.Second}, refreshAhead: defaultRefreshAhead,
 	}
+	for _, option := range options {
+		option(adapter)
+	}
+	return adapter
 }
 
 func (a *Adapter) Code() string              { return AdapterCode }
@@ -52,8 +71,9 @@ func (a *Adapter) SupportsProvider(provider mgmt.Provider) bool {
 }
 
 type authCache struct {
-	AuthMode string `json:"auth_mode"`
-	Tokens   struct {
+	AuthMode    string `json:"auth_mode"`
+	LastRefresh string `json:"last_refresh"`
+	Tokens      struct {
 		IDToken      string `json:"id_token"`
 		AccessToken  string `json:"access_token"`
 		RefreshToken string `json:"refresh_token"`
@@ -91,6 +111,15 @@ func (a *Adapter) Inspect(raw []byte) (mgmt.SubscriptionInspection, error) {
 		return mgmt.SubscriptionInspection{}, err
 	}
 	inspection := mgmt.SubscriptionInspection{AccountRef: cache.Tokens.AccountID}
+	accessClaims := jwtClaims(cache.Tokens.AccessToken)
+	if expires, ok := claimUnix(accessClaims, "exp"); ok {
+		inspection.CredentialExpiresAt = &expires
+	}
+	if refreshed, ok := parseRefreshTime(cache.LastRefresh); ok {
+		inspection.CredentialRefreshedAt = &refreshed
+	} else if issued, ok := claimUnix(accessClaims, "iat"); ok {
+		inspection.CredentialRefreshedAt = &issued
+	}
 	claims := jwtClaims(cache.Tokens.IDToken)
 	if claims == nil {
 		claims = jwtClaims(cache.Tokens.AccessToken)
@@ -104,6 +133,42 @@ func (a *Adapter) Inspect(raw []byte) (mgmt.SubscriptionInspection, error) {
 		}
 	}
 	return inspection, nil
+}
+
+func parseRefreshTime(value string) (time.Time, bool) {
+	if value == "" {
+		return time.Time{}, false
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return parsed.UTC(), true
+}
+
+// ensureLastRefresh 保证保存和导出的凭据包含 Codex auth.json 的刷新时间字段。
+func ensureLastRefresh(raw []byte) ([]byte, error) {
+	cache, err := parseCredential(raw)
+	if err != nil {
+		return nil, err
+	}
+	if _, ok := parseRefreshTime(cache.LastRefresh); ok {
+		return bytes.Clone(raw), nil
+	}
+	refreshedAt := time.Now().UTC().Truncate(time.Second)
+	if issued, ok := claimUnix(jwtClaims(cache.Tokens.AccessToken), "iat"); ok {
+		refreshedAt = issued
+	}
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &document); err != nil {
+		return nil, errInvalidCredential
+	}
+	encoded, err := json.Marshal(refreshedAt.Format(time.RFC3339))
+	if err != nil {
+		return nil, err
+	}
+	document["last_refresh"] = encoded
+	return json.Marshal(document)
 }
 
 func jwtClaims(token string) map[string]any {
@@ -142,21 +207,25 @@ func claimUnix(claims map[string]any, key string) (time.Time, bool) {
 	return time.Unix(seconds, 0).UTC(), true
 }
 
-func (a *Adapter) Probe(ctx context.Context, raw []byte) (mgmt.SubscriptionProbe, error) {
+func (a *Adapter) Probe(ctx context.Context, raw []byte, proxy *catalog.OutboundProxy) (mgmt.SubscriptionProbe, error) {
 	cache, err := parseCredential(raw)
 	if err != nil {
 		return mgmt.SubscriptionProbe{}, err
 	}
-	inspection, err := a.Inspect(raw)
+	credential, err := ensureLastRefresh(raw)
 	if err != nil {
 		return mgmt.SubscriptionProbe{}, err
 	}
-	credential := bytes.Clone(raw)
-	usage, err := a.readUsage(ctx, cache.Tokens.AccessToken, cache.Tokens.AccountID)
+	inspection, err := a.Inspect(credential)
+	if err != nil {
+		clear(credential)
+		return mgmt.SubscriptionProbe{}, err
+	}
+	usage, err := a.readUsage(ctx, cache.Tokens.AccessToken, cache.Tokens.AccountID, proxy)
 	var statusError *usageHTTPError
 	if errors.As(err, &statusError) && statusError.StatusCode == http.StatusUnauthorized {
 		clear(credential)
-		credential, inspection, err = a.refreshCredential(ctx, raw)
+		credential, inspection, err = a.refreshCredential(ctx, raw, proxy)
 		if err != nil {
 			return mgmt.SubscriptionProbe{}, err
 		}
@@ -165,7 +234,7 @@ func (a *Adapter) Probe(ctx context.Context, raw []byte) (mgmt.SubscriptionProbe
 			clear(credential)
 			return mgmt.SubscriptionProbe{}, parseErr
 		}
-		usage, err = a.readUsage(ctx, refreshed.Tokens.AccessToken, refreshed.Tokens.AccountID)
+		usage, err = a.readUsage(ctx, refreshed.Tokens.AccessToken, refreshed.Tokens.AccountID, proxy)
 	}
 	if err != nil {
 		clear(credential)
@@ -181,7 +250,7 @@ func (a *Adapter) Probe(ctx context.Context, raw []byte) (mgmt.SubscriptionProbe
 	}, nil
 }
 
-func (a *Adapter) readUsage(ctx context.Context, accessToken, accountID string) (usageResponse, error) {
+func (a *Adapter) readUsage(ctx context.Context, accessToken, accountID string, proxy *catalog.OutboundProxy) (usageResponse, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, a.usageEndpoint, nil)
 	if err != nil {
 		return usageResponse{}, errors.New("cannot create ChatGPT usage request")
@@ -191,7 +260,14 @@ func (a *Adapter) readUsage(ctx context.Context, accessToken, accountID string) 
 	request.Header.Set("ChatGPT-Account-Id", accountID)
 	defer request.Header.Del("Authorization")
 
-	response, err := a.client.Do(request)
+	client, cleanup, err := provider.ClientWithProxy(ctx, a.client, proxy, provider.ProxyRequestLog{
+		Operation: "subscription_usage", ProviderCode: catalog.OpenAIOfficialCode, Protocol: "OPENAI",
+	})
+	if err != nil {
+		return usageResponse{}, errors.New("invalid ChatGPT proxy configuration")
+	}
+	defer cleanup()
+	response, err := client.Do(request)
 	if err != nil {
 		return usageResponse{}, errors.New("cannot reach ChatGPT usage service")
 	}
@@ -217,7 +293,7 @@ func (e *usageHTTPError) Error() string {
 	return fmt.Sprintf("ChatGPT usage request failed with HTTP %d", e.StatusCode)
 }
 
-func (a *Adapter) refreshCredential(ctx context.Context, raw []byte) ([]byte, mgmt.SubscriptionInspection, error) {
+func (a *Adapter) refreshCredential(ctx context.Context, raw []byte, proxy *catalog.OutboundProxy) ([]byte, mgmt.SubscriptionInspection, error) {
 	directory, err := os.MkdirTemp("", "zentrola-codex-auth-")
 	if err != nil {
 		return nil, mgmt.SubscriptionInspection{}, errors.New("cannot create isolated Codex credential directory")
@@ -228,7 +304,7 @@ func (a *Adapter) refreshCredential(ctx context.Context, raw []byte) ([]byte, mg
 		return nil, mgmt.SubscriptionInspection{}, errors.New("cannot stage Codex credential")
 	}
 
-	client, err := startClient(ctx, a.executable, directory)
+	client, err := startClient(ctx, a.executable, directory, proxy)
 	if err != nil {
 		return nil, mgmt.SubscriptionInspection{}, err
 	}
@@ -247,6 +323,12 @@ func (a *Adapter) refreshCredential(ctx context.Context, raw []byte) ([]byte, mg
 	if err != nil {
 		return nil, mgmt.SubscriptionInspection{}, errors.New("cannot read refreshed Codex credential")
 	}
+	normalized, err := ensureLastRefresh(updated)
+	clear(updated)
+	if err != nil {
+		return nil, mgmt.SubscriptionInspection{}, err
+	}
+	updated = normalized
 	inspection, err := a.Inspect(updated)
 	if err != nil {
 		clear(updated)
@@ -260,19 +342,46 @@ func (a *Adapter) refreshCredential(ctx context.Context, raw []byte) ([]byte, mg
 
 // RefreshIfNeeded 在短期 access token 临近过期时交给官方 app-server 刷新。
 // 返回的更新凭据仍是完整 auth.json，调用方必须立即加密保存并清除明文。
-func (a *Adapter) RefreshIfNeeded(ctx context.Context, raw []byte) ([]byte, bool, error) {
-	_, _, expiresAt, err := RequestCredential(raw)
+func (a *Adapter) RefreshIfNeeded(ctx context.Context, raw []byte, proxy *catalog.OutboundProxy) ([]byte, bool, error) {
+	needed, err := a.NeedsRefresh(raw)
 	if err != nil {
 		return nil, false, err
 	}
-	if expiresAt != nil && expiresAt.After(time.Now().UTC().Add(5*time.Minute)) {
+	if !needed {
 		return nil, false, nil
 	}
-	updated, _, err := a.refreshCredential(ctx, raw)
+	updated, _, err := a.refreshCredential(ctx, raw, proxy)
 	if err != nil {
 		return nil, false, err
 	}
 	return updated, true, nil
+}
+
+func (a *Adapter) NeedsRefresh(raw []byte) (bool, error) {
+	_, _, expiresAt, err := RequestCredential(raw)
+	if err != nil {
+		return false, err
+	}
+	if expiresAt != nil && expiresAt.After(time.Now().UTC().Add(a.refreshAhead)) {
+		return false, nil
+	}
+	return true, nil
+}
+
+func (a *Adapter) RefreshBefore(now time.Time) time.Time {
+	return now.UTC().Add(a.refreshAhead)
+}
+
+func (a *Adapter) CredentialRefreshMetadata(raw []byte) (refreshedAt, expiresAt *time.Time, err error) {
+	inspection, err := a.Inspect(raw)
+	if err != nil {
+		return nil, nil, err
+	}
+	return inspection.CredentialRefreshedAt, inspection.CredentialExpiresAt, nil
+}
+
+func (a *Adapter) ExportCredential(raw []byte) ([]byte, error) {
+	return ensureLastRefresh(raw)
 }
 
 type rpcClient struct {
@@ -281,13 +390,19 @@ type rpcClient struct {
 	scanner *bufio.Scanner
 }
 
-func startClient(ctx context.Context, executable, directory string) (*rpcClient, error) {
+func startClient(ctx context.Context, executable, directory string, proxy *catalog.OutboundProxy) (*rpcClient, error) {
 	command := exec.CommandContext(ctx, executable, "app-server", "--stdio", "-c", `cli_auth_credentials_store="file"`)
 	environment := make([]string, 0, len(os.Environ())+1)
 	for _, item := range os.Environ() {
 		if !strings.HasPrefix(strings.ToUpper(item), "CODEX_HOME=") {
 			environment = append(environment, item)
 		}
+	}
+	environment, err := provider.EnvironmentWithProxy(ctx, environment, proxy, provider.ProxyRequestLog{
+		Operation: "subscription_refresh", ProviderCode: catalog.OpenAIOfficialCode, Protocol: "OPENAI",
+	})
+	if err != nil {
+		return nil, errors.New("invalid ChatGPT proxy configuration")
 	}
 	command.Env = append(environment, "CODEX_HOME="+directory)
 	stdin, err := command.StdinPipe()

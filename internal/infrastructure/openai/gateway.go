@@ -82,7 +82,9 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 		req.Header.Set("X-Request-ID", input.RequestID)
 	}
 	// 客户端 Authorization / Cookie / Anthropic / SDK Header 均不复制到上游。
-	client, cleanup, err := provider.ClientWithProxy(c.client, route.Proxy)
+	client, cleanup, err := provider.ClientWithProxy(ctx, c.client, route.Proxy, provider.ProxyRequestLog{
+		Operation: "gateway_inference", ProviderID: route.ProviderID, ResourceID: route.ResourceID, Protocol: gw.OpenAIEndpoint,
+	})
 	if err != nil {
 		return nil, gw.ErrProxy
 	}

@@ -13,7 +13,7 @@ SELECT pm.id AS provider_model_id,pm.provider_id,pm.upstream_model_code,pe.base_
        p.proxy_enabled,p.proxy_url_ciphertext,p.proxy_url_nonce,p.proxy_url_key_version,
        p.proxy_headers_ciphertext,p.proxy_headers_nonce,p.proxy_headers_key_version,
        r.id AS resource_id,r.auth_type,r.auth_adapter,r.subscription_type,r.priority AS resource_priority,r.expires_at,
-       r.quota_status,r.quota_checked_at,r.quota_resets_at,
+       r.quota_status,r.quota_checked_at,r.quota_resets_at,r.credential_refreshed_at,r.credential_expires_at,
        r.credential_ciphertext,r.credential_nonce,r.key_version
 FROM provider_model pm
 JOIN provider p ON p.id=pm.provider_id
@@ -52,8 +52,45 @@ WHERE id=sqlc.arg(resource_id)
 -- name: UpdateGatewayResourceCredential :execrows
 UPDATE provider_credential
 SET credential_ciphertext=sqlc.arg(credential_ciphertext),credential_nonce=sqlc.arg(credential_nonce),
-    key_version=sqlc.arg(key_version),updated_by='system',updated_at=sqlc.arg(updated_at)
+    key_version=sqlc.arg(key_version),credential_refreshed_at=sqlc.narg(credential_refreshed_at),
+    credential_expires_at=sqlc.narg(credential_expires_at),updated_by='system',updated_at=sqlc.arg(updated_at)
 WHERE id=sqlc.arg(resource_id) AND provider_id=sqlc.arg(provider_id) AND NOT is_deleted;
+
+-- name: UpdateGatewayResourceCredentialRefreshMetadata :execrows
+UPDATE provider_credential
+SET credential_refreshed_at=sqlc.narg(credential_refreshed_at),
+    credential_expires_at=sqlc.narg(credential_expires_at),updated_by='system',updated_at=sqlc.arg(updated_at)
+WHERE id=sqlc.arg(resource_id) AND provider_id=sqlc.arg(provider_id) AND NOT is_deleted
+  AND credential_expires_at IS NULL;
+
+-- name: GatewayResourceCredential :one
+SELECT credential_ciphertext,credential_nonce,key_version
+FROM provider_credential
+WHERE id=sqlc.arg(resource_id) AND provider_id=sqlc.arg(provider_id)
+  AND NOT is_deleted AND auth_type='SUBSCRIPTION';
+
+-- name: LockGatewaySubscriptionRefresh :one
+SELECT pg_advisory_lock(-(sqlc.arg(resource_id)::bigint));
+
+-- name: UnlockGatewaySubscriptionRefresh :one
+SELECT pg_advisory_unlock(-(sqlc.arg(resource_id)::bigint));
+
+-- name: ListGatewaySubscriptionCredentials :many
+SELECT r.id AS resource_id,r.provider_id,r.auth_adapter,r.credential_refreshed_at,r.credential_expires_at,
+       p.proxy_enabled,p.proxy_url_ciphertext,p.proxy_url_nonce,p.proxy_url_key_version,
+       p.proxy_headers_ciphertext,p.proxy_headers_nonce,p.proxy_headers_key_version,
+       r.credential_ciphertext,r.credential_nonce,r.key_version
+FROM provider_credential r
+JOIN provider p ON p.id=r.provider_id
+WHERE r.id>sqlc.arg(after_id)
+  AND NOT r.is_deleted AND r.auth_type='SUBSCRIPTION' AND r.subscription_type='PERSONAL'
+  AND r.runtime_status='HEALTHY'
+  AND (r.effective_at IS NULL OR r.effective_at<=now())
+  AND (r.expires_at IS NULL OR r.expires_at>now())
+  AND (r.credential_expires_at IS NULL OR r.credential_expires_at<=sqlc.arg(refresh_before)::timestamptz)
+  AND NOT p.is_deleted AND p.status='ACTIVE'
+ORDER BY r.id
+LIMIT sqlc.arg(page_limit);
 
 -- name: OpenAIModels :many
 SELECT DISTINCT ON (m.model_code) m.model_code,m.created_at,p.provider_code FROM model m

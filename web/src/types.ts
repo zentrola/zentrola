@@ -80,7 +80,7 @@ export interface Resource {
   name: string
   providerId: string
   authType: 'API_KEY' | 'SUBSCRIPTION'
-  authAdapter: 'API_KEY' | 'OPENAI_CODEX'
+  authAdapter: 'API_KEY' | 'OPENAI_CODEX' | 'ANTHROPIC_CLAUDE_CODE'
   subscriptionType: 'PERSONAL' | 'SEAT' | null
   planCode: string | null
   externalAccountRef: string | null

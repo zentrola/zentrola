@@ -14,6 +14,7 @@ import (
 
 	gw "github.com/zentrola/zentrola/internal/application/gateway"
 	"github.com/zentrola/zentrola/internal/domain/catalog"
+	"github.com/zentrola/zentrola/internal/infrastructure/anthropicclaude"
 	"github.com/zentrola/zentrola/internal/infrastructure/provider"
 )
 
@@ -54,12 +55,25 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 			)
 		}
 	}
-	if len(credential) == 0 || len(credential) > 4096 {
-		return nil, gw.ErrCredential
-	}
-	for _, ch := range credential {
-		if ch < 33 || ch > 126 {
+	requestCredential := string(credential)
+	claudeSubscription := route.AuthType == "SUBSCRIPTION"
+	if claudeSubscription {
+		if route.AuthAdapter != anthropicclaude.AdapterCode {
 			return nil, gw.ErrCredential
+		}
+		var credentialErr error
+		requestCredential, credentialErr = anthropicclaude.RequestCredential(credential)
+		if credentialErr != nil {
+			return nil, gw.ErrCredential
+		}
+	} else {
+		if len(credential) == 0 || len(credential) > 4096 {
+			return nil, gw.ErrCredential
+		}
+		for _, ch := range credential {
+			if ch < 33 || ch > 126 {
+				return nil, gw.ErrCredential
+			}
 		}
 	}
 	url := baseURL + input.Path
@@ -75,7 +89,11 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	req.Header.Set("Accept-Encoding", "identity")
-	req.Header.Set("x-api-key", string(credential))
+	if claudeSubscription {
+		req.Header.Set("Authorization", "Bearer "+requestCredential)
+	} else {
+		req.Header.Set("x-api-key", requestCredential)
+	}
 	for name, values := range input.ProtocolHeaders {
 		if !strings.HasPrefix(strings.ToLower(name), "anthropic-") {
 			continue
@@ -94,10 +112,15 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 	if input.Beta != "" && req.Header.Get("anthropic-beta") == "" {
 		req.Header.Set("anthropic-beta", input.Beta)
 	}
+	if claudeSubscription {
+		addAnthropicBeta(req.Header, anthropicclaude.OAuthBeta)
+	}
 	if input.RequestID != "" {
 		req.Header.Set("X-Request-ID", input.RequestID)
 	}
-	client, cleanup, err := provider.ClientWithProxy(c.client, route.Proxy)
+	client, cleanup, err := provider.ClientWithProxy(ctx, c.client, route.Proxy, provider.ProxyRequestLog{
+		Operation: "gateway_inference", ProviderID: route.ProviderID, ResourceID: route.ResourceID, Protocol: gw.AnthropicEndpoint,
+	})
 	if err != nil {
 		return nil, gw.ErrProxy
 	}
@@ -105,6 +128,7 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 	resp, err := instrumented.Do(req)
 	if err != nil {
 		sentHeaders.Delete("x-api-key")
+		sentHeaders.Delete("Authorization")
 		cleanup()
 		if errors.Is(ctx.Err(), context.Canceled) {
 			return nil, gw.ErrCancelled
@@ -136,9 +160,24 @@ func (b *gatewayBody) Close() error {
 	b.once.Do(func() {
 		b.err = b.ReadCloser.Close()
 		b.sentHeaders.Delete("x-api-key")
+		b.sentHeaders.Delete("Authorization")
 		if b.cleanup != nil {
 			b.cleanup()
 		}
 	})
 	return b.err
+}
+
+func addAnthropicBeta(header http.Header, beta string) {
+	values := strings.Join(header.Values("anthropic-beta"), ",")
+	for _, value := range strings.Split(values, ",") {
+		if strings.TrimSpace(value) == beta {
+			return
+		}
+	}
+	if strings.TrimSpace(values) == "" {
+		header.Set("anthropic-beta", beta)
+		return
+	}
+	header.Set("anthropic-beta", values+","+beta)
 }

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	gw "github.com/zentrola/zentrola/internal/application/gateway"
+	"github.com/zentrola/zentrola/internal/infrastructure/anthropicclaude"
 )
 
 func TestGatewayClientProtocol(t *testing.T) {
@@ -54,6 +55,35 @@ func TestGatewayClientProtocol(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatal("invalid destination reached transport")
+	}
+}
+
+func TestGatewayClientUsesBearerForClaudeSubscription(t *testing.T) {
+	client := NewGatewayClient(time.Second)
+	var requestHeaders http.Header
+	client.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		requestHeaders = r.Header
+		if r.Header.Get("Authorization") != "Bearer sk-ant-oat01-test" || r.Header.Get("x-api-key") != "" {
+			t.Fatal("Claude subscription did not use Bearer authentication")
+		}
+		beta := r.Header.Get("anthropic-beta")
+		if !strings.Contains(beta, "test-beta") || !strings.Contains(beta, anthropicclaude.OAuthBeta) {
+			t.Fatalf("missing OAuth beta header: %q", beta)
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"type":"message"}`))}, nil
+	})
+	credential := []byte(`{"kind":"claude_code_setup_token","access_token":"sk-ant-oat01-test"}`)
+	response, err := client.Open(context.Background(), gw.Route{
+		BaseURL: "https://api.anthropic.com", AuthType: "SUBSCRIPTION", AuthAdapter: anthropicclaude.AdapterCode,
+	}, gw.Request{Path: "/v1/messages", Beta: "test-beta", Body: []byte(`{}`)}, credential)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := response.Body.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if requestHeaders.Get("Authorization") != "" {
+		t.Fatal("closed HTTP transaction retained Authorization header")
 	}
 }
 

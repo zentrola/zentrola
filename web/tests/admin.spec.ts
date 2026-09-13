@@ -661,6 +661,28 @@ async function fixture(page: Page) {
         )
       return reply({ updated: true })
     }
+    if (
+      segments[0] === 'resources' &&
+      segments[2] === 'credential' &&
+      segments[3] === 'export' &&
+      method === 'GET'
+    ) {
+      const resource = resources.find((candidate) => candidate.id === segments[1])
+      if (!resource) return reply(null, 404, 'NOT_FOUND')
+      if (
+        resource.authType !== 'SUBSCRIPTION' ||
+        resource.authAdapter !== 'OPENAI_CODEX' ||
+        resource.subscriptionType !== 'PERSONAL'
+      )
+        return reply(null, 409, 'CREDENTIAL_EXPORT_UNSUPPORTED')
+      expect(req.headers().authorization).toBe('Bearer fixture-admin-token')
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/octet-stream',
+        headers: { 'Content-Disposition': 'attachment; filename="auth.json"' },
+        body: resource.credential,
+      })
+    }
     if (segments[2] === 'credential') {
       resources.find((r) => r.id === segments[1]).credential = body.credential
       return reply({ updated: true })
@@ -2095,6 +2117,9 @@ test('服务商支持个人订阅优先并保留 API Key 兜底', async ({ page 
   await authContent.fill(authJSON)
   await modal(page).getByRole('button', { name: '保存', exact: true }).click()
   const credentialList = modal(page)
+  await expect(credentialList).toContainText(
+    '测试连接成功后会重新获取额度状态、额度重置时间和检查时间。',
+  )
   await expect(credentialList.getByRole('columnheader')).toHaveText([
     '认证凭据',
     '认证方式',
@@ -2119,12 +2144,24 @@ test('服务商支持个人订阅优先并保留 API Key 兜底', async ({ page 
     expect.objectContaining({ authType: 'SUBSCRIPTION', authAdapter: 'OPENAI_CODEX' }),
   ])
 
+  const downloadPromise = page.waitForEvent('download')
+  await subscriptionRow
+    .getByRole('button', { name: '导出 OpenAI 个人订阅 的 auth.json', exact: true })
+    .click()
+  const exported = await downloadPromise
+  expect(exported.suggestedFilename()).toBe('auth.json')
+  const exportedStream = await exported.createReadStream()
+  const exportedChunks: Buffer[] = []
+  for await (const chunk of exportedStream) exportedChunks.push(Buffer.from(chunk))
+  expect(Buffer.concat(exportedChunks).toString()).toBe(authJSON)
+  await expect(page.getByRole('status')).toContainText('已导出 auth.json')
+
   await subscriptionRow
     .getByRole('button', { name: '验证 OpenAI 个人订阅 的可用性', exact: true })
     .click()
   await expect(modal(page).getByRole('status')).toContainText('个人订阅验证通过')
   await expect(modal(page)).toContainText(
-    '通过 ChatGPT 额度接口验证订阅认证并刷新额度状态，不会发起模型调用。',
+    '成功后会更新额度状态、额度重置时间和检查时间，不会发起模型调用。',
   )
   await modal(page).getByRole('button', { name: '关闭', exact: true }).last().click()
   expect(state.resources[0].quotaStatus).toBe('AVAILABLE')
@@ -2139,7 +2176,9 @@ test('服务商支持个人订阅优先并保留 API Key 兜底', async ({ page 
   await modal(page).getByRole('combobox', { name: '认证方式' }).selectOption('API_KEY')
   await modal(page).getByLabel('API Key', { exact: true }).fill('fallback-api-key')
   await modal(page).getByRole('button', { name: '保存', exact: true }).click()
-  await expect(modal(page).getByRole('row').filter({ hasText: 'OpenAI API Key' })).toBeVisible()
+  const apiKeyRow = modal(page).getByRole('row').filter({ hasText: 'OpenAI API Key' })
+  await expect(apiKeyRow).toBeVisible()
+  await expect(apiKeyRow.getByRole('button', { name: /导出/ })).toHaveCount(0)
   await modal(page).getByRole('button', { name: '关闭', exact: true }).click()
   await expect(page.locator('dialog')).toHaveCount(0)
   expect(state.resources).toEqual(
@@ -2178,6 +2217,58 @@ test('服务商支持个人订阅优先并保留 API Key 兜底', async ({ page 
     .poll(() => state.resources.filter((resource) => resource.authType === 'SUBSCRIPTION').length)
     .toBe(0)
   expect(state.resources.some((resource) => resource.authType === 'API_KEY')).toBe(true)
+})
+
+test('Anthropic 官方渠道直接输入 Claude 个人订阅 Token', async ({ page }) => {
+  const state = await fixture(page)
+  state.providers.push({
+    id: '83',
+    name: 'Anthropic',
+    code: 'anthropic-official',
+    type: 'OFFICIAL',
+    status: 'ACTIVE',
+    website: 'https://www.anthropic.com',
+    endpoints: [{ protocolType: 'ANTHROPIC', baseUrl: 'https://api.anthropic.com' }],
+    proxyEnabled: false,
+    proxyUrl: null,
+    proxyHeaders: [],
+    modelSyncSupported: false,
+    authAdapters: ['API_KEY', 'ANTHROPIC_CLAUDE_CODE'],
+    createdAt: stamp,
+    updatedAt: stamp,
+  })
+  await signIn(page)
+  await page.getByRole('link', { name: '服务商', exact: true }).click()
+  const providerRow = page.getByRole('row').filter({ hasText: 'Anthropic' })
+  await providerRow.getByRole('button', { name: '管理 Anthropic 的认证凭据' }).click()
+  await modal(page).getByRole('button', { name: '新增凭据', exact: true }).click()
+  await modal(page).getByRole('combobox', { name: '认证方式' }).selectOption('SUBSCRIPTION')
+
+  const token = 'sk-ant-oat01-fixture-token'
+  await expect(modal(page)).toContainText('claude setup-token')
+  const commandGuide = modal(page).locator('div.subscription-source-guide')
+  await expect(commandGuide).toBeVisible()
+  await expect(modal(page).locator('details.subscription-source-guide')).toHaveCount(0)
+  await expect(commandGuide.locator('code')).toHaveText('claude setup-token')
+  await expect(modal(page).getByRole('tablist')).toHaveCount(0)
+  await expect(modal(page).locator('input[type="file"]')).toHaveCount(0)
+  await expect(modal(page).locator('.subscription-command-list > div')).toHaveCount(1)
+  await expect(modal(page).getByRole('button', { name: '复制 Claude Code 命令' })).toBeVisible()
+  const tokenInput = modal(page).getByLabel('Claude Code OAuth Token', { exact: true })
+  await tokenInput.fill('invalid-token')
+  await modal(page).getByRole('button', { name: '保存', exact: true }).click()
+  await expect(page.locator('.toast')).toContainText('有效 Claude Code OAuth Token')
+
+  await tokenInput.fill(token)
+  await modal(page).getByRole('button', { name: '保存', exact: true }).click()
+  expect(state.resources).toEqual([
+    expect.objectContaining({
+      authType: 'SUBSCRIPTION',
+      authAdapter: 'ANTHROPIC_CLAUDE_CODE',
+      credential: token,
+    }),
+  ])
+  await expect(modal(page).getByRole('row').filter({ hasText: 'Anthropic 个人订阅' })).toBeVisible()
 })
 
 test('状态 switch 直接生效且危险操作仍需确认', async ({ page }) => {

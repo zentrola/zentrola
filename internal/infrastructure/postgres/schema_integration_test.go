@@ -277,7 +277,10 @@ ORDER BY c.relname,a.attnum`, schema)
 	if credentialColumns["last_active_at"] {
 		t.Error("provider_credential.last_active_at was not removed")
 	}
-	for _, column := range []string{"runtime_status", "blocked_reason", "blocked_at", "last_error_at", "last_http_status", "last_error_code"} {
+	for _, column := range []string{
+		"runtime_status", "blocked_reason", "blocked_at", "last_error_at", "last_http_status", "last_error_code",
+		"credential_refreshed_at", "credential_expires_at",
+	} {
 		if !credentialColumns[column] {
 			t.Errorf("provider_credential.%s is missing", column)
 		}

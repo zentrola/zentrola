@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestConfigValidation(t *testing.T) {
@@ -27,6 +28,9 @@ func TestConfigValidation(t *testing.T) {
 		{"unbounded gateway", "GATEWAY_REQUEST_TIMEOUT", "0s", "GATEWAY_REQUEST_TIMEOUT"},
 		{"invalid identity cache TTL", "GATEWAY_IDENTITY_CACHE_TTL", "0s", "GATEWAY_IDENTITY_CACHE_TTL"},
 		{"invalid route cache TTL", "GATEWAY_ROUTE_CACHE_TTL", "0s", "GATEWAY_ROUTE_CACHE_TTL"},
+		{"invalid subscription refresh ahead", "CODEX_SUBSCRIPTION_REFRESH_AHEAD", "0s", "CODEX_SUBSCRIPTION_REFRESH_AHEAD"},
+		{"invalid subscription refresh interval", "CODEX_SUBSCRIPTION_REFRESH_INTERVAL", "0s", "CODEX_SUBSCRIPTION_REFRESH_INTERVAL"},
+		{"invalid subscription refresh timeout", "CODEX_SUBSCRIPTION_REFRESH_RUN_TIMEOUT", "0s", "CODEX_SUBSCRIPTION_REFRESH_RUN_TIMEOUT"},
 		{"oversized body limit", "GATEWAY_MAX_BODY_BYTES", "2147483647", "GATEWAY_MAX_BODY_BYTES"},
 		{"empty usage queue", "USAGE_QUEUE_SIZE", "0", "USAGE_QUEUE_SIZE"},
 		{"oversized usage batch", "USAGE_BATCH_SIZE", "10001", "USAGE_BATCH_SIZE"},
@@ -42,6 +46,23 @@ func TestConfigValidation(t *testing.T) {
 				t.Fatalf("expected %s error, got %v", tt.want, err)
 			}
 		})
+	}
+}
+
+func TestSubscriptionRefreshDefaults(t *testing.T) {
+	cfg, err := parse(func(key string) (string, bool) {
+		if key == "POSTGRES_PASSWORD" {
+			return "test-only", true
+		}
+		return "", false
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Gateway.SubscriptionRefreshAhead != 30*time.Minute ||
+		cfg.Gateway.SubscriptionRefreshInterval != time.Minute ||
+		cfg.Gateway.SubscriptionRunTimeout != 4*time.Minute {
+		t.Fatalf("unexpected subscription refresh defaults: %+v", cfg.Gateway)
 	}
 }
 

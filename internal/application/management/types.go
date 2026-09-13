@@ -19,6 +19,7 @@ var (
 	ErrProvider                    = errors.New("provider unavailable")
 	ErrProviderCredentialRequired  = errors.New("provider credential required")
 	ErrModelSyncCredentialRequired = errors.New("model sync credential required")
+	ErrCredentialExportUnsupported = errors.New("credential export unsupported")
 )
 
 const (
@@ -26,6 +27,7 @@ const (
 	AuthTypeSubscription   = "SUBSCRIPTION"
 	AuthAdapterAPIKey      = "API_KEY"
 	AuthAdapterOpenAICodex = "OPENAI_CODEX"
+	AuthAdapterClaudeCode  = "ANTHROPIC_CLAUDE_CODE"
 	SubscriptionPersonal   = "PERSONAL"
 	QuotaAvailable         = "AVAILABLE"
 	QuotaNearLimit         = "NEAR_LIMIT"
@@ -146,29 +148,31 @@ type ProviderInitializeResult struct {
 	Existing int `json:"existing"`
 }
 type Resource struct {
-	ID                   int64      `json:"id,string"`
-	ProviderID           int64      `json:"providerId,string"`
-	Name                 string     `json:"name"`
-	AuthType             string     `json:"authType"`
-	AuthAdapter          string     `json:"authAdapter"`
-	SubscriptionType     *string    `json:"subscriptionType"`
-	PlanCode             *string    `json:"planCode"`
-	ExternalAccountRef   *string    `json:"externalAccountRef"`
-	Priority             int32      `json:"priority"`
-	EffectiveAt          *time.Time `json:"effectiveAt"`
-	ExpiresAt            *time.Time `json:"expiresAt"`
-	QuotaStatus          string     `json:"quotaStatus"`
-	QuotaCheckedAt       *time.Time `json:"quotaCheckedAt"`
-	QuotaResetsAt        *time.Time `json:"quotaResetsAt"`
-	RuntimeStatus        string     `json:"runtimeStatus"`
-	BlockedReason        *string    `json:"blockedReason"`
-	BlockedAt            *time.Time `json:"blockedAt"`
-	LastErrorAt          *time.Time `json:"lastErrorAt"`
-	LastHTTPStatus       *int32     `json:"lastHttpStatus"`
-	LastErrorCode        *string    `json:"lastErrorCode"`
-	CredentialConfigured bool       `json:"credentialConfigured"`
-	CreatedAt            time.Time  `json:"createdAt"`
-	UpdatedAt            time.Time  `json:"updatedAt"`
+	ID                    int64      `json:"id,string"`
+	ProviderID            int64      `json:"providerId,string"`
+	Name                  string     `json:"name"`
+	AuthType              string     `json:"authType"`
+	AuthAdapter           string     `json:"authAdapter"`
+	SubscriptionType      *string    `json:"subscriptionType"`
+	PlanCode              *string    `json:"planCode"`
+	ExternalAccountRef    *string    `json:"externalAccountRef"`
+	Priority              int32      `json:"priority"`
+	EffectiveAt           *time.Time `json:"effectiveAt"`
+	ExpiresAt             *time.Time `json:"expiresAt"`
+	QuotaStatus           string     `json:"quotaStatus"`
+	QuotaCheckedAt        *time.Time `json:"quotaCheckedAt"`
+	QuotaResetsAt         *time.Time `json:"quotaResetsAt"`
+	CredentialRefreshedAt *time.Time `json:"-"`
+	CredentialExpiresAt   *time.Time `json:"-"`
+	RuntimeStatus         string     `json:"runtimeStatus"`
+	BlockedReason         *string    `json:"blockedReason"`
+	BlockedAt             *time.Time `json:"blockedAt"`
+	LastErrorAt           *time.Time `json:"lastErrorAt"`
+	LastHTTPStatus        *int32     `json:"lastHttpStatus"`
+	LastErrorCode         *string    `json:"lastErrorCode"`
+	CredentialConfigured  bool       `json:"credentialConfigured"`
+	CreatedAt             time.Time  `json:"createdAt"`
+	UpdatedAt             time.Time  `json:"updatedAt"`
 }
 type ResourceQuota struct {
 	Code                  string     `json:"code"`
@@ -197,9 +201,11 @@ type CreateResourceInput struct {
 }
 
 type SubscriptionInspection struct {
-	AccountRef string
-	PlanCode   string
-	ExpiresAt  *time.Time
+	AccountRef            string
+	PlanCode              string
+	ExpiresAt             *time.Time
+	CredentialRefreshedAt *time.Time
+	CredentialExpiresAt   *time.Time
 }
 
 type SubscriptionProbe struct {
@@ -213,7 +219,10 @@ type SubscriptionAdapter interface {
 	Supports(string) bool
 	SupportsProvider(Provider) bool
 	Inspect([]byte) (SubscriptionInspection, error)
-	Probe(context.Context, []byte) (SubscriptionProbe, error)
+	Probe(context.Context, []byte, *catalog.OutboundProxy) (SubscriptionProbe, error)
+}
+type SubscriptionCredentialExporter interface {
+	ExportCredential([]byte) ([]byte, error)
 }
 type Key struct {
 	ID        int64      `json:"id,string"`

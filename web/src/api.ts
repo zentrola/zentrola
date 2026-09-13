@@ -162,6 +162,54 @@ export async function api<T>(path: string, method = 'GET', body?: unknown): Prom
     pending.delete(controller)
   }
 }
+
+export async function download(path: string): Promise<Blob> {
+  const controller = new AbortController()
+  pending.add(controller)
+  const epoch = generation
+  const timeout = setTimeout(() => controller.abort('timeout'), 25000)
+  try {
+    const response = await fetch(`${apiBaseUrl}/api/v1${path}`, {
+      signal: controller.signal,
+      cache: 'no-store',
+      credentials: 'omit',
+      redirect: 'error',
+      headers: token.value ? { Authorization: `Bearer ${token.value}` } : {},
+    })
+    if (epoch !== generation) throw new ApiError('UNAUTHENTICATED')
+    if (!response.ok) {
+      let data: {
+        code?: string
+        requestId?: string
+        data?: { retryAfterSeconds?: number; field?: string }
+      } = {}
+      try {
+        data = await response.json()
+      } catch {
+        // 非 JSON 错误响应统一按 UNKNOWN 处理。
+      }
+      if (response.status === 401 && token.value) clearSession(true)
+      throw new ApiError(
+        data.code || 'UNKNOWN',
+        data.requestId || response.headers.get('X-Request-ID') || '',
+        typeof data.data?.retryAfterSeconds === 'number' &&
+        Number.isFinite(data.data.retryAfterSeconds) &&
+        data.data.retryAfterSeconds > 0
+          ? Math.ceil(data.data.retryAfterSeconds)
+          : 0,
+        typeof data.data?.field === 'string' ? data.data.field : '',
+      )
+    }
+    return await response.blob()
+  } catch (error) {
+    if (epoch !== generation) throw new ApiError('UNAUTHENTICATED')
+    if (error instanceof ApiError) throw error
+    throw new ApiError(controller.signal.reason === 'timeout' ? 'TIMEOUT' : 'NETWORK')
+  } finally {
+    clearTimeout(timeout)
+    pending.delete(controller)
+  }
+}
 export async function login(username: string, password: string) {
   clearSession()
   const result = await api<Session>('/auth/login', 'POST', {

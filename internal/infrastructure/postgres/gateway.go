@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -17,7 +18,16 @@ import (
 
 type GatewayStore struct{ pool *pgxpool.Pool }
 
+type subscriptionRefreshConnectionKey struct{}
+
 func NewGatewayStore(pool *pgxpool.Pool) *GatewayStore { return &GatewayStore{pool: pool} }
+
+func (s *GatewayStore) gatewayQueries(ctx context.Context) *dbgen.Queries {
+	if conn, ok := ctx.Value(subscriptionRefreshConnectionKey{}).(*pgxpool.Conn); ok {
+		return dbgen.New(conn)
+	}
+	return dbgen.New(s.pool)
+}
 func (s *GatewayStore) Resolve(ctx context.Context, identity appsec.PrincipalIdentity, model string, protocols ...string) (gw.Route, error) {
 	routes, err := s.ResolveCandidates(ctx, identity, model, protocols...)
 	if err != nil {
@@ -100,6 +110,7 @@ func (s *GatewayStore) ResolveCandidates(ctx context.Context, identity appsec.Pr
 			UpstreamModel: row.UpstreamModelCode, BaseURL: row.BaseUrl, EndpointProtocol: row.ProtocolType,
 			AuthType: row.AuthType, AuthAdapter: row.AuthAdapter, ResourcePriority: row.ResourcePriority,
 			QuotaStatus: row.QuotaStatus, ExpiresAt: timePointer(row.ExpiresAt),
+			CredentialRefreshedAt: timePointer(row.CredentialRefreshedAt), CredentialExpiresAt: timePointer(row.CredentialExpiresAt),
 			Credential:   catalog.SealedCredential{Ciphertext: row.CredentialCiphertext, Nonce: row.CredentialNonce, KeyVersion: row.KeyVersion},
 			ProxyEnabled: row.ProxyEnabled,
 		}
@@ -156,15 +167,115 @@ func (s *GatewayStore) UpdateResourceCredential(ctx context.Context, route gw.Ro
 	if route.ResourceID <= 0 || route.ProviderID <= 0 || sealed.KeyVersion <= 0 {
 		return gw.ErrInvalid
 	}
-	updated, err := dbgen.New(s.pool).UpdateGatewayResourceCredential(ctx, dbgen.UpdateGatewayResourceCredentialParams{
+	updated, err := s.gatewayQueries(ctx).UpdateGatewayResourceCredential(ctx, dbgen.UpdateGatewayResourceCredentialParams{
 		ResourceID: route.ResourceID, ProviderID: route.ProviderID,
 		CredentialCiphertext: sealed.Ciphertext, CredentialNonce: sealed.Nonce, KeyVersion: sealed.KeyVersion,
+		CredentialRefreshedAt: nullableTime(route.CredentialRefreshedAt), CredentialExpiresAt: nullableTime(route.CredentialExpiresAt),
 		UpdatedAt: pgtype.Timestamptz{Time: time.Now().UTC().Truncate(time.Microsecond), Valid: true},
 	})
 	if err != nil || updated != 1 {
 		return gw.ErrUnavailable
 	}
 	return nil
+}
+
+func (s *GatewayStore) UpdateResourceCredentialRefreshMetadata(ctx context.Context, route gw.Route) error {
+	if route.ResourceID <= 0 || route.ProviderID <= 0 || route.CredentialExpiresAt == nil {
+		return gw.ErrInvalid
+	}
+	updated, err := s.gatewayQueries(ctx).UpdateGatewayResourceCredentialRefreshMetadata(ctx, dbgen.UpdateGatewayResourceCredentialRefreshMetadataParams{
+		ResourceID: route.ResourceID, ProviderID: route.ProviderID,
+		CredentialRefreshedAt: nullableTime(route.CredentialRefreshedAt), CredentialExpiresAt: nullableTime(route.CredentialExpiresAt),
+		UpdatedAt: pgtype.Timestamptz{Time: time.Now().UTC().Truncate(time.Microsecond), Valid: true},
+	})
+	if err != nil || updated > 1 {
+		return gw.ErrUnavailable
+	}
+	return nil
+}
+
+func (s *GatewayStore) LoadResourceCredential(ctx context.Context, route gw.Route) (catalog.SealedCredential, error) {
+	if route.ResourceID <= 0 || route.ProviderID <= 0 {
+		return catalog.SealedCredential{}, gw.ErrInvalid
+	}
+	row, err := s.gatewayQueries(ctx).GatewayResourceCredential(ctx, dbgen.GatewayResourceCredentialParams{
+		ResourceID: route.ResourceID,
+		ProviderID: route.ProviderID,
+	})
+	if err != nil {
+		return catalog.SealedCredential{}, gw.ErrUnavailable
+	}
+	return catalog.SealedCredential{
+		Ciphertext: row.CredentialCiphertext,
+		Nonce:      row.CredentialNonce,
+		KeyVersion: row.KeyVersion,
+	}, nil
+}
+
+func (s *GatewayStore) LockSubscriptionRefresh(ctx context.Context, resourceID int64) (context.Context, func(), error) {
+	if resourceID <= 0 {
+		return ctx, nil, gw.ErrInvalid
+	}
+	conn, err := s.pool.Acquire(ctx)
+	if err != nil {
+		return ctx, nil, gw.ErrUnavailable
+	}
+	if _, err := dbgen.New(conn).LockGatewaySubscriptionRefresh(ctx, resourceID); err != nil {
+		conn.Release()
+		return ctx, nil, gw.ErrUnavailable
+	}
+	var once sync.Once
+	lockedCtx := context.WithValue(ctx, subscriptionRefreshConnectionKey{}, conn)
+	return lockedCtx, func() {
+		once.Do(func() {
+			unlockCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			unlocked, unlockErr := dbgen.New(conn).UnlockGatewaySubscriptionRefresh(unlockCtx, resourceID)
+			if unlockErr == nil && unlocked {
+				conn.Release()
+				return
+			}
+			// 不能把仍持有 session advisory lock 的连接放回连接池。
+			hijacked := conn.Hijack()
+			closeCtx, closeCancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer closeCancel()
+			_ = hijacked.Close(closeCtx)
+		})
+	}, nil
+}
+
+func (s *GatewayStore) ListSubscriptionCredentials(ctx context.Context, after int64, limit int32, refreshBefore time.Time) ([]gw.SubscriptionCredential, error) {
+	if after < 0 || limit <= 0 {
+		return nil, gw.ErrInvalid
+	}
+	rows, err := dbgen.New(s.pool).ListGatewaySubscriptionCredentials(ctx, dbgen.ListGatewaySubscriptionCredentialsParams{
+		AfterID: after, PageLimit: limit, RefreshBefore: pgTime(refreshBefore),
+	})
+	if err != nil {
+		return nil, gw.ErrUnavailable
+	}
+	result := make([]gw.SubscriptionCredential, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, gw.SubscriptionCredential{
+			ProviderID: row.ProviderID, ResourceID: row.ResourceID, AuthAdapter: row.AuthAdapter,
+			CredentialRefreshedAt: timePointer(row.CredentialRefreshedAt), CredentialExpiresAt: timePointer(row.CredentialExpiresAt),
+			Credential: catalog.SealedCredential{
+				Ciphertext: row.CredentialCiphertext, Nonce: row.CredentialNonce, KeyVersion: row.KeyVersion,
+			},
+			ProxyEnabled: row.ProxyEnabled,
+		})
+		if row.ProxyUrlKeyVersion != nil {
+			result[len(result)-1].ProxyURL = catalog.SealedCredential{
+				Ciphertext: row.ProxyUrlCiphertext, Nonce: row.ProxyUrlNonce, KeyVersion: *row.ProxyUrlKeyVersion,
+			}
+		}
+		if row.ProxyHeadersKeyVersion != nil {
+			result[len(result)-1].ProxyHeaders = catalog.SealedCredential{
+				Ciphertext: row.ProxyHeadersCiphertext, Nonce: row.ProxyHeadersNonce, KeyVersion: *row.ProxyHeadersKeyVersion,
+			}
+		}
+	}
+	return result, nil
 }
 
 func (s *GatewayStore) Models(ctx context.Context, identity appsec.PrincipalIdentity) ([]gw.Model, error) {
