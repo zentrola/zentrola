@@ -52,6 +52,28 @@ const credentialTarget = ref<Provider | null>(null)
 const credentialDeleteTarget = ref<Resource | null>(null)
 const credentialCreating = ref(false)
 const credentialAuthType = ref<'API_KEY' | 'SUBSCRIPTION'>('API_KEY')
+type SubscriptionInputMode = 'UPLOAD' | 'PASTE'
+const subscriptionInputMode = ref<SubscriptionInputMode>('UPLOAD')
+const subscriptionFileName = ref('')
+const subscriptionUploadCommands = [
+  { platform: 'macOS', command: 'open ~/.codex' },
+  {
+    platform: 'Windows PowerShell',
+    command: 'explorer.exe "$env:USERPROFILE\\.codex"',
+  },
+  { platform: 'Linux', command: 'xdg-open ~/.codex' },
+] as const
+const subscriptionPasteCommands = [
+  { platform: 'macOS', command: 'pbcopy < ~/.codex/auth.json' },
+  {
+    platform: 'Windows PowerShell',
+    command: 'Get-Content -Raw "$env:USERPROFILE\\.codex\\auth.json" | Set-Clipboard',
+  },
+  { platform: 'Linux', command: 'cat ~/.codex/auth.json' },
+] as const
+const subscriptionCommands = computed(() =>
+  subscriptionInputMode.value === 'UPLOAD' ? subscriptionUploadCommands : subscriptionPasteCommands,
+)
 const testSelectionTarget = ref<Provider | null>(null)
 const selectedTestResourceID = ref('')
 const testTarget = ref<{ provider: Provider; resource: Resource } | null>(null)
@@ -63,6 +85,8 @@ const credential = ref('')
 const activeConfigTab = ref<'models' | 'proxy'>('models')
 const modelConfigTab = ref<HTMLButtonElement | null>(null)
 const proxyConfigTab = ref<HTMLButtonElement | null>(null)
+const subscriptionUploadTab = ref<HTMLButtonElement | null>(null)
+const subscriptionPasteTab = ref<HTMLButtonElement | null>(null)
 type MappingDraft = {
   modelId: string
   upstreamModelCode: string
@@ -491,6 +515,8 @@ function configureCredential(provider: Provider) {
   credentialTarget.value = provider
   credentialCreating.value = false
   credentialAuthType.value = 'API_KEY'
+  subscriptionInputMode.value = 'UPLOAD'
+  subscriptionFileName.value = ''
   credential.value = ''
   actionError.value = ''
 }
@@ -498,12 +524,45 @@ function configureCredential(provider: Provider) {
 function addCredential() {
   credentialCreating.value = true
   credentialAuthType.value = 'API_KEY'
+  subscriptionInputMode.value = 'UPLOAD'
+  subscriptionFileName.value = ''
   credential.value = ''
 }
 
 function cancelCredentialCreation() {
   credentialCreating.value = false
+  subscriptionInputMode.value = 'UPLOAD'
+  subscriptionFileName.value = ''
   credential.value = ''
+}
+
+function resetCredentialInput() {
+  subscriptionInputMode.value = 'UPLOAD'
+  subscriptionFileName.value = ''
+  credential.value = ''
+}
+
+function selectSubscriptionInputMode(mode: SubscriptionInputMode) {
+  if (subscriptionInputMode.value === mode) return
+  subscriptionInputMode.value = mode
+  subscriptionFileName.value = ''
+  credential.value = ''
+}
+
+async function focusSubscriptionInputMode(mode: SubscriptionInputMode) {
+  selectSubscriptionInputMode(mode)
+  await nextTick()
+  const tab = mode === 'UPLOAD' ? subscriptionUploadTab.value : subscriptionPasteTab.value
+  tab?.focus()
+}
+
+async function copySubscriptionCommand(command: string) {
+  try {
+    await navigator.clipboard.writeText(command)
+    showSuccessToast(t('common.copied'))
+  } catch {
+    showErrorToast(t('common.copyFailed'))
+  }
 }
 
 function openDelete(provider: Provider) {
@@ -524,14 +583,27 @@ function deleteProvider() {
 function closeCredential() {
   credentialTarget.value = null
   credentialCreating.value = false
+  subscriptionInputMode.value = 'UPLOAD'
+  subscriptionFileName.value = ''
   credential.value = ''
+}
+
+function validSubscriptionCredential(value: string) {
+  const size = new TextEncoder().encode(value).length
+  if (!value.trim() || size > 65536) return false
+  try {
+    const parsed = JSON.parse(value)
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+  } catch {
+    return false
+  }
 }
 
 function saveCredential() {
   const valid =
     credentialAuthType.value === 'API_KEY'
       ? /^[\x21-\x7e]{1,4096}$/.test(credential.value)
-      : credential.value.length > 0 && new TextEncoder().encode(credential.value).length <= 65536
+      : validSubscriptionCredential(credential.value)
   if (!valid) {
     showErrorToast(
       t(
@@ -553,6 +625,8 @@ function saveCredential() {
     })
     await loadResources()
     credentialCreating.value = false
+    subscriptionInputMode.value = 'UPLOAD'
+    subscriptionFileName.value = ''
     credential.value = ''
     showSuccessToast(t('common.saved'))
   })
@@ -565,9 +639,12 @@ async function importSubscription(event: Event) {
   if (file.size > 65536) {
     showErrorToast(t('resources.subscriptionRequired'))
     input.value = ''
+    subscriptionFileName.value = ''
+    credential.value = ''
     return
   }
   credential.value = await file.text()
+  subscriptionFileName.value = file.name
 }
 
 function deleteCredential() {
@@ -1364,8 +1441,11 @@ onMounted(() => {
   >
     <template v-if="!credentialCreating">
       <div class="credential-list-head">
-        <div>
-          <h3>{{ credentialTarget.name }}</h3>
+        <div class="credential-list-heading">
+          <div class="credential-title-line">
+            <h3>{{ credentialTarget.name }}</h3>
+            <Status :value="credentialTarget.status" />
+          </div>
           <p>{{ t('resources.listHint') }}</p>
         </div>
         <button type="button" class="button primary" :disabled="busy" @click="addCredential">
@@ -1373,14 +1453,6 @@ onMounted(() => {
         </button>
       </div>
       <dl class="credential-overview">
-        <div>
-          <dt>{{ t('resources.provider') }}</dt>
-          <dd>{{ credentialTarget.name }}</dd>
-        </div>
-        <div>
-          <dt>{{ t('common.status') }}</dt>
-          <dd><Status :value="credentialTarget.status" /></dd>
-        </div>
         <div class="credential-overview-endpoints">
           <dt>{{ t('resources.baseUrl') }}</dt>
           <dd>
@@ -1503,7 +1575,12 @@ onMounted(() => {
           t('resources.authType')
         }}</label>
         <div class="credential-form-control">
-          <select id="credential-auth-type" v-model="credentialAuthType" :disabled="busy">
+          <select
+            id="credential-auth-type"
+            v-model="credentialAuthType"
+            :disabled="busy"
+            @change="resetCredentialInput"
+          >
             <option value="API_KEY">{{ t('resources.authTypes.API_KEY') }}</option>
             <option
               v-if="credentialTarget.authAdapters?.includes('OPENAI_CODEX')"
@@ -1514,17 +1591,12 @@ onMounted(() => {
           </select>
         </div>
       </div>
-      <div class="credential-form-row">
-        <label
-          class="credential-form-label"
-          :for="credentialAuthType === 'API_KEY' ? 'credential-api-key' : 'credential-auth-file'"
-          >{{
-            t(credentialAuthType === 'API_KEY' ? 'resources.apiKey' : 'resources.authFile')
-          }}</label
-        >
+      <div v-if="credentialAuthType === 'API_KEY'" class="credential-form-row">
+        <label class="credential-form-label" for="credential-api-key">{{
+          t('resources.apiKey')
+        }}</label>
         <div class="credential-form-control">
           <input
-            v-if="credentialAuthType === 'API_KEY'"
             id="credential-api-key"
             v-model="credential"
             type="password"
@@ -1534,26 +1606,125 @@ onMounted(() => {
             :disabled="busy"
             spellcheck="false"
           />
+        </div>
+      </div>
+      <p v-if="credentialAuthType === 'API_KEY'" class="field-hint credential-form-hint">
+        {{ t('resources.credentialHint') }}
+      </p>
+      <section v-else class="subscription-import">
+        <div
+          class="subscription-input-tabs"
+          role="tablist"
+          :aria-label="t('resources.subscriptionMethodLabel')"
+        >
+          <button
+            id="subscription-upload-tab"
+            ref="subscriptionUploadTab"
+            type="button"
+            role="tab"
+            :aria-selected="subscriptionInputMode === 'UPLOAD'"
+            aria-controls="subscription-upload-panel"
+            :tabindex="subscriptionInputMode === 'UPLOAD' ? 0 : -1"
+            :disabled="busy"
+            @click="selectSubscriptionInputMode('UPLOAD')"
+            @keydown.right.prevent="focusSubscriptionInputMode('PASTE')"
+            @keydown.end.prevent="focusSubscriptionInputMode('PASTE')"
+          >
+            {{ t('resources.subscriptionMethods.UPLOAD') }}
+          </button>
+          <button
+            id="subscription-paste-tab"
+            ref="subscriptionPasteTab"
+            type="button"
+            role="tab"
+            :aria-selected="subscriptionInputMode === 'PASTE'"
+            aria-controls="subscription-paste-panel"
+            :tabindex="subscriptionInputMode === 'PASTE' ? 0 : -1"
+            :disabled="busy"
+            @click="selectSubscriptionInputMode('PASTE')"
+            @keydown.left.prevent="focusSubscriptionInputMode('UPLOAD')"
+            @keydown.home.prevent="focusSubscriptionInputMode('UPLOAD')"
+          >
+            {{ t('resources.subscriptionMethods.PASTE') }}
+          </button>
+        </div>
+
+        <details :key="subscriptionInputMode" class="subscription-source-guide">
+          <summary>
+            <Icon name="arrow" :size="13" />
+            <span>{{
+              t(
+                subscriptionInputMode === 'UPLOAD'
+                  ? 'resources.subscriptionFolderCommandTitle'
+                  : 'resources.subscriptionCommandTitle',
+              )
+            }}</span>
+          </summary>
+          <div class="subscription-command-list">
+            <div v-for="item in subscriptionCommands" :key="item.platform">
+              <span>{{ item.platform }}</span>
+              <code :title="item.command">{{ item.command }}</code>
+              <button
+                type="button"
+                class="icon-button subscription-command-copy"
+                :aria-label="t('resources.copySubscriptionCommand', { platform: item.platform })"
+                :title="t('resources.copySubscriptionCommand', { platform: item.platform })"
+                @click="copySubscriptionCommand(item.command)"
+              >
+                <Icon name="copy" :size="14" />
+              </button>
+            </div>
+          </div>
+        </details>
+
+        <div
+          v-if="subscriptionInputMode === 'UPLOAD'"
+          id="subscription-upload-panel"
+          class="subscription-input-panel"
+          role="tabpanel"
+          aria-labelledby="subscription-upload-tab"
+        >
           <input
-            v-else
             id="credential-auth-file"
+            class="subscription-file-input"
             type="file"
             accept=".json,application/json"
             required
+            :aria-label="t('resources.authFile')"
             :disabled="busy"
             @change="importSubscription"
           />
+          <label class="subscription-file-picker" for="credential-auth-file">
+            <Icon name="upload" :size="21" />
+            <span>
+              <strong>{{ subscriptionFileName || t('resources.subscriptionChooseFile') }}</strong>
+              <small>{{ t('resources.subscriptionFileLimit') }}</small>
+            </span>
+          </label>
+          <p class="field-hint">{{ t('resources.subscriptionUploadHint') }}</p>
         </div>
-      </div>
-      <p class="field-hint credential-form-hint">
-        {{
-          t(
-            credentialAuthType === 'API_KEY'
-              ? 'resources.credentialHint'
-              : 'resources.subscriptionHint',
-          )
-        }}
-      </p>
+
+        <div
+          v-else
+          id="subscription-paste-panel"
+          class="subscription-input-panel"
+          role="tabpanel"
+          aria-labelledby="subscription-paste-tab"
+        >
+          <p class="subscription-paste-intro">{{ t('resources.subscriptionPasteHint') }}</p>
+          <textarea
+            id="credential-auth-content"
+            v-model="credential"
+            rows="8"
+            autocomplete="off"
+            required
+            :aria-label="t('resources.subscriptionPasteLabel')"
+            :disabled="busy"
+            :placeholder="t('resources.subscriptionPastePlaceholder')"
+            spellcheck="false"
+          ></textarea>
+        </div>
+      </section>
     </form>
     <template #footer>
       <template v-if="credentialCreating">
@@ -1861,42 +2032,42 @@ onMounted(() => {
 }
 .credential-list-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 20px;
-  margin-bottom: 18px;
+  margin-bottom: 14px;
+}
+.credential-list-heading {
+  min-width: 0;
+}
+.credential-title-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
 }
 .credential-list-head h3 {
   margin: 0;
   color: #183247;
-  font-size: 15px;
+  font-size: 17px;
+  line-height: 1.35;
+}
+.credential-title-line .status {
+  margin: 0;
 }
 .credential-list-head p {
-  max-width: 430px;
-  margin: 5px 0 0;
+  max-width: 520px;
+  margin: 4px 0 0;
   color: var(--muted);
   font-size: 12px;
   line-height: 1.55;
 }
 .credential-overview {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0;
   margin: 0 0 16px;
   overflow: hidden;
   border: 1px solid #dce5ee;
   border-radius: 8px;
-  background: #f8fafc;
-}
-.credential-overview > div {
-  display: grid;
-  grid-template-columns: 92px minmax(0, 1fr);
-  gap: 10px;
-  padding: 10px 12px;
-  border-bottom: 1px solid #e3eaf1;
-}
-.credential-overview > div:nth-child(odd):not(.credential-overview-endpoints) {
-  border-right: 1px solid #e3eaf1;
+  background: #f8fbfe;
 }
 .credential-overview dt,
 .credential-overview dd {
@@ -1907,30 +2078,46 @@ onMounted(() => {
   color: #687e92;
   font-size: 11px;
   font-weight: 600;
+  letter-spacing: 0.01em;
 }
 .credential-overview dd {
   color: #29445c;
   font-size: 12px;
 }
 .credential-overview-endpoints {
-  grid-column: 1 / -1;
-  border-bottom: 0 !important;
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr);
+  align-items: stretch;
+}
+.credential-overview-endpoints dt {
+  display: flex;
+  align-items: center;
+  padding: 12px 14px;
+  border-right: 1px solid #e3eaf1;
 }
 .credential-overview-endpoints dd {
   display: grid;
-  gap: 6px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  background: #fff;
 }
 .credential-overview-endpoints dd > span {
-  display: grid;
-  grid-template-columns: 64px minmax(0, 1fr);
-  gap: 8px;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 10px;
+  padding: 11px 14px;
+}
+.credential-overview-endpoints dd > span + span {
+  border-left: 1px solid #e3eaf1;
 }
 .credential-overview-endpoints b {
+  flex: 0 0 auto;
   color: #73889a;
   font-size: 10px;
   font-weight: 600;
 }
 .credential-overview-endpoints code {
+  min-width: 0;
   overflow: hidden;
   color: #38556f;
   text-overflow: ellipsis;
@@ -2119,6 +2306,200 @@ onMounted(() => {
 }
 .credential-form-hint {
   margin: -2px 0 0 100px;
+}
+.subscription-import {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+}
+.subscription-input-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid #dce5ee;
+}
+.subscription-input-tabs button {
+  position: relative;
+  padding: 9px 14px 10px;
+  border: 0;
+  color: #667d91;
+  cursor: pointer;
+  background: transparent;
+  font: inherit;
+  font-weight: 600;
+}
+.subscription-input-tabs button::after {
+  position: absolute;
+  right: 12px;
+  bottom: -1px;
+  left: 12px;
+  height: 2px;
+  content: '';
+  background: transparent;
+}
+.subscription-input-tabs button[aria-selected='true'] {
+  color: var(--blue);
+}
+.subscription-input-tabs button[aria-selected='true']::after {
+  background: var(--blue);
+}
+.subscription-input-tabs button:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid #90b7fb;
+  outline-offset: -2px;
+}
+.subscription-input-tabs button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.subscription-source-guide {
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid #e5ebf1;
+  border-radius: 7px;
+  color: #607589;
+  background: #fbfcfe;
+}
+.subscription-source-guide summary {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 10px;
+  color: #708397;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1.4;
+  list-style: none;
+}
+.subscription-source-guide summary::-webkit-details-marker {
+  display: none;
+}
+.subscription-source-guide summary:hover {
+  color: #4f6e89;
+  background: #f7f9fc;
+}
+.subscription-source-guide summary:focus-visible {
+  outline: 2px solid #90b7fb;
+  outline-offset: -2px;
+}
+.subscription-source-guide summary svg {
+  flex: none;
+  transition: transform 0.16s ease;
+}
+.subscription-source-guide[open] summary {
+  border-bottom: 1px solid #e8edf2;
+}
+.subscription-source-guide[open] summary svg {
+  transform: rotate(90deg);
+}
+.subscription-command-list {
+  display: grid;
+  padding: 4px 10px 6px;
+}
+.subscription-command-list > div {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr) 28px;
+  align-items: center;
+  min-width: 0;
+  gap: 7px;
+  padding: 7px 0;
+}
+.subscription-command-list > div + div {
+  border-top: 1px solid #e1e9f2;
+}
+.subscription-command-list span {
+  color: #71869a;
+  font-size: 10px;
+}
+.subscription-command-list code {
+  min-width: 0;
+  overflow: hidden;
+  color: #385a75;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.subscription-command-copy {
+  width: 28px;
+  height: 28px;
+  color: #6e91b8;
+  opacity: 0.8;
+}
+.subscription-command-list > div:hover .subscription-command-copy,
+.subscription-command-copy:focus-visible {
+  opacity: 1;
+}
+.subscription-input-panel {
+  display: grid;
+  gap: 8px;
+}
+.subscription-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+  white-space: nowrap;
+}
+.subscription-file-picker {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 64px;
+  padding: 11px 14px;
+  border: 1px dashed #aec4d8;
+  border-radius: 7px;
+  color: #48718f;
+  cursor: pointer;
+  background: #fbfdff;
+}
+.subscription-file-picker:hover {
+  border-color: #78a4e8;
+  background: #f6faff;
+}
+.subscription-file-input:focus-visible + .subscription-file-picker {
+  outline: 2px solid #90b7fb;
+  outline-offset: 2px;
+}
+.subscription-file-input:disabled + .subscription-file-picker {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.subscription-file-picker > svg {
+  flex: none;
+}
+.subscription-file-picker span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+.subscription-file-picker strong {
+  overflow: hidden;
+  color: #29465f;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.subscription-file-picker small {
+  color: var(--muted);
+  font-size: 10px;
+}
+.subscription-input-panel > .field-hint {
+  margin: 0;
+}
+.subscription-paste-intro {
+  margin: 0;
+  color: #485e72;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.subscription-input-panel textarea {
+  width: 100%;
+  min-height: 142px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+  font-size: 11px;
+  line-height: 1.55;
 }
 .credential-create-form .form-footer {
   margin-top: 2px;
@@ -2615,15 +2996,25 @@ onMounted(() => {
     justify-content: flex-start;
   }
   .credential-overview {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .credential-overview > div,
-  .credential-overview > div:nth-child(odd):not(.credential-overview-endpoints) {
-    grid-template-columns: 88px minmax(0, 1fr);
-    border-right: 0;
+    background: #fff;
   }
   .credential-overview-endpoints {
-    grid-column: 1;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .credential-overview-endpoints dt {
+    padding: 9px 12px 7px;
+    border-right: 0;
+    background: #f8fbfe;
+  }
+  .credential-overview-endpoints dd {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .credential-overview-endpoints dd > span {
+    padding: 10px 12px;
+  }
+  .credential-overview-endpoints dd > span + span {
+    border-top: 1px solid #e3eaf1;
+    border-left: 0;
   }
   .credential-form-row {
     grid-template-columns: 1fr;
@@ -2635,6 +3026,15 @@ onMounted(() => {
   }
   .credential-form-hint {
     margin-left: 0;
+  }
+  .subscription-input-tabs button {
+    flex: 1;
+  }
+  .subscription-source-guide {
+    border-radius: 6px;
+  }
+  .subscription-command-list > div {
+    grid-template-columns: 86px minmax(0, 1fr) 28px;
   }
   .credential-list-head {
     align-items: stretch;
