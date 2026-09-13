@@ -2377,40 +2377,48 @@ tbody tr:hover {
   background: #fff;
 }
 .ranking-head {
-  padding: 21px 23px 18px;
+  padding: 0;
   border-bottom: 1px solid #edf1f5;
 }
-.ranking-head > span {
-  margin-top: 2px;
-  padding: 3px 8px;
-  border-radius: 5px;
-  background: #edf3fb;
-  color: #53708b;
-  font-size: 11px;
-  font-weight: 650;
-}
-.ranking-head-actions {
+.ranking-head-link {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  width: 100%;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 21px 23px 18px;
+  transition:
+    color 0.15s,
+    background-color 0.15s;
 }
-.ranking-head-actions > span {
+.ranking-head-link:hover {
+  color: #1f5d9f;
+  background: #f8fafd;
+}
+.ranking-head-link:focus-visible {
+  outline-offset: -3px;
+}
+.ranking-head-meta {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 7px;
+  margin-top: 2px;
+  color: #53708b;
+}
+.ranking-head-meta > span {
   padding: 3px 8px;
   border-radius: 5px;
-  color: #53708b;
   background: #edf3fb;
   font-size: 11px;
   font-weight: 650;
 }
-.ranking-head-actions a {
-  color: #376b9c;
-  font-size: 12px;
-  font-weight: 600;
+.ranking-head-meta svg {
+  transition: transform 0.15s;
 }
-.ranking-head-actions a:hover {
+.ranking-head-link:hover .ranking-head-meta svg {
   color: var(--blue);
-  text-decoration: underline;
-  text-underline-offset: 3px;
+  transform: translateX(2px);
 }
 .ranking-list {
   list-style: none;
@@ -3013,7 +3021,7 @@ tbody tr:hover {
   .access-panel {
     padding: 21px;
   }
-  .ranking-head {
+  .ranking-head-link {
     padding: 19px 20px 16px;
   }
   .ranking-list {
