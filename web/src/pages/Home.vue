@@ -383,13 +383,14 @@ onMounted(load)
   <div class="ranking-grid">
     <section class="ranking-panel">
       <div class="ranking-head">
-        <div>
+        <RouterLink
+          class="ranking-head-link"
+          :to="statisticsRoute('member')"
+          :aria-label="t('home.tokenRanking')"
+        >
           <h2>{{ t('home.tokenRanking') }}</h2>
-        </div>
-        <div class="ranking-head-actions">
-          <span>Top 10</span>
-          <RouterLink :to="statisticsRoute('member')">{{ t('home.viewAll') }}</RouterLink>
-        </div>
+          <span class="ranking-head-meta"><span>Top 10</span><Icon name="arrow" :size="14" /></span>
+        </RouterLink>
       </div>
       <ol v-if="summary?.tokenRanking.length" class="ranking-list token-ranking">
         <li v-for="(item, index) in summary.tokenRanking" :key="item.principalId">
@@ -418,13 +419,14 @@ onMounted(load)
 
     <section class="ranking-panel">
       <div class="ranking-head">
-        <div>
+        <RouterLink
+          class="ranking-head-link"
+          :to="statisticsRoute('model')"
+          :aria-label="t('home.clientModelRanking')"
+        >
           <h2>{{ t('home.clientModelRanking') }}</h2>
-        </div>
-        <div class="ranking-head-actions">
-          <span>Top 10</span>
-          <RouterLink :to="statisticsRoute('model')">{{ t('home.viewAll') }}</RouterLink>
-        </div>
+          <span class="ranking-head-meta"><span>Top 10</span><Icon name="arrow" :size="14" /></span>
+        </RouterLink>
       </div>
       <ol v-if="summary?.clientModelRanking.length" class="ranking-list model-ranking">
         <li v-for="(item, index) in summary.clientModelRanking" :key="item.modelId">
@@ -454,13 +456,14 @@ onMounted(load)
 
     <section class="ranking-panel">
       <div class="ranking-head">
-        <div>
+        <RouterLink
+          class="ranking-head-link"
+          :to="statisticsRoute('provider')"
+          :aria-label="t('home.providerRanking')"
+        >
           <h2>{{ t('home.providerRanking') }}</h2>
-        </div>
-        <div class="ranking-head-actions">
-          <span>Top 10</span>
-          <RouterLink :to="statisticsRoute('provider')">{{ t('home.viewAll') }}</RouterLink>
-        </div>
+          <span class="ranking-head-meta"><span>Top 10</span><Icon name="arrow" :size="14" /></span>
+        </RouterLink>
       </div>
       <ol v-if="summary?.providerRanking.length" class="ranking-list provider-ranking">
         <li v-for="(item, index) in summary.providerRanking" :key="item.providerId">

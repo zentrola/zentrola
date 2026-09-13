@@ -824,7 +824,15 @@ test('首页展示本月指标、应用接入、配置脚本和分项排行榜',
   await expect(page.locator('.model-ranking small').first()).toContainText('9.1K Token')
   await expect(page.locator('.model-ranking small').first()).toHaveAttribute('title', '9,100 Token')
   await expect(page.locator('.provider-ranking small').first()).toHaveText('9.2K Token')
-  await expect(page.getByRole('link', { name: '查看全部' })).toHaveCount(3)
+  for (const [name, dimension] of [
+    ['用户 Token 消耗排行', 'member'],
+    ['模型请求排行', 'model'],
+    ['服务商调用排行', 'provider'],
+  ])
+    await expect(page.getByRole('link', { name, exact: true })).toHaveAttribute(
+      'href',
+      new RegExp(`dimension=${dimension}`),
+    )
   await expect(page.getByText(/\/v1$/, { exact: true })).toBeVisible()
   await expect(page.getByText(/\/anthropic$/, { exact: true })).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
@@ -2642,6 +2650,7 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
     exact: true,
   })
   await expect(testProviderConnection).toBeVisible()
+  await expect(testProviderConnection).toHaveAttribute('title', '测试连接')
   await expect(testProviderConnection.locator('svg')).toBeVisible()
   await testProviderConnection.click()
   await expect(modal(page).getByRole('status')).toContainText('模型调用验证通过')
