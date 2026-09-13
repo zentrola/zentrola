@@ -4652,6 +4652,12 @@
                     },
                     {
                         "type": "string",
+                        "description": "服务商 ID",
+                        "name": "providerId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "资源 ID",
                         "name": "resourceId",
                         "in": "query"
@@ -4753,6 +4759,106 @@
                                     "properties": {
                                         "data": {
                                             "$ref": "#/definitions/usage.Dashboard"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/usage/statistics": {
+            "get": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "description": "按用户、客户端逻辑模型或服务商聚合指定时间范围内的请求、Token、成功率和平均耗时，并按维度主指标倒序分页。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "用量统计"
+                ],
+                "summary": "用量统计排行",
+                "parameters": [
+                    {
+                        "enum": [
+                            "member",
+                            "model",
+                            "provider"
+                        ],
+                        "type": "string",
+                        "description": "统计维度",
+                        "name": "dimension",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "minimum": 0,
+                        "type": "integer",
+                        "default": 0,
+                        "description": "上一页 nextCursor，表示排行偏移量",
+                        "name": "after",
+                        "in": "query"
+                    },
+                    {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer",
+                        "default": 50,
+                        "description": "每页数量",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "起始时间 RFC3339",
+                        "name": "from",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "结束时间 RFC3339",
+                        "name": "to",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/http.PageResponse-usage_StatisticRow"
                                         }
                                     }
                                 }
@@ -5756,6 +5862,23 @@
                 }
             }
         },
+        "http.PageResponse-usage_StatisticRow": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/usage.StatisticRow"
+                    }
+                },
+                "nextCursor": {
+                    "type": "string"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
         "http.RevokedResponse": {
             "type": "object",
             "properties": {
@@ -6726,6 +6849,45 @@
                 },
                 "status": {
                     "type": "string"
+                }
+            }
+        },
+        "usage.StatisticRow": {
+            "type": "object",
+            "properties": {
+                "averageLatencyMs": {
+                    "type": "integer"
+                },
+                "cachedInputTokens": {
+                    "type": "integer"
+                },
+                "code": {
+                    "type": "string"
+                },
+                "count": {
+                    "type": "integer"
+                },
+                "entityId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "inputTokens": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "outputTokens": {
+                    "type": "integer"
+                },
+                "overallTokens": {
+                    "type": "integer"
+                },
+                "successful": {
+                    "type": "integer"
+                },
+                "tokens": {
+                    "type": "integer"
                 }
             }
         },

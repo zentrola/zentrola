@@ -9,11 +9,11 @@ import (
 )
 
 type Filter struct {
-	PrincipalID, ModelID, ResourceID *int64
-	From, To                         time.Time
-	After                            int64
-	Limit                            int32
-	ProbeNext                        bool
+	PrincipalID, ModelID, ProviderID, ResourceID *int64
+	From, To                                     time.Time
+	After                                        int64
+	Limit                                        int32
+	ProbeNext                                    bool
 }
 type Row struct {
 	ClientProtocol    string    `json:"clientProtocol"`
@@ -37,6 +37,38 @@ type Row struct {
 }
 type Page struct {
 	Items []Row
+	Total int64
+}
+type StatisticDimension string
+
+const (
+	StatisticMember   StatisticDimension = "member"
+	StatisticModel    StatisticDimension = "model"
+	StatisticProvider StatisticDimension = "provider"
+)
+
+type StatisticFilter struct {
+	Dimension StatisticDimension
+	From, To  time.Time
+	After     int64
+	Limit     int32
+	ProbeNext bool
+}
+type StatisticRow struct {
+	EntityID          int64  `json:"entityId,string"`
+	Name              string `json:"name"`
+	Code              string `json:"code"`
+	Count             int64  `json:"count"`
+	Successful        int64  `json:"successful"`
+	InputTokens       int64  `json:"inputTokens"`
+	OutputTokens      int64  `json:"outputTokens"`
+	CachedInputTokens int64  `json:"cachedInputTokens"`
+	Tokens            int64  `json:"tokens"`
+	OverallTokens     int64  `json:"overallTokens"`
+	AverageLatencyMS  int64  `json:"averageLatencyMs"`
+}
+type StatisticPage struct {
+	Items []StatisticRow
 	Total int64
 }
 type TokenRank struct {
@@ -68,6 +100,7 @@ type Dashboard struct {
 }
 type QueryStore interface {
 	Query(context.Context, admin.Identity, Filter) (Page, error)
+	Statistics(context.Context, admin.Identity, StatisticFilter) (StatisticPage, error)
 	Dashboard(context.Context, admin.Identity, time.Time, time.Time) (Dashboard, error)
 }
 type QueryService struct{ store QueryStore }
@@ -80,12 +113,23 @@ func (s *QueryService) Query(ctx context.Context, a admin.Identity, f Filter) (P
 	if f.After < 0 || f.Limit < 1 || f.Limit > 100 || f.From.IsZero() || !f.To.After(f.From) || f.To.Sub(f.From) > 366*24*time.Hour {
 		return Page{}, appsec.ErrInvalidArgument
 	}
-	for _, id := range []*int64{f.PrincipalID, f.ModelID, f.ResourceID} {
+	for _, id := range []*int64{f.PrincipalID, f.ModelID, f.ProviderID, f.ResourceID} {
 		if id != nil && *id <= 0 {
 			return Page{}, appsec.ErrInvalidArgument
 		}
 	}
 	return s.store.Query(ctx, a, f)
+}
+
+func (s *QueryService) Statistics(ctx context.Context, a admin.Identity, f StatisticFilter) (StatisticPage, error) {
+	if a.ID <= 0 {
+		return StatisticPage{}, appsec.ErrUnauthenticated
+	}
+	if (f.Dimension != StatisticMember && f.Dimension != StatisticModel && f.Dimension != StatisticProvider) ||
+		f.After < 0 || f.Limit < 1 || f.Limit > 100 || f.From.IsZero() || !f.To.After(f.From) || f.To.Sub(f.From) > 366*24*time.Hour {
+		return StatisticPage{}, appsec.ErrInvalidArgument
+	}
+	return s.store.Statistics(ctx, a, f)
 }
 
 func (s *QueryService) Dashboard(ctx context.Context, a admin.Identity, from, to time.Time) (Dashboard, error) {

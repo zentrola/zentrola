@@ -162,6 +162,19 @@ export interface Usage {
   latencyMs: number
   attemptNo: number
 }
+export interface UsageStatistic {
+  entityId: string
+  name: string
+  code: string
+  count: number
+  successful: number
+  inputTokens: number
+  outputTokens: number
+  cachedInputTokens: number
+  tokens: number
+  overallTokens: number
+  averageLatencyMs: number
+}
 export interface TokenRank {
   principalId: string
   name: string

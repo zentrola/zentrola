@@ -17,7 +17,8 @@ FROM usage_record u
 WHERE u.started_at>=$1::timestamptz AND u.started_at<$2::timestamptz
 AND ($3::bigint IS NULL OR u.principal_id=$3)
 AND ($4::bigint IS NULL OR u.model_id=$4)
-AND ($5::bigint IS NULL OR u.provider_credential_id=$5)
+AND ($5::bigint IS NULL OR u.provider_id=$5)
+AND ($6::bigint IS NULL OR u.provider_credential_id=$6)
 `
 
 type CountUsageParams struct {
@@ -25,6 +26,7 @@ type CountUsageParams struct {
 	ToTime      pgtype.Timestamptz
 	PrincipalID *int64
 	ModelID     *int64
+	ProviderID  *int64
 	ResourceID  *int64
 }
 
@@ -34,6 +36,7 @@ func (q *Queries) CountUsage(ctx context.Context, arg CountUsageParams) (int64, 
 		arg.ToTime,
 		arg.PrincipalID,
 		arg.ModelID,
+		arg.ProviderID,
 		arg.ResourceID,
 	)
 	var column_1 int64
@@ -62,8 +65,9 @@ WHERE (u.id<$1::bigint OR $1::bigint=0)
 AND u.started_at>=$2::timestamptz AND u.started_at<$3::timestamptz
 AND ($4::bigint IS NULL OR u.principal_id=$4)
 AND ($5::bigint IS NULL OR u.model_id=$5)
-AND ($6::bigint IS NULL OR u.provider_credential_id=$6)
-ORDER BY u.id DESC LIMIT $7::int
+AND ($6::bigint IS NULL OR u.provider_id=$6)
+AND ($7::bigint IS NULL OR u.provider_credential_id=$7)
+ORDER BY u.id DESC LIMIT $8::int
 `
 
 type QueryUsageParams struct {
@@ -72,6 +76,7 @@ type QueryUsageParams struct {
 	ToTime      pgtype.Timestamptz
 	PrincipalID *int64
 	ModelID     *int64
+	ProviderID  *int64
 	ResourceID  *int64
 	PageLimit   int32
 }
@@ -104,6 +109,7 @@ func (q *Queries) QueryUsage(ctx context.Context, arg QueryUsageParams) ([]Query
 		arg.ToTime,
 		arg.PrincipalID,
 		arg.ModelID,
+		arg.ProviderID,
 		arg.ResourceID,
 		arg.PageLimit,
 	)
@@ -236,6 +242,170 @@ func (q *Queries) UsageDashboardCounts(ctx context.Context, arg UsageDashboardCo
 	return i, err
 }
 
+const usageMemberStatistics = `-- name: UsageMemberStatistics :many
+SELECT u.principal_id AS entity_id,
+       p.name,
+       ''::text AS code,
+       COUNT(DISTINCT u.request_id)::bigint AS metric_count,
+       COUNT(DISTINCT u.request_id) FILTER (WHERE u.status='SUCCESS') AS successful,
+       COALESCE(SUM(u.input_tokens), 0)::bigint AS input_tokens,
+       COALESCE(SUM(u.output_tokens), 0)::bigint AS output_tokens,
+       COALESCE(SUM(u.cached_input_tokens), 0)::bigint AS cached_input_tokens,
+       COALESCE(SUM(COALESCE(u.input_tokens, 0) + COALESCE(u.output_tokens, 0)), 0)::bigint AS tokens,
+       SUM(SUM(COALESCE(u.input_tokens, 0) + COALESCE(u.output_tokens, 0))) OVER ()::bigint AS overall_tokens,
+       COALESCE(ROUND(AVG(u.latency_ms)), 0)::bigint AS average_latency_ms,
+       COUNT(*) OVER ()::bigint AS total_count
+FROM usage_record u
+JOIN principal p ON p.id=u.principal_id
+WHERE u.started_at>=$1::timestamptz
+  AND u.started_at<$2::timestamptz
+GROUP BY u.principal_id, p.name
+ORDER BY tokens DESC, metric_count DESC, u.principal_id DESC
+LIMIT $4::int OFFSET $3::bigint
+`
+
+type UsageMemberStatisticsParams struct {
+	FromTime   pgtype.Timestamptz
+	ToTime     pgtype.Timestamptz
+	PageOffset int64
+	PageLimit  int32
+}
+
+type UsageMemberStatisticsRow struct {
+	EntityID          int64
+	Name              string
+	Code              string
+	MetricCount       int64
+	Successful        int64
+	InputTokens       int64
+	OutputTokens      int64
+	CachedInputTokens int64
+	Tokens            int64
+	OverallTokens     int64
+	AverageLatencyMs  int64
+	TotalCount        int64
+}
+
+func (q *Queries) UsageMemberStatistics(ctx context.Context, arg UsageMemberStatisticsParams) ([]UsageMemberStatisticsRow, error) {
+	rows, err := q.db.Query(ctx, usageMemberStatistics,
+		arg.FromTime,
+		arg.ToTime,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []UsageMemberStatisticsRow{}
+	for rows.Next() {
+		var i UsageMemberStatisticsRow
+		if err := rows.Scan(
+			&i.EntityID,
+			&i.Name,
+			&i.Code,
+			&i.MetricCount,
+			&i.Successful,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CachedInputTokens,
+			&i.Tokens,
+			&i.OverallTokens,
+			&i.AverageLatencyMs,
+			&i.TotalCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const usageModelStatistics = `-- name: UsageModelStatistics :many
+SELECT m.id AS entity_id,
+       m.display_name AS name,
+       m.model_code AS code,
+       COUNT(DISTINCT u.request_id)::bigint AS metric_count,
+       COUNT(DISTINCT u.request_id) FILTER (WHERE u.status='SUCCESS') AS successful,
+       COALESCE(SUM(u.input_tokens), 0)::bigint AS input_tokens,
+       COALESCE(SUM(u.output_tokens), 0)::bigint AS output_tokens,
+       COALESCE(SUM(u.cached_input_tokens), 0)::bigint AS cached_input_tokens,
+       COALESCE(SUM(COALESCE(u.input_tokens, 0) + COALESCE(u.output_tokens, 0)), 0)::bigint AS tokens,
+       SUM(SUM(COALESCE(u.input_tokens, 0) + COALESCE(u.output_tokens, 0))) OVER ()::bigint AS overall_tokens,
+       COALESCE(ROUND(AVG(u.latency_ms)), 0)::bigint AS average_latency_ms,
+       COUNT(*) OVER ()::bigint AS total_count
+FROM usage_record u
+JOIN model m ON m.id=u.model_id
+WHERE u.started_at>=$1::timestamptz
+  AND u.started_at<$2::timestamptz
+GROUP BY m.id, m.display_name, m.model_code
+ORDER BY metric_count DESC, tokens DESC, m.id DESC
+LIMIT $4::int OFFSET $3::bigint
+`
+
+type UsageModelStatisticsParams struct {
+	FromTime   pgtype.Timestamptz
+	ToTime     pgtype.Timestamptz
+	PageOffset int64
+	PageLimit  int32
+}
+
+type UsageModelStatisticsRow struct {
+	EntityID          int64
+	Name              string
+	Code              string
+	MetricCount       int64
+	Successful        int64
+	InputTokens       int64
+	OutputTokens      int64
+	CachedInputTokens int64
+	Tokens            int64
+	OverallTokens     int64
+	AverageLatencyMs  int64
+	TotalCount        int64
+}
+
+func (q *Queries) UsageModelStatistics(ctx context.Context, arg UsageModelStatisticsParams) ([]UsageModelStatisticsRow, error) {
+	rows, err := q.db.Query(ctx, usageModelStatistics,
+		arg.FromTime,
+		arg.ToTime,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []UsageModelStatisticsRow{}
+	for rows.Next() {
+		var i UsageModelStatisticsRow
+		if err := rows.Scan(
+			&i.EntityID,
+			&i.Name,
+			&i.Code,
+			&i.MetricCount,
+			&i.Successful,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CachedInputTokens,
+			&i.Tokens,
+			&i.OverallTokens,
+			&i.AverageLatencyMs,
+			&i.TotalCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const usageProviderRanking = `-- name: UsageProviderRanking :many
 SELECT p.id AS provider_id,
        p.provider_name,
@@ -276,6 +446,88 @@ func (q *Queries) UsageProviderRanking(ctx context.Context, arg UsageProviderRan
 			&i.ProviderName,
 			&i.Calls,
 			&i.Tokens,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const usageProviderStatistics = `-- name: UsageProviderStatistics :many
+SELECT p.id AS entity_id,
+       p.provider_name AS name,
+       p.provider_code AS code,
+       COUNT(*)::bigint AS metric_count,
+       COUNT(*) FILTER (WHERE u.status='SUCCESS') AS successful,
+       COALESCE(SUM(u.input_tokens), 0)::bigint AS input_tokens,
+       COALESCE(SUM(u.output_tokens), 0)::bigint AS output_tokens,
+       COALESCE(SUM(u.cached_input_tokens), 0)::bigint AS cached_input_tokens,
+       COALESCE(SUM(COALESCE(u.input_tokens, 0) + COALESCE(u.output_tokens, 0)), 0)::bigint AS tokens,
+       SUM(SUM(COALESCE(u.input_tokens, 0) + COALESCE(u.output_tokens, 0))) OVER ()::bigint AS overall_tokens,
+       COALESCE(ROUND(AVG(u.latency_ms)), 0)::bigint AS average_latency_ms,
+       COUNT(*) OVER ()::bigint AS total_count
+FROM usage_record u
+JOIN provider p ON p.id=u.provider_id
+WHERE u.started_at>=$1::timestamptz
+  AND u.started_at<$2::timestamptz
+GROUP BY p.id, p.provider_name, p.provider_code
+ORDER BY metric_count DESC, tokens DESC, p.id DESC
+LIMIT $4::int OFFSET $3::bigint
+`
+
+type UsageProviderStatisticsParams struct {
+	FromTime   pgtype.Timestamptz
+	ToTime     pgtype.Timestamptz
+	PageOffset int64
+	PageLimit  int32
+}
+
+type UsageProviderStatisticsRow struct {
+	EntityID          int64
+	Name              string
+	Code              string
+	MetricCount       int64
+	Successful        int64
+	InputTokens       int64
+	OutputTokens      int64
+	CachedInputTokens int64
+	Tokens            int64
+	OverallTokens     int64
+	AverageLatencyMs  int64
+	TotalCount        int64
+}
+
+func (q *Queries) UsageProviderStatistics(ctx context.Context, arg UsageProviderStatisticsParams) ([]UsageProviderStatisticsRow, error) {
+	rows, err := q.db.Query(ctx, usageProviderStatistics,
+		arg.FromTime,
+		arg.ToTime,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []UsageProviderStatisticsRow{}
+	for rows.Next() {
+		var i UsageProviderStatisticsRow
+		if err := rows.Scan(
+			&i.EntityID,
+			&i.Name,
+			&i.Code,
+			&i.MetricCount,
+			&i.Successful,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CachedInputTokens,
+			&i.Tokens,
+			&i.OverallTokens,
+			&i.AverageLatencyMs,
+			&i.TotalCount,
 		); err != nil {
 			return nil, err
 		}

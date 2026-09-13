@@ -140,6 +140,7 @@ async function fixture(page: Page) {
     memberListQueries: URLSearchParams[] = [],
     memberSuggestionQueries: URLSearchParams[] = [],
     usageQueries: URLSearchParams[] = [],
+    statisticQueries: URLSearchParams[] = [],
     modelSyncRequests: string[] = []
   const providerInputs: any[] = []
   const safeProviderProxy = (input: any) => {
@@ -214,6 +215,40 @@ async function fixture(page: Page) {
         ],
       })
     const pageReply = (items: any[]) => reply({ items, nextCursor: null, total: items.length })
+    if (path === '/usage/statistics' && method === 'GET') {
+      statisticQueries.push(new URLSearchParams(url.searchParams))
+      const dimension = url.searchParams.get('dimension')
+      const shared = {
+        successful: 17,
+        inputTokens: 6100,
+        outputTokens: 2100,
+        cachedInputTokens: 800,
+        tokens: 8200,
+        overallTokens: 12840,
+        averageLatencyMs: 236,
+      }
+      if (dimension === 'model')
+        return pageReply([
+          {
+            ...shared,
+            entityId: '71',
+            name: 'DeepSeek V4 Flash',
+            code: 'deepseek-v4-flash',
+            count: 18,
+          },
+        ])
+      if (dimension === 'provider')
+        return pageReply([
+          {
+            ...shared,
+            entityId: '81',
+            name: 'DeepSeek',
+            code: 'deepseek',
+            count: 20,
+          },
+        ])
+      return pageReply([{ ...shared, entityId: longID, name: '林知远', code: '', count: 18 }])
+    }
     if (path === '/members/suggestions' && method === 'GET') {
       memberSuggestionQueries.push(new URLSearchParams(url.searchParams))
       const name = url.searchParams.get('name') || ''
@@ -660,6 +695,7 @@ async function fixture(page: Page) {
     memberListQueries,
     memberSuggestionQueries,
     usageQueries,
+    statisticQueries,
     modelSyncRequests,
     expire: () => {
       unauthorized = true
@@ -788,6 +824,7 @@ test('首页展示本月指标、应用接入、配置脚本和分项排行榜',
   await expect(page.locator('.model-ranking small').first()).toContainText('9.1K Token')
   await expect(page.locator('.model-ranking small').first()).toHaveAttribute('title', '9,100 Token')
   await expect(page.locator('.provider-ranking small').first()).toHaveText('9.2K Token')
+  await expect(page.getByRole('link', { name: '查看全部' })).toHaveCount(3)
   await expect(page.getByText(/\/v1$/, { exact: true })).toBeVisible()
   await expect(page.getByText(/\/anthropic$/, { exact: true })).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
@@ -2716,7 +2753,22 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
   expect(state.members[0].status).toBe('DISABLED')
 
   const memberListRequestCount = state.memberListQueries.length
-  await page.getByRole('link', { name: '用量记录' }).click()
+  await page.getByRole('link', { name: '用量分析' }).click()
+  await expect(page.getByRole('heading', { name: '用量分析', exact: true })).toBeVisible()
+  await expect(page.getByRole('tab', { name: '统计排行', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  )
+  await expect.poll(() => state.statisticQueries.at(-1)?.get('dimension')).toBe('member')
+  await page.getByRole('tab', { name: '模型请求', exact: true }).click()
+  await expect.poll(() => state.statisticQueries.at(-1)?.get('dimension')).toBe('model')
+  await page.getByRole('tab', { name: '服务商调用', exact: true }).click()
+  await expect.poll(() => state.statisticQueries.at(-1)?.get('dimension')).toBe('provider')
+  const providerStatisticRow = page.getByRole('row').filter({ hasText: 'DeepSeek' })
+  await expect(providerStatisticRow).toContainText('20')
+  await page.screenshot({ path: 'test-results/visual/usage-statistics.png', fullPage: true })
+  await providerStatisticRow.getByRole('button', { name: '查看明细', exact: true }).click()
+  await expect.poll(() => state.usageQueries.at(-1)?.get('providerId')).toBe('81')
   const dateRangeButton = page.getByRole('button', { name: '选择起止日期', exact: true })
   await expect(dateRangeButton.locator('svg')).toHaveCount(1)
   const defaultDates = (await dateRangeButton.textContent())?.match(/\d{4}\/\d{2}\/\d{2}/g) || [],
@@ -2757,10 +2809,12 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
   expect(state.memberSuggestionQueries.at(-1)?.get('name')).toBe('林知')
   expect(state.memberSuggestionQueries.at(-1)?.get('limit')).toBe('8')
   await page.getByRole('combobox', { name: '模型', exact: true }).selectOption('71')
+  await page.getByRole('combobox', { name: '服务商', exact: true }).selectOption('81')
   await expect(page.getByRole('combobox', { name: '服务商凭证', exact: true })).toHaveCount(0)
   await page.getByRole('button', { name: '搜索', exact: true }).click()
   await expect.poll(() => state.usageQueries.at(-1)?.get('memberId')).toBe(longID)
   expect(state.usageQueries.at(-1)?.get('modelId')).toBe('71')
+  expect(state.usageQueries.at(-1)?.get('providerId')).toBe('81')
   expect(state.usageQueries.at(-1)?.get('resourceId')).toBeNull()
   const usageRow = page.getByRole('row').filter({ hasText: 'OpenAI' })
   await expect(usageRow.locator('td').nth(5)).toHaveText('0')
@@ -2837,8 +2891,8 @@ test('14 寸屏幕默认展开侧栏并将横向溢出限制在表格内', async
   await expect(modelLink.locator('span')).toBeVisible()
   await expect(modelLink).toHaveAttribute('data-label', '模型')
 
-  await page.getByRole('link', { name: '用量记录', exact: true }).click()
-  await expect(page.getByRole('heading', { name: '用量记录', exact: true })).toBeVisible()
+  await page.getByRole('link', { name: '用量分析', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '用量分析', exact: true })).toBeVisible()
   await expect(page.locator('.usage-context')).toHaveCount(0)
   await expect(page.locator('.usage-list-panel > .usage-filters')).toHaveCount(1)
   await expect(page.locator('.usage-list-panel > .table-scroll')).toHaveCount(1)
@@ -2855,8 +2909,8 @@ test('有操作列表固定首尾列，无操作列表只固定首列', async ({
   await fixture(page)
   await page.setViewportSize({ width: 760, height: 768 })
   await signIn(page, 'home')
-  await page.goto('/#/usage')
-  await expect(page.getByRole('heading', { name: '用量记录', exact: true })).toBeVisible()
+  await page.goto('/#/usage?view=records')
+  await expect(page.getByRole('heading', { name: '用量分析', exact: true })).toBeVisible()
 
   const tableScroll = page.locator('.usage-list-panel > .table-scroll')
   await expect(tableScroll).toHaveClass(/is-overflowing/)
@@ -3038,7 +3092,8 @@ test('成员列表按 ID 倒序前后翻页，保持长 ID 并拒绝无效用量
   await expect(page.getByText('第一页成员', { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '首页' })).toBeDisabled()
   expect(pages).toBe(5)
-  await page.getByRole('link', { name: '用量记录' }).click()
+  await page.getByRole('link', { name: '用量分析' }).click()
+  await page.getByRole('tab', { name: '请求明细', exact: true }).click()
   await expect(page.getByRole('button', { name: '搜索', exact: true })).toBeEnabled()
   await expect(page.getByText('默认查询昨天至今天')).toHaveCount(0)
   await expect(page.locator('.model-filter-field .filter-label')).toHaveCSS('font-weight', '400')
