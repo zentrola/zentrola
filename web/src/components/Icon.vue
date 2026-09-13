@@ -17,6 +17,7 @@ const paths: Record<string, string> = {
   usage: 'M4 3v18h17M8 16v-5m5 5V7m5 9V3',
   operations: 'M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2',
   plus: 'M12 5v14M5 12h14',
+  upload: 'M12 16V4m0 0-5 5m5-5 5 5M4 16v4h16v-4',
   search: 'M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0',
   calendar: 'M7 3v3m10-3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v14H4V6a1 1 0 0 1 1-1Z',
   close: 'm6 6 12 12M18 6 6 18',

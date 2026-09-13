@@ -1901,14 +1901,18 @@ test('服务商列表展示凭证聚合运行状态和错误原因', async ({ pa
 
   await expect(page.getByRole('columnheader', { name: '运行状态', exact: true })).toBeVisible()
   const row = page.getByRole('row').filter({ hasText: 'DeepSeek' })
-  await expect(row.getByText('已阻断', { exact: true })).toBeVisible()
+  await expect(row.getByText('不可用', { exact: true })).toBeVisible()
   await expect(row).not.toContainText('余额或计费异常 · HTTP 402')
   await expect(row.locator('.provider-runtime-state')).toHaveAttribute(
     'title',
-    '查看 DeepSeek 的凭证，当前运行状态：已阻断：余额或计费异常 · HTTP 402 · UPSTREAM_BILLING_BLOCKED',
+    '查看 DeepSeek 的凭证，当前运行状态：不可用：余额或计费异常 · HTTP 402 · UPSTREAM_BILLING_BLOCKED',
   )
   await row.getByRole('button', { name: /查看 DeepSeek 的凭证/ }).click()
   await expect(modal(page).getByRole('heading', { name: '凭证配置' })).toBeVisible()
+  await expect(modal(page).locator('.credential-title-line')).toContainText('DeepSeek')
+  await expect(modal(page).locator('.credential-title-line')).toContainText('启用')
+  await expect(modal(page).locator('.credential-overview dt')).toHaveText(['Base URL'])
+  await expect(modal(page).locator('.credential-overview-endpoints dd > span')).toHaveCount(2)
   await expect(modal(page).locator('.credential-overview')).not.toContainText('API Key · ••••••••')
   await expect(modal(page).locator('.credential-overview')).toContainText(
     'https://api.deepseek.com',
@@ -1928,7 +1932,7 @@ test('服务商列表展示凭证聚合运行状态和错误原因', async ({ pa
     '错误信息',
     '操作',
   ])
-  await expect(credentialRow.getByRole('cell').nth(2)).toContainText('已阻断')
+  await expect(credentialRow.getByRole('cell').nth(2)).toContainText('不可用')
   await expect(credentialRow.getByRole('cell').nth(3)).toContainText('余额或计费异常 · HTTP 402')
   await expect(credentialRow.getByRole('cell').nth(3)).toContainText('UPSTREAM_BILLING_BLOCKED')
   const credentialList = modal(page).locator('.credential-list')
@@ -1947,6 +1951,7 @@ test('服务商列表展示凭证聚合运行状态和错误原因', async ({ pa
 })
 
 test('服务商支持个人订阅优先并保留 API Key 兜底', async ({ page }) => {
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
   const state = await fixture(page)
   state.providers.push({
     id: '82',
@@ -1976,23 +1981,73 @@ test('服务商支持个人订阅优先并保留 API Key 兜底', async ({ page 
     .click()
   await modal(page).getByRole('button', { name: '新增凭据', exact: true }).click()
   await modal(page).getByRole('combobox', { name: '认证方式' }).selectOption('SUBSCRIPTION')
+  const authJSON = JSON.stringify({
+    auth_mode: 'chatgpt',
+    tokens: {
+      id_token: 'fixture-id-token',
+      access_token: 'fixture-access-token',
+      refresh_token: 'fixture-refresh-token',
+      account_id: 'fixture-account',
+    },
+  })
+  const subscriptionTabs = modal(page).getByRole('tablist', {
+    name: '个人订阅凭据导入方式',
+  })
+  await expect(subscriptionTabs.getByRole('tab')).toHaveText(['上传文件', '手动输入'])
+  await expect(subscriptionTabs.getByRole('tab', { name: '上传文件' })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  )
+  const sourceGuide = modal(page).locator('.subscription-source-guide')
+  const sourceSummary = sourceGuide.locator('summary')
+  await expect(sourceSummary).toHaveText('找不到文件？查看打开目录命令')
+  await expect(sourceGuide.locator('.subscription-command-list')).toBeHidden()
+  await modal(page).screenshot({
+    path: '../.cache/web-visual/provider-subscription-upload.png',
+  })
+  await sourceSummary.click()
+  await expect(sourceGuide).toHaveAttribute('open', '')
+  await expect(sourceGuide).toContainText('open ~/.codex')
+  await expect(sourceGuide).toContainText('explorer.exe')
+  await expect(sourceGuide).toContainText('xdg-open ~/.codex')
+  await expect(sourceGuide.getByRole('button', { name: /复制 .* 命令/ })).toHaveCount(3)
+  await expect(modal(page)).toContainText('运行上方命令打开 Codex 目录，然后选择 auth.json。')
   await modal(page)
     .getByLabel('Codex auth.json', { exact: true })
     .setInputFiles({
       name: 'auth.json',
       mimeType: 'application/json',
-      buffer: Buffer.from(
-        JSON.stringify({
-          auth_mode: 'chatgpt',
-          tokens: {
-            id_token: 'fixture-id-token',
-            access_token: 'fixture-access-token',
-            refresh_token: 'fixture-refresh-token',
-            account_id: 'fixture-account',
-          },
-        }),
-      ),
+      buffer: Buffer.from(authJSON),
     })
+  await expect(modal(page).locator('.subscription-file-picker')).toContainText('auth.json')
+  await subscriptionTabs.getByRole('tab', { name: '上传文件' }).press('ArrowRight')
+  await expect(subscriptionTabs.getByRole('tab', { name: '手动输入' })).toBeFocused()
+  await expect(subscriptionTabs.getByRole('tab', { name: '手动输入' })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  )
+  const authContent = modal(page).getByLabel('auth.json 内容', { exact: true })
+  await expect(authContent).toBeVisible()
+  await expect(modal(page).getByLabel('Codex auth.json', { exact: true })).toHaveCount(0)
+  await expect(sourceSummary).toHaveText('查看复制文件内容命令')
+  await expect(sourceGuide.locator('.subscription-command-list')).toBeHidden()
+  await expect(modal(page)).toContainText('运行上方命令获取内容，然后粘贴到输入框。')
+  await expect(modal(page).getByText('auth.json 内容', { exact: true })).toHaveCount(0)
+  await modal(page).screenshot({
+    path: '../.cache/web-visual/provider-subscription-paste.png',
+  })
+  await sourceSummary.click()
+  await expect(sourceGuide).toContainText('pbcopy < ~/.codex/auth.json')
+  await expect(sourceGuide).toContainText('Set-Clipboard')
+  await expect(sourceGuide).toContainText('cat ~/.codex/auth.json')
+  await sourceGuide.getByRole('button', { name: '复制 macOS 命令', exact: true }).click()
+  await expect(page.locator('.toast-success')).toContainText('已复制')
+  await authContent.fill('{')
+  await modal(page).getByRole('button', { name: '保存', exact: true }).click()
+  await expect(page.locator('.toast')).toContainText(
+    '请输入或上传不超过 64 KiB 的有效 Codex auth.json。',
+  )
+  await authContent.fill(authJSON)
   await modal(page).getByRole('button', { name: '保存', exact: true }).click()
   const credentialList = modal(page)
   await expect(credentialList.getByRole('columnheader')).toHaveText([
