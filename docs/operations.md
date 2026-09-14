@@ -92,7 +92,7 @@ LOG_FILE_MAX_BACKUPS=10
 - Containers and Kubernetes: write JSON to stdout and let the runtime or logging agent rotate and ship it.
 - A single host without a logging agent: set `LOG_FILE_PATH` to enable JSON Lines with application-managed rotation.
 - Do not let multiple processes write the same log file.
-- `APP_ENV=dev` may log unredacted JSON request and response summaries. They can contain credentials, prompts, messages, and model output. Never enable this behavior in production or share those logs.
+- `APP_ENV=dev` and `APP_ENV=test` log unredacted JSON request and response summaries. They can contain credentials, prompts, messages, and model output, so do not share those logs. `APP_ENV=prod` does not log request or response bodies.
 
 Sensitive authentication headers are excluded from access-log summaries. Response `X-Trace-ID` and `X-Span-ID` values can be used to correlate requests.
 
