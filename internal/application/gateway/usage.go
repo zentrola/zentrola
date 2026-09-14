@@ -19,6 +19,9 @@ type UsageObserver struct {
 	line, data                    []byte
 	drop                          bool
 	start, stop, failed, badUsage bool
+	protocolInvalid               bool
+	blocks                        map[int]bool
+	nextBlock                     int
 	input, output, cached         *int64
 	eventCount                    int64
 	lastEvent                     string
@@ -26,18 +29,19 @@ type UsageObserver struct {
 }
 
 type UsageDiagnostics struct {
-	Stream       bool
-	Started      bool
-	Stopped      bool
-	Failed       bool
-	BadUsage     bool
-	JSONComplete bool
-	JSONInvalid  bool
-	InputSeen    bool
-	OutputSeen   bool
-	CachedSeen   bool
-	EventCount   int64
-	LastEvent    string
+	Stream          bool
+	Started         bool
+	Stopped         bool
+	Failed          bool
+	ProtocolInvalid bool
+	BadUsage        bool
+	JSONComplete    bool
+	JSONInvalid     bool
+	InputSeen       bool
+	OutputSeen      bool
+	CachedSeen      bool
+	EventCount      int64
+	LastEvent       string
 }
 
 func NewOpenAIUsageObserver(stream bool) *UsageObserver {
@@ -267,6 +271,7 @@ func (o *UsageObserver) event(raw []byte) {
 	}
 	var e struct {
 		Type    string          `json:"type"`
+		Index   *int            `json:"index"`
 		Usage   json.RawMessage `json:"usage"`
 		Message struct {
 			Usage json.RawMessage `json:"usage"`
@@ -274,25 +279,70 @@ func (o *UsageObserver) event(raw []byte) {
 	}
 	if json.Unmarshal(raw, &e) != nil {
 		o.badUsage = true
+		o.invalidateProtocol()
 		return
 	}
 	switch e.Type {
 	case "message_start":
-		if o.start {
-			o.badUsage = true
+		if o.start || o.stop {
+			o.invalidateProtocol()
+			return
 		}
 		o.start = true
 		o.update(e.Message.Usage)
+	case "content_block_start":
+		if !o.start || o.stop || o.hasOpenBlocks() || e.Index == nil || *e.Index != o.nextBlock {
+			o.invalidateProtocol()
+			return
+		}
+		if o.blocks == nil {
+			o.blocks = map[int]bool{}
+		}
+		if _, exists := o.blocks[*e.Index]; exists {
+			o.invalidateProtocol()
+			return
+		}
+		o.blocks[*e.Index] = true
+		o.nextBlock++
+	case "content_block_delta":
+		if e.Index == nil || !o.blocks[*e.Index] {
+			o.invalidateProtocol()
+		}
+	case "content_block_stop":
+		if e.Index == nil || !o.blocks[*e.Index] {
+			o.invalidateProtocol()
+			return
+		}
+		o.blocks[*e.Index] = false
 	case "message_delta":
-		if !o.start || o.stop {
-			o.badUsage = true
+		if !o.start || o.stop || o.hasOpenBlocks() {
+			o.invalidateProtocol()
+			return
 		}
 		o.update(e.Usage)
 	case "message_stop":
+		if !o.start || o.stop || o.hasOpenBlocks() {
+			o.invalidateProtocol()
+			return
+		}
 		o.stop = true
 	case "error":
 		o.failed = true
 	}
+}
+
+func (o *UsageObserver) invalidateProtocol() {
+	o.protocolInvalid = true
+	o.failed = true
+}
+
+func (o *UsageObserver) hasOpenBlocks() bool {
+	for _, open := range o.blocks {
+		if open {
+			return true
+		}
+	}
+	return false
 }
 func (o *UsageObserver) update(raw []byte) {
 	if len(raw) == 0 {
@@ -410,10 +460,19 @@ func (o *UsageObserver) Complete() bool {
 	return o.start && o.json.complete && !o.json.invalid && !o.failed
 }
 func (o *UsageObserver) ErrorCode() string {
+	if o.protocolInvalid {
+		return "UPSTREAM_INVALID_RESPONSE"
+	}
 	if o.failed {
 		return "UPSTREAM_STREAM_ERROR"
 	}
 	return "UPSTREAM_RESPONSE_INCOMPLETE"
+}
+
+// ProtocolInvalid 表示 Anthropic SSE 的 JSON 或 content block 生命周期不合法。
+// 它与 usage 字段缺失或异常分离，避免仅因计费信息不可用而中断正常响应。
+func (o *UsageObserver) ProtocolInvalid() bool {
+	return o != nil && o.stream && !o.openai && o.protocolInvalid
 }
 func (o *UsageObserver) Tokens(complete bool) (*int64, *int64, *int64) {
 	if o.badUsage || o.json.invalid {
@@ -430,18 +489,19 @@ func (o *UsageObserver) Diagnostics() UsageDiagnostics {
 		return UsageDiagnostics{}
 	}
 	return UsageDiagnostics{
-		Stream:       o.stream,
-		Started:      o.start,
-		Stopped:      o.stop,
-		Failed:       o.failed,
-		BadUsage:     o.badUsage,
-		JSONComplete: o.json.complete,
-		JSONInvalid:  o.json.invalid,
-		InputSeen:    o.input != nil,
-		OutputSeen:   o.output != nil,
-		CachedSeen:   o.cached != nil,
-		EventCount:   o.eventCount,
-		LastEvent:    o.lastEvent,
+		Stream:          o.stream,
+		Started:         o.start,
+		Stopped:         o.stop,
+		Failed:          o.failed,
+		ProtocolInvalid: o.protocolInvalid,
+		BadUsage:        o.badUsage,
+		JSONComplete:    o.json.complete,
+		JSONInvalid:     o.json.invalid,
+		InputSeen:       o.input != nil,
+		OutputSeen:      o.output != nil,
+		CachedSeen:      o.cached != nil,
+		EventCount:      o.eventCount,
+		LastEvent:       o.lastEvent,
 	}
 }
 

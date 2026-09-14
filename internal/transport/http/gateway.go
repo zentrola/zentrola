@@ -378,6 +378,24 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if observer != nil {
 				observer.Feed(buffer[:n])
 			}
+			if observer != nil && observer.ProtocolInvalid() {
+				interrupted(observer.ErrorCode())
+				g.service.ReportInvalidStream(r.Context(), upstream)
+				g.logger.WarnContext(r.Context(), "gateway rejected invalid upstream stream",
+					"error_code", observer.ErrorCode(),
+					"protocol", protocol,
+					"upstream_status", upstream.Status,
+					"upstream_bytes", upstreamBytes,
+				)
+				if downstreamOpen {
+					payload := []byte("event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"The upstream model provider returned an invalid streaming response. [UPSTREAM_INVALID_RESPONSE]\"}}\n\n")
+					_ = controller.SetWriteDeadline(time.Now().Add(g.cfg.WriteTimeout))
+					_, _ = w.Write(payload)
+					_ = controller.Flush()
+				}
+				cancel()
+				return
+			}
 			if downstreamOpen {
 				_ = controller.SetWriteDeadline(time.Now().Add(g.cfg.WriteTimeout))
 				if _, err := w.Write(buffer[:n]); err != nil {
