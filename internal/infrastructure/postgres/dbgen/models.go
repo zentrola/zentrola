@@ -450,14 +450,6 @@ type UsageRecord struct {
 	OutputTokens *int64
 	// 缓存读取 Token 数；NULL=上游未返回可靠值，0=已确认零用量
 	CachedInputTokens *int64
-	// 计量单位：TOKEN=Token；CALL=调用次数；IMAGE=图像数量；SECOND=秒数
-	BillingUnit string
-	// 计量数量；NULL=无法可靠确认；非客户销售金额
-	BillingQuantity pgtype.Numeric
-	// 上游成本快照；NULL=未计算，MVP 不实现成本计算
-	CostAmount pgtype.Numeric
-	// 成本币种；NULL=未计算成本
-	CostCurrency *string
 	// 真实上游调用开始时间，UTC
 	StartedAt pgtype.Timestamptz
 	// 上游调用结束时间，UTC

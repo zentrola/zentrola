@@ -271,7 +271,8 @@ async function fixture(page: Page) {
         const filtered = status ? groups.filter((group) => group.status === status) : groups
         return pageReply([...filtered].sort((a, b) => (BigInt(a.id) > BigInt(b.id) ? -1 : 1)))
       }
-      if (path === '/resources') return pageReply(resources.map(({ credential: _, ...row }) => row))
+      if (path === '/resources')
+        return pageReply(resources.map(({ credential: _, quotaDetails: __, ...row }) => row))
       if (path === '/operation-logs') return pageReply(operations)
       if (path === '/usage') {
         usageQueries.push(url.searchParams)
@@ -687,11 +688,61 @@ async function fixture(page: Page) {
       resources.find((r) => r.id === segments[1]).credential = body.credential
       return reply({ updated: true })
     }
+    if (segments[2] === 'quotas' && method === 'GET') {
+      const resource = resources.find((candidate) => candidate.id === segments[1])
+      if (!resource) return reply(null, 404, 'NOT_FOUND')
+      return reply(resource.quotaDetails || [])
+    }
     if (segments[2] === 'test-connection') {
       const resource = resources.find((candidate) => candidate.id === segments[1])
       if (resource?.authType === 'SUBSCRIPTION' && !failedTest) {
         resource.quotaStatus = 'AVAILABLE'
         resource.quotaCheckedAt = stamp
+        resource.quotaResetsAt = stamp
+        resource.quotaDetails = [
+          {
+            code: 'codex.primary',
+            name: null,
+            status: 'AVAILABLE',
+            unit: 'PERCENT',
+            limitValue: null,
+            usedValue: null,
+            remainingValue: null,
+            usedPercent: 25,
+            windowDurationSeconds: 18000,
+            resetsAt: stamp,
+            reachedType: null,
+            observedAt: stamp,
+          },
+          {
+            code: 'codex.secondary',
+            name: null,
+            status: 'AVAILABLE',
+            unit: 'PERCENT',
+            limitValue: null,
+            usedValue: null,
+            remainingValue: null,
+            usedPercent: 6,
+            windowDurationSeconds: 604800,
+            resetsAt: stamp,
+            reachedType: null,
+            observedAt: stamp,
+          },
+          {
+            code: 'codex.spark.primary',
+            name: 'Codex Spark',
+            status: 'AVAILABLE',
+            unit: 'PERCENT',
+            limitValue: null,
+            usedValue: null,
+            remainingValue: null,
+            usedPercent: 0,
+            windowDurationSeconds: 604800,
+            resetsAt: stamp,
+            reachedType: null,
+            observedAt: stamp,
+          },
+        ]
       }
       return reply({
         ok: !failedTest,
@@ -1980,28 +2031,28 @@ test('服务商列表展示凭证聚合运行状态和错误原因', async ({ pa
   await expect(modal(page).locator('.credential-title-line')).toContainText('启用')
   await expect(modal(page).locator('.credential-overview dt')).toHaveText(['Base URL'])
   await expect(modal(page).locator('.credential-overview-endpoints dd > span')).toHaveCount(2)
-  await expect(modal(page).locator('.credential-overview')).not.toContainText('API Key · ••••••••')
   await expect(modal(page).locator('.credential-overview')).toContainText(
     'https://api.deepseek.com',
   )
   await expect(
     modal(page).getByRole('button', { name: '验证并恢复 DeepSeek API Key', exact: true }),
   ).toBeVisible()
-  await expect(modal(page).getByRole('button', { name: '保存', exact: true })).toBeVisible()
+  await expect(modal(page).getByRole('button', { name: '保存', exact: true })).toHaveCount(0)
+  await expect(modal(page).locator('.modal-footer')).toHaveCount(0)
   await modal(page).screenshot({ path: '../.cache/web-visual/provider-credential-config.png' })
   const credentialRow = modal(page).getByRole('row').filter({ hasText: 'DeepSeek API Key' })
-  await expect(credentialRow).toContainText('API Key · ••••••••')
+  await expect(credentialRow).not.toContainText('••••••••')
   await expect(credentialRow).toContainText('最后验证时间')
   await expect(modal(page).getByRole('columnheader')).toHaveText([
     '认证凭据',
     '认证方式',
     '运行状态',
-    '错误信息',
     '操作',
   ])
-  await expect(credentialRow.getByRole('cell').nth(2)).toContainText('不可用')
-  await expect(credentialRow.getByRole('cell').nth(3)).toContainText('余额或计费异常 · HTTP 402')
-  await expect(credentialRow.getByRole('cell').nth(3)).toContainText('UPSTREAM_BILLING_BLOCKED')
+  const runtimeCell = credentialRow.getByRole('cell').nth(2)
+  await expect(runtimeCell).toContainText('不可用')
+  await expect(runtimeCell).toContainText('余额或计费异常 · HTTP 402')
+  await expect(runtimeCell).toContainText('UPSTREAM_BILLING_BLOCKED')
   const credentialList = modal(page).locator('.credential-list')
   expect(
     await credentialList.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
@@ -2124,15 +2175,22 @@ test('服务商支持个人订阅优先并保留 API Key 兜底', async ({ page 
     '认证凭据',
     '认证方式',
     '运行状态',
-    '错误信息',
     '操作',
   ])
   const subscriptionRow = credentialList.getByRole('row').filter({ hasText: '个人订阅' })
-  await expect(credentialList.locator('.credential-overview')).not.toContainText('Token · ••••••••')
   await expect(subscriptionRow).toContainText('OpenAI 个人订阅')
-  await expect(subscriptionRow).toContainText('Token · ••••••••')
+  const subscriptionAuthCell = subscriptionRow.getByRole('cell').nth(1)
+  await expect(subscriptionAuthCell).not.toContainText('个人订阅')
+  await expect(subscriptionAuthCell).toContainText('订阅套餐 · plus')
+  await expect(subscriptionAuthCell.locator('.credential-plan')).toHaveCSS(
+    'border-bottom-style',
+    'solid',
+  )
+  await expect(subscriptionRow).not.toContainText('Token')
+  await expect(subscriptionRow).not.toContainText('••••••••')
   await expect(subscriptionRow).toContainText('最后验证时间')
-  await expect(subscriptionRow.getByRole('cell').nth(3)).toHaveText('-')
+  await expect(subscriptionRow.locator('.credential-quota-reset')).toHaveText('额度重置时间 · -')
+  await expect(subscriptionRow.getByRole('cell').nth(2)).toHaveText('正常')
   await expect(
     subscriptionRow.getByRole('button', {
       name: '验证 OpenAI 个人订阅 的可用性',
@@ -2165,13 +2223,44 @@ test('服务商支持个人订阅优先并保留 API Key 兜底', async ({ page 
   )
   await modal(page).getByRole('button', { name: '关闭', exact: true }).last().click()
   expect(state.resources[0].quotaStatus).toBe('AVAILABLE')
-
+  const automaticQuotaRefresh = page.waitForRequest(
+    (request) =>
+      request.method() === 'POST' &&
+      new URL(request.url()).pathname.endsWith(
+        `/resources/${state.resources[0].id}/test-connection`,
+      ),
+  )
+  const quotaDetailRequest = page.waitForRequest((request) =>
+    new URL(request.url()).pathname.endsWith(`/resources/${state.resources[0].id}/quotas`),
+  )
   await providerRow
     .getByRole('button', {
       name: '管理 OpenAI 的认证凭据',
       exact: true,
     })
     .click()
+  await automaticQuotaRefresh
+  await quotaDetailRequest
+  const refreshedSubscriptionRow = modal(page).getByRole('row').filter({ hasText: '个人订阅' })
+  const formattedResetAt = await page.evaluate((value) => {
+    return new Intl.DateTimeFormat('zh-CN', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      hour12: false,
+    }).format(new Date(value))
+  }, stamp)
+  await expect(refreshedSubscriptionRow).toContainText('5 小时窗口 · 剩余 75%')
+  await expect(refreshedSubscriptionRow).toContainText('7 天窗口 · 剩余 94%')
+  await expect(refreshedSubscriptionRow).toContainText('Codex Spark · 7 天窗口 · 剩余 100%')
+  await expect(refreshedSubscriptionRow).not.toContainText('额度可用')
+  await expect(refreshedSubscriptionRow.locator('.credential-quota-reset')).toHaveText([
+    `额度重置时间 · ${formattedResetAt}`,
+    `额度重置时间 · ${formattedResetAt}`,
+    `额度重置时间 · ${formattedResetAt}`,
+  ])
+  await modal(page).screenshot({
+    path: '../.cache/web-visual/provider-subscription-quota.png',
+  })
   await modal(page).getByRole('button', { name: '新增凭据', exact: true }).click()
   await modal(page).getByRole('combobox', { name: '认证方式' }).selectOption('API_KEY')
   await modal(page).getByLabel('API Key', { exact: true }).fill('fallback-api-key')

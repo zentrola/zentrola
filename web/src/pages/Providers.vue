@@ -14,6 +14,7 @@ import type {
   ProviderInitializeResult,
   ProviderProtocol,
   Resource,
+  ResourceQuota,
 } from '../types'
 import Icon from '../components/Icon.vue'
 import ListFooter from '../components/ListFooter.vue'
@@ -87,6 +88,9 @@ const selectedTestResourceID = ref('')
 const testTarget = ref<{ provider: Provider; resource: Resource } | null>(null)
 const testResult = ref<ConnectionResult | null>(null)
 const credentialVerifiedAt = reactive<Record<string, string>>({})
+const credentialQuotas = reactive<Record<string, ResourceQuota[]>>({})
+const quotaRefreshing = reactive<Record<string, boolean>>({})
+const quotaRefreshError = reactive<Record<string, string>>({})
 const syncTarget = ref<{ provider: Provider } | null>(null)
 const syncResult = ref<ModelSyncResult | null>(null)
 const credential = ref('')
@@ -422,12 +426,6 @@ function providerRuntimeActionLabel(provider: Provider) {
   })
 }
 
-function maskedCredential(resource: Resource) {
-  return resource.authType === 'SUBSCRIPTION'
-    ? t('resources.maskedToken')
-    : t('resources.maskedApiKey')
-}
-
 function lastCredentialVerification(resource: Resource) {
   return credentialVerifiedAt[resource.id] || resource.quotaCheckedAt || resource.lastErrorAt
 }
@@ -487,6 +485,81 @@ async function loadResources() {
   }
 }
 
+function displayableQuotas(resourceID: string) {
+  return (credentialQuotas[resourceID] || []).filter(
+    (quota) =>
+      quota.remainingValue !== null ||
+      quota.usedPercent !== null ||
+      quota.limitValue !== null ||
+      quota.usedValue !== null,
+  )
+}
+
+function quotaWindowLabel(quota: ResourceQuota) {
+  const seconds = quota.windowDurationSeconds
+  let window = ''
+  if (seconds && seconds % 86400 === 0)
+    window = t('resources.quotaWindowDays', { value: seconds / 86400 })
+  else if (seconds && seconds % 3600 === 0)
+    window = t('resources.quotaWindowHours', { value: seconds / 3600 })
+  else if (seconds && seconds % 60 === 0)
+    window = t('resources.quotaWindowMinutes', { value: seconds / 60 })
+  const defaultWindow = quota.code === 'codex.primary' || quota.code === 'codex.secondary'
+  const name = quota.name?.trim() || (defaultWindow ? '' : quota.code)
+  return [name, window].filter(Boolean).join(' · ') || quota.code
+}
+
+function quotaRemainingLabel(quota: ResourceQuota) {
+  if (quota.remainingValue !== null) {
+    return t('resources.quotaRemainingValue', {
+      value: quota.remainingValue,
+      unit: quota.unit ? ` ${quota.unit}` : '',
+    })
+  }
+  if (quota.usedPercent !== null) {
+    const value = new Intl.NumberFormat(i18n.global.locale.value, {
+      maximumFractionDigits: 1,
+    }).format(Math.max(0, 100 - quota.usedPercent))
+    return t('resources.quotaRemainingPercent', { value })
+  }
+  if (quota.limitValue !== null && quota.usedValue !== null) {
+    return t('resources.quotaUsageValue', {
+      used: quota.usedValue,
+      limit: quota.limitValue,
+      unit: quota.unit ? ` ${quota.unit}` : '',
+    })
+  }
+  return t('resources.quotaAmountUnknown')
+}
+
+async function refreshSubscriptionQuota(resource: Resource) {
+  if (quotaRefreshing[resource.id]) return
+  quotaRefreshing[resource.id] = true
+  delete quotaRefreshError[resource.id]
+  delete credentialQuotas[resource.id]
+  try {
+    const result = await api<ConnectionResult>(`/resources/${resource.id}/test-connection`, 'POST')
+    if (!result.ok) {
+      quotaRefreshError[resource.id] = resultMessage(result, resource)
+      return
+    }
+    credentialQuotas[resource.id] = await api<ResourceQuota[]>(`/resources/${resource.id}/quotas`)
+  } catch (error) {
+    quotaRefreshError[resource.id] = errorText(error)
+  } finally {
+    delete quotaRefreshing[resource.id]
+  }
+}
+
+async function refreshProviderQuotas(provider: Provider) {
+  await loadResources()
+  const subscriptions = resourcesFor(provider).filter(
+    (resource) => resource.authType === 'SUBSCRIPTION',
+  )
+  await Promise.all(subscriptions.map(refreshSubscriptionQuota))
+  if (subscriptions.length) await loadResources()
+}
+
 async function loadModels() {
   modelError.value = ''
   try {
@@ -527,6 +600,7 @@ function configureCredential(provider: Provider) {
   subscriptionFileName.value = ''
   credential.value = ''
   actionError.value = ''
+  void refreshProviderQuotas(provider)
 }
 
 function addCredential() {
@@ -1518,7 +1592,6 @@ onMounted(() => {
             <col class="credential-name-column" />
             <col class="credential-auth-column" />
             <col class="credential-runtime-column" />
-            <col class="credential-error-column" />
             <col class="credential-operation-column" />
           </colgroup>
           <thead>
@@ -1526,7 +1599,6 @@ onMounted(() => {
               <th>{{ t('resources.credential') }}</th>
               <th>{{ t('resources.authType') }}</th>
               <th>{{ t('resources.runtimeStatus') }}</th>
-              <th>{{ t('resources.errorInfo') }}</th>
               <th class="credential-action-column">{{ t('common.actions') }}</th>
             </tr>
           </thead>
@@ -1543,53 +1615,84 @@ onMounted(() => {
                 </small>
               </td>
               <td class="credential-auth" :data-label="t('resources.authType')">
-                {{ t(`resources.authTypes.${resource.authType || 'API_KEY'}`) }}
-                <small v-if="resource.planCode" class="credential-detail">{{
-                  resource.planCode
-                }}</small>
-                <small class="credential-detail credential-mask">
-                  <code>{{ maskedCredential(resource) }}</code>
-                </small>
-                <Status
-                  v-if="resource.authType === 'SUBSCRIPTION'"
-                  :value="resource.quotaStatus || 'UNKNOWN'"
-                />
-              </td>
-              <td class="credential-runtime" :data-label="t('resources.runtimeStatus')">
-                <div class="credential-runtime-line">
-                  <Status :value="resource.runtimeStatus || 'HEALTHY'" />
-                  <button
-                    type="button"
-                    class="icon-button credential-verify-action"
-                    :class="{ 'is-blocked': resource.runtimeStatus === 'BLOCKED' }"
-                    :aria-label="verificationLabel(resource)"
-                    :title="verificationLabel(resource)"
-                    :disabled="busy"
-                    @click="testCredentialFromModal(credentialTarget, resource)"
+                <div class="credential-auth-content">
+                  <span v-if="resource.authType !== 'SUBSCRIPTION'">
+                    {{ t(`resources.authTypes.${resource.authType || 'API_KEY'}`) }}
+                  </span>
+                  <small v-if="resource.planCode" class="credential-detail credential-plan">
+                    {{ t('resources.plan') }} · {{ resource.planCode }}
+                  </small>
+                  <small
+                    v-if="resource.authType === 'SUBSCRIPTION' && quotaRefreshing[resource.id]"
+                    class="credential-detail credential-quota-feedback"
                   >
-                    <Icon name="refresh" :size="15" />
-                  </button>
+                    {{ t('resources.quotaRefreshing') }}
+                  </small>
+                  <small
+                    v-else-if="
+                      resource.authType === 'SUBSCRIPTION' && quotaRefreshError[resource.id]
+                    "
+                    class="credential-detail credential-quota-feedback is-error"
+                    :title="quotaRefreshError[resource.id]"
+                  >
+                    {{ t('resources.quotaRefreshFailed') }} · {{ quotaRefreshError[resource.id] }}
+                  </small>
+                  <div
+                    v-else-if="
+                      resource.authType === 'SUBSCRIPTION' && displayableQuotas(resource.id).length
+                    "
+                    class="credential-quota-windows"
+                  >
+                    <div
+                      v-for="quota in displayableQuotas(resource.id)"
+                      :key="quota.code"
+                      class="credential-quota-window"
+                    >
+                      <small class="credential-detail">
+                        {{ quotaWindowLabel(quota) }} · {{ quotaRemainingLabel(quota) }}
+                      </small>
+                      <small class="credential-detail credential-quota-reset">
+                        {{ t('resources.quotaResetsAt') }} · {{ date(quota.resetsAt) }}
+                      </small>
+                    </div>
+                  </div>
+                  <template v-else-if="resource.authType === 'SUBSCRIPTION'">
+                    <small v-if="credentialQuotas[resource.id]" class="credential-detail">
+                      {{ t('resources.quotaAmountUnknown') }}
+                    </small>
+                    <small class="credential-detail credential-quota-reset">
+                      {{ t('resources.quotaResetsAt') }} · {{ date(resource.quotaResetsAt) }}
+                    </small>
+                  </template>
                 </div>
               </td>
-              <td class="credential-error" :data-label="t('resources.errorInfo')">
-                <template
-                  v-if="
-                    resource.runtimeStatus === 'BLOCKED' ||
-                    resource.blockedReason ||
-                    resource.lastErrorCode ||
-                    resource.lastHttpStatus
-                  "
-                >
-                  <span>{{ blockedResourceReason(resource) }}</span>
-                  <small
-                    v-if="resource.lastErrorCode"
-                    class="credential-detail"
-                    :title="resource.lastErrorCode"
-                  >
-                    {{ resource.lastErrorCode }}
-                  </small>
-                </template>
-                <span v-else>{{ t('common.none') }}</span>
+              <td class="credential-runtime" :data-label="t('resources.runtimeStatus')">
+                <div class="credential-runtime-content">
+                  <div class="credential-runtime-line">
+                    <Status :value="resource.runtimeStatus || 'HEALTHY'" />
+                    <button
+                      type="button"
+                      class="icon-button credential-verify-action"
+                      :class="{ 'is-blocked': resource.runtimeStatus === 'BLOCKED' }"
+                      :aria-label="verificationLabel(resource)"
+                      :title="verificationLabel(resource)"
+                      :disabled="busy"
+                      @click="testCredentialFromModal(credentialTarget, resource)"
+                    >
+                      <Icon name="refresh" :size="15" />
+                    </button>
+                  </div>
+                  <div v-if="resource.runtimeStatus === 'BLOCKED'" class="credential-runtime-error">
+                    <span>{{ blockedResourceReason(resource) }}</span>
+                    <small
+                      v-if="resource.lastErrorCode"
+                      class="credential-detail"
+                      :title="resource.lastErrorCode"
+                    >
+                      {{ resource.lastErrorCode }}
+                    </small>
+                  </div>
+                </div>
               </td>
               <td class="credential-action-column" :data-label="t('common.actions')">
                 <div class="row-actions">
@@ -1835,24 +1938,12 @@ onMounted(() => {
         </div>
       </section>
     </form>
-    <template #footer>
-      <template v-if="credentialCreating">
-        <button type="button" class="button" :disabled="busy" @click="cancelCredentialCreation">
-          {{ t('common.cancel') }}</button
-        ><button
-          type="submit"
-          form="credential-create-form"
-          class="button primary"
-          :disabled="busy"
-        >
-          {{ t(busy ? 'common.working' : 'common.save') }}
-        </button>
-      </template>
-      <template v-else>
-        <button type="button" class="button primary" :disabled="busy" @click="closeCredential">
-          {{ t('common.save') }}
-        </button>
-      </template>
+    <template v-if="credentialCreating" #footer>
+      <button type="button" class="button" :disabled="busy" @click="cancelCredentialCreation">
+        {{ t('common.cancel') }}</button
+      ><button type="submit" form="credential-create-form" class="button primary" :disabled="busy">
+        {{ t(busy ? 'common.working' : 'common.save') }}
+      </button>
     </template>
   </Modal>
 
@@ -2247,13 +2338,13 @@ onMounted(() => {
   white-space: normal;
 }
 .credential-name-column {
-  width: 30%;
+  width: 31%;
 }
 .credential-auth-column {
-  width: 20%;
+  width: 29%;
 }
 .credential-runtime-column {
-  width: 17%;
+  width: auto;
 }
 .credential-operation-column {
   width: 64px;
@@ -2269,12 +2360,37 @@ onMounted(() => {
 .credential-list td > strong {
   overflow-wrap: anywhere;
 }
-.credential-auth .status {
-  display: flex;
-  width: max-content;
-  max-width: 100%;
-  margin: 5px 0 0;
-  white-space: nowrap;
+.credential-auth-content {
+  min-width: 0;
+}
+.credential-plan {
+  margin: 0 0 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+  color: #536d84;
+}
+.credential-plan + .credential-quota-windows,
+.credential-plan + .credential-quota-feedback {
+  margin-top: 0;
+}
+.credential-quota-windows {
+  display: grid;
+  gap: 7px;
+  margin-top: 6px;
+}
+.credential-quota-window .credential-detail {
+  margin-top: 0;
+}
+.credential-quota-window .credential-detail:first-child {
+  color: #536d84;
+}
+.credential-quota-window .credential-detail + .credential-detail {
+  margin-top: 2px;
+}
+.credential-quota-feedback.is-error {
+  color: var(--danger);
+  text-overflow: clip;
+  white-space: normal;
 }
 .credential-runtime .status {
   margin: 0;
@@ -2290,17 +2406,20 @@ onMounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.credential-mask code {
-  color: #536d84;
-  letter-spacing: 0.04em;
+.credential-runtime-content {
+  min-width: 0;
 }
-.credential-error {
+.credential-runtime-error {
+  margin-top: 7px;
   color: #566d82;
+  font-size: 12px;
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
-.credential-error .credential-detail {
+.credential-runtime-error .credential-detail {
   max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .credential-action-column {
   text-align: right;

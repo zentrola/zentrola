@@ -19,7 +19,7 @@ npm run dev
 Windows PowerShell：
 
 ```powershell
-Set-Location D:\Workspace\Private\zentrola\web
+Set-Location .\web
 npm.cmd ci
 npm.cmd run dev
 ```
@@ -78,7 +78,7 @@ npm run build
 Windows PowerShell：
 
 ```powershell
-Set-Location D:\Workspace\Private\zentrola\web
+Set-Location .\web
 npm.cmd ci
 npm.cmd run build
 ```

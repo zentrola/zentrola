@@ -253,11 +253,8 @@ async function signOut() {
       </div>
     </aside>
     <main class="login-form-area">
+      <LanguageSwitch class="login-language" />
       <form ref="form" class="login-form" :novalidate="setupRequired" @submit.prevent="signIn">
-        <div class="login-form-head">
-          <p class="login-label">{{ t('console') }}</p>
-          <LanguageSwitch class="login-language" />
-        </div>
         <h2>
           {{
             t(
