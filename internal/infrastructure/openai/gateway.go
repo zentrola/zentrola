@@ -50,8 +50,8 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 	if !allowed {
 		return nil, gw.ErrRoute
 	}
-	if (input.Protocol != gw.OpenAIProtocol && input.Protocol != gw.OpenAIResponsesProtocol) ||
-		(input.Path != "/v1/chat/completions" && input.Path != "/v1/responses") || input.BetaQuery {
+	if !gw.IsOpenAIProtocol(input.Protocol) ||
+		(input.Path != "/v1/chat/completions" && input.Path != "/v1/responses" && input.Path != "/v1/images/generations") || input.BetaQuery {
 		return nil, gw.ErrInvalid
 	}
 	if requestCredential == "" || len(requestCredential) > 16<<10 {
@@ -64,6 +64,8 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 	}
 	if route.AuthType != "SUBSCRIPTION" && input.Protocol == gw.OpenAIResponsesProtocol {
 		upstreamPath = "/responses"
+	} else if route.AuthType != "SUBSCRIPTION" && input.Protocol == gw.OpenAIImagesProtocol {
+		upstreamPath = "/images/generations"
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+upstreamPath, bytes.NewReader(input.Body))
 	if err != nil {

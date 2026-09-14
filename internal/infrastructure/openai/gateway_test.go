@@ -76,6 +76,53 @@ func TestResponsesForwarding(t *testing.T) {
 	response.Body.Close()
 }
 
+func TestImageGenerationForwarding(t *testing.T) {
+	c := NewGatewayClient(time.Second)
+	const body = `{"model":"gpt-image","prompt":"draw an otter","stream":true,"partial_images":2}`
+	c.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.String() != "https://api.example.com/v1/images/generations" || r.Method != http.MethodPost {
+			t.Fatalf("unexpected Images URL: %s", r.URL)
+		}
+		if r.Header.Get("Authorization") != "Bearer upstream-only" || r.Header.Get("Accept") != "application/json, text/event-stream" {
+			t.Fatalf("unexpected Images headers: %+v", r.Header)
+		}
+		data, _ := io.ReadAll(r.Body)
+		if string(data) != body {
+			t.Fatalf("Images request changed: %s", data)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": {"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader("event: image_generation.completed\ndata: {\"type\":\"image_generation.completed\",\"b64_json\":\"aW1hZ2U=\"}\n\n")),
+		}, nil
+	})
+	response, err := c.Open(context.Background(), gw.Route{BaseURL: "https://api.example.com/v1"}, gw.Request{
+		Protocol: gw.OpenAIImagesProtocol,
+		Path:     "/v1/images/generations",
+		Body:     []byte(body),
+	}, []byte("upstream-only"))
+	if err != nil || response.Status != http.StatusOK {
+		t.Fatalf("Images forwarding failed: response=%+v err=%v", response, err)
+	}
+	data, readErr := io.ReadAll(response.Body)
+	response.Body.Close()
+	if readErr != nil || !strings.Contains(string(data), `"b64_json":"aW1hZ2U="`) {
+		t.Fatalf("Images response changed: %s, %v", data, readErr)
+	}
+}
+
+func TestImageGenerationRejectsSubscriptionCredential(t *testing.T) {
+	c := NewGatewayClient(time.Second)
+	_, err := c.Open(context.Background(), gw.Route{AuthType: "SUBSCRIPTION", AuthAdapter: "OPENAI_CODEX"}, gw.Request{
+		Protocol: gw.OpenAIImagesProtocol,
+		Path:     "/v1/images/generations",
+		Body:     []byte(`{"model":"gpt-image","prompt":"draw an otter"}`),
+	}, []byte("subscription"))
+	if !errors.Is(err, gw.ErrRoute) {
+		t.Fatalf("Images accepted a subscription credential: %v", err)
+	}
+}
+
 func TestCodexSubscriptionResponsesForwarding(t *testing.T) {
 	c := NewGatewayClient(time.Second)
 	var headers http.Header

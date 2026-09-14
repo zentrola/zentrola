@@ -29,7 +29,7 @@ func (u *CompatibleUpstream) Open(ctx context.Context, route Route, request Requ
 	}
 	inboundProtocol := request.Protocol
 	sameProtocol := endpointProtocol == AnthropicEndpoint && inboundProtocol == AnthropicProtocol ||
-		endpointProtocol == OpenAIEndpoint && (inboundProtocol == OpenAIProtocol || inboundProtocol == OpenAIResponsesProtocol)
+		endpointProtocol == OpenAIEndpoint && IsOpenAIProtocol(inboundProtocol)
 
 	upstream := u.openAI
 	if endpointProtocol == AnthropicEndpoint {
@@ -118,7 +118,7 @@ func translateCompatibilityHeaders(headers http.Header, targetProtocol string) {
 		}
 		return
 	}
-	if targetProtocol != OpenAIProtocol && targetProtocol != OpenAIResponsesProtocol {
+	if !IsOpenAIProtocol(targetProtocol) {
 		return
 	}
 	mappings = map[string]string{

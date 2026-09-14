@@ -140,7 +140,12 @@ func TestOpenAIIntegration(t *testing.T) {
 			if r.BaseURL != "https://api.deepseek.com" {
 				t.Error("wrong OpenAI route")
 			}
-			if q.Protocol == gw.OpenAIResponsesProtocol {
+			if q.Protocol == gw.OpenAIImagesProtocol {
+				if q.Path != "/v1/images/generations" {
+					t.Error("wrong OpenAI Images route")
+				}
+				body = `{"created":1,"data":[{"b64_json":"aW1hZ2U="}]}`
+			} else if q.Protocol == gw.OpenAIResponsesProtocol {
 				if q.Path != "/v1/responses" {
 					t.Error("wrong OpenAI Responses route")
 				}
@@ -226,6 +231,10 @@ func TestOpenAIIntegration(t *testing.T) {
 		}
 	}
 	call("responses", "POST", "/v1/responses", `{"model":"deepseek-v4-flash","input":"hello"}`, key.Key, 200)
+	images := call("images", "POST", "/v1/images/generations", `{"model":"deepseek-v4-flash","prompt":"draw an otter"}`, key.Key, 200)
+	if !strings.Contains(string(images), `"b64_json":"aW1hZ2U="`) {
+		t.Fatal("Images response changed")
+	}
 	call("anthropic", "POST", "/anthropic/v1/messages", `{"model":"deepseek-v4-flash"}`, key.Key, 200)
 	before := calls.Load()
 	call("no_key", "POST", "/v1/chat/completions", `{}`, "", 401)
@@ -243,6 +252,11 @@ func TestOpenAIIntegration(t *testing.T) {
 	converted := call("protocol_fallback", "POST", "/v1/chat/completions", `{"model":"claude-sonnet","messages":[{"role":"user","content":"hello"}]}`, key.Key, 200)
 	if !strings.Contains(string(converted), `"object":"chat.completion"`) {
 		t.Fatal("Anthropic fallback did not return OpenAI response")
+	}
+	before = calls.Load()
+	call("images_anthropic_only", "POST", "/v1/images/generations", `{"model":"claude-sonnet","prompt":"draw an otter"}`, key.Key, 503)
+	if calls.Load() != before {
+		t.Fatal("Images request reached an Anthropic-only route")
 	}
 	if err := management.DeleteResource(ctx, actor, resource.ID, appsec.RequestMeta{}); err != nil {
 		t.Fatal(err)
@@ -305,10 +319,13 @@ func TestOpenAIIntegration(t *testing.T) {
 	if r := byID[requestIDs["responses"]]; r.ClientProtocol != "OPENAI_RESPONSES" || r.ProviderModelID != byID[requestIDs["normal"]].ProviderModelID {
 		t.Fatalf("OpenAI Responses did not share the OpenAI provider endpoint: %+v", r)
 	}
+	if r := byID[requestIDs["images"]]; r.ClientProtocol != "OPENAI_IMAGES" || r.Status != "SUCCESS" || r.InputTokens != nil || r.OutputTokens != nil || r.ProviderModelID != byID[requestIDs["normal"]].ProviderModelID {
+		t.Fatalf("OpenAI Images usage invalid: %+v", r)
+	}
 	if r := byID[requestIDs["anthropic"]]; r.ClientProtocol != "ANTHROPIC_MESSAGES" || r.Status != "SUCCESS" || r.ProviderModelID != byID[requestIDs["normal"]].ProviderModelID {
 		t.Fatal("shared provider-model attribution lost")
 	}
-	for _, name := range []string{"wrong_protocol", "denied", "disabled", "bad"} {
+	for _, name := range []string{"wrong_protocol", "images_anthropic_only", "denied", "disabled", "bad"} {
 		if _, ok := byID[requestIDs[name]]; ok {
 			t.Fatal("local failure was recorded as upstream usage")
 		}

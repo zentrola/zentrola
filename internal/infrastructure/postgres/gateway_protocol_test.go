@@ -16,6 +16,7 @@ func TestGatewayEndpointProtocolPreference(t *testing.T) {
 		{"Anthropic prefers Anthropic", gw.AnthropicProtocol, []string{gw.AnthropicEndpoint, gw.OpenAIEndpoint}},
 		{"OpenAI Chat prefers OpenAI", gw.OpenAIProtocol, []string{gw.OpenAIEndpoint, gw.AnthropicEndpoint}},
 		{"OpenAI Responses prefers OpenAI", gw.OpenAIResponsesProtocol, []string{gw.OpenAIEndpoint, gw.AnthropicEndpoint}},
+		{"OpenAI Images requires OpenAI", gw.OpenAIImagesProtocol, []string{gw.OpenAIEndpoint}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if got := gatewayEndpointProtocols(test.protocol); !reflect.DeepEqual(got, test.want) {

@@ -106,6 +106,38 @@ func TestOpenAIResponsesFallsBackToAnthropicAndReturnsResponses(t *testing.T) {
 	}
 }
 
+func TestOpenAIImagesOnlyUsesOpenAIEndpoint(t *testing.T) {
+	body := []byte(`{"model":"gpt-image","prompt":"draw an otter","future":{"value":9007199254740993}}`)
+	openAICalls := 0
+	openAI := upstreamFunc(func(_ context.Context, route Route, request Request, _ []byte) (*Response, error) {
+		openAICalls++
+		if route.EndpointProtocol != OpenAIEndpoint || request.Protocol != OpenAIImagesProtocol || request.Path != "/v1/images/generations" || string(request.Body) != string(body) {
+			t.Fatalf("Images request was not passed through unchanged: route=%+v request=%+v", route, request)
+		}
+		return compatibilityResponse(http.StatusOK, "application/json", `{"created":1,"data":[{"b64_json":"aW1hZ2U="}]}`), nil
+	})
+	upstream := NewCompatibleUpstream(nil, openAI)
+	response, err := upstream.Open(context.Background(), Route{EndpointProtocol: OpenAIEndpoint}, Request{
+		Protocol: OpenAIImagesProtocol, Path: "/v1/images/generations", Body: body,
+	}, nil)
+	if err != nil || response.Status != http.StatusOK || openAICalls != 1 {
+		t.Fatalf("Images pass-through failed: response=%+v calls=%d err=%v", response, openAICalls, err)
+	}
+	response.Body.Close()
+
+	anthropicCalls := 0
+	upstream = NewCompatibleUpstream(upstreamFunc(func(context.Context, Route, Request, []byte) (*Response, error) {
+		anthropicCalls++
+		return nil, nil
+	}), openAI)
+	_, err = upstream.Open(context.Background(), Route{EndpointProtocol: AnthropicEndpoint}, Request{
+		Protocol: OpenAIImagesProtocol, Path: "/v1/images/generations", Body: body,
+	}, nil)
+	if !errors.Is(err, ErrRoute) || anthropicCalls != 0 {
+		t.Fatalf("Images request reached Anthropic endpoint: calls=%d err=%v", anthropicCalls, err)
+	}
+}
+
 func TestCompatibilityConvertsStreamingResponses(t *testing.T) {
 	t.Run("OpenAI to Anthropic", func(t *testing.T) {
 		openAI := compatibilityUpstreamFunc(func(context.Context, Route, Request, []byte) (*Response, error) {

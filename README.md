@@ -56,7 +56,7 @@ The management plane and gateway plane are isolated:
 - Logical models and prioritized provider-model mappings
 - Member Virtual Key issuance, expiration, and revocation
 - Anthropic Messages, Count Tokens, SSE, and tool-use traffic
-- OpenAI model listing, Chat Completions, Responses, SSE, and tool calls
+- OpenAI model listing, Chat Completions, Responses, Images API, SSE, and tool calls
 - Same-protocol routing, cross-protocol conversion, and provider failover
 - Usage dashboards and operation logs
 - Chinese and English Admin Web localization

@@ -41,7 +41,7 @@ func (s *GatewayStore) ResolveCandidates(ctx context.Context, identity appsec.Pr
 	if len(protocols) > 0 {
 		protocol = protocols[0]
 	}
-	if protocol != gw.AnthropicProtocol && protocol != gw.OpenAIProtocol && protocol != gw.OpenAIResponsesProtocol {
+	if protocol != gw.AnthropicProtocol && !gw.IsOpenAIProtocol(protocol) {
 		return nil, gw.ErrInvalid
 	}
 	preferredProtocol := gatewayEndpointProtocols(protocol)[0]
@@ -97,6 +97,9 @@ func (s *GatewayStore) ResolveCandidates(ctx context.Context, identity appsec.Pr
 	seen := make(map[candidateKey]struct{}, len(rows))
 	routes := make([]gw.Route, 0, len(rows))
 	for _, row := range rows {
+		if protocol == gw.OpenAIImagesProtocol && row.ProtocolType != gw.OpenAIEndpoint {
+			continue
+		}
 		if row.AuthType == mgmt.AuthTypeSubscription && protocol != gw.OpenAIResponsesProtocol {
 			continue
 		}
@@ -137,6 +140,9 @@ func (s *GatewayStore) ResolveCandidates(ctx context.Context, identity appsec.Pr
 func gatewayEndpointProtocols(protocol string) []string {
 	if protocol == gw.AnthropicProtocol {
 		return []string{gw.AnthropicEndpoint, gw.OpenAIEndpoint}
+	}
+	if protocol == gw.OpenAIImagesProtocol {
+		return []string{gw.OpenAIEndpoint}
 	}
 	return []string{gw.OpenAIEndpoint, gw.AnthropicEndpoint}
 }

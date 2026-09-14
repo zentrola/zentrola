@@ -172,6 +172,7 @@ VALUES (60,40,'Resource',decode(repeat('11',32),'hex'),decode(repeat('22',12),'h
 	t.Run("usage facts and append only audit", func(t *testing.T) {
 		withFixture(t, ctx, pool, func(tx pgx.Tx) {
 			mustExec(t, ctx, tx, `INSERT INTO usage_record (id,request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,client_protocol,started_at,completed_at,latency_ms,status,created_at) VALUES (101,'req_test',1,10,40,50,60,30,'MODEL_GATEWAY','ANTHROPIC_MESSAGES',now(),now(),0,'SUCCESS',now())`)
+			mustExec(t, ctx, tx, `UPDATE usage_record SET client_protocol='OPENAI_IMAGES' WHERE id=101`)
 			var unknown bool
 			if err := tx.QueryRow(ctx, `SELECT input_tokens IS NULL AND output_tokens IS NULL AND cached_input_tokens IS NULL FROM usage_record WHERE id=101`).Scan(&unknown); err != nil || !unknown {
 				t.Fatal("unknown usage was falsified")
