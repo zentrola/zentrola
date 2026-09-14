@@ -141,6 +141,8 @@ func (s *Service) forwardCandidates(ctx context.Context, identity appsec.Princip
 				continue
 			}
 		}
+		selectedRoute := route
+		response.route = &selectedRoute
 		return response, nil
 	}
 	return nil, ErrUpstream

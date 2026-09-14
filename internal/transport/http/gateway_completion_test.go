@@ -38,6 +38,21 @@ func (completionCipher) DecryptProviderProxy(catalog.SealedCredential, catalog.P
 	return nil, errors.New("unexpected proxy decryption")
 }
 
+type completionRouteState struct {
+	healthy   []gw.Route
+	cooldowns []gw.Route
+}
+
+func (*completionRouteState) Acquire(context.Context, gw.Route) (bool, error) { return true, nil }
+func (s *completionRouteState) Cooldown(_ context.Context, route gw.Route, _ time.Duration) error {
+	s.cooldowns = append(s.cooldowns, route)
+	return nil
+}
+func (s *completionRouteState) Healthy(_ context.Context, route gw.Route) error {
+	s.healthy = append(s.healthy, route)
+	return nil
+}
+
 type completionUpstream func(context.Context, gw.Route, gw.Request, []byte) (*gw.Response, error)
 
 func (f completionUpstream) Open(ctx context.Context, route gw.Route, request gw.Request, credential []byte) (*gw.Response, error) {
@@ -89,6 +104,91 @@ func (b *completionAfterCancellationBody) Read(p []byte) (int, error) {
 }
 
 func (*completionAfterCancellationBody) Close() error { return nil }
+
+func TestAnthropicInvalidContentBlockStreamIsRejected(t *testing.T) {
+	malformed := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1}}}\n\n" +
+		"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n" +
+		"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n" +
+		"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":4,\"content_block\":{\"type\":\"tool_use\",\"id\":\"tool_1\",\"name\":\"Read\",\"input\":{}}}\n\n" +
+		"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":2}\n\n"
+	var trace *usage.Event
+	upstream := completionUpstream(func(_ context.Context, _ gw.Route, request gw.Request, _ []byte) (*gw.Response, error) {
+		trace = request.Trace
+		return &gw.Response{
+			Status:  http.StatusOK,
+			Headers: map[string][]string{"Content-Type": {"text/event-stream"}},
+			Body:    io.NopCloser(strings.NewReader(malformed)),
+		}, nil
+	})
+	state := &completionRouteState{}
+	service := gw.New(completionStore{}, completionCipher{}, upstream, gw.WithRouteState(state))
+	handler := NewGatewayHandler(service, config.Gateway{
+		MaxBodyBytes:    1 << 20,
+		RequestTimeout:  time.Second,
+		BodyReadTimeout: time.Second,
+		WriteTimeout:    time.Second,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
+
+	request := httptest.NewRequest(http.MethodPost, "/anthropic/v1/messages", strings.NewReader(`{"model":"client-model","max_tokens":8,"stream":true,"messages":[{"role":"user","content":"hi"}]}`))
+	request.Header.Set("Content-Type", "application/json")
+	request = request.WithContext(context.WithValue(request.Context(), principalIdentityKey{}, appsec.PrincipalIdentity{ID: 1, AccessKeyID: 2}))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	response := recorder.Body.String()
+	if recorder.Code != http.StatusOK || !strings.Contains(response, "event: error") ||
+		!strings.Contains(response, "UPSTREAM_INVALID_RESPONSE") || strings.Contains(response, `\"index\":4`) {
+		t.Fatalf("invalid stream response was not safely rejected: status=%d body=%q", recorder.Code, response)
+	}
+	if trace == nil || trace.Status != usage.Failed || trace.ErrorType != "UPSTREAM_INVALID_RESPONSE" {
+		t.Fatalf("invalid stream usage trace incorrect: %+v", trace)
+	}
+	if len(state.healthy) != 1 || len(state.cooldowns) != 1 || state.cooldowns[0].ResourceID != 4 {
+		t.Fatalf("invalid stream route state incorrect: healthy=%v cooldowns=%v", state.healthy, state.cooldowns)
+	}
+}
+
+func TestAnthropicValidContentBlockStreamPassesThroughUnchanged(t *testing.T) {
+	stream := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1}}}\n\n" +
+		"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n" +
+		"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"ok\"}}\n\n" +
+		"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n" +
+		"event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":1}}\n\n" +
+		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+	var trace *usage.Event
+	upstream := completionUpstream(func(_ context.Context, _ gw.Route, request gw.Request, _ []byte) (*gw.Response, error) {
+		trace = request.Trace
+		return &gw.Response{
+			Status:  http.StatusOK,
+			Headers: map[string][]string{"Content-Type": {"text/event-stream"}},
+			Body:    io.NopCloser(strings.NewReader(stream)),
+		}, nil
+	})
+	state := &completionRouteState{}
+	service := gw.New(completionStore{}, completionCipher{}, upstream, gw.WithRouteState(state))
+	handler := NewGatewayHandler(service, config.Gateway{
+		MaxBodyBytes:    1 << 20,
+		RequestTimeout:  time.Second,
+		BodyReadTimeout: time.Second,
+		WriteTimeout:    time.Second,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
+
+	request := httptest.NewRequest(http.MethodPost, "/anthropic/v1/messages", strings.NewReader(`{"model":"client-model","max_tokens":8,"stream":true,"messages":[{"role":"user","content":"hi"}]}`))
+	request.Header.Set("Content-Type", "application/json")
+	request = request.WithContext(context.WithValue(request.Context(), principalIdentityKey{}, appsec.PrincipalIdentity{ID: 1, AccessKeyID: 2}))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK || recorder.Body.String() != stream {
+		t.Fatalf("valid Anthropic stream changed: status=%d body=%q", recorder.Code, recorder.Body.String())
+	}
+	if trace == nil || trace.Status != usage.Success || trace.ErrorType != "" {
+		t.Fatalf("valid stream usage trace incorrect: %+v", trace)
+	}
+	if len(state.healthy) != 1 || len(state.cooldowns) != 0 {
+		t.Fatalf("valid stream route state incorrect: healthy=%v cooldowns=%v", state.healthy, state.cooldowns)
+	}
+}
 
 func TestOpenAIImageGenerationPassThrough(t *testing.T) {
 	tests := []struct {

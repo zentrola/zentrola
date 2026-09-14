@@ -177,6 +177,7 @@ type Response struct {
 	Body            io.ReadCloser
 	RequestedStream bool
 	ErrorType       string
+	route           *Route
 }
 type Upstream interface {
 	Open(context.Context, Route, Request, []byte) (*Response, error)
@@ -254,6 +255,17 @@ func (s *Service) Forward(ctx context.Context, identity appsec.PrincipalIdentity
 		response.RequestedStream = parsed.Stream
 	}
 	return response, err
+}
+
+// ReportInvalidStream 将已开始传输后才发现的上游协议错误计入路由冷却。
+// 此时不能安全重试，否则可能重复输出内容或执行工具。
+func (s *Service) ReportInvalidStream(ctx context.Context, response *Response) {
+	if s == nil || response == nil || response.route == nil {
+		return
+	}
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+	defer cancel()
+	s.cooldown(persistCtx, *response.route, defaultRouteCooldown)
 }
 
 func (s *Service) Models(ctx context.Context, identity appsec.PrincipalIdentity) ([]Model, error) {
