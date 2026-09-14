@@ -538,7 +538,7 @@ function deleteGroup() {
   display: block;
   margin: 0;
   padding-top: 10px;
-  color: #485e72;
+  color: var(--color-text-secondary);
   font-size: 13px;
   font-weight: 600;
   line-height: 1.4;
@@ -609,8 +609,9 @@ function deleteGroup() {
 .modality-tag {
   display: inline-block;
   padding: 2px 6px;
-  border-radius: 5px;
-  background: #edf3fb;
+  border-radius: 6px;
+  color: var(--color-primary-hover);
+  background: var(--color-primary-soft);
   font-size: 11px;
   white-space: nowrap;
 }

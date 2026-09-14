@@ -1121,7 +1121,12 @@ test('操作日志详情展示原始 JSON、差异高亮和追踪信息', async 
   await expect(after.getByRole('button', { name: '复制修改后', exact: true })).toBeVisible()
   await copyBefore.click()
   await expect(page.locator('.toast-success')).toContainText('已复制')
-  await expect(dialog.getByText('req_provider_status', { exact: true })).toBeVisible()
+  const requestID = dialog.locator('.operation-trace .technical-value')
+  await expect(requestID).toHaveText('req_provider_status')
+  await requestID.getByRole('button', { name: '复制', exact: true }).click()
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe('req_provider_status')
   await expect(dialog.getByText('PROVIDER_STATUS_CHANGE', { exact: true })).toHaveCount(0)
   await expect(dialog.getByText('admin', { exact: true })).toHaveCount(0)
   await mkdir('../.cache/web-visual', { recursive: true })
@@ -1214,6 +1219,11 @@ test('成员列表按需查看 Key 并处理删除和失败恢复', async ({ pag
     'zt_vk_temp********temp',
     'vk-work1234********1234',
   ])
+  const maskedKey = modal(page).getByRole('row').filter({ hasText: '工作站' })
+  await maskedKey.getByRole('button', { name: '复制', exact: true }).click()
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe('vk-work1234********1234')
   await expect(modal(page)).toContainText('长期有效')
   await expect(modal(page)).toContainText('2020年1月1日')
   await expect(modal(page).locator('tbody tr').first().locator('td').nth(2)).toHaveText(
@@ -1544,6 +1554,7 @@ test('服务商同步入口只由后端能力参数控制', async ({ page }) => 
 
 test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => {
   const state = await fixture(page)
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
   await signIn(page)
 
   await page.setViewportSize({ width: 1200, height: 900 })
@@ -1841,14 +1852,19 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   const row = page.getByRole('row').filter({ hasText: '阿里云百炼' })
   const providerNameCellBox = await row.getByRole('cell').first().boundingBox()
   expect(providerNameCellBox).not.toBeNull()
-  expect(providerNameCellBox!.width).toBeGreaterThanOrEqual(230)
+  expect(providerNameCellBox!.width).toBeGreaterThanOrEqual(245)
   const endpoint = row.locator('.endpoint')
   await expect(endpoint).toHaveText('https://dashscope.aliyuncs.com/compatible-mode/v1')
-  await expect(endpoint).toHaveCSS('overflow-wrap', 'anywhere')
-  await expect(endpoint).toHaveCSS('white-space', 'normal')
-  expect(await endpoint.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(
-    true,
+  await expect(endpoint).toHaveAttribute(
+    'title',
+    'https://dashscope.aliyuncs.com/compatible-mode/v1',
   )
+  await expect(endpoint.locator('.technical-value-text')).toHaveCSS('text-overflow', 'ellipsis')
+  await expect(endpoint.locator('.technical-value-text')).toHaveCSS('white-space', 'nowrap')
+  await endpoint.getByRole('button', { name: '复制', exact: true }).click()
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe('https://dashscope.aliyuncs.com/compatible-mode/v1')
   await expect(row.getByText('OpenAI', { exact: true })).toBeVisible()
   await expect(row.locator('.endpoint-protocol')).toHaveText(['OpenAI'])
   await expect(row.getByText('Anthropic', { exact: true })).toHaveCount(0)
@@ -3069,8 +3085,8 @@ test('14 寸屏幕默认展开侧栏并将横向溢出限制在表格内', async
       }
     }),
   ).toEqual({
-    sidebarWidth: 230,
-    workspaceLeft: 230,
+    sidebarWidth: 240,
+    workspaceLeft: 240,
     navLabelDisplay: 'block',
     topbarHeight: 58,
     documentFits: true,
@@ -3092,6 +3108,45 @@ test('14 寸屏幕默认展开侧栏并将横向溢出限制在表格内', async
     fullPage: true,
     animations: 'disabled',
   })
+})
+
+test('高密度表格在常用桌面分辨率保持稳定列宽和单行技术字段', async ({ page }) => {
+  await fixture(page)
+  await signIn(page, 'home')
+  await page.getByRole('link', { name: '服务商', exact: true }).click()
+
+  for (const width of [1366, 1440, 1920]) {
+    await page.setViewportSize({ width, height: 900 })
+    await expect(page.getByRole('heading', { name: '服务商', exact: true })).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    const scroll = page.locator('.providers-table').locator('..')
+    expect(await scroll.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(
+      true,
+    )
+    const headers = page.locator('.providers-table th')
+    expect((await headers.nth(2).boundingBox())!.width).toBeGreaterThanOrEqual(120)
+    expect((await headers.nth(5).boundingBox())!.width).toBeGreaterThanOrEqual(170)
+  }
+
+  const endpoint = page.locator('.providers-table .endpoint').first()
+  await expect(endpoint).toHaveAttribute('title', /https:\/\//)
+  await expect(endpoint.locator('.technical-value-text')).toHaveCSS('white-space', 'nowrap')
+  await expect(endpoint.getByRole('button', { name: '复制', exact: true })).toBeVisible()
+
+  await page.getByRole('link', { name: '用量分析', exact: true }).click()
+  const statisticsScroll = page.locator('.statistics-table').locator('..')
+  expect(
+    await statisticsScroll.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+  ).toBe(true)
+  expect(
+    (await page.locator('.statistics-table th').last().boundingBox())!.width,
+  ).toBeGreaterThanOrEqual(100)
+
+  await page.getByRole('link', { name: '操作日志', exact: true }).click()
+  const operationHeaders = page.locator('.operations-table th')
+  expect((await operationHeaders.nth(4).boundingBox())!.width).toBeGreaterThanOrEqual(108)
+  expect((await operationHeaders.last().boundingBox())!.width).toBeGreaterThanOrEqual(88)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
 })
 
 test('有操作列表固定首尾列，无操作列表只固定首列', async ({ page }) => {
@@ -3182,7 +3237,7 @@ test('桌面侧栏可手动折叠和展开', async ({ page }) => {
 
   await page.setViewportSize({ width: 700, height: 768 })
   await page.getByRole('button', { name: '打开导航' }).click()
-  await expect.poll(() => sidebar.evaluate((element) => element.clientWidth)).toBe(230)
+  await expect.poll(() => sidebar.evaluate((element) => element.clientWidth)).toBe(240)
   await expect
     .poll(() => workspace.evaluate((element) => element.getBoundingClientRect().left))
     .toBe(0)
@@ -3198,10 +3253,10 @@ test('桌面侧栏可手动折叠和展开', async ({ page }) => {
     'aria-expanded',
     'true',
   )
-  await expect.poll(() => sidebar.evaluate((element) => element.clientWidth)).toBe(230)
+  await expect.poll(() => sidebar.evaluate((element) => element.clientWidth)).toBe(240)
   await expect
     .poll(() => workspace.evaluate((element) => element.getBoundingClientRect().left))
-    .toBe(230)
+    .toBe(240)
   await expect(modelLabel).toBeVisible()
 })
 

@@ -134,11 +134,11 @@ onUnmounted(() => document.removeEventListener('pointerdown', onOutside))
   border-radius: 8px;
   background: transparent;
   font-size: 12px;
-  color: #4b6176;
+  color: var(--color-text-secondary);
 }
 .account-trigger:hover,
 .account-trigger[aria-expanded='true'] {
-  background: #f3f6fa;
+  background: #f1f5f9;
 }
 .account-trigger:focus-visible {
   outline: 2px solid var(--blue);
@@ -172,9 +172,9 @@ onUnmounted(() => document.removeEventListener('pointerdown', onOutside))
   max-width: calc(100vw - 34px);
   padding: 6px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: #fff;
-  box-shadow: 0 8px 28px #172f461a;
+  box-shadow: 0 12px 28px rgb(15 23 42 / 12%);
 }
 .account-summary {
   display: flex;
@@ -207,7 +207,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onOutside))
 }
 .account-item:hover,
 .account-item:focus-visible {
-  background: #edf3fd;
+  background: var(--color-primary-soft);
   outline: none;
 }
 .account-divider {
@@ -220,7 +220,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onOutside))
 }
 .logout-item:hover,
 .logout-item:focus-visible {
-  background: #fff2f2;
+  background: #fef2f2;
 }
 @media (max-width: 640px) {
   .account-name {

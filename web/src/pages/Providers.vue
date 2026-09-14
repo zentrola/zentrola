@@ -25,6 +25,7 @@ import Status from '../components/Status.vue'
 import StatusSwitch from '../components/StatusSwitch.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import TableScroll from '../components/TableScroll.vue'
+import TechnicalValue from '../components/TechnicalValue.vue'
 
 const {
   items,
@@ -986,10 +987,14 @@ onMounted(() => {
       </button>
     </p>
     <TableScroll has-actions>
-      <table>
+      <table class="providers-table">
         <colgroup>
           <col class="provider-name-column" />
-          <col span="5" />
+          <col class="provider-enable-column" />
+          <col class="provider-runtime-column" />
+          <col class="provider-proxy-column" />
+          <col class="provider-endpoint-column" />
+          <col class="provider-action-column" />
         </colgroup>
         <thead>
           <tr>
@@ -1010,7 +1015,7 @@ onMounted(() => {
                   <span class="provider-name-line"
                     ><strong>{{ provider.name }}</strong></span
                   >
-                  <small>{{ provider.code }}</small>
+                  <TechnicalValue :value="provider.code" :copyable="false" muted />
                 </div>
                 <span class="provider-name-actions"
                   ><a
@@ -1106,15 +1111,13 @@ onMounted(() => {
               >
                 <span v-if="endpointURL(provider, 'OPENAI')"
                   ><span class="endpoint-protocol">OpenAI</span
-                  ><code class="endpoint" :title="endpointURL(provider, 'OPENAI')">{{
-                    endpointURL(provider, 'OPENAI')
-                  }}</code></span
+                  ><TechnicalValue
+                    class="endpoint"
+                    :value="endpointURL(provider, 'OPENAI')" /></span
                 ><span v-if="endpointURL(provider, 'ANTHROPIC')"
                   ><span class="endpoint-protocol">Anthropic</span
-                  ><code class="endpoint" :title="endpointURL(provider, 'ANTHROPIC')">{{
-                    endpointURL(provider, 'ANTHROPIC')
-                  }}</code></span
-                >
+                  ><TechnicalValue class="endpoint" :value="endpointURL(provider, 'ANTHROPIC')"
+                /></span>
               </div>
             </td>
             <td class="align-right">
@@ -1169,6 +1172,15 @@ onMounted(() => {
           )
         }}
       </p>
+      <button
+        v-if="!loading"
+        type="button"
+        class="button primary empty-state-action"
+        @click="query || appliedRuntimeFilter ? reset() : openEdit()"
+      >
+        <Icon :name="query || appliedRuntimeFilter ? 'refresh' : 'plus'" :size="16" />
+        {{ t(query || appliedRuntimeFilter ? 'common.reset' : 'providers.create') }}
+      </button>
     </div>
     <ListFooter
       :cursor="cursor"
@@ -1580,7 +1592,7 @@ onMounted(() => {
           <dd>
             <span v-for="endpoint in credentialTarget.endpoints" :key="endpoint.protocolType">
               <b>{{ endpoint.protocolType === 'OPENAI' ? 'OpenAI' : 'Anthropic' }}</b>
-              <code :title="endpoint.baseUrl">{{ endpoint.baseUrl }}</code>
+              <TechnicalValue :value="endpoint.baseUrl" />
             </span>
             <span v-if="!credentialTarget.endpoints.length">{{ t('common.none') }}</span>
           </dd>
@@ -2055,7 +2067,7 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
   margin: 0;
-  color: #485e72;
+  color: var(--color-text-secondary);
   font-weight: 500;
   white-space: nowrap;
 }
@@ -2063,49 +2075,58 @@ onMounted(() => {
   width: 120px;
   padding-top: 9px;
   padding-bottom: 9px;
-  background: #fbfcfe;
-  border-color: #dfe6ef;
+  background: var(--color-surface);
+  border-color: var(--color-border);
   font-size: 12px;
 }
-.panel table {
-  min-width: 840px;
+.providers-table {
+  min-width: 992px;
   table-layout: fixed;
 }
-.panel th,
-.panel td {
+.providers-table th,
+.providers-table td {
   padding-left: 14px;
   padding-right: 14px;
 }
+.providers-table td {
+  height: 58px;
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+.providers-table .avatar {
+  width: 36px;
+  height: 36px;
+}
 .provider-name-column {
-  width: 230px;
+  width: 252px;
 }
-.panel th:nth-child(2) {
-  width: 90px;
+.provider-enable-column {
+  width: 88px;
 }
-.panel th:nth-child(3) {
-  width: 125px;
+.provider-runtime-column {
+  width: 126px;
 }
-.panel th:nth-child(4) {
-  width: 64px;
+.provider-proxy-column {
+  width: 72px;
 }
-.panel th:nth-child(5) {
+.provider-endpoint-column {
   width: auto;
 }
-.panel th:nth-child(6) {
-  width: 190px;
+.provider-action-column {
+  width: 176px;
 }
-.panel th:nth-child(4),
-.panel td:nth-child(4) {
+.providers-table th:nth-child(4),
+.providers-table td:nth-child(4) {
   padding-left: 8px;
   padding-right: 8px;
 }
-.panel th:nth-child(2),
-.panel td:nth-child(2) {
+.providers-table th:nth-child(2),
+.providers-table td:nth-child(2) {
   padding-left: 12px;
   padding-right: 12px;
 }
-.panel th:nth-child(3),
-.panel td:nth-child(3) {
+.providers-table th:nth-child(3),
+.providers-table td:nth-child(3) {
   padding-left: 18px;
 }
 .provider-runtime-state {
@@ -2117,17 +2138,18 @@ onMounted(() => {
   cursor: pointer;
 }
 .provider-runtime-state:hover:not(:disabled) {
-  box-shadow: 0 0 0 2px #8eadd733;
+  box-shadow: 0 0 0 2px #dbeafe;
 }
 .provider-runtime-state:focus-visible {
-  outline: 2px solid #90b7fb;
+  outline: 2px solid #bfdbfe;
   outline-offset: 2px;
 }
 .endpoint {
-  display: block;
   min-width: 0;
-  overflow-wrap: anywhere;
-  white-space: normal;
+}
+.endpoint :deep(.technical-value-copy) {
+  width: 22px;
+  height: 22px;
 }
 .provider-name-line {
   display: flex;
@@ -2147,6 +2169,9 @@ onMounted(() => {
   flex: 1;
   min-width: 0;
 }
+.person > div > .technical-value {
+  margin-top: 2px;
+}
 .provider-name-actions {
   display: inline-flex;
   flex: none;
@@ -2160,15 +2185,26 @@ onMounted(() => {
   height: 25px;
   place-items: center;
   padding: 0;
-  border: 1px solid #c8d7e6;
+  border: 1px solid var(--color-border);
   border-radius: 50%;
-  color: var(--blue);
-  background: #f4f8fc;
+  color: var(--color-text-muted);
+  background: #f8fafc;
+  opacity: 0.72;
   text-decoration: none;
+  transition:
+    color 0.15s,
+    background-color 0.15s,
+    opacity 0.15s;
+}
+.providers-table tbody tr:hover .provider-quick-action,
+.provider-quick-action:focus-visible {
+  color: var(--blue);
+  opacity: 1;
 }
 .provider-quick-action:hover:not(:disabled) {
   border-color: var(--blue);
-  background: #eaf2ff;
+  background: var(--color-primary-soft);
+  opacity: 1;
 }
 .provider-website-action {
   border: 0;
@@ -2176,7 +2212,7 @@ onMounted(() => {
 }
 .provider-website-action:hover:not(:disabled) {
   border: 0;
-  background: #eaf2ff;
+  background: var(--color-primary-soft);
 }
 .provider-direct-action,
 .provider-direct-action:hover:not(:disabled) {
@@ -2187,13 +2223,14 @@ onMounted(() => {
 }
 .endpoint-stack {
   display: grid;
-  gap: 7px;
+  gap: 2px;
 }
 .endpoint-stack > span {
   display: grid;
-  grid-template-columns: 58px minmax(0, 1fr);
-  align-items: start;
-  gap: 8px;
+  grid-template-columns: 56px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  min-height: 20px;
 }
 .endpoint-protocol {
   display: inline-flex;
@@ -2202,8 +2239,8 @@ onMounted(() => {
   justify-content: center;
   padding: 2px 5px;
   border-radius: 4px;
-  color: #60788d;
-  background: #eef3f7;
+  color: var(--color-text-secondary);
+  background: #f1f5f9;
   font-size: 10px;
   font-weight: 600;
   line-height: 1.2;
@@ -2220,7 +2257,7 @@ onMounted(() => {
   height: 28px;
 }
 .proxy-access-state.is-enabled {
-  color: #20714f;
+  color: var(--color-success);
 }
 .proxy-access-state.is-direct {
   color: var(--muted);
@@ -2250,7 +2287,7 @@ onMounted(() => {
 }
 .credential-list-head h3 {
   margin: 0;
-  color: #183247;
+  color: var(--color-text);
   font-size: 17px;
   line-height: 1.35;
 }
@@ -2267,9 +2304,9 @@ onMounted(() => {
 .credential-overview {
   margin: 0 0 16px;
   overflow: hidden;
-  border: 1px solid #dce5ee;
+  border: 1px solid var(--color-border);
   border-radius: 8px;
-  background: #f8fbfe;
+  background: #f8fafc;
 }
 .credential-overview dt,
 .credential-overview dd {
@@ -2277,13 +2314,13 @@ onMounted(() => {
   margin: 0;
 }
 .credential-overview dt {
-  color: #687e92;
+  color: var(--color-text-secondary);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.01em;
 }
 .credential-overview dd {
-  color: #29445c;
+  color: var(--color-text);
   font-size: 12px;
 }
 .credential-overview-endpoints {
@@ -2318,18 +2355,14 @@ onMounted(() => {
   font-size: 10px;
   font-weight: 600;
 }
-.credential-overview-endpoints code {
+.credential-overview-endpoints .technical-value {
   min-width: 0;
-  overflow: hidden;
-  color: #38556f;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .credential-list {
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
 }
 .credential-list table {
   width: 100%;
@@ -2434,8 +2467,8 @@ onMounted(() => {
 }
 .credential-test-options {
   overflow: hidden;
-  border: 1px solid #dbe4ed;
-  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
 }
 .credential-test-option {
   display: grid;
@@ -2451,10 +2484,10 @@ onMounted(() => {
   border-top: 1px solid #e5ebf1;
 }
 .credential-test-option:hover {
-  background: #f7faff;
+  background: #f8fafc;
 }
 .credential-test-option.is-selected {
-  background: #edf4ff;
+  background: var(--color-primary-soft);
 }
 .credential-test-option input {
   width: 16px;
@@ -2489,20 +2522,20 @@ onMounted(() => {
   color: var(--blue);
 }
 .credential-verify-action.is-blocked {
-  color: #b46619;
+  color: var(--color-warning-text);
 }
 .credential-empty {
   display: grid;
   justify-items: center;
   gap: 8px;
   padding: 42px 20px;
-  border: 1px dashed #cad7e4;
-  border-radius: 8px;
-  color: #71869a;
+  border: 1px dashed #cbd5e1;
+  border-radius: var(--radius-control);
+  color: var(--color-text-muted);
   text-align: center;
 }
 .credential-empty strong {
-  color: #385168;
+  color: var(--color-text);
   font-size: 14px;
 }
 .credential-empty p {
@@ -2527,7 +2560,7 @@ onMounted(() => {
   display: block;
   margin: 0;
   padding-top: 10px;
-  color: #485e72;
+  color: var(--color-text-secondary);
   line-height: 1.4;
   text-align: right;
 }
@@ -2551,7 +2584,7 @@ onMounted(() => {
   position: relative;
   padding: 9px 14px 10px;
   border: 0;
-  color: #667d91;
+  color: var(--color-text-secondary);
   cursor: pointer;
   background: transparent;
   font: inherit;
@@ -2574,7 +2607,7 @@ onMounted(() => {
 }
 .subscription-input-tabs button:focus-visible {
   border-radius: 4px;
-  outline: 2px solid #90b7fb;
+  outline: 2px solid #bfdbfe;
   outline-offset: -2px;
 }
 .subscription-input-tabs button:disabled {
@@ -2584,10 +2617,10 @@ onMounted(() => {
 .subscription-source-guide {
   margin: 0;
   overflow: hidden;
-  border: 1px solid #e5ebf1;
+  border: 1px solid var(--color-border);
   border-radius: 7px;
-  color: #607589;
-  background: #fbfcfe;
+  color: var(--color-text-secondary);
+  background: #f8fafc;
 }
 .subscription-source-guide summary {
   display: flex;
@@ -2616,7 +2649,7 @@ onMounted(() => {
   background: #f7f9fc;
 }
 .subscription-source-guide summary:focus-visible {
-  outline: 2px solid #90b7fb;
+  outline: 2px solid #bfdbfe;
   outline-offset: -2px;
 }
 .subscription-source-guide summary svg {
@@ -2694,18 +2727,18 @@ onMounted(() => {
   gap: 12px;
   min-height: 64px;
   padding: 11px 14px;
-  border: 1px dashed #aec4d8;
-  border-radius: 7px;
-  color: #48718f;
+  border: 1px dashed #cbd5e1;
+  border-radius: var(--radius-control);
+  color: var(--color-text-secondary);
   cursor: pointer;
-  background: #fbfdff;
+  background: #f8fafc;
 }
 .subscription-file-picker:hover {
-  border-color: #78a4e8;
-  background: #f6faff;
+  border-color: #93c5fd;
+  background: var(--color-primary-soft);
 }
 .subscription-file-input:focus-visible + .subscription-file-picker {
-  outline: 2px solid #90b7fb;
+  outline: 2px solid #bfdbfe;
   outline-offset: 2px;
 }
 .subscription-file-input:disabled + .subscription-file-picker {
@@ -2736,7 +2769,7 @@ onMounted(() => {
 }
 .subscription-paste-intro {
   margin: 0;
-  color: #485e72;
+  color: var(--color-text-secondary);
   font-size: 12px;
   line-height: 1.5;
 }
@@ -2769,7 +2802,7 @@ onMounted(() => {
   height: 26px;
   place-items: center;
   border-radius: 5px;
-  color: #60788d;
+  color: var(--color-text-muted);
   cursor: pointer;
   font-size: 18px;
   line-height: 1;
@@ -2781,10 +2814,10 @@ onMounted(() => {
 .provider-more summary:hover,
 .provider-more summary:focus-visible {
   color: var(--blue);
-  background: #edf4fc;
+  background: var(--color-primary-soft);
 }
 .provider-more summary:focus-visible {
-  outline: 2px solid #90b7fb;
+  outline: 2px solid #bfdbfe;
   outline-offset: 2px;
 }
 .provider-more-menu {
@@ -2794,10 +2827,10 @@ onMounted(() => {
   right: calc(100% + 4px);
   min-width: 80px;
   padding: 6px;
-  border: 1px solid #d8e2ec;
-  border-radius: 7px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
   background: #fff;
-  box-shadow: 0 8px 24px #1832471f;
+  box-shadow: 0 12px 28px rgb(15 23 42 / 12%);
   transform: translateY(-50%);
 }
 .provider-more-menu .text-button {
@@ -2841,10 +2874,10 @@ onMounted(() => {
 .provider-connection-hint {
   margin: 0 0 10px;
   padding: 7px 10px;
-  border-left: 3px solid #8eadd7;
-  border-radius: 5px;
-  color: #60788d;
-  background: #f5f8fc;
+  border-left: 3px solid var(--color-primary);
+  border-radius: 6px;
+  color: var(--color-text-secondary);
+  background: var(--color-primary-soft);
   font-size: 12px;
   line-height: 1.55;
 }
@@ -2863,7 +2896,7 @@ onMounted(() => {
   display: block;
   margin: 0;
   padding-top: 10px;
-  color: #485e72;
+  color: var(--color-text-secondary);
   font-size: 12px;
   font-weight: 600;
   line-height: 1.4;
@@ -2885,7 +2918,7 @@ onMounted(() => {
   gap: 4px;
   overflow-x: auto;
   overflow-y: hidden;
-  border-bottom: 1px solid #d8e2ec;
+  border-bottom: 1px solid var(--color-border);
 }
 .config-tab {
   position: relative;
@@ -2894,7 +2927,7 @@ onMounted(() => {
   padding: 9px 15px 10px;
   border: 0;
   background: transparent;
-  color: #60788d;
+  color: var(--color-text-secondary);
   font-size: 13px;
   font-weight: 600;
 }
@@ -2908,10 +2941,10 @@ onMounted(() => {
   content: '';
 }
 .config-tab:hover {
-  color: #315f87;
+  color: var(--color-primary);
 }
 .config-tab.is-active {
-  color: #174f9d;
+  color: var(--color-primary-hover);
 }
 .config-tab.is-active::after {
   background: var(--blue);
@@ -2920,7 +2953,7 @@ onMounted(() => {
   padding-top: 14px;
 }
 .config-panel:focus-visible {
-  outline: 3px solid #90b7fb;
+  outline: 2px solid #bfdbfe;
   outline-offset: 4px;
 }
 .proxy-editor {
@@ -2965,9 +2998,9 @@ onMounted(() => {
 .proxy-switch-track {
   width: 100%;
   height: 100%;
-  border: 1px solid #b8c5d2;
+  border: 1px solid #cbd5e1;
   border-radius: 999px;
-  background: #cbd4dd;
+  background: #cbd5e1;
   transition:
     border-color 0.15s,
     background 0.15s;
@@ -2991,7 +3024,7 @@ onMounted(() => {
   transform: translateX(18px);
 }
 .proxy-switch-control input:focus-visible + .proxy-switch-track {
-  outline: 3px solid #90b7fb;
+  outline: 2px solid #bfdbfe;
   outline-offset: 3px;
 }
 .proxy-switch-control input:focus-visible {
@@ -3007,7 +3040,7 @@ onMounted(() => {
   gap: 12px 0;
   margin-top: 14px;
   padding-top: 14px;
-  border-top: 1px solid #e4eaf1;
+  border-top: 1px solid var(--color-border);
 }
 .proxy-fields > label {
   margin: 0;
@@ -3049,8 +3082,8 @@ onMounted(() => {
   max-width: 220px;
   padding: 6px 8px;
   border-radius: 5px;
-  background: #183247;
-  box-shadow: 0 4px 12px #1832472b;
+  background: var(--color-sidebar);
+  box-shadow: 0 4px 12px rgb(15 23 42 / 18%);
   color: #fff;
   content: attr(data-tooltip);
   font-size: 11px;
@@ -3070,7 +3103,7 @@ onMounted(() => {
   transform: translate(0, -50%);
 }
 .provider-field-help:focus-visible {
-  outline: 2px solid #90b7fb;
+  outline: 2px solid #bfdbfe;
   outline-offset: 2px;
 }
 .proxy-headers-head {
@@ -3087,7 +3120,7 @@ onMounted(() => {
   gap: 10px;
 }
 .proxy-headers-head strong {
-  color: #183247;
+  color: var(--color-text);
   font-size: 13px;
 }
 .proxy-headers-head span {
@@ -3139,7 +3172,7 @@ onMounted(() => {
 .proxy-header-remove {
   width: 36px;
   height: 40px;
-  color: #b44b4b;
+  color: var(--color-danger);
 }
 .proxy-header-remove:hover:not(:disabled) {
   color: #8f2f35;
@@ -3154,8 +3187,8 @@ onMounted(() => {
 .mapping-list {
   min-width: 0;
   overflow: clip;
-  border: 1px solid #d8e2ec;
-  border-radius: 9px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
 }
 .mapping-grid {
   display: grid;
@@ -3163,7 +3196,7 @@ onMounted(() => {
   align-items: center;
   gap: 12px;
   padding: 4px 10px;
-  border-top: 1px solid #e5ebf1;
+  border-top: 1px solid #f1f5f9;
 }
 .mapping-grid-head {
   padding-top: 6px;
@@ -3180,7 +3213,7 @@ onMounted(() => {
 }
 .mapping-row.is-selected {
   background: #fff;
-  box-shadow: inset 3px 0 #4e82d8;
+  box-shadow: inset 3px 0 var(--color-primary);
 }
 .mapping-check {
   display: flex;
@@ -3202,7 +3235,7 @@ onMounted(() => {
 .mapping-model-name {
   min-width: 0;
   overflow: hidden;
-  color: #183247;
+  color: var(--color-text);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3222,9 +3255,9 @@ onMounted(() => {
   padding: 5px 10px;
 }
 .mapping-row:not(.is-selected) .mapping-control input {
-  border-color: #e2e9f0;
-  background: #f5f8fb;
-  color: #8a9aa9;
+  border-color: var(--color-border);
+  background: #f8fafc;
+  color: var(--color-text-muted);
 }
 .mapping-empty {
   margin: 0;

@@ -213,7 +213,7 @@ function lineLabel(line: JsonLine) {
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #f7f9fc;
+  background: #f8fafc;
 }
 .json-snapshot-head {
   display: flex;
@@ -226,7 +226,7 @@ function lineLabel(line: JsonLine) {
   background: #fff;
 }
 .json-snapshot-head h3 {
-  color: #3e5369;
+  color: var(--color-text);
   font-size: 13px;
   font-weight: 600;
 }
@@ -242,10 +242,10 @@ function lineLabel(line: JsonLine) {
   font-size: 12px;
 }
 .json-copy:hover {
-  background: #edf4ff;
+  background: var(--color-primary-soft);
 }
 .json-copy:focus-visible {
-  outline: 3px solid #90b7fb;
+  outline: 2px solid #bfdbfe;
   outline-offset: 1px;
 }
 .json-code {
@@ -253,8 +253,8 @@ function lineLabel(line: JsonLine) {
   margin: 0;
   padding: 12px 0;
   overflow: auto;
-  color: #253a4f;
-  background: #f7f9fc;
+  color: var(--color-text-secondary);
+  background: #f8fafc;
   font-family: Consolas, 'SFMono-Regular', monospace;
   font-size: 12px;
   line-height: 1.75;
@@ -272,16 +272,16 @@ function lineLabel(line: JsonLine) {
   white-space: pre;
 }
 .json-line.changed {
-  background: #fff3c9;
-  box-shadow: inset 3px 0 #d49922;
+  background: var(--color-warning-bg);
+  box-shadow: inset 3px 0 #f59e0b;
 }
 .json-line.added {
-  background: #e8f6ed;
-  box-shadow: inset 3px 0 #398a59;
+  background: #ecfdf5;
+  box-shadow: inset 3px 0 var(--color-success);
 }
 .json-line.removed {
-  background: #fff0f0;
-  box-shadow: inset 3px 0 #c55757;
+  background: #fef2f2;
+  box-shadow: inset 3px 0 var(--color-danger);
 }
 .json-diff-empty {
   padding: 28px 16px;

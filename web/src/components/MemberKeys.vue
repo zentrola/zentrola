@@ -10,6 +10,7 @@ import ListFooter from './ListFooter.vue'
 import Icon from './Icon.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
 import TableScroll from './TableScroll.vue'
+import TechnicalValue from './TechnicalValue.vue'
 
 const props = defineProps<{ member: Member }>()
 defineEmits<{ close: [] }>()
@@ -87,7 +88,7 @@ function revoke() {
           <tr v-for="key in items" :key="key.id">
             <td class="key-display-name">{{ key.name }}</td>
             <td>
-              <code>{{ key.maskedKey }}</code>
+              <TechnicalValue :value="key.maskedKey" />
             </td>
             <td>{{ key.expiresAt ? dateOnly(key.expiresAt) : t('members.noExpiry') }}</td>
             <td class="align-right">
