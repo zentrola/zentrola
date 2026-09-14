@@ -268,6 +268,33 @@ func TestNonProductionAccessLogCapturesBodiesWithoutRedaction(t *testing.T) {
 	}
 }
 
+func TestNonProductionAccessLogCapturesLargeAndNonJSONBodiesInFull(t *testing.T) {
+	requestBody := `{"prompt":"` + strings.Repeat("large-private-prompt-", 10_000) + `"}`
+	responseBody := "event: response.completed\ndata: private-stream-response\n\n"
+	for _, environment := range []string{"dev", "test"} {
+		t.Run(environment, func(t *testing.T) {
+			var logs bytes.Buffer
+			logger := logging.New(&logs, "json", slog.LevelInfo)
+			handler := accessLog(logger, environment)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.Copy(io.Discard, r.Body)
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, responseBody)
+			}))
+			req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(requestBody))
+			req.Header.Set("Content-Type", "application/json")
+			handler.ServeHTTP(httptest.NewRecorder(), req)
+
+			var record map[string]any
+			if err := json.Unmarshal(logs.Bytes(), &record); err != nil {
+				t.Fatal(err)
+			}
+			if record["request_body"] != requestBody || record["response_body"] != responseBody {
+				t.Fatalf("%s access log did not contain the complete bodies", environment)
+			}
+		})
+	}
+}
+
 func TestProductionAccessLogOmitsBodies(t *testing.T) {
 	var logs bytes.Buffer
 	logger := logging.New(&logs, "json", slog.LevelInfo)

@@ -5,11 +5,8 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
-	"fmt"
 	"io"
 	"log/slog"
-	"mime"
 	"net/http"
 	"sort"
 	"strings"
@@ -43,7 +40,6 @@ func requestID(next http.Handler) http.Handler {
 	})
 }
 
-const accessLogBodyLimit = 8 << 10
 const accessLogHeaderValueLimit = 256
 
 var requestHeaderAllowlist = []string{
@@ -144,24 +140,13 @@ func accessLogExtraFields(ctx context.Context) []any {
 }
 
 type bodyCapture struct {
-	data      bytes.Buffer
-	total     int64
-	truncated bool
+	data  bytes.Buffer
+	total int64
 }
 
 func (c *bodyCapture) Write(p []byte) (int, error) {
 	c.total += int64(len(p))
-	remaining := accessLogBodyLimit - c.data.Len()
-	if remaining > 0 {
-		written := len(p)
-		if written > remaining {
-			written = remaining
-		}
-		_, _ = c.data.Write(p[:written])
-	}
-	if c.total > accessLogBodyLimit {
-		c.truncated = true
-	}
+	_, _ = c.data.Write(p)
 	return len(p), nil
 }
 
@@ -178,28 +163,11 @@ func (r *captureReadCloser) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func bodyLogValue(capture *bodyCapture, contentType string) string {
+func bodyLogValue(capture *bodyCapture) string {
 	if capture == nil || capture.total == 0 {
 		return ""
 	}
-	media, _, _ := mime.ParseMediaType(contentType)
-	if media != "application/json" {
-		return fmt.Sprintf("[OMITTED content_type=%s bytes=%d]", media, capture.total)
-	}
-	if capture.truncated {
-		return fmt.Sprintf("[OMITTED truncated_json bytes=%d captured=%d]", capture.total, capture.data.Len())
-	}
-	decoder := json.NewDecoder(bytes.NewReader(capture.data.Bytes()))
-	decoder.UseNumber()
-	var value any
-	if err := decoder.Decode(&value); err != nil {
-		return fmt.Sprintf("[OMITTED invalid_json bytes=%d]", capture.total)
-	}
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		return fmt.Sprintf("[OMITTED unencodable_json bytes=%d]", capture.total)
-	}
-	return string(encoded)
+	return capture.data.String()
 }
 
 func accessLog(logger *slog.Logger, environments ...string) func(http.Handler) http.Handler {
@@ -246,8 +214,8 @@ func accessLog(logger *slog.Logger, environments ...string) func(http.Handler) h
 				}
 				if logBodies {
 					attributes = append(attributes,
-						"request_body", bodyLogValue(requestBody, r.Header.Get("Content-Type")),
-						"response_body", bodyLogValue(responseBody, wrapped.Header().Get("Content-Type")),
+						"request_body", bodyLogValue(requestBody),
+						"response_body", bodyLogValue(responseBody),
 					)
 				}
 				attributes = append(attributes, accessLogExtraFields(r.Context())...)
