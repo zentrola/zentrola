@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -179,51 +178,7 @@ func (r *captureReadCloser) Read(p []byte) (int, error) {
 	return n, err
 }
 
-var nonAlphaNumeric = regexp.MustCompile(`[^a-z0-9]+`)
-
-func sensitiveJSONField(name string) bool {
-	name = nonAlphaNumeric.ReplaceAllString(strings.ToLower(name), "")
-	// 这些字段虽然包含敏感词片段，但只描述能力或用量，不携带实际载荷或凭据。
-	switch name {
-	case "inputmodalities", "outputmodalities", "maxtokens", "inputtokens", "outputtokens", "cachedinputtokens",
-		"prompttokens", "completiontokens", "totaltokens", "credentialconfigured":
-		return false
-	}
-	for _, marker := range []string{
-		"password", "secret", "token", "credential", "authorization", "apikey", "virtualkey", "jwt",
-		"content", "message", "prompt", "input", "output", "system", "instruction", "thinking", "conversation", "context", "query", "response", "text",
-	} {
-		if strings.Contains(name, marker) {
-			return true
-		}
-	}
-	return name == "key"
-}
-
-func redactJSON(value any) any {
-	switch value := value.(type) {
-	case map[string]any:
-		for key, child := range value {
-			if sensitiveJSONField(key) {
-				value[key] = "[REDACTED]"
-				continue
-			}
-			switch child.(type) {
-			case map[string]any, []any:
-				value[key] = redactJSON(child)
-			}
-		}
-	case []any:
-		for i := range value {
-			value[i] = redactJSON(value[i])
-		}
-	default:
-		return value
-	}
-	return value
-}
-
-func bodyLogValue(capture *bodyCapture, contentType string, redact bool) string {
+func bodyLogValue(capture *bodyCapture, contentType string) string {
 	if capture == nil || capture.total == 0 {
 		return ""
 	}
@@ -240,9 +195,6 @@ func bodyLogValue(capture *bodyCapture, contentType string, redact bool) string 
 	if err := decoder.Decode(&value); err != nil {
 		return fmt.Sprintf("[OMITTED invalid_json bytes=%d]", capture.total)
 	}
-	if redact {
-		value = redactJSON(value)
-	}
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		return fmt.Sprintf("[OMITTED unencodable_json bytes=%d]", capture.total)
@@ -251,7 +203,7 @@ func bodyLogValue(capture *bodyCapture, contentType string, redact bool) string 
 }
 
 func accessLog(logger *slog.Logger, environments ...string) func(http.Handler) http.Handler {
-	development := len(environments) > 0 && environments[0] == "dev"
+	logBodies := len(environments) > 0 && (environments[0] == "dev" || environments[0] == "test")
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
@@ -259,7 +211,7 @@ func accessLog(logger *slog.Logger, environments ...string) func(http.Handler) h
 			// chi 包装器保留 Flusher 等接口，避免影响后续 SSE。
 			wrapped := chimiddleware.NewWrapResponseWriter(w, r.ProtoMajor)
 			var requestBody, responseBody *bodyCapture
-			if development {
+			if logBodies {
 				requestBody = &bodyCapture{}
 				responseBody = &bodyCapture{}
 				if r.Body != nil {
@@ -292,10 +244,10 @@ func accessLog(logger *slog.Logger, environments ...string) func(http.Handler) h
 				if headers := accessLogHeaders(wrapped.Header(), responseHeaderAllowlist); len(headers) > 0 {
 					attributes = append(attributes, "response_headers", headers)
 				}
-				if development {
+				if logBodies {
 					attributes = append(attributes,
-						"request_body", bodyLogValue(requestBody, r.Header.Get("Content-Type"), false),
-						"response_body", bodyLogValue(responseBody, wrapped.Header().Get("Content-Type"), false),
+						"request_body", bodyLogValue(requestBody, r.Header.Get("Content-Type")),
+						"response_body", bodyLogValue(responseBody, wrapped.Header().Get("Content-Type")),
 					)
 				}
 				attributes = append(attributes, accessLogExtraFields(r.Context())...)

@@ -229,78 +229,42 @@ func TestMiddlewarePreservesStreamingAndCancellation(t *testing.T) {
 	}
 }
 
-func TestDevelopmentAccessLogCapturesBodiesWithoutRedaction(t *testing.T) {
+func TestNonProductionAccessLogCapturesBodiesWithoutRedaction(t *testing.T) {
 	provider := telemetry.Setup()
 	t.Cleanup(func() { _ = telemetry.Shutdown(context.Background(), provider) })
-	var logs bytes.Buffer
-	logger := logging.New(&logs, "json", slog.LevelInfo)
-	handler := requestID(accessLog(logger, "dev")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.Copy(io.Discard, r.Body)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		_, _ = io.WriteString(w, `{"error":{"code":"MODEL_PERMISSION_DENIED","message":"Model permission denied."},"accessToken":"response-secret"}`)
-	})))
-	req := httptest.NewRequest(http.MethodPost, "/anthropic/v1/messages?token=query-secret", strings.NewReader(`{"model":"claude-sonnet","messages":[{"role":"user","content":"private-prompt"}],"password":"request-secret","input_text":"future-schema-secret","conversation":"unknown-content-secret"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
+	for _, environment := range []string{"dev", "test"} {
+		t.Run(environment, func(t *testing.T) {
+			var logs bytes.Buffer
+			logger := logging.New(&logs, "json", slog.LevelInfo)
+			handler := requestID(accessLog(logger, environment)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.Copy(io.Discard, r.Body)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = io.WriteString(w, `{"error":{"code":"MODEL_PERMISSION_DENIED","message":"Model permission denied."},"accessToken":"response-secret"}`)
+			})))
+			req := httptest.NewRequest(http.MethodPost, "/anthropic/v1/messages?token=query-secret", strings.NewReader(`{"model":"claude-sonnet","messages":[{"role":"user","content":"private-prompt"}],"password":"request-secret","input_text":"future-schema-secret","conversation":"unknown-content-secret"}`))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
 
-	output := logs.String()
-	for _, required := range []string{
-		"request_time", "method", "trace_id", "span_id", "duration_ms", "path", "status",
-		"request_bytes", "response_bytes", "request_body", "response_body", "claude-sonnet",
-		"MODEL_PERMISSION_DENIED", "private-prompt", "request-secret", "response-secret",
-		"future-schema-secret", "unknown-content-secret",
-	} {
-		if !strings.Contains(output, required) {
-			t.Fatalf("development access log missing %s: %s", required, output)
-		}
-	}
-	if strings.Count(output, `"trace_id"`) != 1 || strings.Count(output, `"span_id"`) != 1 {
-		t.Fatalf("trace and span IDs must each appear once: %s", output)
-	}
-	if strings.Contains(output, "query-secret") {
-		t.Fatalf("development access log included URL query: %s", output)
-	}
-}
-
-func TestRedactJSONOnlyRedactsSensitiveFields(t *testing.T) {
-	value := map[string]any{
-		"name":                  "GLM 5.3 Flash",
-		"createdAt":             "2026-09-10T16:41:23+08:00",
-		"inputModalities":       []any{"text", "image"},
-		"outputModalities":      []any{"text"},
-		"publisherProviderId":   "42",
-		"publisherProviderName": "Zhipu AI",
-		"remark":                "ordinary metadata",
-		"total":                 json.Number("15"),
-		"nextCursor":            "cursor-123",
-		"password":              "password-secret",
-		"accessToken":           "token-secret",
-		"messages":              []any{map[string]any{"role": "user", "content": "private-prompt"}},
-		"input_text":            "private-input",
-	}
-
-	encoded, err := json.Marshal(redactJSON(value))
-	if err != nil {
-		t.Fatal(err)
-	}
-	output := string(encoded)
-	for _, expected := range []string{
-		"GLM 5.3 Flash", "2026-09-10T16:41:23+08:00", "text", "image", "42", "Zhipu AI",
-		"ordinary metadata", "15", "cursor-123",
-	} {
-		if !strings.Contains(output, expected) {
-			t.Fatalf("ordinary field value %q missing from %s", expected, output)
-		}
-	}
-	for _, secret := range []string{"password-secret", "token-secret", "private-prompt", "private-input"} {
-		if strings.Contains(output, secret) {
-			t.Fatalf("sensitive value %q leaked in %s", secret, output)
-		}
-	}
-	if strings.Count(output, "[REDACTED]") != 4 {
-		t.Fatalf("unexpected redacted output: %s", output)
+			output := logs.String()
+			for _, required := range []string{
+				"request_time", "method", "trace_id", "span_id", "duration_ms", "path", "status",
+				"request_bytes", "response_bytes", "request_body", "response_body", "claude-sonnet",
+				"MODEL_PERMISSION_DENIED", "private-prompt", "request-secret", "response-secret",
+				"future-schema-secret", "unknown-content-secret",
+			} {
+				if !strings.Contains(output, required) {
+					t.Fatalf("non-production access log missing %s: %s", required, output)
+				}
+			}
+			if strings.Count(output, `"trace_id"`) != 1 || strings.Count(output, `"span_id"`) != 1 {
+				t.Fatalf("trace and span IDs must each appear once: %s", output)
+			}
+			if strings.Contains(output, "query-secret") {
+				t.Fatalf("non-production access log included URL query: %s", output)
+			}
+		})
 	}
 }
 
