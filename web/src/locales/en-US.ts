@@ -520,6 +520,11 @@ export default {
       'This provider has multiple credentials. Select the credential to use for this connection test.',
     selectTestCredential: 'Test credential',
     selectCredentialForTest: 'Test connection with {name}',
+    selectTestProtocolTitle: '{name} / Select test protocol',
+    selectTestProtocolHint:
+      'This provider has multiple protocols. Select the protocol to use for this connection test.',
+    selectTestProtocol: 'Test protocol',
+    selectProtocolForTest: 'Test connection with the {protocol} protocol',
     test: 'Test connection',
     startTest: 'Start test',
     testing: 'Verifying model access…',

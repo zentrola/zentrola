@@ -86,7 +86,12 @@ const subscriptionCommands = computed(() => {
 })
 const testSelectionTarget = ref<Provider | null>(null)
 const selectedTestResourceID = ref('')
-const testTarget = ref<{ provider: Provider; resource: Resource } | null>(null)
+const selectedTestProtocol = ref<ProviderProtocol | ''>('')
+const testTarget = ref<{
+  provider: Provider
+  resource: Resource
+  protocol?: ProviderProtocol
+} | null>(null)
 const testResult = ref<ConnectionResult | null>(null)
 const credentialVerifiedAt = reactive<Record<string, string>>({})
 const credentialQuotas = reactive<Record<string, ResourceQuota[]>>({})
@@ -780,14 +785,26 @@ function deleteCredential() {
   })
 }
 
-function testConnection(provider: Provider, resource: Resource) {
-  testTarget.value = { provider, resource }
+function preferredTestProtocol(provider: Provider): ProviderProtocol | undefined {
+  return (
+    provider.endpoints.find((endpoint) => endpoint.protocolType === 'ANTHROPIC') ??
+    provider.endpoints.find((endpoint) => endpoint.protocolType === 'OPENAI')
+  )?.protocolType
+}
+
+function testConnection(
+  provider: Provider,
+  resource: Resource,
+  protocol = resource.authType === 'API_KEY' ? preferredTestProtocol(provider) : undefined,
+) {
+  testTarget.value = { provider, resource, protocol }
   testResult.value = null
   actionError.value = ''
   void run(async () => {
     try {
+      const query = protocol ? `?protocol=${encodeURIComponent(protocol)}` : ''
       const result = await api<ConnectionResult>(
-        `/resources/${resource.id}/test-connection`,
+        `/resources/${resource.id}/test-connection${query}`,
         'POST',
       )
       credentialVerifiedAt[resource.id] = new Date().toISOString()
@@ -800,20 +817,54 @@ function testConnection(provider: Provider, resource: Resource) {
   })
 }
 
+const selectedTestResource = computed(() => {
+  if (!testSelectionTarget.value) return undefined
+  return resourcesFor(testSelectionTarget.value).find(
+    (candidate) => candidate.id === selectedTestResourceID.value,
+  )
+})
+const testProtocolOptions = computed(() => {
+  if (!testSelectionTarget.value) return []
+  return [...testSelectionTarget.value.endpoints].sort((left, right) => {
+    if (left.protocolType === right.protocolType) return 0
+    return left.protocolType === 'ANTHROPIC' ? -1 : 1
+  })
+})
+const testCredentialSelectionRequired = computed(
+  () => !!testSelectionTarget.value && resourcesFor(testSelectionTarget.value).length > 1,
+)
+const testProtocolSelectionRequired = computed(
+  () => selectedTestResource.value?.authType === 'API_KEY' && testProtocolOptions.value.length > 1,
+)
+const testSelectionReady = computed(
+  () =>
+    !!selectedTestResource.value &&
+    (!testProtocolSelectionRequired.value || !!selectedTestProtocol.value),
+)
+
+function openTestSelection(provider: Provider, resource?: Resource) {
+  testSelectionTarget.value = provider
+  selectedTestResourceID.value = resource?.id ?? resourceFor(provider)?.id ?? ''
+  selectedTestProtocol.value = preferredTestProtocol(provider) ?? ''
+}
+
 function testProviderConnection(provider: Provider) {
   const candidates = resourcesFor(provider)
   if (!candidates.length) return
-  if (candidates.length === 1) {
+  if (
+    candidates.length === 1 &&
+    (candidates[0].authType !== 'API_KEY' || provider.endpoints.length <= 1)
+  ) {
     testConnection(provider, candidates[0])
     return
   }
-  testSelectionTarget.value = provider
-  selectedTestResourceID.value = resourceFor(provider)?.id ?? candidates[0].id
+  openTestSelection(provider)
 }
 
 function closeTestSelection() {
   testSelectionTarget.value = null
   selectedTestResourceID.value = ''
+  selectedTestProtocol.value = ''
 }
 
 function testSelectedProviderCredential() {
@@ -823,12 +874,18 @@ function testSelectedProviderCredential() {
     (candidate) => candidate.id === selectedTestResourceID.value,
   )
   if (!resource) return
+  const protocol =
+    resource.authType === 'API_KEY' ? selectedTestProtocol.value || undefined : undefined
   closeTestSelection()
-  testConnection(provider, resource)
+  testConnection(provider, resource, protocol)
 }
 
 function testCredentialFromModal(provider: Provider, resource: Resource) {
   closeCredential()
+  if (resource.authType === 'API_KEY' && provider.endpoints.length > 1) {
+    openTestSelection(provider, resource)
+    return
+  }
   testConnection(provider, resource)
 }
 
@@ -1512,45 +1569,87 @@ onMounted(() => {
 
   <Modal
     v-if="testSelectionTarget"
-    :title="t('resources.selectTestCredentialTitle', { name: testSelectionTarget.name })"
+    :title="
+      t(
+        testCredentialSelectionRequired
+          ? 'resources.selectTestCredentialTitle'
+          : 'resources.selectTestProtocolTitle',
+        { name: testSelectionTarget.name },
+      )
+    "
     :busy="busy"
     medium
     @close="closeTestSelection"
   >
-    <p class="muted credential-test-selection-hint">
-      {{ t('resources.selectTestCredentialHint') }}
-    </p>
-    <div
-      class="credential-test-options"
-      role="radiogroup"
-      :aria-label="t('resources.selectTestCredential')"
-    >
-      <label
-        v-for="resource in resourcesFor(testSelectionTarget)"
-        :key="resource.id"
-        class="credential-test-option"
-        :class="{ 'is-selected': selectedTestResourceID === resource.id }"
+    <section v-if="testCredentialSelectionRequired" class="credential-test-section">
+      <p class="muted credential-test-selection-hint">
+        {{ t('resources.selectTestCredentialHint') }}
+      </p>
+      <div
+        class="credential-test-options"
+        role="radiogroup"
+        :aria-label="t('resources.selectTestCredential')"
       >
-        <input
-          v-model="selectedTestResourceID"
-          type="radio"
-          name="provider-test-credential"
-          :value="resource.id"
-          :aria-label="t('resources.selectCredentialForTest', { name: resource.name })"
-        />
-        <span class="credential-test-option-main">
-          <strong>{{ resource.name }}</strong>
-          <small>{{ t(`resources.authTypes.${resource.authType || 'API_KEY'}`) }}</small>
-        </span>
-        <span class="credential-test-option-status">
-          <Status :value="resource.runtimeStatus || 'HEALTHY'" />
-          <Status
-            v-if="resource.authType === 'SUBSCRIPTION'"
-            :value="resource.quotaStatus || 'UNKNOWN'"
+        <label
+          v-for="resource in resourcesFor(testSelectionTarget)"
+          :key="resource.id"
+          class="credential-test-option"
+          :class="{ 'is-selected': selectedTestResourceID === resource.id }"
+        >
+          <input
+            v-model="selectedTestResourceID"
+            type="radio"
+            name="provider-test-credential"
+            :value="resource.id"
+            :aria-label="t('resources.selectCredentialForTest', { name: resource.name })"
           />
-        </span>
-      </label>
-    </div>
+          <span class="credential-test-option-main">
+            <strong>{{ resource.name }}</strong>
+            <small>{{ t(`resources.authTypes.${resource.authType || 'API_KEY'}`) }}</small>
+          </span>
+          <span class="credential-test-option-status">
+            <Status :value="resource.runtimeStatus || 'HEALTHY'" />
+            <Status
+              v-if="resource.authType === 'SUBSCRIPTION'"
+              :value="resource.quotaStatus || 'UNKNOWN'"
+            />
+          </span>
+        </label>
+      </div>
+    </section>
+    <section v-if="testProtocolSelectionRequired" class="credential-test-section">
+      <p class="muted credential-test-selection-hint">
+        {{ t('resources.selectTestProtocolHint') }}
+      </p>
+      <div
+        class="credential-test-options"
+        role="radiogroup"
+        :aria-label="t('resources.selectTestProtocol')"
+      >
+        <label
+          v-for="endpoint in testProtocolOptions"
+          :key="endpoint.protocolType"
+          class="credential-test-option"
+          :class="{ 'is-selected': selectedTestProtocol === endpoint.protocolType }"
+        >
+          <input
+            v-model="selectedTestProtocol"
+            type="radio"
+            name="provider-test-protocol"
+            :value="endpoint.protocolType"
+            :aria-label="
+              t('resources.selectProtocolForTest', {
+                protocol: endpoint.protocolType === 'ANTHROPIC' ? 'Anthropic' : 'OpenAI',
+              })
+            "
+          />
+          <span class="credential-test-option-main">
+            <strong>{{ endpoint.protocolType === 'ANTHROPIC' ? 'Anthropic' : 'OpenAI' }}</strong>
+            <TechnicalValue :value="endpoint.baseUrl" :copyable="false" muted />
+          </span>
+        </label>
+      </div>
+    </section>
     <footer class="form-footer">
       <button type="button" class="button" :disabled="busy" @click="closeTestSelection">
         {{ t('common.cancel') }}
@@ -1558,7 +1657,7 @@ onMounted(() => {
       <button
         type="button"
         class="button primary"
-        :disabled="busy || !selectedTestResourceID"
+        :disabled="busy || !testSelectionReady"
         @click="testSelectedProviderCredential"
       >
         {{ t('resources.startTest') }}
@@ -1991,6 +2090,10 @@ onMounted(() => {
         {{ resultMessage(testResult, testTarget.resource) }}
       </div>
       <dl class="detail-grid">
+        <template v-if="testTarget.protocol">
+          <dt>{{ t('resources.protocol') }}</dt>
+          <dd>{{ testTarget.protocol === 'ANTHROPIC' ? 'Anthropic' : 'OpenAI' }}</dd>
+        </template>
         <dt>{{ t('common.code') }}</dt>
         <dd>{{ testResult.code }}</dd>
         <dt>HTTP</dt>
@@ -2464,6 +2567,9 @@ onMounted(() => {
 }
 .credential-test-selection-hint {
   margin-bottom: 14px;
+}
+.credential-test-section + .credential-test-section {
+  margin-top: 18px;
 }
 .credential-test-options {
   overflow: hidden;

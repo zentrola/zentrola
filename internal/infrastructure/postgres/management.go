@@ -688,6 +688,12 @@ func (s *managementSession) RestoreResourceRuntime(ctx context.Context, id int64
 	})
 	return err
 }
+func (s *managementSession) BlockResourceRuntime(ctx context.Context, id int64, reason, code string, status *int32, at time.Time) error {
+	return s.q.ManageBlockResourceRuntime(ctx, dbgen.ManageBlockResourceRuntimeParams{
+		ID: id, BlockedReason: &reason, BlockedAt: pgTime(at), LastHttpStatus: status,
+		LastErrorCode: &code, UpdatedBy: actorRef(s.actor.ID),
+	})
+}
 
 func pgNumeric(value *string) pgtype.Numeric {
 	if value == nil {

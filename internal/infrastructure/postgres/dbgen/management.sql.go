@@ -181,6 +181,34 @@ func (q *Queries) ManageAddMember(ctx context.Context, arg ManageAddMemberParams
 	return err
 }
 
+const manageBlockResourceRuntime = `-- name: ManageBlockResourceRuntime :exec
+UPDATE provider_credential
+SET runtime_status='BLOCKED',blocked_reason=$2,blocked_at=$3,last_error_at=$3,
+    last_http_status=$4,last_error_code=$5,updated_by=$6,updated_at=$3
+WHERE id=$1 AND is_deleted=false
+`
+
+type ManageBlockResourceRuntimeParams struct {
+	ID             int64
+	BlockedReason  *string
+	BlockedAt      pgtype.Timestamptz
+	LastHttpStatus *int32
+	LastErrorCode  *string
+	UpdatedBy      string
+}
+
+func (q *Queries) ManageBlockResourceRuntime(ctx context.Context, arg ManageBlockResourceRuntimeParams) error {
+	_, err := q.db.Exec(ctx, manageBlockResourceRuntime,
+		arg.ID,
+		arg.BlockedReason,
+		arg.BlockedAt,
+		arg.LastHttpStatus,
+		arg.LastErrorCode,
+		arg.UpdatedBy,
+	)
+	return err
+}
+
 const manageCreateGroup = `-- name: ManageCreateGroup :exec
 INSERT INTO principal_group(id,group_code,group_name,remark,status,created_by,updated_by,created_at,updated_at)
 VALUES($1,$2,$3,$4,'ACTIVE',$5,$5,$6,$6)

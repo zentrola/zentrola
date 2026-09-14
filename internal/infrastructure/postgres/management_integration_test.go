@@ -353,9 +353,13 @@ func TestStage3Integration(t *testing.T) {
 		if result.OK || result.Code != "CREDENTIAL_UNRECOVERABLE" {
 			t.Fatal("unrecoverable credential test accepted")
 		}
+		blocked := stage3Data[mgmt.Resource](t, request("GET", firstPath, nil, 200))
+		if blocked.RuntimeStatus != "BLOCKED" || blocked.BlockedReason == nil || *blocked.BlockedReason != "CREDENTIAL_UNRECOVERABLE" || blocked.LastErrorCode == nil || *blocked.LastErrorCode != "CREDENTIAL_UNRECOVERABLE" {
+			t.Fatalf("connection failure was not persisted: %+v", blocked)
+		}
 		request("PUT", firstPath+"/credential", map[string]string{"credential": credential}, 200)
 		recovered := stage3Data[mgmt.Resource](t, request("GET", firstPath, nil, 200))
-		if !recovered.CredentialConfigured {
+		if !recovered.CredentialConfigured || recovered.RuntimeStatus != "HEALTHY" || recovered.BlockedReason != nil || recovered.LastErrorCode != nil {
 			t.Fatal("replaced credential should stay configured")
 		}
 	})
@@ -835,7 +839,7 @@ func TestStage3Integration(t *testing.T) {
 		if err := pool.QueryRow(ctx, "SELECT string_agg(row_to_json(l)::text,' ') FROM operation_log l").Scan(&stored); err != nil {
 			t.Fatal(err)
 		}
-		for _, event := range []string{"MEMBER_CREATE", "MEMBER_STATUS_CHANGE", "ACCESS_KEY_CREATE", "ACCESS_KEY_REVOKE", "GROUP_CREATE", "GROUP_UPDATE", "GROUP_STATUS_CHANGE", "GROUP_DELETE", "GROUP_MEMBER_ADD", "GROUP_MEMBER_REMOVE", "GROUP_MODEL_GRANT", "GROUP_MODEL_REVOKE", "MODEL_CREATE", "MODEL_UPDATE", "MODEL_DELETE", "MODEL_STATUS_CHANGE", "PROVIDER_CREATE", "PROVIDER_UPDATE", "RESOURCE_CREATE", "RESOURCE_CREDENTIAL_UPDATE", "RESOURCE_STATUS_CHANGE", "RESOURCE_CONNECTION_TEST"} {
+		for _, event := range []string{"MEMBER_CREATE", "MEMBER_STATUS_CHANGE", "ACCESS_KEY_CREATE", "ACCESS_KEY_REVOKE", "GROUP_CREATE", "GROUP_UPDATE", "GROUP_STATUS_CHANGE", "GROUP_DELETE", "GROUP_MEMBER_ADD", "GROUP_MEMBER_REMOVE", "GROUP_MODEL_GRANT", "GROUP_MODEL_REVOKE", "MODEL_CREATE", "MODEL_UPDATE", "MODEL_DELETE", "MODEL_STATUS_CHANGE", "PROVIDER_CREATE", "PROVIDER_UPDATE", "RESOURCE_CREATE", "RESOURCE_CREDENTIAL_UPDATE", "RESOURCE_CONNECTION_TEST"} {
 			if !strings.Contains(stored, event) {
 				t.Errorf("missing audit %s", event)
 			}

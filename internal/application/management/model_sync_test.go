@@ -11,6 +11,21 @@ import (
 	"github.com/zentrola/zentrola/internal/domain/catalog"
 )
 
+func TestConnectionTestEndpointSelection(t *testing.T) {
+	provider := Provider{Endpoints: []ProviderEndpoint{
+		{ProtocolType: "OPENAI", BaseURL: "https://api.example.com/v1"},
+		{ProtocolType: "ANTHROPIC", BaseURL: "https://api.example.com/anthropic"},
+	}}
+	protocol, baseURL := preferredProviderEndpoint(provider)
+	if protocol != "ANTHROPIC" || baseURL != "https://api.example.com/anthropic" {
+		t.Fatalf("default connection test endpoint = %s %s", protocol, baseURL)
+	}
+	protocol, baseURL = providerEndpoint(provider, "OPENAI")
+	if protocol != "OPENAI" || baseURL != "https://api.example.com/v1" {
+		t.Fatalf("selected connection test endpoint = %s %s", protocol, baseURL)
+	}
+}
+
 type syncIDs struct{ next int64 }
 
 func (g *syncIDs) NextID(context.Context) (int64, error) { g.next++; return g.next, nil }

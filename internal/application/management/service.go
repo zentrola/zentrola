@@ -804,7 +804,17 @@ func (s *Service) DeleteResource(ctx context.Context, actor admin.Identity, id i
 	})
 }
 func (s *Service) TestResource(ctx context.Context, actor admin.Identity, id int64, meta appsec.RequestMeta) (ConnectionResult, error) {
+	return s.TestResourceProtocol(ctx, actor, id, "", meta)
+}
+
+// TestResourceProtocol 使用指定的上游协议测试 API Key 资源；protocol 为空时
+// 优先 Anthropic，未配置 Anthropic 时回退 OpenAI。订阅资源仍由认证适配器探测。
+func (s *Service) TestResourceProtocol(ctx context.Context, actor admin.Identity, id int64, protocol string, meta appsec.RequestMeta) (ConnectionResult, error) {
 	if id <= 0 {
+		return ConnectionResult{}, appsec.ErrInvalidArgument
+	}
+	protocol = strings.ToUpper(strings.TrimSpace(protocol))
+	if protocol != "" && !validProviderProtocol(protocol) {
 		return ConnectionResult{}, appsec.ErrInvalidArgument
 	}
 	var resource ResourceRecord
@@ -872,9 +882,15 @@ func (s *Service) TestResource(ctx context.Context, actor admin.Identity, id int
 		result.Code = "PROVIDER_MODEL_MAPPING_REQUIRED"
 	} else {
 		defer clear(plain)
-		protocol, baseURL := preferredProviderEndpoint(provider)
+		selectedProtocol, baseURL := preferredProviderEndpoint(provider)
+		if protocol != "" {
+			selectedProtocol, baseURL = providerEndpoint(provider, protocol)
+			if baseURL == "" {
+				return ConnectionResult{}, appsec.ErrInvalidArgument
+			}
+		}
 		target := ConnectionTarget{
-			Protocol: protocol, BaseURL: baseURL, UpstreamModelCode: mappings[0].UpstreamModelCode,
+			Protocol: selectedProtocol, BaseURL: baseURL, UpstreamModelCode: mappings[0].UpstreamModelCode,
 			AuthType: resource.AuthType, AuthAdapter: resource.AuthAdapter,
 		}
 		if baseURL == "" {
@@ -922,27 +938,16 @@ func (s *Service) TestResource(ctx context.Context, actor admin.Identity, id int
 		}
 		now := time.Now().UTC().Truncate(time.Microsecond)
 		if result.OK {
-			if restorer, ok := w.(interface {
-				RestoreResourceRuntime(context.Context, int64, time.Time) error
-			}); ok {
-				if err := restorer.RestoreResourceRuntime(auditCtx, id, now); err != nil {
-					return err
-				}
+			if err := w.RestoreResourceRuntime(auditCtx, id, now); err != nil {
+				return err
 			}
 		} else if reason := connectionBlockReason(result.Code); reason != "" {
-			current.RuntimeStatus = "BLOCKED"
-			current.BlockedReason = stringPointer(reason)
-			current.BlockedAt = &now
-			current.LastErrorAt = &now
-			current.LastErrorCode = stringPointer(result.Code)
+			var status *int32
 			if result.HTTPStatus > 0 {
-				status := int32(result.HTTPStatus)
-				current.LastHTTPStatus = &status
-			} else {
-				current.LastHTTPStatus = nil
+				value := int32(result.HTTPStatus)
+				status = &value
 			}
-			current.UpdatedAt = now
-			if err := w.UpdateResource(auditCtx, current); err != nil {
+			if err := w.BlockResourceRuntime(auditCtx, id, reason, result.Code, status, now); err != nil {
 				return err
 			}
 		}

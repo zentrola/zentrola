@@ -745,10 +745,11 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 	})
 	// @Summary 测试资源连接
 	// @Tags 模型与资源
-	// @Description 使用已保存凭证访问上游模型列表；请求会产生外部网络调用。HTTP 200 后仍需检查 data.ok 和 data.code。
+	// @Description API Key 资源会使用指定协议发起最小模型推理，订阅资源会调用对应认证适配器的额度接口；请求会产生外部网络调用。HTTP 200 后仍需检查 data.ok 和 data.code。
 	// @Produce json
 	// @Security AdminBearer
 	// @Param id path string true "业务 ID（正整数字符串）"
+	// @Param protocol query string false "API Key 资源要测试的上游协议；未指定时优先 Anthropic" Enums(ANTHROPIC,OPENAI)
 	// @Success 200 {object} response{data=mgmt.ConnectionResult}
 	// @Header all {string} X-Request-ID "请求追踪 ID"
 	// @Failure 400 {object} response
@@ -764,7 +765,18 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 			securityError(w, req, err)
 			return
 		}
-		data, err := m.TestResource(req.Context(), adminFrom(req), id, requestMeta(req))
+		for name, values := range req.URL.Query() {
+			if name != "protocol" || len(values) != 1 {
+				securityError(w, req, appsec.ErrInvalidArgument)
+				return
+			}
+		}
+		protocol, err := optionalQueryValue(req, "protocol")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		data, err := m.TestResourceProtocol(req.Context(), adminFrom(req), id, protocol, requestMeta(req))
 		adminResult(w, req, 200, data, err)
 	})
 	// @Summary 同步官方模型目录

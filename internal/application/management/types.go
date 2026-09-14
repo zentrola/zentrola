@@ -311,6 +311,8 @@ type Writer interface {
 	DeleteProviderMapping(context.Context, int64, int64, time.Time) error
 	CreateResource(context.Context, ResourceRecord) error
 	UpdateResource(context.Context, ResourceRecord) error
+	BlockResourceRuntime(context.Context, int64, string, string, *int32, time.Time) error
+	RestoreResourceRuntime(context.Context, int64, time.Time) error
 	DeleteResource(context.Context, int64, time.Time) (bool, error)
 	ReplaceResourceQuotas(context.Context, int64, []ResourceQuota) error
 	Audit(context.Context, Audit, appsec.RequestMeta) error
