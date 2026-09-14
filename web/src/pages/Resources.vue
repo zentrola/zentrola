@@ -398,6 +398,6 @@ function verificationLabel(resource: Resource) {
   color: var(--blue);
 }
 .resource-verify-action.is-blocked {
-  color: #b46619;
+  color: var(--color-warning-text);
 }
 </style>

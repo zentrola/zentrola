@@ -126,28 +126,28 @@ onUnmounted(() => document.removeEventListener('pointerdown', onOutside))
   min-width: 112px;
   height: 33px;
   padding: 0 10px;
-  border: 1px solid #d9e2ec;
-  border-radius: 7px;
-  background: #f4f7fa;
-  color: #405a72;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: #f8fafc;
+  color: var(--color-text-secondary);
   font-size: 12px;
   font-weight: 600;
 }
 .language-trigger:hover,
 .language-trigger[aria-expanded='true'] {
-  border-color: #bdcbd9;
+  border-color: #cbd5e1;
   background: #fff;
 }
 .language-trigger:focus-visible {
-  outline: 2px solid #90b7fb;
+  outline: 2px solid #bfdbfe;
   outline-offset: 2px;
 }
 .language-chevron {
   width: 6px;
   height: 6px;
   margin-top: -3px;
-  border-right: 1.5px solid #6a7c8f;
-  border-bottom: 1.5px solid #6a7c8f;
+  border-right: 1.5px solid var(--color-text-muted);
+  border-bottom: 1.5px solid var(--color-text-muted);
   transform: rotate(45deg);
   transition: transform 150ms;
 }
@@ -164,9 +164,9 @@ onUnmounted(() => document.removeEventListener('pointerdown', onOutside))
   min-width: 0;
   height: 36px;
   padding: 0 11px;
-  border-radius: 999px;
+  border-radius: 9999px;
   background: #fff;
-  box-shadow: 0 2px 8px #17324a0a;
+  box-shadow: var(--shadow-card);
 }
 .language-switch.login-language .language-trigger:hover,
 .language-switch.login-language .language-trigger[aria-expanded='true'] {
@@ -186,9 +186,9 @@ onUnmounted(() => document.removeEventListener('pointerdown', onOutside))
   width: 140px;
   padding: 5px;
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: var(--radius-control);
   background: #fff;
-  box-shadow: 0 8px 24px #172f461a;
+  box-shadow: 0 12px 28px rgb(15 23 42 / 12%);
 }
 .language-option {
   display: flex;
@@ -199,13 +199,13 @@ onUnmounted(() => document.removeEventListener('pointerdown', onOutside))
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: #405a72;
+  color: var(--color-text-secondary);
   text-align: left;
   font-size: 12px;
 }
 .language-option:hover,
 .language-option:focus-visible {
-  background: #edf3fd;
+  background: var(--color-primary-soft);
   outline: none;
 }
 .language-option[aria-checked='true'] {

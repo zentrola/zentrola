@@ -12,6 +12,7 @@ import Modal from '../components/Modal.vue'
 import PageHeader from '../components/PageHeader.vue'
 import ListFooter from '../components/ListFooter.vue'
 import TableScroll from '../components/TableScroll.vue'
+import TechnicalValue from '../components/TechnicalValue.vue'
 
 type UsageView = 'statistics' | 'records'
 type StatisticDimension = 'member' | 'model' | 'provider'
@@ -618,6 +619,12 @@ onBeforeUnmount(() => {
       </div>
       <TableScroll has-actions>
         <table class="statistics-table">
+          <colgroup>
+            <col class="usage-rank-column" />
+            <col class="usage-name-column" />
+            <col span="8" class="usage-metric-column" />
+            <col class="usage-action-column" />
+          </colgroup>
           <thead>
             <tr>
               <th class="rank-column">{{ t('usage.rank') }}</th>
@@ -665,6 +672,14 @@ onBeforeUnmount(() => {
         <Icon name="usage" :size="32" />
         <h3>{{ t(statisticsLoading ? 'common.loading' : 'common.empty') }}</h3>
         <p v-if="!statisticsLoading">{{ t('usage.statisticsEmpty') }}</p>
+        <button
+          v-if="!statisticsLoading"
+          type="button"
+          class="button primary empty-state-action"
+          @click="reset"
+        >
+          <Icon name="refresh" :size="16" />{{ t('common.reset') }}
+        </button>
       </div>
       <ListFooter
         :cursor="statisticCursor"
@@ -681,6 +696,15 @@ onBeforeUnmount(() => {
     <template v-else>
       <TableScroll has-actions>
         <table class="usage-table">
+          <colgroup>
+            <col class="usage-time-column" />
+            <col class="usage-member-column" />
+            <col class="usage-model-column" />
+            <col class="usage-protocol-column" />
+            <col class="usage-status-column" />
+            <col span="3" class="usage-token-column" />
+            <col class="usage-action-column" />
+          </colgroup>
           <thead>
             <tr>
               <th>{{ t('usage.time') }}</th>
@@ -696,10 +720,18 @@ onBeforeUnmount(() => {
           </thead>
           <tbody>
             <tr v-for="row in recordItems" :key="row.id">
-              <td>
+              <td class="table-time">
                 {{ date(row.requestAt) }}<small class="subline">{{ row.latencyMs }} ms</small>
               </td>
-              <td>{{ row.principalName || row.principalId }}</td>
+              <td>
+                <strong>{{ row.principalName || row.principalId }}</strong>
+                <TechnicalValue
+                  v-if="row.principalName"
+                  :value="row.principalId"
+                  :copyable="false"
+                  muted
+                />
+              </td>
               <td>
                 {{ label(models, row.modelId)
                 }}<small class="subline">{{ label(resources, row.resourceId) }}</small>
@@ -730,6 +762,14 @@ onBeforeUnmount(() => {
         <Icon name="usage" :size="32" />
         <h3>{{ t(recordsLoading ? 'common.loading' : 'common.empty') }}</h3>
         <p v-if="!recordsLoading">{{ t('usage.empty') }}</p>
+        <button
+          v-if="!recordsLoading"
+          type="button"
+          class="button primary empty-state-action"
+          @click="reset"
+        >
+          <Icon name="refresh" :size="16" />{{ t('common.reset') }}
+        </button>
       </div>
       <ListFooter
         :cursor="recordCursor"
@@ -748,7 +788,7 @@ onBeforeUnmount(() => {
     ><dl class="detail-grid">
       <dt>{{ t('common.requestId') }}</dt>
       <dd>
-        <code>{{ selected.requestId }}</code>
+        <TechnicalValue :value="selected.requestId" />
       </dd>
       <dt>{{ t('usage.member') }}</dt>
       <dd>
@@ -767,7 +807,12 @@ onBeforeUnmount(() => {
       <dt>{{ t('common.status') }}</dt>
       <dd><Status :value="selected.status" /></dd>
       <dt>{{ t('usage.errorType') }}</dt>
-      <dd>{{ selected.errorType || t('common.none') }}</dd>
+      <dd>
+        <TechnicalValue
+          :value="selected.errorType || t('common.none')"
+          :copyable="!!selected.errorType"
+        />
+      </dd>
       <dt>{{ t('usage.errorInfo') }}</dt>
       <dd>{{ errorDescription(selected.errorType) }}</dd>
       <dt>{{ t('usage.time') }}</dt>

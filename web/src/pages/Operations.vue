@@ -11,6 +11,7 @@ import ListFooter from '../components/ListFooter.vue'
 import ListSearch from '../components/ListSearch.vue'
 import OperationDiff from '../components/OperationDiff.vue'
 import TableScroll from '../components/TableScroll.vue'
+import TechnicalValue from '../components/TechnicalValue.vue'
 const { items, cursor, page, pageSize, total, loading, error, load, previous, retry, setPageSize } =
   useCollection<Operation>(() => '/operation-logs')
 const selected = ref<Operation | null>(null)
@@ -51,7 +52,15 @@ onMounted(() => load())
       {{ error }}<button class="text-button" @click="retry">{{ t('common.retry') }}</button>
     </p>
     <TableScroll has-actions>
-      <table>
+      <table class="operations-table">
+        <colgroup>
+          <col class="operation-time-column" />
+          <col class="operation-operator-column" />
+          <col class="operation-type-column" />
+          <col class="operation-target-column" />
+          <col class="operation-status-column" />
+          <col class="operation-action-column" />
+        </colgroup>
         <thead>
           <tr>
             <th>{{ t('common.created') }}</th>
@@ -64,14 +73,19 @@ onMounted(() => load())
         </thead>
         <tbody>
           <tr v-for="row in visible" :key="row.id">
-            <td>{{ date(row.createdAt) }}</td>
+            <td class="table-time">{{ date(row.createdAt) }}</td>
             <td>{{ row.operatorName }}</td>
             <td>{{ operationLabel(row.type) }}</td>
-            <td class="operation-target">
-              {{ targetLabel(row.targetType)
-              }}<span class="operation-target-id">{{
-                row.targetId ?? t('operations.emptyValue')
-              }}</span>
+            <td>
+              <div class="operation-target">
+                <span class="operation-target-name">{{ targetLabel(row.targetType) }}</span>
+                <TechnicalValue
+                  class="operation-target-id"
+                  :value="row.targetId ?? t('operations.emptyValue')"
+                  :copyable="!!row.targetId"
+                  muted
+                />
+              </div>
             </td>
             <td><Status :value="row.result" /></td>
             <td class="align-right">
@@ -84,6 +98,14 @@ onMounted(() => load())
     <div v-if="!visible.length" class="empty-state">
       <Icon name="operations" :size="32" />
       <p>{{ t(loading ? 'common.loading' : query ? 'common.noResults' : 'operations.empty') }}</p>
+      <button
+        v-if="!loading"
+        type="button"
+        class="button primary empty-state-action"
+        @click="query ? reset() : load()"
+      >
+        <Icon name="refresh" :size="16" />{{ t(query ? 'common.reset' : 'common.retry') }}
+      </button>
     </div>
     <ListFooter
       :cursor="cursor"
@@ -115,17 +137,54 @@ onMounted(() => load())
     >
       <template v-if="selected.errorCode">
         <dt>{{ t('usage.errorType') }}</dt>
-        <dd>{{ errorLabel(selected.errorCode) }}</dd>
+        <dd>
+          <TechnicalValue
+            :value="errorLabel(selected.errorCode)"
+            :copy-value="selected.errorCode"
+          />
+        </dd>
       </template>
       <template v-if="selected.requestId">
         <dt>{{ t('common.requestId') }}</dt>
-        <dd>{{ selected.requestId }}</dd>
+        <dd><TechnicalValue :value="selected.requestId" /></dd>
       </template>
     </dl>
   </Modal>
 </template>
 
 <style scoped>
+.operations-table {
+  min-width: 860px;
+  table-layout: fixed;
+}
+.operation-time-column {
+  width: 164px;
+}
+.operation-operator-column {
+  width: 142px;
+}
+.operation-type-column {
+  width: 172px;
+}
+.operation-target-column {
+  width: auto;
+}
+.operation-status-column {
+  width: 112px;
+}
+.operation-action-column {
+  width: 92px;
+}
+.operation-operator-column,
+.operations-table td:nth-child(2),
+.operations-table td:nth-child(3) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.operation-target-name {
+  flex: none;
+  white-space: nowrap;
+}
 .operation-trace {
   display: grid;
   grid-template-columns: 110px minmax(0, 1fr);

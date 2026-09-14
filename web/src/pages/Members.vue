@@ -493,7 +493,7 @@ async function copyKey() {
   display: block;
   margin: 0;
   padding-top: 10px;
-  color: #485e72;
+  color: var(--color-text-secondary);
   font-size: 13px;
   font-weight: 600;
   line-height: 1.4;
