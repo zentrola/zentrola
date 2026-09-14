@@ -67,10 +67,14 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	inferencePath := "/v1/messages"
 	if g.protocol == gw.OpenAIProtocol {
 		path = r.URL.Path
-		if path == "/v1/responses" {
+		switch path {
+		case "/v1/responses":
 			protocol = gw.OpenAIResponsesProtocol
 			inferencePath = "/v1/responses"
-		} else {
+		case "/v1/images/generations":
+			protocol = gw.OpenAIImagesProtocol
+			inferencePath = "/v1/images/generations"
+		default:
 			protocol = gw.OpenAIProtocol
 			inferencePath = "/v1/chat/completions"
 		}
@@ -101,7 +105,7 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if trace != nil {
 			trace.ErrorType = failure.Code
 		}
-		if protocol == gw.OpenAIProtocol || protocol == gw.OpenAIResponsesProtocol {
+		if gw.IsOpenAIProtocol(protocol) {
 			writeOpenAIError(w, failure)
 		} else {
 			writeGatewayError(w, failure)
@@ -117,7 +121,7 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if (protocol == gw.OpenAIProtocol || protocol == gw.OpenAIResponsesProtocol) && path == "/v1/models" {
+	if gw.IsOpenAIProtocol(protocol) && path == "/v1/models" {
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", "GET")
 			reject(&gw.Failure{Code: "METHOD_NOT_ALLOWED", Type: "invalid_request_error", Message: "Method not allowed.", Status: 405})
@@ -148,7 +152,7 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if (protocol == gw.AnthropicProtocol && path != "/v1/messages" && path != "/v1/messages/count_tokens") ||
-		((protocol == gw.OpenAIProtocol || protocol == gw.OpenAIResponsesProtocol) && path != inferencePath) {
+		(gw.IsOpenAIProtocol(protocol) && path != inferencePath) {
 		reject(&gw.Failure{Code: "NOT_FOUND", Type: "not_found_error", Message: "Route not found.", Status: 404})
 		return
 	}
@@ -265,7 +269,7 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if g.cfg.Development {
 			parse := gw.Parse
-			if protocol == gw.OpenAIProtocol || protocol == gw.OpenAIResponsesProtocol {
+			if gw.IsOpenAIProtocol(protocol) {
 				parse = gw.ParseOpenAI
 			}
 			parsed, parseErr := parse(body)
@@ -301,7 +305,7 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	responseMedia, _, _ := mime.ParseMediaType(responseContentType)
 	responseStream := responseMedia == "text/event-stream"
 	streamInferred := false
-	if responseContentType == "" && protocol == gw.OpenAIResponsesProtocol && requestedStream {
+	if responseContentType == "" && (protocol == gw.OpenAIResponsesProtocol || protocol == gw.OpenAIImagesProtocol) && requestedStream {
 		responseStream = true
 		streamInferred = true
 	}
@@ -314,15 +318,17 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			trace.ErrorType = "UPSTREAM_RESPONSE_INCOMPLETE"
 			encoding := http.Header(upstream.Headers).Get("Content-Encoding")
 			if encoding == "" || encoding == "identity" {
-				observer = gw.NewUsageObserver(responseStream)
-				if protocol == gw.OpenAIResponsesProtocol {
+				switch protocol {
+				case gw.OpenAIResponsesProtocol:
 					if responseContentType == "" {
 						observer = gw.NewAutoOpenAIResponsesUsageObserver(requestedStream)
 					} else {
 						observer = gw.NewOpenAIResponsesUsageObserver(responseStream)
 					}
-				} else if protocol == gw.OpenAIProtocol {
+				case gw.OpenAIProtocol:
 					observer = gw.NewOpenAIUsageObserver(responseStream)
+				case gw.AnthropicProtocol:
+					observer = gw.NewUsageObserver(responseStream)
 				}
 			}
 		}

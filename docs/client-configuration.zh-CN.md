@@ -8,7 +8,7 @@
 
 | 协议                 | Base URL                           | 支持的路径                                                                | 认证方式                              |
 | -------------------- | ---------------------------------- | ------------------------------------------------------------------------- | ------------------------------------- |
-| OpenAI Compatible    | `https://<gateway-host>/v1`        | `GET /v1/models`、`POST /v1/chat/completions`、`POST /v1/responses`       | `Authorization: Bearer <virtual-key>` |
+| OpenAI Compatible    | `https://<gateway-host>/v1`        | `GET /v1/models`、`POST /v1/chat/completions`、`POST /v1/responses`、`POST /v1/images/generations` | `Authorization: Bearer <virtual-key>` |
 | Anthropic Compatible | `https://<gateway-host>/anthropic` | `POST /anthropic/v1/messages`、`POST /anthropic/v1/messages/count_tokens` | `x-api-key: <virtual-key>` 或 Bearer  |
 
 调用 Anthropic 接口时不要同时发送 `x-api-key` 和 `Authorization`。

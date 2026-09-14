@@ -8,7 +8,7 @@ Every client uses a member Virtual Key. The key identifies the member; model acc
 
 | Protocol             | Base URL                           | Supported paths                                                           | Authentication                        |
 | -------------------- | ---------------------------------- | ------------------------------------------------------------------------- | ------------------------------------- |
-| OpenAI compatible    | `https://<gateway-host>/v1`        | `GET /v1/models`, `POST /v1/chat/completions`, `POST /v1/responses`       | `Authorization: Bearer <virtual-key>` |
+| OpenAI compatible    | `https://<gateway-host>/v1`        | `GET /v1/models`, `POST /v1/chat/completions`, `POST /v1/responses`, `POST /v1/images/generations` | `Authorization: Bearer <virtual-key>` |
 | Anthropic compatible | `https://<gateway-host>/anthropic` | `POST /anthropic/v1/messages`, `POST /anthropic/v1/messages/count_tokens` | `x-api-key: <virtual-key>` or Bearer  |
 
 Do not send both `x-api-key` and `Authorization` to the Anthropic endpoint.

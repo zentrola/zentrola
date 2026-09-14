@@ -56,7 +56,7 @@ Codex / Claude Code / OpenAI 兼容客户端
 - 逻辑模型与带优先级的 Provider Model 映射
 - Virtual Key 签发、有效期管理和撤销
 - Anthropic Messages、Count Tokens、SSE 和工具调用
-- OpenAI Models、Chat Completions、Responses、SSE 和工具调用
+- OpenAI Models、Chat Completions、Responses、Images API、SSE 和工具调用
 - 同协议优先、异协议转换和服务商故障切换
 - Usage 仪表盘和 Operation Log
 - Admin Web 中英文界面

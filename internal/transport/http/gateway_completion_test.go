@@ -90,6 +90,68 @@ func (b *completionAfterCancellationBody) Read(p []byte) (int, error) {
 
 func (*completionAfterCancellationBody) Close() error { return nil }
 
+func TestOpenAIImageGenerationPassThrough(t *testing.T) {
+	tests := []struct {
+		name        string
+		requestBody string
+		response    string
+		contentType string
+	}{
+		{
+			name:        "JSON",
+			requestBody: `{"model":"client-model","prompt":"draw an otter","quality":"high"}`,
+			response:    `{"created":1,"data":[{"b64_json":"aW1hZ2U="}]}`,
+			contentType: "application/json",
+		},
+		{
+			name:        "SSE inferred without upstream content type",
+			requestBody: `{"model":"client-model","prompt":"draw an otter","stream":true,"partial_images":2}`,
+			response:    "event: image_generation.completed\ndata: {\"type\":\"image_generation.completed\",\"b64_json\":\"aW1hZ2U=\"}\n\n",
+			contentType: "",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var trace *usage.Event
+			upstream := completionUpstream(func(_ context.Context, _ gw.Route, request gw.Request, _ []byte) (*gw.Response, error) {
+				trace = request.Trace
+				wantBody := strings.Replace(test.requestBody, `"client-model"`, `"upstream-model"`, 1)
+				if request.Protocol != gw.OpenAIImagesProtocol || request.Path != "/v1/images/generations" || string(request.Body) != wantBody {
+					t.Fatalf("unexpected Images request: protocol=%s path=%s body=%s", request.Protocol, request.Path, request.Body)
+				}
+				headers := map[string][]string{}
+				if test.contentType != "" {
+					headers["Content-Type"] = []string{test.contentType}
+				}
+				return &gw.Response{Status: http.StatusOK, Headers: headers, Body: io.NopCloser(strings.NewReader(test.response))}, nil
+			})
+			service := gw.New(completionStore{}, completionCipher{}, upstream)
+			handler := NewOpenAIGatewayHandler(service, config.Gateway{
+				MaxBodyBytes:    1 << 20,
+				RequestTimeout:  time.Second,
+				BodyReadTimeout: time.Second,
+				WriteTimeout:    time.Second,
+			}, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
+
+			request := httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(test.requestBody))
+			request.Header.Set("Content-Type", "application/json")
+			request = request.WithContext(context.WithValue(request.Context(), principalIdentityKey{}, appsec.PrincipalIdentity{ID: 1, AccessKeyID: 2}))
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+
+			if recorder.Code != http.StatusOK || recorder.Body.String() != test.response {
+				t.Fatalf("Images response changed: status=%d body=%q", recorder.Code, recorder.Body.String())
+			}
+			if strings.Contains(test.requestBody, `"stream":true`) && recorder.Header().Get("Content-Type") != "text/event-stream" {
+				t.Fatalf("Images stream content type was not inferred: %q", recorder.Header().Get("Content-Type"))
+			}
+			if trace == nil || trace.ClientProtocol != gw.OpenAIImagesProtocol || trace.Status != usage.Success {
+				t.Fatalf("Images usage trace incorrect: %+v", trace)
+			}
+		})
+	}
+}
+
 func TestOpenAIResponsesCompletionWinsFollowingClientCancellation(t *testing.T) {
 	requestContext, cancelRequest := context.WithCancel(context.Background())
 	defer cancelRequest()

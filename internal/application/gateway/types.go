@@ -54,6 +54,12 @@ type Route struct {
 const AnthropicProtocol = "ANTHROPIC_MESSAGES"
 const OpenAIProtocol = "OPENAI_CHAT"
 const OpenAIResponsesProtocol = "OPENAI_RESPONSES"
+const OpenAIImagesProtocol = "OPENAI_IMAGES"
+
+// IsOpenAIProtocol 判断客户端协议是否属于 OpenAI 协议族。
+func IsOpenAIProtocol(protocol string) bool {
+	return protocol == OpenAIProtocol || protocol == OpenAIResponsesProtocol || protocol == OpenAIImagesProtocol
+}
 
 const AnthropicEndpoint = "ANTHROPIC"
 const OpenAIEndpoint = "OPENAI"
@@ -220,11 +226,12 @@ func (s *Service) Forward(ctx context.Context, identity appsec.PrincipalIdentity
 	if (request.Protocol == AnthropicProtocol && request.Path != "/v1/messages" && request.Path != "/v1/messages/count_tokens") ||
 		(request.Protocol == OpenAIProtocol && request.Path != "/v1/chat/completions") ||
 		(request.Protocol == OpenAIResponsesProtocol && request.Path != "/v1/responses") ||
-		(request.Protocol != AnthropicProtocol && request.Protocol != OpenAIProtocol && request.Protocol != OpenAIResponsesProtocol) {
+		(request.Protocol == OpenAIImagesProtocol && request.Path != "/v1/images/generations") ||
+		(request.Protocol != AnthropicProtocol && !IsOpenAIProtocol(request.Protocol)) {
 		return nil, ErrInvalid
 	}
 	parseRequest := Parse
-	if request.Protocol == OpenAIProtocol || request.Protocol == OpenAIResponsesProtocol {
+	if IsOpenAIProtocol(request.Protocol) {
 		parseRequest = ParseOpenAI
 	}
 	parsed, err := parseRequest(request.Body)
