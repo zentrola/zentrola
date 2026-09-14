@@ -3,6 +3,7 @@ package provider
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -12,6 +13,8 @@ import (
 )
 
 func TestClientWithProxyIsolatedTransport(t *testing.T) {
+	ConfigureProxyLogEnvironment("dev")
+	t.Cleanup(func() { ConfigureProxyLogEnvironment("prod") })
 	baseTransport := http.DefaultTransport.(*http.Transport).Clone()
 	baseTransport.Proxy = nil
 	base := &http.Client{Transport: baseTransport}
@@ -37,20 +40,25 @@ func TestClientWithProxyIsolatedTransport(t *testing.T) {
 	if baseTransport.Proxy != nil || baseTransport.ProxyConnectHeader != nil {
 		t.Fatal("base transport was mutated")
 	}
-	output := logs.String()
-	for _, expected := range []string{"provider outbound request using proxy", `"proxy_enabled":true`, `"operation":"test"`, `"provider_id":12`, `"protocol":"OPENAI"`} {
-		if !strings.Contains(output, expected) {
-			t.Fatalf("proxy log missing %q: %s", expected, output)
-		}
+	var entry map[string]any
+	if err := json.Unmarshal(logs.Bytes(), &entry); err != nil {
+		t.Fatalf("decode proxy log: %v", err)
 	}
-	for _, secret := range []string{"user", "password", "proxy.example.com", "secret", "X-Proxy-Token"} {
-		if strings.Contains(output, secret) {
-			t.Fatalf("proxy log leaked %q: %s", secret, output)
-		}
+	if entry["msg"] != "provider outbound request using proxy" || entry["proxy"] != true ||
+		entry["proxy_url"] != "http://user:password@proxy.example.com:8080" || entry["proxy_auth"] != true ||
+		entry["proxy_redacted"] != false || entry["operation"] != "test" ||
+		entry["provider_id"] != float64(12) || entry["protocol"] != "OPENAI" {
+		t.Fatalf("unexpected proxy log: %v", entry)
+	}
+	headers, ok := entry["proxy_headers"].(map[string]any)
+	if !ok || len(headers) != 1 || headers["X-Proxy-Token"] != "secret" {
+		t.Fatalf("unexpected proxy headers in log: %v", entry["proxy_headers"])
 	}
 }
 
 func TestEnvironmentWithProxyOverridesInheritedProxyVariables(t *testing.T) {
+	ConfigureProxyLogEnvironment("prod")
+	t.Cleanup(func() { ConfigureProxyLogEnvironment("prod") })
 	var logs bytes.Buffer
 	got, err := EnvironmentWithProxy(context.Background(), []string{
 		"PATH=test", "http_proxy=http://old.example", "HTTPS_PROXY=http://old.example", "NO_PROXY=chatgpt.com", "ALL_PROXY=socks5://old.example",
@@ -65,7 +73,38 @@ func TestEnvironmentWithProxyOverridesInheritedProxyVariables(t *testing.T) {
 		strings.Contains(joined, "old.example") || strings.Contains(strings.ToUpper(joined), "NO_PROXY=") || strings.Contains(strings.ToUpper(joined), "ALL_PROXY=") {
 		t.Fatalf("unexpected proxy environment: %q", got)
 	}
-	if output := logs.String(); !strings.Contains(output, `"operation":"subscription_refresh"`) || strings.Contains(output, "password") || strings.Contains(output, "proxy.example.com") {
+	if output := logs.String(); !strings.Contains(output, `"operation":"subscription_refresh"`) ||
+		!strings.Contains(output, `"proxy":true`) || !strings.Contains(output, `"proxy_url":"https://******:******@proxy.example.com:8443"`) ||
+		!strings.Contains(output, `"proxy_auth":true`) || !strings.Contains(output, `"proxy_headers":{}`) || !strings.Contains(output, `"proxy_redacted":true`) ||
+		strings.Contains(output, "password") || strings.Contains(output, "user") {
 		t.Fatalf("unexpected proxy log: %s", output)
+	}
+}
+
+func TestProductionProxyLogMasksHeaderValues(t *testing.T) {
+	ConfigureProxyLogEnvironment("prod")
+	t.Cleanup(func() { ConfigureProxyLogEnvironment("prod") })
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	proxyURL, err := parseProxyURL(&catalog.OutboundProxy{URL: "http://proxy-user:proxy-password@proxy.example.com:8080"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	logProxyRequest(context.Background(), proxyURL, map[string]string{"X-Proxy-Token": "proxy-secret"}, ProxyRequestLog{Logger: logger})
+
+	output := logs.String()
+	for _, expected := range []string{
+		`"proxy_url":"http://******:******@proxy.example.com:8080"`,
+		`"proxy_headers":{"X-Proxy-Token":"******"}`,
+		`"proxy_redacted":true`,
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("proxy log missing %q: %s", expected, output)
+		}
+	}
+	for _, secret := range []string{"proxy-user", "proxy-password", "proxy-secret"} {
+		if strings.Contains(output, secret) {
+			t.Fatalf("production proxy log leaked %q: %s", secret, output)
+		}
 	}
 }

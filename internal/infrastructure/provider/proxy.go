@@ -7,12 +7,12 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 
 	"github.com/zentrola/zentrola/internal/domain/catalog"
 )
 
-// ProxyRequestLog 描述一次使用服务商代理的出站请求。不得在日志字段中加入
-// 代理 URL、认证信息、Header 或上游凭据。
+// ProxyRequestLog 描述一次使用服务商代理的出站请求。
 type ProxyRequestLog struct {
 	Logger       *slog.Logger
 	Operation    string
@@ -20,6 +20,20 @@ type ProxyRequestLog struct {
 	ResourceID   int64
 	ProviderCode string
 	Protocol     string
+}
+
+var redactProxyLogSecrets atomic.Bool
+
+func init() {
+	// 未显式配置运行环境时采用生产环境策略，避免测试工具或独立调用意外输出凭据。
+	redactProxyLogSecrets.Store(true)
+}
+
+// ConfigureProxyLogEnvironment 配置进程级代理日志策略。只有明确的 dev/test 环境
+// 输出完整代理配置，prod 或未知环境均以星号替换认证信息和 Header Value。
+func ConfigureProxyLogEnvironment(environment string) {
+	environment = strings.ToLower(strings.TrimSpace(environment))
+	redactProxyLogSecrets.Store(environment != "dev" && environment != "test")
 }
 
 func parseProxyURL(proxy *catalog.OutboundProxy) (*url.URL, error) {
@@ -34,12 +48,44 @@ func parseProxyURL(proxy *catalog.OutboundProxy) (*url.URL, error) {
 	return proxyURL, nil
 }
 
-func logProxyRequest(ctx context.Context, proxyURL *url.URL, details ProxyRequestLog) {
+func proxyLogURL(proxyURL *url.URL, redact bool) string {
+	if !redact || proxyURL.User == nil {
+		return proxyURL.String()
+	}
+	safe := *proxyURL
+	if _, hasPassword := safe.User.Password(); hasPassword {
+		safe.User = url.UserPassword("******", "******")
+	} else {
+		safe.User = url.User("******")
+	}
+	// net/url 会把 Userinfo 中的星号转义为 %2A；日志展示需要保留直观掩码。
+	return strings.ReplaceAll(safe.String(), "%2A", "*")
+}
+
+func proxyLogHeaders(headers map[string]string, redact bool) map[string]string {
+	result := make(map[string]string, len(headers))
+	for name, value := range headers {
+		if redact {
+			value = "******"
+		}
+		result[http.CanonicalHeaderKey(name)] = value
+	}
+	return result
+}
+
+func logProxyRequest(ctx context.Context, proxyURL *url.URL, headers map[string]string, details ProxyRequestLog) {
 	logger := details.Logger
 	if logger == nil {
 		logger = slog.Default()
 	}
-	attributes := []any{"proxy_enabled", true, "proxy_scheme", proxyURL.Scheme}
+	redact := redactProxyLogSecrets.Load()
+	attributes := []any{
+		"proxy", true,
+		"proxy_url", proxyLogURL(proxyURL, redact),
+		"proxy_auth", proxyURL.User != nil,
+		"proxy_headers", proxyLogHeaders(headers, redact),
+		"proxy_redacted", redact,
+	}
 	if details.Operation != "" {
 		attributes = append(attributes, "operation", details.Operation)
 	}
@@ -80,7 +126,7 @@ func ClientWithProxy(ctx context.Context, base *http.Client, proxy *catalog.Outb
 	}
 	client := *base
 	client.Transport = transport
-	logProxyRequest(ctx, proxyURL, details)
+	logProxyRequest(ctx, proxyURL, proxy.Headers, details)
 	return &client, transport.CloseIdleConnections, nil
 }
 
@@ -105,6 +151,6 @@ func EnvironmentWithProxy(ctx context.Context, environment []string, proxy *cata
 		}
 	}
 	result = append(result, "HTTP_PROXY="+proxyURL.String(), "HTTPS_PROXY="+proxyURL.String())
-	logProxyRequest(ctx, proxyURL, details)
+	logProxyRequest(ctx, proxyURL, proxy.Headers, details)
 	return result, nil
 }
