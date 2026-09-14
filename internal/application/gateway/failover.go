@@ -49,7 +49,9 @@ func (s *Service) forwardCandidates(ctx context.Context, identity appsec.Princip
 	originalBody := request.Body
 	index := s.nextRoute(ctx, routes, 0)
 	if index < 0 {
-		return nil, ErrRoute
+		// ResolveCandidates 已经确认存在配置完整的候选路由；此处全部被
+		// RouteState 拒绝只表示短期冷却，不能误报为缺少 Provider 配置。
+		return nil, ErrRouteCooldown
 	}
 	for index >= 0 {
 		route := routes[index]
