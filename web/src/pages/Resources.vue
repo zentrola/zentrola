@@ -211,7 +211,9 @@ function verificationLabel(resource: Resource) {
             </td>
             <td>
               {{ t(`resources.authTypes.${resource.authType}`) }}
-              <small v-if="resource.planCode" class="subline">{{ resource.planCode }}</small>
+              <small v-if="resource.planCode" class="subline">
+                {{ t('resources.plan') }} · {{ resource.planCode }}
+              </small>
             </td>
             <td>
               <Status v-if="resource.authType === 'SUBSCRIPTION'" :value="resource.quotaStatus" />
@@ -219,6 +221,9 @@ function verificationLabel(resource: Resource) {
               <small v-if="resource.quotaCheckedAt" class="subline">{{
                 date(resource.quotaCheckedAt)
               }}</small>
+              <small v-if="resource.authType === 'SUBSCRIPTION'" class="subline">
+                {{ t('resources.quotaResetsAt') }} · {{ date(resource.quotaResetsAt) }}
+              </small>
             </td>
             <td>
               <div class="resource-runtime-line">

@@ -171,14 +171,14 @@ VALUES (60,40,'Resource',decode(repeat('11',32),'hex'),decode(repeat('22',12),'h
 	})
 	t.Run("usage facts and append only audit", func(t *testing.T) {
 		withFixture(t, ctx, pool, func(tx pgx.Tx) {
-			mustExec(t, ctx, tx, `INSERT INTO usage_record (id,request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,client_protocol,billing_unit,started_at,completed_at,latency_ms,status,created_at) VALUES (101,'req_test',1,10,40,50,60,30,'MODEL_GATEWAY','ANTHROPIC_MESSAGES','TOKEN',now(),now(),0,'SUCCESS',now())`)
+			mustExec(t, ctx, tx, `INSERT INTO usage_record (id,request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,client_protocol,started_at,completed_at,latency_ms,status,created_at) VALUES (101,'req_test',1,10,40,50,60,30,'MODEL_GATEWAY','ANTHROPIC_MESSAGES',now(),now(),0,'SUCCESS',now())`)
 			var unknown bool
-			if err := tx.QueryRow(ctx, `SELECT input_tokens IS NULL AND cost_amount IS NULL AND cost_currency IS NULL FROM usage_record WHERE id=101`).Scan(&unknown); err != nil || !unknown {
-				t.Fatal("unknown usage/cost was falsified")
+			if err := tx.QueryRow(ctx, `SELECT input_tokens IS NULL AND output_tokens IS NULL AND cached_input_tokens IS NULL FROM usage_record WHERE id=101`).Scan(&unknown); err != nil || !unknown {
+				t.Fatal("unknown usage was falsified")
 			}
-			mustReject(t, ctx, tx, "23505", `INSERT INTO usage_record (id,request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,input_tokens,output_tokens,cached_input_tokens,billing_unit,billing_quantity,cost_amount,cost_currency,started_at,completed_at,latency_ms,status,error_type,created_at,client_protocol) SELECT 102,request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,input_tokens,output_tokens,cached_input_tokens,billing_unit,billing_quantity,cost_amount,cost_currency,started_at,completed_at,latency_ms,status,error_type,created_at,client_protocol FROM usage_record WHERE id=101`)
+			mustReject(t, ctx, tx, "23505", `INSERT INTO usage_record (id,request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,input_tokens,output_tokens,cached_input_tokens,started_at,completed_at,latency_ms,status,error_type,created_at,client_protocol) SELECT 102,request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,input_tokens,output_tokens,cached_input_tokens,started_at,completed_at,latency_ms,status,error_type,created_at,client_protocol FROM usage_record WHERE id=101`)
 			mustExec(t, ctx, tx, `UPDATE usage_record SET attempt_no=2 WHERE id=101`)
-			mustExec(t, ctx, tx, `INSERT INTO usage_record (id,request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,input_tokens,output_tokens,cached_input_tokens,billing_unit,billing_quantity,cost_amount,cost_currency,started_at,completed_at,latency_ms,status,error_type,created_at,client_protocol) SELECT 102,request_id,1,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,input_tokens,output_tokens,cached_input_tokens,billing_unit,billing_quantity,cost_amount,cost_currency,started_at,completed_at,latency_ms,status,error_type,created_at,client_protocol FROM usage_record WHERE id=101`)
+			mustExec(t, ctx, tx, `INSERT INTO usage_record (id,request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,input_tokens,output_tokens,cached_input_tokens,started_at,completed_at,latency_ms,status,error_type,created_at,client_protocol) SELECT 102,request_id,1,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,input_tokens,output_tokens,cached_input_tokens,started_at,completed_at,latency_ms,status,error_type,created_at,client_protocol FROM usage_record WHERE id=101`)
 			mustReject(t, ctx, tx, "23514", `UPDATE usage_record SET attempt_no=0 WHERE id=102`)
 			mustExec(t, ctx, tx, `INSERT INTO operation_log (id,operator_type,operator_id,operator_name,module,operation_type,target_type,target_id,result,created_at) VALUES (200,'ADMIN',70,'Admin','MEMBER','MEMBER_CREATE','PRINCIPAL',10,'SUCCESS',now())`)
 			for _, sql := range []string{`UPDATE operation_log SET operator_name='changed'`, `DELETE FROM operation_log`, `TRUNCATE operation_log`} {
@@ -203,7 +203,7 @@ ORDER BY c.relname,a.attnum`, schema)
 		"model":      "publisher_provider_id",
 		"admin_user": "locked_until,last_login_at", "principal": "remark", "principal_access_key": "expires_at,last_used_at,revoked_at",
 		"principal_group": "remark", "provider_credential": "blocked_reason,blocked_at,last_error_at,last_http_status,last_error_code",
-		"usage_record":  "input_tokens,output_tokens,cached_input_tokens,billing_quantity,cost_amount,cost_currency,error_type",
+		"usage_record":  "input_tokens,output_tokens,cached_input_tokens,error_type",
 		"operation_log": "operator_id,target_id,target_name,request_id,request_method,request_path,ip_address,user_agent,error_code,before_data,after_data,remark",
 	}
 	tables := map[string]bool{}
@@ -228,9 +228,6 @@ ORDER BY c.relname,a.attnum`, schema)
 		}
 		if col == "id" && typ != "bigint" {
 			t.Errorf("ID is not BIGINT: %s", table)
-		}
-		if (col == "cost_amount" || col == "billing_quantity") && typ != "numeric(20,8)" {
-			t.Errorf("inexact numeric type: %s.%s", table, col)
 		}
 		if strings.Contains(typ, "timestamp") && typ != "timestamp with time zone" {
 			t.Errorf("non-UTC timestamp type: %s.%s", table, col)
@@ -283,6 +280,15 @@ ORDER BY c.relname,a.attnum`, schema)
 	} {
 		if !credentialColumns[column] {
 			t.Errorf("provider_credential.%s is missing", column)
+		}
+	}
+	usageColumns := make(map[string]bool, len(columns["usage_record"]))
+	for _, column := range columns["usage_record"] {
+		usageColumns[column] = true
+	}
+	for _, column := range []string{"billing_unit", "billing_quantity", "cost_amount", "cost_currency"} {
+		if usageColumns[column] {
+			t.Errorf("usage_record.%s was not removed", column)
 		}
 	}
 	preferredRecordColumns := []string{"id", "is_deleted", "status"}

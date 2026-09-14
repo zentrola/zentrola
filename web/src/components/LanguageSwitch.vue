@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, useId } from 'vue'
 import { activeLocale, setLocale, t, type SupportedLocale } from '../i18n'
+import Icon from './Icon.vue'
 
 const options: { locale: SupportedLocale; label: string }[] = [
   { locale: 'zh-CN', label: '简体中文' },
@@ -80,6 +81,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onOutside))
       @keydown.up.prevent="show(true)"
       @keydown.esc.prevent="close(true)"
     >
+      <Icon class="language-icon" name="website" :size="15" />
       <span>{{ currentLabel }}</span>
       <span class="language-chevron" :class="{ expanded: open }" aria-hidden="true"></span>
     </button>
@@ -152,6 +154,29 @@ onUnmounted(() => document.removeEventListener('pointerdown', onOutside))
 .language-chevron.expanded {
   margin-top: 3px;
   transform: rotate(225deg);
+}
+.language-icon {
+  display: none;
+}
+.language-switch.login-language .language-trigger {
+  justify-content: flex-start;
+  gap: 8px;
+  min-width: 0;
+  height: 36px;
+  padding: 0 11px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 2px 8px #17324a0a;
+}
+.language-switch.login-language .language-trigger:hover,
+.language-switch.login-language .language-trigger[aria-expanded='true'] {
+  background: #f7f9fb;
+}
+.language-switch.login-language .language-icon {
+  display: block;
+}
+.language-switch.login-language .language-chevron {
+  margin-left: 2px;
 }
 .language-dropdown {
   position: absolute;
