@@ -5,9 +5,11 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -62,6 +64,9 @@ var responseHeaderAllowlist = []string{
 	"Anthropic-Ratelimit-Tokens-Remaining",
 	"X-Ratelimit-Remaining-Requests",
 	"X-Ratelimit-Remaining-Tokens",
+	"X-Request-ID",
+	"X-Trace-ID",
+	"X-Span-ID",
 }
 
 func accessLogHeaders(headers http.Header, allowlist []string) map[string]string {
@@ -84,6 +89,47 @@ func accessLogHeaders(headers http.Header, allowlist []string) map[string]string
 		result[strings.ToLower(name)] = value
 	}
 	return result
+}
+
+func accessLogHeadersForEnvironment(headers http.Header, allowlist []string, full bool) map[string]string {
+	if full {
+		result := make(map[string]string, len(headers))
+		for name, values := range headers {
+			value := strings.TrimSpace(strings.Join(values, ","))
+			value = strings.Map(func(character rune) rune {
+				if character < 32 || character == 127 {
+					return -1
+				}
+				return character
+			}, value)
+			result[strings.ToLower(name)] = value
+		}
+		return result
+	}
+	result := accessLogHeaders(headers, allowlist)
+	for name := range headers {
+		key := strings.ToLower(name)
+		if _, safe := result[key]; !safe {
+			result[key] = "******"
+		}
+	}
+	return result
+}
+
+func accessLogURL(requestURL *url.URL, redact bool) string {
+	if !redact || requestURL.RawQuery == "" {
+		return requestURL.RequestURI()
+	}
+	safe := *requestURL
+	query := safe.Query()
+	for name, values := range query {
+		for index := range values {
+			values[index] = "******"
+		}
+		query[name] = values
+	}
+	safe.RawQuery = query.Encode()
+	return strings.ReplaceAll(safe.RequestURI(), "%2A", "*")
 }
 
 type accessLogDetailsKey struct{}
@@ -163,15 +209,34 @@ func (r *captureReadCloser) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func bodyLogValue(capture *bodyCapture) string {
+func bodyLogValue(capture *bodyCapture) any {
 	if capture == nil || capture.total == 0 {
-		return ""
+		return nil
+	}
+	data := capture.data.Bytes()
+	if json.Valid(data) {
+		return json.RawMessage(append([]byte(nil), data...))
 	}
 	return capture.data.String()
 }
 
+type accessLogRequest struct {
+	Method  string            `json:"method"`
+	URL     string            `json:"url"`
+	Headers map[string]string `json:"headers"`
+	Body    any               `json:"body,omitempty"`
+	Bytes   int64             `json:"bytes"`
+}
+
+type accessLogResponse struct {
+	Status  int               `json:"status"`
+	Headers map[string]string `json:"headers"`
+	Body    any               `json:"body,omitempty"`
+	Bytes   int               `json:"bytes"`
+}
+
 func accessLog(logger *slog.Logger, environments ...string) func(http.Handler) http.Handler {
-	logBodies := len(environments) > 0 && (environments[0] == "dev" || environments[0] == "test")
+	logDetails := len(environments) > 0 && (environments[0] == "dev" || environments[0] == "test")
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
@@ -179,7 +244,7 @@ func accessLog(logger *slog.Logger, environments ...string) func(http.Handler) h
 			// chi 包装器保留 Flusher 等接口，避免影响后续 SSE。
 			wrapped := chimiddleware.NewWrapResponseWriter(w, r.ProtoMajor)
 			var requestBody, responseBody *bodyCapture
-			if logBodies {
+			if logDetails {
 				requestBody = &bodyCapture{}
 				responseBody = &bodyCapture{}
 				if r.Body != nil {
@@ -192,31 +257,35 @@ func accessLog(logger *slog.Logger, environments ...string) func(http.Handler) h
 				if status == 0 {
 					status = http.StatusOK
 				}
+				request := accessLogRequest{
+					Method:  r.Method,
+					URL:     accessLogURL(r.URL, !logDetails),
+					Headers: accessLogHeadersForEnvironment(r.Header, requestHeaderAllowlist, logDetails),
+					Bytes:   r.ContentLength,
+				}
+				response := accessLogResponse{
+					Status:  status,
+					Headers: accessLogHeadersForEnvironment(wrapped.Header(), responseHeaderAllowlist, logDetails),
+					Bytes:   wrapped.BytesWritten(),
+				}
+				if requestBody != nil {
+					request.Bytes = requestBody.total
+				}
+				if logDetails {
+					request.Body = bodyLogValue(requestBody)
+					response.Body = bodyLogValue(responseBody)
+				} else {
+					if request.Bytes != 0 {
+						request.Body = "******"
+					}
+					if response.Bytes > 0 {
+						response.Body = "******"
+					}
+				}
 				attributes := []any{
-					"request_time", start.UTC().Format(time.RFC3339Nano),
-					"method", r.Method,
+					"request", request,
+					"response", response,
 					"duration_ms", time.Since(start).Milliseconds(),
-					"path", r.URL.Path,
-					"status", status,
-					"request_bytes", func() int64 {
-						if requestBody != nil {
-							return requestBody.total
-						}
-						return r.ContentLength
-					}(),
-					"response_bytes", wrapped.BytesWritten(),
-				}
-				if headers := accessLogHeaders(r.Header, requestHeaderAllowlist); len(headers) > 0 {
-					attributes = append(attributes, "request_headers", headers)
-				}
-				if headers := accessLogHeaders(wrapped.Header(), responseHeaderAllowlist); len(headers) > 0 {
-					attributes = append(attributes, "response_headers", headers)
-				}
-				if logBodies {
-					attributes = append(attributes,
-						"request_body", bodyLogValue(requestBody),
-						"response_body", bodyLogValue(responseBody),
-					)
 				}
 				attributes = append(attributes, accessLogExtraFields(r.Context())...)
 				logger.InfoContext(r.Context(), "http request", attributes...)

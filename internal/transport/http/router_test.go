@@ -240,20 +240,24 @@ func TestNonProductionAccessLogCapturesBodiesWithoutRedaction(t *testing.T) {
 			handler := requestID(accessLog(logger, environment)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				_, _ = io.Copy(io.Discard, r.Body)
 				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("X-Debug-Response", "response-header-value")
 				w.WriteHeader(http.StatusForbidden)
 				_, _ = io.WriteString(w, `{"error":{"code":"MODEL_PERMISSION_DENIED","message":"Model permission denied."},"accessToken":"response-secret"}`)
 			})))
 			req := httptest.NewRequest(http.MethodPost, "/anthropic/v1/messages?token=query-secret", strings.NewReader(`{"model":"claude-sonnet","messages":[{"role":"user","content":"private-prompt"}],"password":"request-secret","input_text":"future-schema-secret","conversation":"unknown-content-secret"}`))
 			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer development-access-key")
+			req.Header.Set("X-Debug-Request", "request-header-value")
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)
 
 			output := logs.String()
 			for _, required := range []string{
-				"request_time", "method", "trace_id", "span_id", "duration_ms", "path", "status",
-				"request_bytes", "response_bytes", "request_body", "response_body", "claude-sonnet",
+				"time", "trace_id", "span_id", "duration_ms", "request", "response", "method", "url", "status",
+				"headers", "body", "bytes", "claude-sonnet",
 				"MODEL_PERMISSION_DENIED", "private-prompt", "request-secret", "response-secret",
-				"future-schema-secret", "unknown-content-secret",
+				"future-schema-secret", "unknown-content-secret", "query-secret", "development-access-key",
+				"request-header-value", "response-header-value",
 			} {
 				if !strings.Contains(output, required) {
 					t.Fatalf("non-production access log missing %s: %s", required, output)
@@ -262,8 +266,8 @@ func TestNonProductionAccessLogCapturesBodiesWithoutRedaction(t *testing.T) {
 			if strings.Count(output, `"trace_id"`) != 1 || strings.Count(output, `"span_id"`) != 1 {
 				t.Fatalf("trace and span IDs must each appear once: %s", output)
 			}
-			if strings.Contains(output, "query-secret") {
-				t.Fatalf("non-production access log included URL query: %s", output)
+			if strings.Contains(output, `\"model\"`) || strings.Contains(output, `\"error\"`) {
+				t.Fatalf("JSON bodies must be nested objects instead of escaped strings: %s", output)
 			}
 		})
 	}
@@ -289,25 +293,49 @@ func TestNonProductionAccessLogCapturesLargeAndNonJSONBodiesInFull(t *testing.T)
 			if err := json.Unmarshal(logs.Bytes(), &record); err != nil {
 				t.Fatal(err)
 			}
-			if record["request_body"] != requestBody || record["response_body"] != responseBody {
+			request, requestOK := record["request"].(map[string]any)
+			response, responseOK := record["response"].(map[string]any)
+			body, bodyOK := request["body"].(map[string]any)
+			if !requestOK || !responseOK || !bodyOK || body["prompt"] != strings.Repeat("large-private-prompt-", 10_000) || response["body"] != responseBody {
 				t.Fatalf("%s access log did not contain the complete bodies", environment)
 			}
 		})
 	}
 }
 
-func TestProductionAccessLogOmitsBodies(t *testing.T) {
+func TestProductionAccessLogMasksBodies(t *testing.T) {
 	var logs bytes.Buffer
 	logger := logging.New(&logs, "json", slog.LevelInfo)
 	handler := requestID(accessLog(logger, "prod")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("Set-Cookie", "session=response-cookie")
 		_, _ = io.WriteString(w, `{"value":"response-value"}`)
 	})))
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/test", strings.NewReader(`{"value":"request-value"}`)))
+	request := httptest.NewRequest(http.MethodPost, "/test?token=query-secret", strings.NewReader(`{"value":"request-value"}`))
+	request.Header.Set("Authorization", "Bearer request-secret")
+	handler.ServeHTTP(rec, request)
+	var record map[string]any
+	if err := json.Unmarshal(logs.Bytes(), &record); err != nil {
+		t.Fatal(err)
+	}
+	loggedRequest, requestOK := record["request"].(map[string]any)
+	response, responseOK := record["response"].(map[string]any)
+	requestHeaders, requestHeadersOK := loggedRequest["headers"].(map[string]any)
+	responseHeaders, responseHeadersOK := response["headers"].(map[string]any)
+	if !requestOK || !responseOK || !requestHeadersOK || !responseHeadersOK || loggedRequest["url"] != "/test?token=******" ||
+		requestHeaders["authorization"] != "******" || responseHeaders["set-cookie"] != "******" ||
+		response["status"] != float64(http.StatusOK) || loggedRequest["body"] != "******" || response["body"] != "******" {
+		t.Fatalf("unexpected production access log: %v", record)
+	}
 	output := logs.String()
-	if strings.Contains(output, "request_body") || strings.Contains(output, "response_body") || strings.Contains(output, "request-value") || strings.Contains(output, "response-value") {
-		t.Fatalf("production access log captured bodies: %s", output)
+	for _, secret := range []string{"query-secret", "request-secret", "response-cookie", "request-value", "response-value"} {
+		if strings.Contains(output, secret) {
+			t.Fatalf("production access log leaked %q: %s", secret, output)
+		}
+	}
+	if strings.Contains(output, "%2A") {
+		t.Fatalf("production access log encoded the star mask: %s", output)
 	}
 }
 

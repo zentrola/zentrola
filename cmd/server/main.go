@@ -31,6 +31,7 @@ import (
 	"github.com/zentrola/zentrola/internal/infrastructure/openai"
 	"github.com/zentrola/zentrola/internal/infrastructure/openaicodex"
 	"github.com/zentrola/zentrola/internal/infrastructure/postgres"
+	"github.com/zentrola/zentrola/internal/infrastructure/provider"
 	"github.com/zentrola/zentrola/internal/infrastructure/redisstate"
 	cryptosec "github.com/zentrola/zentrola/internal/infrastructure/security"
 	"github.com/zentrola/zentrola/internal/infrastructure/telemetry"
@@ -135,6 +136,7 @@ func run(args []string, output io.Writer) (runErr error) {
 }
 
 func runService(command commandOptions, selection configSelection, cfg config.Config, managed *managedProcess, output io.Writer) (runErr error) {
+	provider.ConfigureProxyLogEnvironment(cfg.Environment)
 	mode := command.name
 	// 显式指定配置后，配置中的相对运行路径必须稳定。
 	if selection.pinned {

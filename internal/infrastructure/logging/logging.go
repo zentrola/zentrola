@@ -242,9 +242,7 @@ func (h *prettyHandler) Handle(_ context.Context, record slog.Record) error {
 }
 
 var compactAccessKeys = map[string]struct{}{
-	"request_time": {}, "method": {}, "duration_ms": {}, "path": {}, "status": {},
-	"request_bytes": {}, "response_bytes": {}, "request_body": {}, "response_body": {},
-	"request_headers": {}, "response_headers": {},
+	"request": {}, "response": {}, "duration_ms": {},
 	"protocol": {}, "upstream_status": {}, "upstream_headers_ms": {}, "first_byte_ms": {},
 	"input_tokens": {}, "output_tokens": {}, "cached_input_tokens": {},
 	"provider_id": {}, "resource_id": {}, "model_id": {}, "provider_model_id": {},
@@ -267,12 +265,9 @@ func compactPrettyRecord(message string, attributes []slog.Attr) (string, []slog
 	}
 
 	var line strings.Builder
-	appendCompactValue(&line, "", values["method"], "")
-	appendCompactValue(&line, "", values["path"], "")
-	appendCompactValue(&line, "status=", values["status"], "")
+	appendCompactObject(&line, "request=", values["request"])
+	appendCompactObject(&line, "response=", values["response"])
 	appendCompactValue(&line, "cost=", values["duration_ms"], "ms")
-	appendCompactObject(&line, "req_headers=", values["request_headers"])
-	appendCompactObject(&line, "res_headers=", values["response_headers"])
 	appendCompactValue(&line, "proto=", values["protocol"], "")
 	appendCompactValue(&line, "upstream=", values["upstream_status"], "")
 	appendCompactValue(&line, "headers=", values["upstream_headers_ms"], "ms")
@@ -283,8 +278,6 @@ func compactPrettyRecord(message string, attributes []slog.Attr) (string, []slog
 	appendCompactValue(&line, "model=", values["model_id"], "")
 	appendCompactValue(&line, "provider_model=", values["provider_model_id"], "")
 	appendCompactValue(&line, "upstream_request=", values["upstream_request_id"], "")
-	appendCompactBody(&line, "req=", values["request_body"])
-	appendCompactBody(&line, "res=", values["response_body"])
 	if line.Len() == 0 {
 		return "http request", remaining
 	}
@@ -326,17 +319,6 @@ func appendCompactTokens(line *strings.Builder, values map[string]slog.Value) {
 		parts[2] = formatValue(cached)
 	}
 	appendCompactText(line, "tokens="+strings.Join(parts, "/"))
-}
-
-func appendCompactBody(line *strings.Builder, prefix string, value slog.Value) {
-	if value.Kind() != slog.KindString || value.String() == "" {
-		return
-	}
-	body := singleLine(value.String())
-	if !json.Valid([]byte(body)) {
-		body = formatValue(value)
-	}
-	appendCompactText(line, prefix+body)
 }
 
 func appendCompactObject(line *strings.Builder, prefix string, value slog.Value) {
