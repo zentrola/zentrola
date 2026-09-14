@@ -27,6 +27,7 @@ var (
 	ErrModelDisabled  = &Failure{"MODEL_DISABLED", "permission_error", "The requested model is disabled. Enable it before retrying.", 403}
 	ErrPermission     = &Failure{"MODEL_PERMISSION_DENIED", "permission_error", "The API key is not authorized to use the requested model.", 403}
 	ErrRoute          = &Failure{"MODEL_ROUTE_UNAVAILABLE", "api_error", "No active provider route is available for the requested model. Enable a provider and configure its endpoint and model mapping.", 503}
+	ErrRouteCooldown  = &Failure{"MODEL_ROUTE_COOLDOWN", "api_error", "All configured provider routes for the requested model are temporarily cooling down after upstream failures. Retry later.", 503}
 	ErrResource       = &Failure{"RESOURCE_UNAVAILABLE", "api_error", "No active provider API key is available. Configure or enable the provider API key.", 503}
 	ErrCredential     = &Failure{"CREDENTIAL_UNRECOVERABLE", "api_error", "The provider API key cannot be decrypted. Reconfigure the provider API key.", 503}
 	ErrSubscription   = &Failure{"SUBSCRIPTION_REFRESH_FAILED", "api_error", "The provider subscription could not be refreshed. Retry later or reconfigure the subscription.", 503}

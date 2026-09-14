@@ -26,6 +26,7 @@ func TestAnthropicGatewayErrorIncludesActionableReasonAndStableCode(t *testing.T
 		reason  string
 	}{
 		{gw.ErrRoute, "configure its endpoint and model mapping"},
+		{gw.ErrRouteCooldown, "temporarily cooling down"},
 		{gw.ErrResource, "Configure or enable the provider API key"},
 		{gw.ErrCredential, "Reconfigure the provider API key"},
 		{gw.ErrProxy, "Reconfigure the provider proxy"},

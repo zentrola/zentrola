@@ -190,6 +190,30 @@ func TestForwardSkipsCoolingRoute(t *testing.T) {
 	got.Body.Close()
 }
 
+func TestForwardReportsCooldownWhenEveryConfiguredRouteIsCooling(t *testing.T) {
+	routes := testRoutes()
+	state := &failoverState{blocked: map[int64]bool{
+		routes[0].ResourceID: true,
+		routes[1].ResourceID: true,
+	}}
+	called := false
+	service := New(&failoverStore{routes: routes}, failoverCipher{}, upstreamFunc(func(_ context.Context, _ Route, _ Request, _ []byte) (*Response, error) {
+		called = true
+		return response(200, `{}`), nil
+	}), WithRouteState(state))
+
+	got, err := testForward(t, service, nil)
+	if got != nil || !errors.Is(err, ErrRouteCooldown) {
+		t.Fatalf("response=%v err=%v", got, err)
+	}
+	if errors.Is(err, ErrRoute) {
+		t.Fatalf("cooldown was misreported as missing route: %v", err)
+	}
+	if called {
+		t.Fatal("upstream was called while every route was cooling")
+	}
+}
+
 func TestForwardBlocksPermanentFailureAndUsesNextProvider(t *testing.T) {
 	store := &failoverStore{routes: testRoutes()}
 	trace := &usage.Event{}
