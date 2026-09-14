@@ -4590,7 +4590,7 @@
                         "AdminBearer": []
                     }
                 ],
-                "description": "使用已保存凭证访问上游模型列表；请求会产生外部网络调用。HTTP 200 后仍需检查 data.ok 和 data.code。",
+                "description": "API Key 资源会使用指定协议发起最小模型推理，订阅资源会调用对应认证适配器的额度接口；请求会产生外部网络调用。HTTP 200 后仍需检查 data.ok 和 data.code。",
                 "produces": [
                     "application/json"
                 ],
@@ -4605,6 +4605,16 @@
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "enum": [
+                            "ANTHROPIC",
+                            "OPENAI"
+                        ],
+                        "type": "string",
+                        "description": "API Key 资源要测试的上游协议；未指定时优先 Anthropic",
+                        "name": "protocol",
+                        "in": "query"
                     }
                 ],
                 "responses": {

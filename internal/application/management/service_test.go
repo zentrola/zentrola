@@ -123,6 +123,17 @@ func (w *resourceTestWriter) RestoreResourceRuntime(context.Context, int64, time
 	w.restored = true
 	return nil
 }
+func (w *resourceTestWriter) BlockResourceRuntime(_ context.Context, _ int64, reason, code string, status *int32, at time.Time) error {
+	w.resource.RuntimeStatus = "BLOCKED"
+	w.resource.BlockedReason = stringPointer(reason)
+	w.resource.BlockedAt = &at
+	w.resource.LastErrorAt = &at
+	w.resource.LastHTTPStatus = status
+	w.resource.LastErrorCode = stringPointer(code)
+	w.resource.UpdatedAt = at
+	w.updated = w.resource
+	return nil
+}
 func (*resourceTestWriter) Audit(context.Context, Audit, appsec.RequestMeta) error { return nil }
 
 type resourceTestStore struct{ writer *resourceTestWriter }
@@ -318,14 +329,17 @@ func TestResourceInferenceProbeBlocksBillingFailure(t *testing.T) {
 			Resource: Resource{ID: 48, ProviderID: 40, Name: "上游账号", AuthType: AuthTypeAPIKey, AuthAdapter: AuthAdapterAPIKey, RuntimeStatus: "HEALTHY", UpdatedAt: updatedAt},
 			Sealed:   catalog.SealedCredential{Ciphertext: []byte("provider-key"), KeyVersion: 1},
 		},
-		provider: Provider{ID: 40, Endpoints: []ProviderEndpoint{{ProtocolType: "ANTHROPIC", BaseURL: "https://api.anthropic.com"}}},
+		provider: Provider{ID: 40, Endpoints: []ProviderEndpoint{
+			{ProtocolType: "OPENAI", BaseURL: "https://api.example.com/v1"},
+			{ProtocolType: "ANTHROPIC", BaseURL: "https://api.anthropic.com"},
+		}},
 		mappings: []ProviderMapping{{ProviderID: 40, UpstreamModelCode: "claude-test", Priority: 0}},
 	}
 	tester := connectionTesterFunc(func(_ context.Context, target ConnectionTarget, credential []byte, _ *catalog.OutboundProxy) ConnectionResult {
-		if target.Protocol != "ANTHROPIC" || target.UpstreamModelCode != "claude-test" || string(credential) != "provider-key" {
+		if target.Protocol != "ANTHROPIC" || target.BaseURL != "https://api.anthropic.com" || target.UpstreamModelCode != "claude-test" || string(credential) != "provider-key" {
 			t.Fatalf("unexpected inference target: %+v", target)
 		}
-		return ConnectionResult{Code: "UPSTREAM_BILLING_BLOCKED", HTTPStatus: 402}
+		return ConnectionResult{Code: "UPSTREAM_BILLING_BLOCKED", HTTPStatus: 403}
 	})
 	service := New(resourceTestStore{writer: writer}, nil, providerTestCipher{}, tester)
 
@@ -336,8 +350,35 @@ func TestResourceInferenceProbeBlocksBillingFailure(t *testing.T) {
 	if result.OK || writer.restored {
 		t.Fatal("billing failure must not restore the resource")
 	}
-	if writer.updated.RuntimeStatus != "BLOCKED" || writer.updated.BlockedReason == nil || *writer.updated.BlockedReason != "BILLING" || writer.updated.LastHTTPStatus == nil || *writer.updated.LastHTTPStatus != 402 {
+	if writer.updated.RuntimeStatus != "BLOCKED" || writer.updated.BlockedReason == nil || *writer.updated.BlockedReason != "BILLING" || writer.updated.LastHTTPStatus == nil || *writer.updated.LastHTTPStatus != 403 {
 		t.Fatalf("unexpected blocked resource: %+v", writer.updated.Resource)
+	}
+}
+
+func TestResourceInferenceProbeUsesSelectedProtocol(t *testing.T) {
+	updatedAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
+	writer := &resourceTestWriter{
+		resource: ResourceRecord{
+			Resource: Resource{ID: 48, ProviderID: 40, Name: "上游账号", AuthType: AuthTypeAPIKey, AuthAdapter: AuthAdapterAPIKey, RuntimeStatus: "HEALTHY", UpdatedAt: updatedAt},
+			Sealed:   catalog.SealedCredential{Ciphertext: []byte("provider-key"), KeyVersion: 1},
+		},
+		provider: Provider{ID: 40, Endpoints: []ProviderEndpoint{
+			{ProtocolType: "OPENAI", BaseURL: "https://api.example.com/v1"},
+			{ProtocolType: "ANTHROPIC", BaseURL: "https://api.example.com/anthropic"},
+		}},
+		mappings: []ProviderMapping{{ProviderID: 40, UpstreamModelCode: "model-test", Priority: 0}},
+	}
+	tester := connectionTesterFunc(func(_ context.Context, target ConnectionTarget, _ []byte, _ *catalog.OutboundProxy) ConnectionResult {
+		if target.Protocol != "OPENAI" || target.BaseURL != "https://api.example.com/v1" {
+			t.Fatalf("unexpected selected inference target: %+v", target)
+		}
+		return ConnectionResult{OK: true, Code: "OK", HTTPStatus: 200}
+	})
+	service := New(resourceTestStore{writer: writer}, nil, providerTestCipher{}, tester)
+
+	result, err := service.TestResourceProtocol(context.Background(), admin.Identity{ID: 1}, 48, "openai", appsec.RequestMeta{})
+	if err != nil || !result.OK || result.Code != "OK" || !writer.restored {
+		t.Fatalf("selected protocol test failed: result=%+v restored=%v err=%v", result, writer.restored, err)
 	}
 }
 

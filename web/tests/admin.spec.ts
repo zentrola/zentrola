@@ -2848,8 +2848,32 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
   await expect(testProviderConnection).toBeVisible()
   await expect(testProviderConnection).toHaveAttribute('title', '测试连接')
   await expect(testProviderConnection.locator('svg')).toBeVisible()
+  const startAnthropicConnectionTest = async () => {
+    const protocolDialog = page.getByRole('dialog', {
+      name: 'DeepSeek / 选择测试协议',
+    })
+    await expect(protocolDialog).toBeVisible()
+    await expect(protocolDialog.getByText('https://api.deepseek.com/anthropic')).toBeVisible()
+    await expect(
+      protocolDialog.getByText('https://api.deepseek.com', { exact: true }),
+    ).toBeVisible()
+    const anthropic = protocolDialog.getByRole('radio', {
+      name: '使用 Anthropic 协议测试连接',
+      exact: true,
+    })
+    await expect(anthropic).toBeChecked()
+    const requestPromise = page.waitForRequest((request) => {
+      const url = new URL(request.url())
+      return request.method() === 'POST' && url.pathname.endsWith('/test-connection')
+    })
+    await protocolDialog.getByRole('button', { name: '开始测试', exact: true }).click()
+    const request = await requestPromise
+    expect(new URL(request.url()).searchParams.get('protocol')).toBe('ANTHROPIC')
+  }
   await testProviderConnection.click()
+  await startAnthropicConnectionTest()
   await expect(modal(page).getByRole('status')).toContainText('模型调用验证通过')
+  await expect(modal(page).getByText('Anthropic', { exact: true })).toBeVisible()
   await modal(page).getByRole('button', { name: '关闭', exact: true }).last().click()
   expect(state.modelSyncRequests).toHaveLength(0)
   await providerRow.getByRole('button', { name: '同步 DeepSeek 的官方模型', exact: true }).click()
@@ -2868,6 +2892,7 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
   await expect(testConnection).toBeVisible()
   expect(await page.content()).not.toContain('fixture-upstream-credential')
   await testConnection.click()
+  await startAnthropicConnectionTest()
   await expect(modal(page).getByRole('status')).toContainText('模型调用验证通过')
   await modal(page).getByRole('button', { name: '关闭', exact: true }).last().click()
   state.failTest()
@@ -2878,6 +2903,7 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
     exact: true,
   })
   await testConnection.click()
+  await startAnthropicConnectionTest()
   await expect(modal(page).getByRole('status')).toContainText('上游认证失败')
   await modal(page).getByRole('button', { name: '关闭', exact: true }).last().click()
   await expect(editCredential).toHaveText('凭证')

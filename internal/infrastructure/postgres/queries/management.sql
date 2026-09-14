@@ -231,6 +231,12 @@ SET runtime_status='HEALTHY',blocked_reason=NULL,blocked_at=NULL,last_error_at=N
     last_http_status=NULL,last_error_code=NULL,updated_by=$2,updated_at=$3
 WHERE id=$1 AND is_deleted=false AND runtime_status='BLOCKED';
 
+-- name: ManageBlockResourceRuntime :exec
+UPDATE provider_credential
+SET runtime_status='BLOCKED',blocked_reason=$2,blocked_at=$3,last_error_at=$3,
+    last_http_status=$4,last_error_code=$5,updated_by=$6,updated_at=$3
+WHERE id=$1 AND is_deleted=false;
+
 -- name: ManageKeys :many
 SELECT id,name,masked_key,status,expires_at,revoked_at,created_at FROM principal_access_key
 WHERE principal_id=$1 AND is_deleted=false AND (id<$2 OR $2=0) ORDER BY id DESC LIMIT $3;

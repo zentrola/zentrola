@@ -420,7 +420,7 @@ type ProviderModel struct {
 	Priority int32
 }
 
-// 一次真实上游调用 Attempt 的用量事实；无逻辑删除
+// 一次真实上游调用 Attempt 的原始用量事实；不保存价格与成本，无逻辑删除
 type UsageRecord struct {
 	// 主键，由应用侧生成的正数 64-bit ID
 	ID int64
@@ -442,7 +442,7 @@ type UsageRecord struct {
 	ModelID int64
 	// 使用场景：MODEL_GATEWAY=模型网关调用
 	UsageScene string
-	// 客户端协议：OPENAI_CHAT=Chat Completions；OPENAI_RESPONSES=Responses；ANTHROPIC_MESSAGES=Messages
+	// 客户端协议：OPENAI_CHAT=Chat Completions；OPENAI_RESPONSES=Responses；OPENAI_IMAGES=Images；ANTHROPIC_MESSAGES=Messages
 	ClientProtocol string
 	// 输入 Token 数；NULL=上游未返回可靠值，0=已确认零用量
 	InputTokens *int64

@@ -15,11 +15,20 @@ import (
 const modelSyncLimit = 1000
 
 func preferredProviderEndpoint(provider Provider) (string, string) {
-	for _, preferred := range providerProtocols {
+	for _, preferred := range [...]string{"ANTHROPIC", "OPENAI"} {
 		for _, endpoint := range provider.Endpoints {
 			if endpoint.ProtocolType == preferred {
 				return endpoint.ProtocolType, endpoint.BaseURL
 			}
+		}
+	}
+	return "", ""
+}
+
+func providerEndpoint(provider Provider, protocol string) (string, string) {
+	for _, endpoint := range provider.Endpoints {
+		if endpoint.ProtocolType == protocol {
+			return endpoint.ProtocolType, endpoint.BaseURL
 		}
 	}
 	return "", ""
