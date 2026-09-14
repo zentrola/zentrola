@@ -92,7 +92,7 @@ LOG_FILE_MAX_BACKUPS=10
 - Docker 和 Kubernetes：将 JSON 写入 stdout，由容器运行时或日志 Agent 轮转并采集。
 - 没有日志 Agent 的单机：设置 `LOG_FILE_PATH`，启用应用管理的 JSON Lines 轮转日志。
 - 多个进程不能写入同一个日志文件。
-- `APP_ENV=dev` 和 `APP_ENV=test` 会记录未经脱敏的 JSON 请求和响应摘要，其中可能包含凭据、prompt、消息和模型输出。不得对外发送这些日志；`APP_ENV=prod` 不记录请求和响应正文。
+- `APP_ENV=dev` 和 `APP_ENV=test` 会记录未经脱敏、未经截断的完整请求和响应正文，其中可能包含凭据、prompt、消息和模型输出。不得对外发送这些日志；`APP_ENV=prod` 不记录请求和响应正文。
 
 访问日志摘要会排除敏感认证 Header。可以使用响应中的 `X-Trace-ID` 和 `X-Span-ID` 关联请求。
 
