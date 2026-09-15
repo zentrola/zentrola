@@ -693,6 +693,28 @@ async function fixture(page: Page) {
       if (!resource) return reply(null, 404, 'NOT_FOUND')
       return reply(resource.quotaDetails || [])
     }
+    if (
+      segments[2] === 'rate-limit-reset-credit' &&
+      segments[3] === 'consume' &&
+      method === 'POST'
+    ) {
+      const resource = resources.find((candidate) => candidate.id === segments[1])
+      if (!resource) return reply(null, 404, 'NOT_FOUND')
+      expect(body.idempotencyKey).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      )
+      expect(body.creditId).toBe('credit-1')
+      resource.quotaStatus = 'AVAILABLE'
+      resource.quotaDetails = (resource.quotaDetails || []).map((quota: any) => ({
+        ...quota,
+        usedPercent: 0,
+        status: 'AVAILABLE',
+      }))
+      return reply({
+        outcome: 'reset',
+        resetCredits: { availableCount: 0, credits: [] },
+      })
+    }
     if (segments[2] === 'test-connection') {
       const resource = resources.find((candidate) => candidate.id === segments[1])
       if (resource?.authType === 'SUBSCRIPTION' && !failedTest) {
@@ -749,6 +771,23 @@ async function fixture(page: Page) {
         code: failedTest ? 'UPSTREAM_AUTH_FAILED' : 'OK',
         httpStatus: failedTest ? 401 : 200,
         latencyMs: 140,
+        resetCredits:
+          resource?.authAdapter === 'OPENAI_CODEX'
+            ? {
+                availableCount: 1,
+                credits: [
+                  {
+                    id: 'credit-1',
+                    resetType: 'codexRateLimits',
+                    status: 'available',
+                    grantedAt: stamp,
+                    expiresAt: stamp,
+                    title: 'Rate-limit reset',
+                    description: 'Reset an eligible Codex rate-limit window.',
+                  },
+                ],
+              }
+            : undefined,
       })
     }
     return reply(null, 404, 'NOT_FOUND')
@@ -2284,6 +2323,21 @@ test('服务商支持个人订阅优先并保留 API Key 兜底', async ({ page 
     `额度重置时间 · ${formattedResetAt}`,
     `额度重置时间 · ${formattedResetAt}`,
   ])
+  await expect(refreshedSubscriptionRow).toContainText('可用重置卡 · 1')
+  const consumeResetCreditRequest = page.waitForRequest(
+    (request) =>
+      request.method() === 'POST' &&
+      new URL(request.url()).pathname.endsWith(
+        `/resources/${state.resources[0].id}/rate-limit-reset-credit/consume`,
+      ),
+  )
+  await refreshedSubscriptionRow.getByRole('button', { name: '使用重置卡', exact: true }).click()
+  await consumeResetCreditRequest
+  await expect(page.getByRole('status')).toContainText('重置卡使用成功，额度已刷新')
+  await expect(refreshedSubscriptionRow).toContainText('可用重置卡 · 0')
+  await expect(
+    refreshedSubscriptionRow.getByRole('button', { name: '使用重置卡', exact: true }),
+  ).toHaveCount(0)
   await modal(page).screenshot({
     path: '../.cache/web-visual/provider-subscription-quota.png',
   })

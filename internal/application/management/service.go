@@ -3,6 +3,7 @@ package management
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -669,6 +670,12 @@ func normalizeSubscriptionProbe(probe *SubscriptionProbe) {
 		probe.Quotas[index].ResetsAt = utcTimePointer(probe.Quotas[index].ResetsAt)
 		probe.Quotas[index].ObservedAt = probe.Quotas[index].ObservedAt.UTC()
 	}
+	if probe.ResetCredits != nil {
+		for index := range probe.ResetCredits.Credits {
+			probe.ResetCredits.Credits[index].GrantedAt = probe.ResetCredits.Credits[index].GrantedAt.UTC()
+			probe.ResetCredits.Credits[index].ExpiresAt = utcTimePointer(probe.ResetCredits.Credits[index].ExpiresAt)
+		}
+	}
 }
 
 func (s *Service) UpdateCredential(ctx context.Context, actor admin.Identity, id int64, credential string, meta appsec.RequestMeta) error {
@@ -888,10 +895,11 @@ func (s *Service) TestResourceProtocol(ctx context.Context, actor admin.Identity
 			if proxyErr != nil {
 				result.Code = "PROXY_CONFIGURATION_UNRECOVERABLE"
 			} else if probe, probeErr := subscription.Probe(ctx, plain, proxy); probeErr != nil {
-				result.Code = "SUBSCRIPTION_UNAVAILABLE"
+				result.Code = subscriptionConnectionCode(probeErr)
 			} else {
 				normalizeSubscriptionProbe(&probe)
 				subscriptionProbe = &probe
+				result.ResetCredits = probe.ResetCredits
 				resource.PlanCode = stringPointer(probe.Inspection.PlanCode)
 				resource.ExternalAccountRef = stringPointer(probe.Inspection.AccountRef)
 				resource.CredentialRefreshedAt = probe.Inspection.CredentialRefreshedAt
@@ -992,7 +1000,122 @@ func (s *Service) TestResourceProtocol(ctx context.Context, actor admin.Identity
 		if !result.OK {
 			code = result.Code
 		}
-		return w.Audit(auditCtx, Audit{Event: operation.ResourceConnectionTest, Target: "RESOURCE", ID: id, Name: resource.Name, After: map[string]any{"test": result, "testedUpdatedAt": resource.UpdatedAt}, ErrorCode: code}, meta)
+		auditResult := result
+		if result.ResetCredits != nil {
+			// 重置卡 ID 是后续兑换使用的 opaque 值，不应进入审计日志。
+			auditResult.ResetCredits = &RateLimitResetCredits{AvailableCount: result.ResetCredits.AvailableCount}
+		}
+		return w.Audit(auditCtx, Audit{Event: operation.ResourceConnectionTest, Target: "RESOURCE", ID: id, Name: resource.Name, After: map[string]any{"test": auditResult, "testedUpdatedAt": resource.UpdatedAt}, ErrorCode: code}, meta)
+	})
+	return result, err
+}
+
+func subscriptionConnectionCode(err error) string {
+	var connectionError SubscriptionConnectionError
+	if errors.As(err, &connectionError) {
+		switch connectionError.ConnectionCode() {
+		case "CREDENTIAL_INVALID", "CODEX_APP_SERVER_UNAVAILABLE", "UPSTREAM_TIMEOUT":
+			return connectionError.ConnectionCode()
+		}
+	}
+	return "SUBSCRIPTION_UNAVAILABLE"
+}
+
+// ConsumeResourceResetCredit 使用一张 ChatGPT 官方额度重置卡，并以官方返回的
+// 最新额度快照更新资源。idempotencyKey 在同一次逻辑兑换重试时必须保持不变。
+func (s *Service) ConsumeResourceResetCredit(ctx context.Context, actor admin.Identity, id int64, idempotencyKey, creditID string, meta appsec.RequestMeta) (ResetCreditConsumeResult, error) {
+	if id <= 0 || !validText(idempotencyKey, 128) || (creditID != "" && !validText(creditID, 256)) {
+		return ResetCreditConsumeResult{}, appsec.ErrInvalidArgument
+	}
+	var resource ResourceRecord
+	var provider Provider
+	if err := s.store.Read(ctx, actor, func(r Reader) error {
+		var err error
+		resource, err = r.Resource(ctx, id)
+		if err != nil {
+			return err
+		}
+		provider, err = r.Provider(ctx, resource.ProviderID)
+		return err
+	}); err != nil {
+		return ResetCreditConsumeResult{}, err
+	}
+	if resource.AuthType != AuthTypeSubscription || resource.AuthAdapter != AuthAdapterOpenAICodex {
+		return ResetCreditConsumeResult{}, ErrResetCreditUnsupported
+	}
+	adapter := s.subscriptionAdapter(resource.AuthAdapter)
+	consumer, ok := adapter.(SubscriptionResetCreditConsumer)
+	if adapter == nil || !adapter.SupportsProvider(provider) || !ok {
+		return ResetCreditConsumeResult{}, ErrResetCreditUnsupported
+	}
+	plain, err := s.cipher.Decrypt(resource.Sealed, owner(actor, resource.Resource))
+	if err != nil {
+		return ResetCreditConsumeResult{}, ErrCredential
+	}
+	defer clear(plain)
+	proxy, err := s.decryptedProviderProxy(provider)
+	if err != nil {
+		return ResetCreditConsumeResult{}, appsec.ErrUnavailable
+	}
+	consumed, err := consumer.ConsumeResetCredit(ctx, plain, proxy, idempotencyKey, creditID)
+	if err != nil {
+		return ResetCreditConsumeResult{}, appsec.ErrUnavailable
+	}
+	defer clear(consumed.Probe.Credential)
+	normalizeSubscriptionProbe(&consumed.Probe)
+	if consumed.Outcome != "reset" && consumed.Outcome != "alreadyRedeemed" && consumed.Outcome != "nothingToReset" && consumed.Outcome != "noCredit" {
+		return ResetCreditConsumeResult{}, appsec.ErrUnavailable
+	}
+	var refreshedSealed catalog.SealedCredential
+	if len(consumed.Probe.Credential) > 0 {
+		refreshedSealed, err = s.cipher.Encrypt(consumed.Probe.Credential, owner(actor, resource.Resource))
+		if err != nil {
+			return ResetCreditConsumeResult{}, ErrCredential
+		}
+	}
+	resource.PlanCode = stringPointer(consumed.Probe.Inspection.PlanCode)
+	resource.ExternalAccountRef = stringPointer(consumed.Probe.Inspection.AccountRef)
+	resource.CredentialRefreshedAt = consumed.Probe.Inspection.CredentialRefreshedAt
+	resource.CredentialExpiresAt = consumed.Probe.Inspection.CredentialExpiresAt
+	if consumed.Probe.Inspection.ExpiresAt != nil {
+		resource.ExpiresAt = consumed.Probe.Inspection.ExpiresAt
+	}
+	resource.QuotaStatus, resource.QuotaResetsAt = aggregateQuota(consumed.Probe.Quotas)
+	checkedAt := time.Now().UTC().Truncate(time.Microsecond)
+	resource.QuotaCheckedAt = &checkedAt
+	if refreshedSealed.KeyVersion != 0 {
+		resource.Sealed = refreshedSealed
+	}
+
+	result := ResetCreditConsumeResult{Outcome: consumed.Outcome, ResetCredits: consumed.Probe.ResetCredits}
+	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
+	err = s.store.Write(auditCtx, actor, func(w Writer) error {
+		current, err := w.Resource(auditCtx, id)
+		if err != nil {
+			return err
+		}
+		if !current.UpdatedAt.Equal(resource.UpdatedAt) {
+			return ErrConflict
+		}
+		resource.UpdatedAt = time.Now().UTC().Truncate(time.Microsecond)
+		if err := w.UpdateResource(auditCtx, resource); err != nil {
+			return err
+		}
+		if err := w.ReplaceResourceQuotas(auditCtx, id, consumed.Probe.Quotas); err != nil {
+			return err
+		}
+		if err := w.RestoreResourceRuntime(auditCtx, id, resource.UpdatedAt); err != nil {
+			return err
+		}
+		available := 0
+		if result.ResetCredits != nil {
+			available = result.ResetCredits.AvailableCount
+		}
+		return w.Audit(auditCtx, Audit{
+			Event: operation.ResourceRateLimitReset, Target: "RESOURCE", ID: id, Name: resource.Name,
+			After: map[string]any{"outcome": result.Outcome, "availableResetCredits": available},
+		}, meta)
 	})
 	return result, err
 }

@@ -4591,6 +4591,100 @@
                 }
             }
         },
+        "/api/v1/resources/{id}/rate-limit-reset-credit/consume": {
+            "post": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "description": "仅支持 OpenAI 个人订阅；调用 Codex 官方 App Server 消耗一张额度重置卡，并立即刷新额度状态。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "模型与资源"
+                ],
+                "summary": "使用 ChatGPT 额度重置卡",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "业务 ID（正整数字符串）",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "幂等键与可选重置卡 ID",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.ConsumeResetCreditRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/management.ResetCreditConsumeResult"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/resources/{id}/sync-models": {
             "post": {
                 "security": [
@@ -4686,7 +4780,7 @@
                         "AdminBearer": []
                     }
                 ],
-                "description": "API Key 资源会使用指定协议发起最小模型推理，订阅资源会调用对应认证适配器的额度接口；请求会产生外部网络调用。HTTP 200 后仍需检查 data.ok 和 data.code。",
+                "description": "API Key 资源会使用指定协议发起最小模型推理，订阅资源会通过对应认证适配器读取额度（OpenAI 个人订阅使用 Codex 官方 App Server）；请求会产生外部网络调用。HTTP 200 后仍需检查 data.ok 和 data.code。",
                 "produces": [
                     "application/json"
                 ],
@@ -5874,6 +5968,22 @@
                 }
             }
         },
+        "http.ConsumeResetCreditRequest": {
+            "type": "object",
+            "required": [
+                "idempotencyKey"
+            ],
+            "properties": {
+                "creditId": {
+                    "type": "string",
+                    "example": "RateLimitResetCredit_1"
+                },
+                "idempotencyKey": {
+                    "type": "string",
+                    "example": "8ae96ff3-3425-4f4c-8772-b6fd61502868"
+                }
+            }
+        },
         "http.CreateGroupRequest": {
             "type": "object",
             "required": [
@@ -6363,6 +6473,9 @@
                 },
                 "ok": {
                     "type": "boolean"
+                },
+                "resetCredits": {
+                    "$ref": "#/definitions/management.RateLimitResetCredits"
                 }
             }
         },
@@ -6555,6 +6668,9 @@
                 },
                 "ok": {
                     "type": "boolean"
+                },
+                "resetCredits": {
+                    "$ref": "#/definitions/management.RateLimitResetCredits"
                 },
                 "updated": {
                     "type": "integer"
@@ -6881,6 +6997,57 @@
                 },
                 "value": {
                     "type": "string"
+                }
+            }
+        },
+        "management.RateLimitResetCredit": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "expiresAt": {
+                    "type": "string"
+                },
+                "grantedAt": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "resetType": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "management.RateLimitResetCredits": {
+            "type": "object",
+            "properties": {
+                "availableCount": {
+                    "type": "integer"
+                },
+                "credits": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/management.RateLimitResetCredit"
+                    }
+                }
+            }
+        },
+        "management.ResetCreditConsumeResult": {
+            "type": "object",
+            "properties": {
+                "outcome": {
+                    "type": "string"
+                },
+                "resetCredits": {
+                    "$ref": "#/definitions/management.RateLimitResetCredits"
                 }
             }
         },

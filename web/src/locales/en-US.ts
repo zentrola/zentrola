@@ -509,6 +509,14 @@ export default {
     quotaRemainingPercent: '{value}% remaining',
     quotaRemainingValue: '{value}{unit} remaining',
     quotaUsageValue: '{used} / {limit}{unit} used',
+    resetCreditsAvailable: 'Reset credits available · {count}',
+    consumeResetCredit: 'Use reset credit',
+    resetCreditConsuming: 'Using…',
+    resetCreditConsumed: 'Reset credit used and quota refreshed',
+    resetCreditOutcomes: {
+      nothingToReset: 'There is no eligible quota window to reset',
+      noCredit: 'There are no reset credits available',
+    },
     configured: 'Configured',
     missing: 'Not configured',
     replace: 'Update credential',
@@ -684,6 +692,7 @@ export default {
       RESOURCE_CREDENTIAL_EXPORT: 'Export personal subscription credential',
       RESOURCE_STATUS_CHANGE: 'Change provider credential status',
       RESOURCE_CONNECTION_TEST: 'Test provider connection',
+      RESOURCE_RATE_LIMIT_RESET: 'Use rate-limit reset credit',
       MODEL_CATALOG_SYNC: 'Sync official model catalog',
       LOGIN_SUCCESS: 'Sign-in succeeded',
       LOGIN_FAILED: 'Sign-in failed',
@@ -730,6 +739,10 @@ export default {
       'The upstream model is unavailable or not permitted for this account.',
     UPSTREAM_TIMEOUT: 'The upstream connection timed out.',
     UPSTREAM_UNAVAILABLE: 'The upstream service is unavailable.',
+    CODEX_APP_SERVER_UNAVAILABLE:
+      'Codex App Server could not start. Check CODEX_EXECUTABLE and restart the backend.',
+    SUBSCRIPTION_UNAVAILABLE:
+      'The personal subscription quota could not be read. Check the network or proxy.',
     SUBSCRIPTION_REFRESH_FAILED:
       'The personal subscription could not be refreshed. Try again later or import auth.json again.',
     UPSTREAM_INVALID_RESPONSE: 'The upstream service returned an invalid response.',

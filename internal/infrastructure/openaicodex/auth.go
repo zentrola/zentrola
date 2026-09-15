@@ -10,10 +10,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -24,19 +24,35 @@ import (
 )
 
 const (
-	AdapterCode          = mgmt.AuthAdapterOpenAICodex
-	defaultUsageEndpoint = "https://chatgpt.com/backend-api/wham/usage"
-	defaultRefreshAhead  = 30 * time.Minute
+	AdapterCode         = mgmt.AuthAdapterOpenAICodex
+	defaultRefreshAhead = 30 * time.Minute
 )
 
-var errInvalidCredential = errors.New("invalid Codex ChatGPT credential")
+var (
+	errInvalidCredential    = errors.New("invalid Codex ChatGPT credential")
+	errAppServerUnavailable = errors.New("Codex app-server is unavailable")
+)
+
+type connectionFailure struct {
+	code  string
+	cause error
+}
+
+func (e *connectionFailure) Error() string          { return e.cause.Error() }
+func (e *connectionFailure) Unwrap() error          { return e.cause }
+func (e *connectionFailure) ConnectionCode() string { return e.code }
 
 type Adapter struct {
-	executable    string
-	client        *http.Client
-	usageEndpoint string
-	refreshAhead  time.Duration
+	executable   string
+	refreshAhead time.Duration
+	runSession   accountSessionRunner
 }
+
+type accountRPC interface {
+	call(context.Context, int64, string, any, any) error
+}
+
+type accountSessionRunner func(context.Context, []byte, *catalog.OutboundProxy, func(accountRPC) error) ([]byte, mgmt.SubscriptionInspection, error)
 
 type Option func(*Adapter)
 
@@ -52,12 +68,8 @@ func New(executable string, options ...Option) *Adapter {
 	if strings.TrimSpace(executable) == "" {
 		executable = "codex"
 	}
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.Proxy = nil
-	adapter := &Adapter{
-		executable: executable, usageEndpoint: defaultUsageEndpoint,
-		client: &http.Client{Transport: transport, Timeout: 20 * time.Second}, refreshAhead: defaultRefreshAhead,
-	}
+	adapter := &Adapter{executable: executable, refreshAhead: defaultRefreshAhead}
+	adapter.runSession = adapter.runAccountSession
 	for _, option := range options {
 		option(adapter)
 	}
@@ -208,101 +220,70 @@ func claimUnix(claims map[string]any, key string) (time.Time, bool) {
 }
 
 func (a *Adapter) Probe(ctx context.Context, raw []byte, proxy *catalog.OutboundProxy) (mgmt.SubscriptionProbe, error) {
-	cache, err := parseCredential(raw)
+	var limits rateLimitsResponse
+	credential, inspection, err := a.runSession(ctx, raw, proxy, func(client accountRPC) error {
+		return client.call(ctx, 2, "account/rateLimits/read", nil, &limits)
+	})
 	if err != nil {
-		return mgmt.SubscriptionProbe{}, err
-	}
-	credential, err := ensureLastRefresh(raw)
-	if err != nil {
-		return mgmt.SubscriptionProbe{}, err
-	}
-	inspection, err := a.Inspect(credential)
-	if err != nil {
-		clear(credential)
-		return mgmt.SubscriptionProbe{}, err
-	}
-	usage, err := a.readUsage(ctx, cache.Tokens.AccessToken, cache.Tokens.AccountID, proxy)
-	var statusError *usageHTTPError
-	if errors.As(err, &statusError) && statusError.StatusCode == http.StatusUnauthorized {
-		clear(credential)
-		credential, inspection, err = a.refreshCredential(ctx, raw, proxy)
-		if err != nil {
-			return mgmt.SubscriptionProbe{}, err
+		code := "SUBSCRIPTION_UNAVAILABLE"
+		switch {
+		case errors.Is(err, errInvalidCredential):
+			code = "CREDENTIAL_INVALID"
+		case errors.Is(err, errAppServerUnavailable):
+			code = "CODEX_APP_SERVER_UNAVAILABLE"
+		case errors.Is(err, context.DeadlineExceeded):
+			code = "UPSTREAM_TIMEOUT"
 		}
-		refreshed, parseErr := parseCredential(credential)
-		if parseErr != nil {
-			clear(credential)
-			return mgmt.SubscriptionProbe{}, parseErr
+		return mgmt.SubscriptionProbe{}, &connectionFailure{
+			code: code, cause: fmt.Errorf("cannot read Codex ChatGPT rate limits: %w", err),
 		}
-		usage, err = a.readUsage(ctx, refreshed.Tokens.AccessToken, refreshed.Tokens.AccountID, proxy)
 	}
-	if err != nil {
-		clear(credential)
-		return mgmt.SubscriptionProbe{}, err
+	if plan := limits.planType(); plan != "" {
+		inspection.PlanCode = plan
 	}
-	if usage.PlanType != "" {
-		inspection.PlanCode = usage.PlanType
-	}
+	observedAt := time.Now().UTC().Truncate(time.Microsecond)
 	return mgmt.SubscriptionProbe{
-		Inspection: inspection,
-		Credential: credential,
-		Quotas:     usage.quotas(time.Now().UTC().Truncate(time.Microsecond)),
+		Inspection:   inspection,
+		Credential:   credential,
+		Quotas:       limits.quotas(observedAt),
+		ResetCredits: limits.resetCredits(),
 	}, nil
 }
 
-func (a *Adapter) readUsage(ctx context.Context, accessToken, accountID string, proxy *catalog.OutboundProxy) (usageResponse, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, a.usageEndpoint, nil)
-	if err != nil {
-		return usageResponse{}, errors.New("cannot create ChatGPT usage request")
-	}
-	request.Header.Set("Accept", "application/json")
-	request.Header.Set("Authorization", "Bearer "+accessToken)
-	request.Header.Set("ChatGPT-Account-Id", accountID)
-	defer request.Header.Del("Authorization")
-
-	client, cleanup, err := provider.ClientWithProxy(ctx, a.client, proxy, provider.ProxyRequestLog{
-		Operation: "subscription_usage", ProviderCode: catalog.OpenAIOfficialCode, Protocol: "OPENAI",
+func (a *Adapter) refreshCredential(ctx context.Context, raw []byte, proxy *catalog.OutboundProxy) ([]byte, mgmt.SubscriptionInspection, error) {
+	var account accountResponse
+	updated, inspection, err := a.runSession(ctx, raw, proxy, func(client accountRPC) error {
+		return client.call(ctx, 2, "account/read", map[string]bool{"refreshToken": true}, &account)
 	})
 	if err != nil {
-		return usageResponse{}, errors.New("invalid ChatGPT proxy configuration")
+		return nil, mgmt.SubscriptionInspection{}, fmt.Errorf("Codex ChatGPT authentication failed: %w", err)
 	}
-	defer cleanup()
-	response, err := client.Do(request)
-	if err != nil {
-		return usageResponse{}, errors.New("cannot reach ChatGPT usage service")
+	if account.Account == nil || account.Account.Type != "chatgpt" {
+		clear(updated)
+		return nil, mgmt.SubscriptionInspection{}, errors.New("Codex ChatGPT authentication failed")
 	}
-	defer response.Body.Close()
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
-		return usageResponse{}, &usageHTTPError{StatusCode: response.StatusCode}
+	if account.Account.PlanType != "" {
+		inspection.PlanCode = account.Account.PlanType
 	}
-	var usage usageResponse
-	decoder := json.NewDecoder(io.LimitReader(response.Body, 1<<20))
-	if err := decoder.Decode(&usage); err != nil {
-		return usageResponse{}, errors.New("invalid ChatGPT usage response")
-	}
-	if usage.AccountID != "" && usage.AccountID != accountID {
-		return usageResponse{}, errors.New("ChatGPT usage account mismatch")
-	}
-	return usage, nil
+	return updated, inspection, nil
 }
 
-type usageHTTPError struct{ StatusCode int }
-
-func (e *usageHTTPError) Error() string {
-	return fmt.Sprintf("ChatGPT usage request failed with HTTP %d", e.StatusCode)
-}
-
-func (a *Adapter) refreshCredential(ctx context.Context, raw []byte, proxy *catalog.OutboundProxy) ([]byte, mgmt.SubscriptionInspection, error) {
+func (a *Adapter) runAccountSession(ctx context.Context, raw []byte, proxy *catalog.OutboundProxy, action func(accountRPC) error) ([]byte, mgmt.SubscriptionInspection, error) {
 	directory, err := os.MkdirTemp("", "zentrola-codex-auth-")
 	if err != nil {
-		return nil, mgmt.SubscriptionInspection{}, errors.New("cannot create isolated Codex credential directory")
+		return nil, mgmt.SubscriptionInspection{}, fmt.Errorf("%w: cannot create isolated credential directory", errAppServerUnavailable)
 	}
 	defer os.RemoveAll(directory)
 	authPath := filepath.Join(directory, "auth.json")
-	if err := os.WriteFile(authPath, raw, 0o600); err != nil {
-		return nil, mgmt.SubscriptionInspection{}, errors.New("cannot stage Codex credential")
+	normalized, err := ensureLastRefresh(raw)
+	if err != nil {
+		return nil, mgmt.SubscriptionInspection{}, err
 	}
+	if err := os.WriteFile(authPath, normalized, 0o600); err != nil {
+		clear(normalized)
+		return nil, mgmt.SubscriptionInspection{}, fmt.Errorf("%w: cannot stage credential", errAppServerUnavailable)
+	}
+	clear(normalized)
 
 	client, err := startClient(ctx, a.executable, directory, proxy)
 	if err != nil {
@@ -310,20 +291,16 @@ func (a *Adapter) refreshCredential(ctx context.Context, raw []byte, proxy *cata
 	}
 	defer client.close()
 	if err := client.initialize(ctx); err != nil {
+		return nil, mgmt.SubscriptionInspection{}, fmt.Errorf("%w: initialization failed: %v", errAppServerUnavailable, err)
+	}
+	if err := action(client); err != nil {
 		return nil, mgmt.SubscriptionInspection{}, err
-	}
-	var account accountResponse
-	if err := client.call(ctx, 2, "account/read", map[string]bool{"refreshToken": true}, &account); err != nil {
-		return nil, mgmt.SubscriptionInspection{}, fmt.Errorf("Codex ChatGPT authentication failed: %w", err)
-	}
-	if account.Account == nil || account.Account.Type != "chatgpt" {
-		return nil, mgmt.SubscriptionInspection{}, errors.New("Codex ChatGPT authentication failed")
 	}
 	updated, err := os.ReadFile(authPath)
 	if err != nil {
-		return nil, mgmt.SubscriptionInspection{}, errors.New("cannot read refreshed Codex credential")
+		return nil, mgmt.SubscriptionInspection{}, fmt.Errorf("%w: cannot read refreshed credential", errAppServerUnavailable)
 	}
-	normalized, err := ensureLastRefresh(updated)
+	normalized, err = ensureLastRefresh(updated)
 	clear(updated)
 	if err != nil {
 		return nil, mgmt.SubscriptionInspection{}, err
@@ -334,10 +311,44 @@ func (a *Adapter) refreshCredential(ctx context.Context, raw []byte, proxy *cata
 		clear(updated)
 		return nil, mgmt.SubscriptionInspection{}, err
 	}
-	if account.Account.PlanType != "" {
-		inspection.PlanCode = account.Account.PlanType
-	}
 	return updated, inspection, nil
+}
+
+func (a *Adapter) ConsumeResetCredit(ctx context.Context, raw []byte, proxy *catalog.OutboundProxy, idempotencyKey, creditID string) (mgmt.ResetCreditConsume, error) {
+	if strings.TrimSpace(idempotencyKey) == "" || strings.TrimSpace(creditID) != creditID {
+		return mgmt.ResetCreditConsume{}, errors.New("invalid rate-limit reset request")
+	}
+	params := map[string]string{"idempotencyKey": idempotencyKey}
+	if creditID != "" {
+		params["creditId"] = creditID
+	}
+	var consumed struct {
+		Outcome string `json:"outcome"`
+	}
+	var limits rateLimitsResponse
+	credential, inspection, err := a.runSession(ctx, raw, proxy, func(client accountRPC) error {
+		if err := client.call(ctx, 2, "account/rateLimitResetCredit/consume", params, &consumed); err != nil {
+			return err
+		}
+		return client.call(ctx, 3, "account/rateLimits/read", nil, &limits)
+	})
+	if err != nil {
+		return mgmt.ResetCreditConsume{}, fmt.Errorf("cannot consume Codex ChatGPT rate-limit reset: %w", err)
+	}
+	if consumed.Outcome != "reset" && consumed.Outcome != "alreadyRedeemed" && consumed.Outcome != "nothingToReset" && consumed.Outcome != "noCredit" {
+		clear(credential)
+		return mgmt.ResetCreditConsume{}, errors.New("invalid Codex ChatGPT rate-limit reset response")
+	}
+	if plan := limits.planType(); plan != "" {
+		inspection.PlanCode = plan
+	}
+	observedAt := time.Now().UTC().Truncate(time.Microsecond)
+	return mgmt.ResetCreditConsume{Outcome: consumed.Outcome, Probe: mgmt.SubscriptionProbe{
+		Inspection:   inspection,
+		Credential:   credential,
+		Quotas:       limits.quotas(observedAt),
+		ResetCredits: limits.resetCredits(),
+	}}, nil
 }
 
 // RefreshIfNeeded 在短期 access token 临近过期时交给官方 app-server 刷新。
@@ -407,17 +418,17 @@ func startClient(ctx context.Context, executable, directory string, proxy *catal
 	command.Env = append(environment, "CODEX_HOME="+directory)
 	stdin, err := command.StdinPipe()
 	if err != nil {
-		return nil, errors.New("cannot open Codex app-server input")
+		return nil, fmt.Errorf("%w: cannot open input", errAppServerUnavailable)
 	}
 	stdout, err := command.StdoutPipe()
 	if err != nil {
 		stdin.Close()
-		return nil, errors.New("cannot open Codex app-server output")
+		return nil, fmt.Errorf("%w: cannot open output", errAppServerUnavailable)
 	}
 	command.Stderr = io.Discard
 	if err := command.Start(); err != nil {
 		stdin.Close()
-		return nil, errors.New("Codex app-server is unavailable")
+		return nil, fmt.Errorf("%w: cannot start process", errAppServerUnavailable)
 	}
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 64<<10), 1<<20)
@@ -513,79 +524,142 @@ type accountResponse struct {
 	} `json:"account"`
 }
 
-type usageResponse struct {
-	AccountID            string                `json:"account_id"`
-	PlanType             string                `json:"plan_type"`
-	RateLimit            *directRateLimit      `json:"rate_limit"`
-	AdditionalRateLimits []additionalRateLimit `json:"additional_rate_limits"`
-	RateLimitReachedType *string               `json:"rate_limit_reached_type"`
+type rateLimitsResponse struct {
+	RateLimits            *codexRateLimit            `json:"rateLimits"`
+	RateLimitsByLimitID   map[string]codexRateLimit  `json:"rateLimitsByLimitId"`
+	RateLimitResetCredits *rateLimitResetCreditsWire `json:"rateLimitResetCredits"`
 }
 
-type additionalRateLimit struct {
-	LimitName      *string          `json:"limit_name"`
-	MeteredFeature string           `json:"metered_feature"`
-	RateLimit      *directRateLimit `json:"rate_limit"`
+type codexRateLimit struct {
+	LimitID              string           `json:"limitId"`
+	LimitName            *string          `json:"limitName"`
+	PlanType             string           `json:"planType"`
+	Primary              *rateLimitWindow `json:"primary"`
+	Secondary            *rateLimitWindow `json:"secondary"`
+	RateLimitReachedType *string          `json:"rateLimitReachedType"`
 }
 
-type directRateLimit struct {
-	Allowed         *bool             `json:"allowed"`
-	LimitReached    bool              `json:"limit_reached"`
-	PrimaryWindow   *directRateWindow `json:"primary_window"`
-	SecondaryWindow *directRateWindow `json:"secondary_window"`
+type rateLimitWindow struct {
+	UsedPercent        float64 `json:"usedPercent"`
+	WindowDurationMins *int64  `json:"windowDurationMins"`
+	ResetsAt           *int64  `json:"resetsAt"`
 }
 
-type directRateWindow struct {
-	UsedPercent        float64 `json:"used_percent"`
-	LimitWindowSeconds *int64  `json:"limit_window_seconds"`
-	ResetAfterSeconds  *int64  `json:"reset_after_seconds"`
-	ResetAt            *int64  `json:"reset_at"`
+type rateLimitResetCreditsWire struct {
+	AvailableCount int                        `json:"availableCount"`
+	Credits        []rateLimitResetCreditWire `json:"credits"`
 }
 
-func (r usageResponse) quotas(observedAt time.Time) []mgmt.ResourceQuota {
-	quotas := make([]mgmt.ResourceQuota, 0, 2+len(r.AdditionalRateLimits)*2)
-	quotas = appendRateLimitQuotas(quotas, "codex", nil, r.RateLimit, r.RateLimitReachedType, observedAt)
-	for index, additional := range r.AdditionalRateLimits {
-		code := strings.TrimSpace(additional.MeteredFeature)
-		if code == "" {
-			code = "additional." + strconv.Itoa(index+1)
+type rateLimitResetCreditWire struct {
+	ID          string  `json:"id"`
+	ResetType   string  `json:"resetType"`
+	Status      string  `json:"status"`
+	GrantedAt   int64   `json:"grantedAt"`
+	ExpiresAt   *int64  `json:"expiresAt"`
+	Title       *string `json:"title"`
+	Description *string `json:"description"`
+}
+
+func (r rateLimitsResponse) orderedLimits() []codexRateLimit {
+	if len(r.RateLimitsByLimitID) == 0 {
+		if r.RateLimits == nil {
+			return nil
 		}
-		quotas = appendRateLimitQuotas(quotas, code, additional.LimitName, additional.RateLimit, nil, observedAt)
+		return []codexRateLimit{*r.RateLimits}
+	}
+	keys := make([]string, 0, len(r.RateLimitsByLimitID))
+	for key := range r.RateLimitsByLimitID {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	limits := make([]codexRateLimit, 0, len(keys))
+	for _, key := range keys {
+		limit := r.RateLimitsByLimitID[key]
+		if strings.TrimSpace(limit.LimitID) == "" {
+			limit.LimitID = key
+		}
+		limits = append(limits, limit)
+	}
+	return limits
+}
+
+func (r rateLimitsResponse) planType() string {
+	for _, limit := range r.orderedLimits() {
+		if strings.TrimSpace(limit.PlanType) != "" {
+			return strings.TrimSpace(limit.PlanType)
+		}
+	}
+	return ""
+}
+
+func (r rateLimitsResponse) quotas(observedAt time.Time) []mgmt.ResourceQuota {
+	limits := r.orderedLimits()
+	quotas := make([]mgmt.ResourceQuota, 0, len(limits)*2)
+	for index, limit := range limits {
+		code := strings.TrimSpace(limit.LimitID)
+		if code == "" {
+			code = "codex"
+			if index > 0 {
+				code += "." + strconv.Itoa(index+1)
+			}
+		}
+		if limit.Primary != nil {
+			quotas = append(quotas, officialWindowQuota(code+".primary", limit.LimitName, limit.Primary, limit.RateLimitReachedType, observedAt))
+		}
+		if limit.Secondary != nil {
+			quotas = append(quotas, officialWindowQuota(code+".secondary", limit.LimitName, limit.Secondary, limit.RateLimitReachedType, observedAt))
+		}
 	}
 	return quotas
 }
 
-func appendRateLimitQuotas(quotas []mgmt.ResourceQuota, code string, name *string, limit *directRateLimit, reachedType *string, observedAt time.Time) []mgmt.ResourceQuota {
-	if limit == nil {
-		return quotas
-	}
-	if limit.PrimaryWindow != nil {
-		quotas = append(quotas, windowQuota(code+".primary", name, limit.PrimaryWindow, limit, reachedType, observedAt))
-	}
-	if limit.SecondaryWindow != nil {
-		quotas = append(quotas, windowQuota(code+".secondary", name, limit.SecondaryWindow, limit, reachedType, observedAt))
-	}
-	return quotas
-}
-
-func windowQuota(code string, name *string, window *directRateWindow, limit *directRateLimit, reachedType *string, observedAt time.Time) mgmt.ResourceQuota {
+func officialWindowQuota(code string, name *string, window *rateLimitWindow, reachedType *string, observedAt time.Time) mgmt.ResourceQuota {
 	percent := window.UsedPercent
 	status := mgmt.QuotaAvailable
-	if reachedType != nil || limit.LimitReached || (limit.Allowed != nil && !*limit.Allowed) || percent >= 100 {
+	if reachedType != nil || percent >= 100 {
 		status = mgmt.QuotaExhausted
 	} else if percent >= 90 {
 		status = mgmt.QuotaNearLimit
 	}
+	var durationSeconds *int64
+	if window.WindowDurationMins != nil && *window.WindowDurationMins >= 0 && *window.WindowDurationMins <= (1<<63-1)/60 {
+		value := *window.WindowDurationMins * 60
+		durationSeconds = &value
+	}
 	var resetsAt *time.Time
-	if window.ResetAt != nil {
-		value := time.Unix(*window.ResetAt, 0).UTC()
-		resetsAt = &value
-	} else if window.ResetAfterSeconds != nil {
-		value := observedAt.Add(time.Duration(*window.ResetAfterSeconds) * time.Second)
+	if window.ResetsAt != nil && *window.ResetsAt > 0 {
+		value := time.Unix(*window.ResetsAt, 0).UTC()
 		resetsAt = &value
 	}
 	return mgmt.ResourceQuota{
 		Code: code, Name: name, Status: status, UsedPercent: &percent,
-		WindowDurationSeconds: window.LimitWindowSeconds, ResetsAt: resetsAt, ReachedType: reachedType,
+		WindowDurationSeconds: durationSeconds, ResetsAt: resetsAt, ReachedType: reachedType,
 		ObservedAt: observedAt,
 	}
+}
+
+func (r rateLimitsResponse) resetCredits() *mgmt.RateLimitResetCredits {
+	if r.RateLimitResetCredits == nil {
+		return nil
+	}
+	result := &mgmt.RateLimitResetCredits{
+		AvailableCount: r.RateLimitResetCredits.AvailableCount,
+		Credits:        make([]mgmt.RateLimitResetCredit, 0, len(r.RateLimitResetCredits.Credits)),
+	}
+	for _, credit := range r.RateLimitResetCredits.Credits {
+		if strings.TrimSpace(credit.ID) == "" {
+			continue
+		}
+		var expiresAt *time.Time
+		if credit.ExpiresAt != nil && *credit.ExpiresAt > 0 {
+			value := time.Unix(*credit.ExpiresAt, 0).UTC()
+			expiresAt = &value
+		}
+		result.Credits = append(result.Credits, mgmt.RateLimitResetCredit{
+			ID: credit.ID, ResetType: credit.ResetType, Status: credit.Status,
+			GrantedAt: time.Unix(credit.GrantedAt, 0).UTC(), ExpiresAt: expiresAt,
+			Title: credit.Title, Description: credit.Description,
+		})
+	}
+	return result
 }
