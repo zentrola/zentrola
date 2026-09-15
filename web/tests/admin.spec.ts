@@ -1697,6 +1697,8 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   const claudeMappingCheckbox = dialog.getByRole('checkbox', {
     name: '启用 Claude Sonnet 映射',
   })
+  await expect(mappingCheckbox).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+  await expect(mappingCheckbox).toHaveCSS('border-top-style', 'none')
   await expect(dialog.locator('.mapping-list')).toHaveCSS('max-height', 'none')
   await expect(dialog.locator('.mapping-list')).toHaveCSS('overflow-y', 'clip')
   await expect(dialog.locator('.modal-body')).toHaveCSS('overflow-y', 'auto')
@@ -1710,6 +1712,8 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await expect(claudeMappingCheckbox).not.toBeChecked()
   await expect(providerModelCode).toBeDisabled()
   await mappingCheckbox.check()
+  await expect(mappingCheckbox).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+  await expect(mappingCheckbox).toHaveCSS('border-top-style', 'none')
   await expect(selectAllMappings).toHaveJSProperty('indeterminate', true)
   await expect(providerModelCode).toBeEnabled()
   await expect(providerModelCode).toHaveValue('')
