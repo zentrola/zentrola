@@ -305,7 +305,10 @@ func inspectResponse(response *Response) responseDecision {
 	if status == http.StatusUnauthorized {
 		return block("AUTHENTICATION", "UPSTREAM_AUTHENTICATION_FAILED")
 	}
-	if status == http.StatusPaymentRequired || containsAny(lower, "insufficient_balance", "insufficient balance", "credit balance", "payment required", "billing_error", "billing error") {
+	if status == http.StatusPaymentRequired || containsAny(lower,
+		"insufficient_balance", "insufficient balance", "credit balance", "payment required",
+		"billing_error", "billing error", "subscription expired", "subscription has expired",
+		"plan expired", "subscription inactive", "no active subscription") {
 		return block("BILLING", "UPSTREAM_BILLING_BLOCKED")
 	}
 	if status == http.StatusForbidden && containsAny(lower, "account suspended", "account_suspended", "account disabled", "account_disabled") {
