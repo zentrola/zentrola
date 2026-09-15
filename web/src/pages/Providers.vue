@@ -270,10 +270,7 @@ function openEdit(provider: Provider | null = null) {
       detail.mappings
         .map((mapping) => ({
           modelId: mapping.modelId,
-          upstreamModelCode:
-            mapping.upstreamModelCode === modelCode(mapping.modelId)
-              ? ''
-              : mapping.upstreamModelCode,
+          upstreamModelCode: mapping.upstreamModelCode,
         }))
         .filter(
           (mapping, index, mappings) =>
@@ -337,12 +334,6 @@ function endpointURL(provider: Provider, protocolType: ProviderProtocol) {
 
 function resolvedUpstreamModelCode(mapping: MappingDraft) {
   return mapping.upstreamModelCode.trim() || modelCode(mapping.modelId)
-}
-
-function normalizeUpstreamModelCode(mapping: MappingDraft) {
-  if (mapping.upstreamModelCode.trim() === modelCode(mapping.modelId)) {
-    mapping.upstreamModelCode = ''
-  }
 }
 
 function resourceFor(provider: Provider) {
@@ -1423,7 +1414,6 @@ onMounted(() => {
                   :placeholder="t('providers.upstreamModelPlaceholder', { code: row.model.code })"
                   :aria-label="t('providers.mappingCodeFor', { name: row.model.name })"
                   @input="updateUpstreamModelCode(row.model.id, $event)"
-                  @blur="row.mapping && normalizeUpstreamModelCode(row.mapping)"
                 />
               </label>
             </div>

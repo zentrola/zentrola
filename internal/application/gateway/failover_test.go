@@ -248,6 +248,31 @@ func TestForwardClassifiesFinalPaymentFailure(t *testing.T) {
 	got.Body.Close()
 }
 
+func TestForwardBlocksInactiveUpstreamSubscription(t *testing.T) {
+	store := &failoverStore{routes: testRoutes()}
+	trace := &usage.Event{}
+	service := New(store, failoverCipher{}, upstreamFunc(func(_ context.Context, route Route, _ Request, _ []byte) (*Response, error) {
+		if route.ResourceID == 1000 {
+			return response(403, `{"error":{"message":"No active subscription found for this group"}}`), nil
+		}
+		return response(200, `{}`), nil
+	}))
+
+	got, err := testForward(t, service, trace)
+	if err != nil || got.Status != 200 {
+		t.Fatalf("status=%v err=%v", got, err)
+	}
+	got.Body.Close()
+	if len(store.blocks) != 1 || store.blocks[0].Reason != "BILLING" ||
+		store.blocks[0].HTTPStatus != 403 ||
+		store.blocks[0].ErrorCode != "UPSTREAM_BILLING_BLOCKED" {
+		t.Fatalf("blocks=%+v", store.blocks)
+	}
+	if len(trace.Attempts) != 1 || trace.Attempts[0].ErrorType != "UPSTREAM_BILLING_BLOCKED" {
+		t.Fatalf("attempts=%+v", trace.Attempts)
+	}
+}
+
 func TestForwardDoesNotSwitchOnClientRequestError(t *testing.T) {
 	store := &failoverStore{routes: testRoutes()}
 	calls := 0

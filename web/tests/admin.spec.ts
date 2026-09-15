@@ -1626,7 +1626,9 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await expect(
     modal(page).getByRole('checkbox', { name: '启用 DeepSeek V4 Flash 映射' }),
   ).toBeChecked()
-  await expect(modal(page).getByLabel('DeepSeek V4 Flash 的服务商模型编码')).toHaveValue('')
+  await expect(modal(page).getByLabel('DeepSeek V4 Flash 的服务商模型编码')).toHaveValue(
+    'deepseek-v4-flash',
+  )
   await expect(modal(page).getByText('Claude Sonnet', { exact: true })).toBeVisible()
   await expect(
     modal(page).getByRole('checkbox', { name: '启用 Claude Sonnet 映射' }),
@@ -1710,7 +1712,7 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await expect(providerModelCode).toHaveAttribute('placeholder', '留空则使用 deepseek-v4-flash')
   await providerModelCode.fill('deepseek-v4-flash')
   await providerModelCode.blur()
-  await expect(providerModelCode).toHaveValue('')
+  await expect(providerModelCode).toHaveValue('deepseek-v4-flash')
   await mappingCheckbox.uncheck()
   await expect(providerModelCode).toBeDisabled()
   await dialog.getByLabel('服务商名称').fill('阿里云百炼')
