@@ -1626,9 +1626,8 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await expect(
     modal(page).getByRole('checkbox', { name: '启用 DeepSeek V4 Flash 映射' }),
   ).toBeChecked()
-  await expect(modal(page).getByLabel('DeepSeek V4 Flash 的服务商模型编码')).toHaveValue(
-    'deepseek-v4-flash',
-  )
+  const existingProviderModelCode = modal(page).getByLabel('DeepSeek V4 Flash 的服务商模型编码')
+  await expect(existingProviderModelCode).toHaveValue('deepseek-v4-flash')
   await expect(modal(page).getByText('Claude Sonnet', { exact: true })).toBeVisible()
   await expect(
     modal(page).getByRole('checkbox', { name: '启用 Claude Sonnet 映射' }),
@@ -1652,9 +1651,11 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   expect((await dialogFooter.boundingBox())!.y).toBe(footerTop)
   await page.setViewportSize({ width: 1200, height: 900 })
   await modal(page).getByLabel('官方网站').fill('https://www.deepseek.com/')
+  await existingProviderModelCode.fill('')
   await modal(page).getByRole('button', { name: '保存', exact: true }).click()
   expect(state.providers[0].website).toBe('https://www.deepseek.com')
   expect(state.providerMappings.get('81')).toHaveLength(1)
+  expect(state.providerMappings.get('81')?.[0].upstreamModelCode).toBe('')
   await expect(page.getByRole('columnheader', { name: '网站', exact: true })).toHaveCount(0)
   const websiteLink = deepSeekRow.getByRole('link', {
     name: '在新页面打开 深度求索 官网',
@@ -1663,6 +1664,9 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await expect(websiteLink).toHaveAttribute('href', 'https://www.deepseek.com')
   await expect(websiteLink).toHaveAttribute('target', '_blank')
   await expect(websiteLink.locator('svg')).toHaveCount(1)
+  await deepSeekRow.getByRole('button', { name: '编辑', exact: true }).click()
+  await expect(modal(page).getByLabel('DeepSeek V4 Flash 的服务商模型编码')).toHaveValue('')
+  await modal(page).getByRole('button', { name: '取消', exact: true }).click()
 
   await page.getByRole('button', { name: '添加服务商' }).click()
   const dialog = modal(page)
@@ -1709,7 +1713,7 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await expect(selectAllMappings).toHaveJSProperty('indeterminate', true)
   await expect(providerModelCode).toBeEnabled()
   await expect(providerModelCode).toHaveValue('')
-  await expect(providerModelCode).toHaveAttribute('placeholder', '留空则使用 deepseek-v4-flash')
+  await expect(providerModelCode).toHaveAttribute('placeholder', '选填')
   await providerModelCode.fill('deepseek-v4-flash')
   await providerModelCode.blur()
   await expect(providerModelCode).toHaveValue('deepseek-v4-flash')

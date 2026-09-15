@@ -95,6 +95,7 @@ type resourceTestWriter struct {
 	Writer
 	resource ResourceRecord
 	provider Provider
+	model    Model
 	mappings []ProviderMapping
 	updated  ResourceRecord
 	quotas   []ResourceQuota
@@ -109,6 +110,9 @@ func (w *resourceTestWriter) Provider(context.Context, int64) (Provider, error) 
 }
 func (w *resourceTestWriter) ProviderMappings(context.Context, int64) ([]ProviderMapping, error) {
 	return w.mappings, nil
+}
+func (w *resourceTestWriter) Model(context.Context, int64) (Model, error) {
+	return w.model, nil
 }
 func (w *resourceTestWriter) UpdateResource(_ context.Context, resource ResourceRecord) error {
 	w.updated = resource
@@ -366,10 +370,11 @@ func TestResourceInferenceProbeUsesSelectedProtocol(t *testing.T) {
 			{ProtocolType: "OPENAI", BaseURL: "https://api.example.com/v1"},
 			{ProtocolType: "ANTHROPIC", BaseURL: "https://api.example.com/anthropic"},
 		}},
-		mappings: []ProviderMapping{{ProviderID: 40, UpstreamModelCode: "model-test", Priority: 0}},
+		model:    Model{ID: 90, Code: "logical-model"},
+		mappings: []ProviderMapping{{ProviderID: 40, ModelID: 90, UpstreamModelCode: "", Priority: 0}},
 	}
 	tester := connectionTesterFunc(func(_ context.Context, target ConnectionTarget, _ []byte, _ *catalog.OutboundProxy) ConnectionResult {
-		if target.ProviderCode != "custom-provider" || target.Protocol != "OPENAI" || target.BaseURL != "https://api.example.com/v1" {
+		if target.ProviderCode != "custom-provider" || target.Protocol != "OPENAI" || target.BaseURL != "https://api.example.com/v1" || target.UpstreamModelCode != "logical-model" {
 			t.Fatalf("unexpected selected inference target: %+v", target)
 		}
 		return ConnectionResult{OK: true, Code: "OK", HTTPStatus: 200}

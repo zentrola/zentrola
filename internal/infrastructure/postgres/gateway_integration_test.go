@@ -76,7 +76,7 @@ func TestStage4Integration(t *testing.T) {
 	provider := createTestProvider(t, ctx, pool, management, actor, "Anthropic 测试服务商",
 		[]mgmt.ProviderEndpoint{{ProtocolType: "ANTHROPIC", BaseURL: "https://api.anthropic.com"}},
 		[]mgmt.ProviderMappingInput{
-			{ModelID: sonnet.ID, UpstreamModelCode: "sonnet-upstream"},
+			{ModelID: sonnet.ID},
 			{ModelID: opus.ID, UpstreamModelCode: "opus-upstream"},
 		})
 	member, err := management.CreateMember(ctx, actor, "网关测试成员", "", appsec.RequestMeta{})
@@ -108,7 +108,7 @@ func TestStage4Integration(t *testing.T) {
 	streamRelease := make(chan struct{})
 	defer close(streamRelease)
 	streamCancelled := make(chan struct{}, 4)
-	const firstEvent = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_test\",\"model\":\"sonnet-upstream\"}}\n\n"
+	const firstEvent = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_test\",\"model\":\"claude-sonnet\"}}\n\n"
 	const tailEvents = "event: future_event\ndata: {\"opaque\":true}\n\nevent: content_block_delta\ndata: {\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"id\\\":9007199254740993}\"}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		data, _ := io.ReadAll(r.Body)
@@ -117,7 +117,7 @@ func TestStage4Integration(t *testing.T) {
 			Scenario string `json:"test_scenario"`
 		}
 		_ = json.Unmarshal(data, &input)
-		if input.Model != "sonnet-upstream" {
+		if input.Model != "claude-sonnet" {
 			t.Error("logical model was not resolved")
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -172,9 +172,9 @@ func TestStage4Integration(t *testing.T) {
 			if !bytes.Contains(data, []byte(`"tool_use_id":"toolu_123"`)) || !bytes.Contains(data, []byte(`9007199254740993`)) {
 				t.Error("tool result ID or integer corrupted")
 			}
-			io.WriteString(w, `{"type":"message","model":"sonnet-upstream","content":[{"type":"text","text":"Tool result received."}],"stop_reason":"end_turn"}`)
+			io.WriteString(w, `{"type":"message","model":"claude-sonnet","content":[{"type":"text","text":"Tool result received."}],"stop_reason":"end_turn"}`)
 		default:
-			io.WriteString(w, `{"type":"message","model":"sonnet-upstream","content":[{"type":"tool_use","id":"toolu_123","name":"read_file","input":{"path":"sample.txt"}}],"stop_reason":"tool_use"}`)
+			io.WriteString(w, `{"type":"message","model":"claude-sonnet","content":[{"type":"tool_use","id":"toolu_123","name":"read_file","input":{"path":"sample.txt"}}],"stop_reason":"tool_use"}`)
 		}
 	}))
 	defer mock.Close()

@@ -128,7 +128,7 @@ func TestProviderInputNormalizationAndValidation(t *testing.T) {
 func TestProviderMappingValidation(t *testing.T) {
 	provider := Provider{}
 	valid := []ProviderMappingInput{
-		{ModelID: 1, UpstreamModelCode: "vendor-model-pro"},
+		{ModelID: 1},
 		{ModelID: 2, UpstreamModelCode: "vendor-model-flash", Priority: 200},
 	}
 	if !validProviderMappings(provider, valid) {
@@ -156,7 +156,7 @@ func TestReplaceProviderMappingsLogicallyDeletesUncheckedModels(t *testing.T) {
 	}}
 	service := &Service{}
 	result, err := service.replaceProviderMappings(context.Background(), writer, Provider{ID: 8}, []ProviderMappingInput{{
-		ModelID: 1, UpstreamModelCode: "new-one",
+		ModelID: 1,
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -164,7 +164,7 @@ func TestReplaceProviderMappingsLogicallyDeletesUncheckedModels(t *testing.T) {
 	if len(result) != 1 || result[0].ID != 10 || result[0].Priority != defaultProviderMappingPriority {
 		t.Fatalf("unexpected retained mappings: %+v", result)
 	}
-	if len(writer.updated) != 1 || writer.updated[0].UpstreamModelCode != "new-one" {
+	if len(writer.updated) != 1 || writer.updated[0].UpstreamModelCode != "" {
 		t.Fatalf("checked mapping was not updated: %+v", writer.updated)
 	}
 	if len(writer.deleted) != 1 || writer.deleted[0] != 11 {
