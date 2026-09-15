@@ -820,6 +820,7 @@ func (s *Service) TestResourceProtocol(ctx context.Context, actor admin.Identity
 	var resource ResourceRecord
 	var provider Provider
 	var mappings []ProviderMapping
+	upstreamModelCode := ""
 	err := s.store.Read(ctx, actor, func(r Reader) error {
 		var err error
 		resource, err = r.Resource(ctx, id)
@@ -831,7 +832,19 @@ func (s *Service) TestResourceProtocol(ctx context.Context, actor admin.Identity
 			return err
 		}
 		mappings, err = r.ProviderMappings(ctx, resource.ProviderID)
-		return err
+		if err != nil || resource.AuthType == AuthTypeSubscription || len(mappings) == 0 {
+			return err
+		}
+		upstreamModelCode = strings.TrimSpace(mappings[0].UpstreamModelCode)
+		if upstreamModelCode != "" {
+			return nil
+		}
+		model, err := r.Model(ctx, mappings[0].ModelID)
+		if err != nil {
+			return err
+		}
+		upstreamModelCode = model.Code
+		return nil
 	})
 	if err != nil {
 		return ConnectionResult{}, err
@@ -878,7 +891,7 @@ func (s *Service) TestResourceProtocol(ctx context.Context, actor admin.Identity
 			}
 		}
 		result.LatencyMS = time.Since(startedAt).Milliseconds()
-	} else if len(mappings) == 0 || strings.TrimSpace(mappings[0].UpstreamModelCode) == "" {
+	} else if len(mappings) == 0 || strings.TrimSpace(upstreamModelCode) == "" {
 		result.Code = "PROVIDER_MODEL_MAPPING_REQUIRED"
 	} else {
 		defer clear(plain)
@@ -891,7 +904,7 @@ func (s *Service) TestResourceProtocol(ctx context.Context, actor admin.Identity
 		}
 		target := ConnectionTarget{
 			ProviderCode: provider.Code, Protocol: selectedProtocol, BaseURL: baseURL,
-			UpstreamModelCode: mappings[0].UpstreamModelCode,
+			UpstreamModelCode: upstreamModelCode,
 			AuthType:          resource.AuthType, AuthAdapter: resource.AuthAdapter,
 		}
 		if baseURL == "" {

@@ -292,7 +292,9 @@ func validProviderMappings(_ Provider, mappings []ProviderMappingInput) bool {
 	}
 	seen := make(map[int64]struct{}, len(mappings))
 	for _, mapping := range mappings {
-		if mapping.ModelID <= 0 || !validText(mapping.UpstreamModelCode, 128) || mapping.Priority < 0 || mapping.Priority > 10000 {
+		if mapping.ModelID <= 0 ||
+			(mapping.UpstreamModelCode != "" && !validText(mapping.UpstreamModelCode, 128)) ||
+			mapping.Priority < 0 || mapping.Priority > 10000 {
 			return false
 		}
 		if _, duplicate := seen[mapping.ModelID]; duplicate {

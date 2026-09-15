@@ -122,7 +122,7 @@ type ProviderInput struct {
 }
 type ProviderMappingInput struct {
 	ModelID           int64  `json:"modelId,string" binding:"required"`
-	UpstreamModelCode string `json:"upstreamModelCode" binding:"required"`
+	UpstreamModelCode string `json:"upstreamModelCode"`
 	Priority          int32  `json:"priority,omitempty"`
 }
 type ProviderMapping struct {

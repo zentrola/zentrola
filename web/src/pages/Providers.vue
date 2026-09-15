@@ -322,18 +322,10 @@ function updateUpstreamModelCode(modelId: string, event: Event) {
   if (mapping) mapping.upstreamModelCode = (event.target as HTMLInputElement).value
 }
 
-function modelCode(modelId: string) {
-  return models.value.find((model) => model.id === modelId)?.code ?? ''
-}
-
 function endpointURL(provider: Provider, protocolType: ProviderProtocol) {
   return (
     provider.endpoints.find((endpoint) => endpoint.protocolType === protocolType)?.baseUrl ?? ''
   )
-}
-
-function resolvedUpstreamModelCode(mapping: MappingDraft) {
-  return mapping.upstreamModelCode.trim() || modelCode(mapping.modelId)
 }
 
 function resourceFor(provider: Provider) {
@@ -923,7 +915,7 @@ function save() {
       : [],
     mappings: form.mappings.map((mapping) => ({
       modelId: mapping.modelId,
-      upstreamModelCode: resolvedUpstreamModelCode(mapping),
+      upstreamModelCode: mapping.upstreamModelCode.trim(),
     })),
   }
   if (!validText(input.name, 128)) validation = t('common.byteLimit')
@@ -942,7 +934,8 @@ function save() {
     form.mappings.some(
       (mapping) =>
         !models.value.some((model) => model.id === mapping.modelId) ||
-        !validText(resolvedUpstreamModelCode(mapping), 128),
+        (mapping.upstreamModelCode.trim() !== '' &&
+          !validText(mapping.upstreamModelCode.trim(), 128)),
     )
   )
     validation = t('providers.mappingInvalid')
@@ -956,7 +949,8 @@ function save() {
       form.mappings.some(
         (mapping) =>
           !models.value.some((model) => model.id === mapping.modelId) ||
-          !validText(resolvedUpstreamModelCode(mapping), 128),
+          (mapping.upstreamModelCode.trim() !== '' &&
+            !validText(mapping.upstreamModelCode.trim(), 128)),
       )
     )
       activeConfigTab.value = 'models'
@@ -1411,7 +1405,7 @@ onMounted(() => {
                   :value="row.mapping?.upstreamModelCode ?? ''"
                   spellcheck="false"
                   :disabled="busy || !row.mapping"
-                  :placeholder="t('providers.upstreamModelPlaceholder', { code: row.model.code })"
+                  :placeholder="t('providers.upstreamModelPlaceholder')"
                   :aria-label="t('providers.mappingCodeFor', { name: row.model.name })"
                   @input="updateUpstreamModelCode(row.model.id, $event)"
                 />

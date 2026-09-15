@@ -108,9 +108,13 @@ func (s *GatewayStore) ResolveCandidates(ctx context.Context, identity appsec.Pr
 			continue
 		}
 		seen[key] = struct{}{}
+		upstreamModel := row.UpstreamModelCode
+		if upstreamModel == "" {
+			upstreamModel = model
+		}
 		route := gw.Route{
 			ModelID: m.ID, ProviderID: row.ProviderID, ProviderModelID: row.ProviderModelID, ResourceID: row.ResourceID,
-			UpstreamModel: row.UpstreamModelCode, BaseURL: row.BaseUrl, EndpointProtocol: row.ProtocolType,
+			UpstreamModel: upstreamModel, BaseURL: row.BaseUrl, EndpointProtocol: row.ProtocolType,
 			AuthType: row.AuthType, AuthAdapter: row.AuthAdapter, ResourcePriority: row.ResourcePriority,
 			QuotaStatus: row.QuotaStatus, ExpiresAt: timePointer(row.ExpiresAt),
 			CredentialRefreshedAt: timePointer(row.CredentialRefreshedAt), CredentialExpiresAt: timePointer(row.CredentialExpiresAt),

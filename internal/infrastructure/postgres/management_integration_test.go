@@ -90,7 +90,7 @@ func TestStage3Integration(t *testing.T) {
 	}
 	const credential = "stage3-private-provider-key"
 	tester := connectionTestFunc(func(_ context.Context, target mgmt.ConnectionTarget, key []byte, _ *catalog.OutboundProxy) mgmt.ConnectionResult {
-		if target.BaseURL != "https://provider.example.com/v1" || target.UpstreamModelCode == "" || string(key) != credential {
+		if target.BaseURL != "https://provider.example.com/v1" || target.UpstreamModelCode != "management-mapped-model" || string(key) != credential {
 			t.Error("unexpected connection test inputs")
 		}
 		return mgmt.ConnectionResult{OK: true, Code: "OK", HTTPStatus: 200}
@@ -186,11 +186,11 @@ func TestStage3Integration(t *testing.T) {
 		t.Fatalf("unexpected provider mappings: %+v", providerDetail.Mappings)
 	}
 	mappingID := providerDetail.Mappings[0].ID
-	customProviderInput.Mappings[0].UpstreamModelCode = "vendor-model-v2"
+	customProviderInput.Mappings[0].UpstreamModelCode = ""
 	customProviderInput.Mappings = customProviderInput.Mappings[:1]
 	stage3Data[mgmt.Provider](t, request("PUT", customProviderPath, customProviderInput, 200))
 	providerDetail = stage3Data[mgmt.ProviderDetail](t, request("GET", customProviderPath, nil, 200))
-	if len(providerDetail.Mappings) != 1 || providerDetail.Mappings[0].ID != mappingID || providerDetail.Mappings[0].UpstreamModelCode != "vendor-model-v2" {
+	if len(providerDetail.Mappings) != 1 || providerDetail.Mappings[0].ID != mappingID || providerDetail.Mappings[0].UpstreamModelCode != "" {
 		t.Fatalf("provider mapping update not preserved: %+v", providerDetail.Mappings)
 	}
 	var deletedMappings int
