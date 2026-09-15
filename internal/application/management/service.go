@@ -890,8 +890,9 @@ func (s *Service) TestResourceProtocol(ctx context.Context, actor admin.Identity
 			}
 		}
 		target := ConnectionTarget{
-			Protocol: selectedProtocol, BaseURL: baseURL, UpstreamModelCode: mappings[0].UpstreamModelCode,
-			AuthType: resource.AuthType, AuthAdapter: resource.AuthAdapter,
+			ProviderCode: provider.Code, Protocol: selectedProtocol, BaseURL: baseURL,
+			UpstreamModelCode: mappings[0].UpstreamModelCode,
+			AuthType:          resource.AuthType, AuthAdapter: resource.AuthAdapter,
 		}
 		if baseURL == "" {
 			result.Code = "PROVIDER_UNAVAILABLE"

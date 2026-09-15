@@ -49,8 +49,9 @@ func TestAnthropicConnectionUsesRealInference(t *testing.T) {
 					Model     string `json:"model"`
 					MaxTokens int    `json:"max_tokens"`
 					Stream    bool   `json:"stream"`
+					Thinking  any    `json:"thinking"`
 				}
-				if json.NewDecoder(r.Body).Decode(&payload) != nil || payload.Model != "claude-test" || payload.MaxTokens != 5 || payload.Stream {
+				if json.NewDecoder(r.Body).Decode(&payload) != nil || payload.Model != "claude-test" || payload.MaxTokens != 5 || payload.Stream || payload.Thinking != nil {
 					t.Fatal("invalid inference probe body")
 				}
 				return &http.Response{StatusCode: tt.status, Body: io.NopCloser(strings.NewReader(tt.body)), Header: make(http.Header)}, nil
@@ -90,8 +91,9 @@ func TestOpenAIConnectionUsesRealInference(t *testing.T) {
 		var payload struct {
 			Model     string `json:"model"`
 			MaxTokens int    `json:"max_tokens"`
+			Thinking  any    `json:"thinking"`
 		}
-		if json.NewDecoder(r.Body).Decode(&payload) != nil || payload.Model != "gpt-test" || payload.MaxTokens != 5 {
+		if json.NewDecoder(r.Body).Decode(&payload) != nil || payload.Model != "gpt-test" || payload.MaxTokens != 5 || payload.Thinking != nil {
 			t.Fatal("invalid inference probe body")
 		}
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":"OK"}}]}`)), Header: make(http.Header)}, nil

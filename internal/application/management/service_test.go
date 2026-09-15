@@ -329,14 +329,14 @@ func TestResourceInferenceProbeBlocksBillingFailure(t *testing.T) {
 			Resource: Resource{ID: 48, ProviderID: 40, Name: "上游账号", AuthType: AuthTypeAPIKey, AuthAdapter: AuthAdapterAPIKey, RuntimeStatus: "HEALTHY", UpdatedAt: updatedAt},
 			Sealed:   catalog.SealedCredential{Ciphertext: []byte("provider-key"), KeyVersion: 1},
 		},
-		provider: Provider{ID: 40, Endpoints: []ProviderEndpoint{
+		provider: Provider{ID: 40, Code: "anthropic-official", Endpoints: []ProviderEndpoint{
 			{ProtocolType: "OPENAI", BaseURL: "https://api.example.com/v1"},
 			{ProtocolType: "ANTHROPIC", BaseURL: "https://api.anthropic.com"},
 		}},
 		mappings: []ProviderMapping{{ProviderID: 40, UpstreamModelCode: "claude-test", Priority: 0}},
 	}
 	tester := connectionTesterFunc(func(_ context.Context, target ConnectionTarget, credential []byte, _ *catalog.OutboundProxy) ConnectionResult {
-		if target.Protocol != "ANTHROPIC" || target.BaseURL != "https://api.anthropic.com" || target.UpstreamModelCode != "claude-test" || string(credential) != "provider-key" {
+		if target.ProviderCode != "anthropic-official" || target.Protocol != "ANTHROPIC" || target.BaseURL != "https://api.anthropic.com" || target.UpstreamModelCode != "claude-test" || string(credential) != "provider-key" {
 			t.Fatalf("unexpected inference target: %+v", target)
 		}
 		return ConnectionResult{Code: "UPSTREAM_BILLING_BLOCKED", HTTPStatus: 403}
@@ -362,14 +362,14 @@ func TestResourceInferenceProbeUsesSelectedProtocol(t *testing.T) {
 			Resource: Resource{ID: 48, ProviderID: 40, Name: "上游账号", AuthType: AuthTypeAPIKey, AuthAdapter: AuthAdapterAPIKey, RuntimeStatus: "HEALTHY", UpdatedAt: updatedAt},
 			Sealed:   catalog.SealedCredential{Ciphertext: []byte("provider-key"), KeyVersion: 1},
 		},
-		provider: Provider{ID: 40, Endpoints: []ProviderEndpoint{
+		provider: Provider{ID: 40, Code: "custom-provider", Endpoints: []ProviderEndpoint{
 			{ProtocolType: "OPENAI", BaseURL: "https://api.example.com/v1"},
 			{ProtocolType: "ANTHROPIC", BaseURL: "https://api.example.com/anthropic"},
 		}},
 		mappings: []ProviderMapping{{ProviderID: 40, UpstreamModelCode: "model-test", Priority: 0}},
 	}
 	tester := connectionTesterFunc(func(_ context.Context, target ConnectionTarget, _ []byte, _ *catalog.OutboundProxy) ConnectionResult {
-		if target.Protocol != "OPENAI" || target.BaseURL != "https://api.example.com/v1" {
+		if target.ProviderCode != "custom-provider" || target.Protocol != "OPENAI" || target.BaseURL != "https://api.example.com/v1" {
 			t.Fatalf("unexpected selected inference target: %+v", target)
 		}
 		return ConnectionResult{OK: true, Code: "OK", HTTPStatus: 200}

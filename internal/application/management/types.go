@@ -335,6 +335,7 @@ type ConnectionResult struct {
 }
 
 type ConnectionTarget struct {
+	ProviderCode      string
 	Protocol          string
 	BaseURL           string
 	UpstreamModelCode string

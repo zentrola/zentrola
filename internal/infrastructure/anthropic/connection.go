@@ -21,8 +21,48 @@ import (
 
 const connectionProbeMaxOutputTokens = 5
 
+type connectionProbe struct {
+	URL            string
+	Body           []byte
+	ResponseFormat inferenceProbeFormat
+}
+
+// connectionProbeAdapter 为连接探测定义统一扩展点。标准实现按协议构造和校验探测，
+// 有兼容差异的服务商只覆盖自己的探测行为，网络和安全策略仍由 ConnectionTester 统一处理。
+type connectionProbeAdapter interface {
+	Build(mgmt.ConnectionTarget, string) (connectionProbe, bool)
+	ValidResponse([]byte, connectionProbe) bool
+}
+
+type standardConnectionProbeAdapter struct{}
+
+func (standardConnectionProbeAdapter) Build(target mgmt.ConnectionTarget, base string) (connectionProbe, bool) {
+	switch target.Protocol {
+	case "OPENAI":
+		return connectionProbe{
+			URL:            strings.TrimSuffix(base, "/") + "/chat/completions",
+			Body:           openAIChatProbeBody(target.UpstreamModelCode),
+			ResponseFormat: openAIChatInferenceProbe,
+		}, true
+	case "ANTHROPIC":
+		return connectionProbe{
+			URL:            strings.TrimSuffix(base, "/") + "/v1/messages",
+			Body:           anthropicProbeBody(target.UpstreamModelCode),
+			ResponseFormat: anthropicInferenceProbe,
+		}, true
+	default:
+		return connectionProbe{}, false
+	}
+}
+
+func (standardConnectionProbeAdapter) ValidResponse(data []byte, probe connectionProbe) bool {
+	return validInferenceResponse(data, probe.ResponseFormat)
+}
+
 type ConnectionTester struct {
-	client *http.Client
+	client           *http.Client
+	standardAdapter  connectionProbeAdapter
+	providerAdapters map[string]connectionProbeAdapter
 }
 
 func NewConnectionTester() *ConnectionTester {
@@ -31,9 +71,21 @@ func NewConnectionTester() *ConnectionTester {
 	transport.DialContext = (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext
 	transport.TLSHandshakeTimeout = 5 * time.Second
 	transport.ResponseHeaderTimeout = 10 * time.Second
+	standardAdapter := standardConnectionProbeAdapter{}
 	return &ConnectionTester{
-		client: &http.Client{Transport: transport, Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
+		client:          &http.Client{Transport: transport, Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
+		standardAdapter: standardAdapter,
+		providerAdapters: map[string]connectionProbeAdapter{
+			catalog.DeepSeekOfficialCode: deepSeekConnectionProbeAdapter{standard: standardAdapter},
+		},
 	}
+}
+
+func (t *ConnectionTester) probeAdapter(providerCode string) connectionProbeAdapter {
+	if adapter := t.providerAdapters[strings.TrimSpace(providerCode)]; adapter != nil {
+		return adapter
+	}
+	return t.standardAdapter
 }
 
 func (t *ConnectionTester) Test(ctx context.Context, target mgmt.ConnectionTarget, credential []byte, proxy *catalog.OutboundProxy) (result mgmt.ConnectionResult) {
@@ -57,7 +109,8 @@ func (t *ConnectionTester) Test(ctx context.Context, target mgmt.ConnectionTarge
 	requestCredential := string(credential)
 	accountID := ""
 	oauthBearer := false
-	probeURL, body, responseFormat, ok := inferenceProbe(target.Protocol, base, target.UpstreamModelCode)
+	probeAdapter := t.probeAdapter(target.ProviderCode)
+	probe, ok := probeAdapter.Build(target, base)
 	if target.AuthType == mgmt.AuthTypeSubscription {
 		switch target.AuthAdapter {
 		case openaicodex.AdapterCode:
@@ -71,8 +124,13 @@ func (t *ConnectionTester) Test(ctx context.Context, target mgmt.ConnectionTarge
 				return
 			}
 			requestCredential, accountID = accessToken, account
-			probeURL = "https://chatgpt.com/backend-api/codex/responses"
-			body, responseFormat, ok = openAIResponsesProbeBody(target.UpstreamModelCode), openAIResponsesInferenceProbe, true
+			probeAdapter = t.standardAdapter
+			probe = connectionProbe{
+				URL:            "https://chatgpt.com/backend-api/codex/responses",
+				Body:           openAIResponsesProbeBody(target.UpstreamModelCode),
+				ResponseFormat: openAIResponsesInferenceProbe,
+			}
+			ok = true
 		case anthropicclaude.AdapterCode:
 			if target.Protocol != "ANTHROPIC" {
 				result.Code = "SUBSCRIPTION_ADAPTER_UNAVAILABLE"
@@ -94,7 +152,7 @@ func (t *ConnectionTester) Test(ctx context.Context, target mgmt.ConnectionTarge
 		return
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, probeURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, probe.URL, bytes.NewReader(probe.Body))
 	if err != nil {
 		result.Code = "UPSTREAM_UNAVAILABLE"
 		return
@@ -151,7 +209,7 @@ func (t *ConnectionTester) Test(ctx context.Context, target mgmt.ConnectionTarge
 		result.Code = inferenceStatusCode(resp.StatusCode, data)
 		return
 	}
-	if !validInferenceResponse(data, responseFormat) {
+	if !probeAdapter.ValidResponse(data, probe) {
 		result.Code = "UPSTREAM_INVALID_RESPONSE"
 		return
 	}
@@ -179,17 +237,6 @@ const (
 	anthropicInferenceProbe
 	openAIResponsesInferenceProbe
 )
-
-func inferenceProbe(protocol, base, model string) (string, []byte, inferenceProbeFormat, bool) {
-	switch protocol {
-	case "OPENAI":
-		return strings.TrimSuffix(base, "/") + "/chat/completions", openAIChatProbeBody(model), openAIChatInferenceProbe, true
-	case "ANTHROPIC":
-		return strings.TrimSuffix(base, "/") + "/v1/messages", anthropicProbeBody(model), anthropicInferenceProbe, true
-	default:
-		return "", nil, 0, false
-	}
-}
 
 type probeMessage struct {
 	Role    string `json:"role"`
