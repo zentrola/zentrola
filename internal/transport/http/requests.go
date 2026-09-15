@@ -162,13 +162,15 @@ func (r LoginRequest) Valid() bool {
 }
 
 type CreateKeyRequest struct {
-	Name      string     `json:"name" binding:"required" example:"Claude Code"`
+	Name string `json:"name" binding:"required" example:"Claude Code"`
+	// ExpiresAt 是以 Z 结尾的 UTC RFC3339 时间。
 	ExpiresAt *time.Time `json:"expiresAt" example:"2027-01-01T00:00:00Z"`
 }
 
 func (r *CreateKeyRequest) Normalize() { r.Name = strings.TrimSpace(r.Name) }
 func (r CreateKeyRequest) Valid() bool {
-	return validRequestText(r.Name, 128, true) && (r.ExpiresAt == nil || r.ExpiresAt.After(time.Now().UTC()))
+	return validRequestText(r.Name, 128, true) && isUTCDateTime(r.ExpiresAt) &&
+		(r.ExpiresAt == nil || r.ExpiresAt.After(time.Now().UTC()))
 }
 
 type CreateMemberRequest struct {
@@ -236,14 +238,16 @@ func (r UpdateGroupRequest) Valid() bool {
 }
 
 type CreateResourceRequest struct {
-	ProviderID  int64      `json:"providerId,string" binding:"required" swaggertype:"string" example:"123456789"`
-	Name        string     `json:"name" binding:"required" example:"企业模型资源"`
-	Credential  string     `json:"credential" binding:"required" example:"your-provider-api-key"`
-	AuthType    string     `json:"authType" enums:"API_KEY,SUBSCRIPTION" example:"API_KEY"`
-	AuthAdapter string     `json:"authAdapter" example:"API_KEY"`
-	Priority    *int32     `json:"priority,omitempty" example:"100"`
-	EffectiveAt *time.Time `json:"effectiveAt,omitempty"`
-	ExpiresAt   *time.Time `json:"expiresAt,omitempty"`
+	ProviderID  int64  `json:"providerId,string" binding:"required" swaggertype:"string" example:"123456789"`
+	Name        string `json:"name" binding:"required" example:"企业模型资源"`
+	Credential  string `json:"credential" binding:"required" example:"your-provider-api-key"`
+	AuthType    string `json:"authType" enums:"API_KEY,SUBSCRIPTION" example:"API_KEY"`
+	AuthAdapter string `json:"authAdapter" example:"API_KEY"`
+	Priority    *int32 `json:"priority,omitempty" example:"100"`
+	// EffectiveAt 是以 Z 结尾的 UTC RFC3339 时间。
+	EffectiveAt *time.Time `json:"effectiveAt,omitempty" example:"2026-09-15T03:20:00Z"`
+	// ExpiresAt 是以 Z 结尾的 UTC RFC3339 时间。
+	ExpiresAt *time.Time `json:"expiresAt,omitempty" example:"2027-09-15T03:20:00Z"`
 }
 
 func (r *CreateResourceRequest) Normalize() {
@@ -260,6 +264,7 @@ func (r *CreateResourceRequest) Normalize() {
 }
 func (r CreateResourceRequest) Valid() bool {
 	if r.ProviderID <= 0 || !validRequestText(r.Name, 128, true) || r.Priority != nil && *r.Priority < 0 ||
+		!isUTCDateTime(r.EffectiveAt) || !isUTCDateTime(r.ExpiresAt) ||
 		r.EffectiveAt != nil && r.ExpiresAt != nil && !r.ExpiresAt.After(*r.EffectiveAt) {
 		return false
 	}
@@ -270,6 +275,10 @@ func (r CreateResourceRequest) Valid() bool {
 		(r.AuthAdapter == "OPENAI_CODEX" || r.AuthAdapter == "ANTHROPIC_CLAUDE_CODE") &&
 		len(r.Credential) > 0 && len(r.Credential) <= 64<<10 && utf8.ValidString(r.Credential) &&
 		!strings.ContainsRune(r.Credential, 0)
+}
+
+func isUTCDateTime(value *time.Time) bool {
+	return value == nil || value.Location() == time.UTC
 }
 
 type UpdateCredentialRequest struct {

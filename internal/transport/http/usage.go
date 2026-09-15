@@ -11,23 +11,38 @@ import (
 	app "github.com/zentrola/zentrola/internal/application/usage"
 )
 
-// getMyUsage 查询 Access Key 所属成员当前 UTC 自然月的 Token 用量。
+// getMyUsage 查询 Access Key 所属成员指定时间范围的 Token 用量。
 // @Summary 查询我的 Token 使用量
 // @Tags 用量统计
-// @Description 返回 Access Key 所属成员当前 UTC 自然月起至请求时刻的 Token 使用量；Token 为所有真实上游调用的输入与输出 Token 之和。
+// @Description 返回 Access Key 所属成员指定时间范围内的 Token 使用量；Token 为所有真实上游调用的输入与输出 Token 之和。from 和 to 必须同时提供，均不提供时默认查询当前 UTC 自然月起至请求时刻，时间区间最长 366 天。
 // @Produce json
 // @Security GatewayKey
 // @Security GatewayBearer
+// @Param from query string false "起始时间（含），UTC RFC3339，必须以 Z 结尾并与 to 同时提供"
+// @Param to query string false "结束时间（不含），UTC RFC3339，必须以 Z 结尾并与 from 同时提供"
 // @Success 200 {object} response{data=app.SelfUsage}
 // @Failure 400,401,503 {object} response
 // @Header all {string} X-Request-ID "请求追踪 ID"
 // @Router /api/v1/me/usage [get]
 func (s *SecurityHandlers) getMyUsage(w http.ResponseWriter, r *http.Request) {
-	if r.URL.RawQuery != "" {
-		securityError(w, r, appsec.ErrInvalidArgument)
-		return
+	now := time.Now().UTC()
+	from := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	to := now
+	values := r.URL.Query()
+	if len(values) > 0 {
+		if len(values) != 2 || len(values["from"]) != 1 || len(values["to"]) != 1 {
+			securityError(w, r, appsec.ErrInvalidArgument)
+			return
+		}
+		var fromErr, toErr error
+		from, fromErr = parseUTCQueryTime(values.Get("from"))
+		to, toErr = parseUTCQueryTime(values.Get("to"))
+		if fromErr != nil || toErr != nil {
+			securityError(w, r, appsec.ErrInvalidArgument)
+			return
+		}
 	}
-	result, err := s.Usage.Self(r.Context(), principalFrom(r), time.Now().UTC())
+	result, err := s.Usage.Self(r.Context(), principalFrom(r), from, to)
 	if err != nil {
 		securityError(w, r, err)
 		return
@@ -41,8 +56,8 @@ func (s *SecurityHandlers) mountUsage(r chi.Router) {
 	// @Description 返回当前部署实例的激活用户数、启用模型和服务商数量，以及指定时间范围内的 Token 汇总、用户 Token Top 10、客户端逻辑模型请求 Top 10 与服务商调用 Top 10。
 	// @Produce json
 	// @Security AdminBearer
-	// @Param from query string true "起始时间 RFC3339"
-	// @Param to query string true "结束时间 RFC3339"
+	// @Param from query string true "起始时间，UTC RFC3339，必须以 Z 结尾"
+	// @Param to query string true "结束时间，UTC RFC3339，必须以 Z 结尾"
 	// @Success 200 {object} response{data=app.Dashboard}
 	// @Failure 400,401,503 {object} response
 	// @Router /api/v1/usage/dashboard [get]
@@ -52,8 +67,8 @@ func (s *SecurityHandlers) mountUsage(r chi.Router) {
 			securityError(w, req, appsec.ErrInvalidArgument)
 			return
 		}
-		from, fromErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(values.Get("from")))
-		to, toErr := time.Parse(time.RFC3339Nano, strings.TrimSpace(values.Get("to")))
+		from, fromErr := parseUTCQueryTime(values.Get("from"))
+		to, toErr := parseUTCQueryTime(values.Get("to"))
 		if fromErr != nil || toErr != nil {
 			securityError(w, req, appsec.ErrInvalidArgument)
 			return
@@ -69,8 +84,8 @@ func (s *SecurityHandlers) mountUsage(r chi.Router) {
 	// @Param dimension query string true "统计维度" Enums(member,model,provider)
 	// @Param after query int false "上一页 nextCursor，表示排行偏移量" minimum(0) default(0)
 	// @Param limit query int false "每页数量" minimum(1) maximum(100) default(50)
-	// @Param from query string true "起始时间 RFC3339"
-	// @Param to query string true "结束时间 RFC3339"
+	// @Param from query string true "起始时间，UTC RFC3339，必须以 Z 结尾"
+	// @Param to query string true "结束时间，UTC RFC3339，必须以 Z 结尾"
 	// @Success 200 {object} response{data=PageResponse[app.StatisticRow]}
 	// @Failure 400,401,503 {object} response
 	// @Router /api/v1/usage/statistics [get]
@@ -87,7 +102,7 @@ func (s *SecurityHandlers) mountUsage(r chi.Router) {
 			case "dimension":
 				f.Dimension = app.StatisticDimension(value)
 			case "from", "to":
-				parsed, err := time.Parse(time.RFC3339Nano, value)
+				parsed, err := parseUTCQueryTime(value)
 				if err != nil {
 					securityError(w, req, appsec.ErrInvalidArgument)
 					return
@@ -130,8 +145,8 @@ func (s *SecurityHandlers) mountUsage(r chi.Router) {
 	// @Security AdminBearer
 	// @Param after query string false "上一页 nextCursor，默认从头查询"
 	// @Param limit query int false "每页数量" minimum(1) maximum(100) default(50)
-	// @Param from query string false "起始时间 RFC3339，默认 to 前 24 小时"
-	// @Param to query string false "结束时间 RFC3339，默认当前时间"
+	// @Param from query string false "起始时间，UTC RFC3339，必须以 Z 结尾；默认 to 前 24 小时"
+	// @Param to query string false "结束时间，UTC RFC3339，必须以 Z 结尾；默认当前时间"
 	// @Param memberId query string false "成员 ID"
 	// @Param modelId query string false "模型 ID"
 	// @Param providerId query string false "服务商 ID"
@@ -154,7 +169,7 @@ func (s *SecurityHandlers) mountUsage(r chi.Router) {
 			v := strings.TrimSpace(list[0])
 			switch key {
 			case "from", "to":
-				t, err := time.Parse(time.RFC3339Nano, v)
+				t, err := parseUTCQueryTime(v)
 				if err != nil {
 					securityError(w, req, appsec.ErrInvalidArgument)
 					return
@@ -217,4 +232,16 @@ func (s *SecurityHandlers) mountUsage(r chi.Router) {
 		// @Router /api/v1/usage/writer [get]
 		r.Get("/usage/writer", func(w http.ResponseWriter, req *http.Request) { adminResult(w, req, 200, s.UsageWriter.Metrics(), nil) })
 	}
+}
+
+func parseUTCQueryTime(value string) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	if !strings.HasSuffix(value, "Z") {
+		return time.Time{}, appsec.ErrInvalidArgument
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}, appsec.ErrInvalidArgument
+	}
+	return parsed.UTC(), nil
 }

@@ -71,7 +71,8 @@ func TestDashboardValidatesIdentityAndRange(t *testing.T) {
 	service := NewQuery(store)
 
 	result, err := service.Dashboard(context.Background(), admin.Identity{ID: 1}, from, to)
-	if err != nil || result.ActiveMemberCount != 3 || result.TotalTokens != 42 || !store.from.Equal(from) || !store.to.Equal(to) {
+	if err != nil || result.ActiveMemberCount != 3 || result.TotalTokens != 42 || !store.from.Equal(from) || !store.to.Equal(to) ||
+		store.from.Location() != time.UTC || store.to.Location() != time.UTC {
 		t.Fatalf("unexpected dashboard result: result=%+v err=%v", result, err)
 	}
 
@@ -96,32 +97,48 @@ func TestDashboardValidatesIdentityAndRange(t *testing.T) {
 	}
 }
 
-func TestSelfReturnsCurrentUTCMonthUsage(t *testing.T) {
+func TestSelfReturnsUsageForRange(t *testing.T) {
 	store := &queryStoreStub{tokens: 156000}
 	service := NewQuery(store)
-	now := time.Date(2026, 9, 15, 11, 20, 30, 0, time.FixedZone("CST", 8*60*60))
+	local := time.FixedZone("CST", 8*60*60)
+	from := time.Date(2026, 9, 1, 0, 0, 0, 0, local)
+	to := time.Date(2026, 9, 15, 11, 20, 30, 0, local)
+	wantFrom, wantTo := from.UTC(), to.UTC()
 
-	result, err := service.Self(context.Background(), appsec.PrincipalIdentity{ID: 42}, now)
+	result, err := service.Self(context.Background(), appsec.PrincipalIdentity{ID: 42}, from, to)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantTo := time.Date(2026, 9, 15, 3, 20, 30, 0, time.UTC)
-	wantFrom := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
-	if result.Tokens != 156000 || !result.From.Equal(wantFrom) || !result.To.Equal(wantTo) {
+	if result.Tokens != 156000 || !result.From.Equal(wantFrom) || !result.To.Equal(wantTo) ||
+		result.From.Location() != time.UTC || result.To.Location() != time.UTC {
 		t.Fatalf("unexpected usage result: %+v", result)
 	}
-	if store.principal != 42 || !store.from.Equal(wantFrom) || !store.to.Equal(wantTo) {
+	if store.principal != 42 || !store.from.Equal(wantFrom) || !store.to.Equal(wantTo) ||
+		store.from.Location() != time.UTC || store.to.Location() != time.UTC {
 		t.Fatalf("unexpected store query: principal=%d from=%s to=%s", store.principal, store.from, store.to)
 	}
 }
 
-func TestSelfRejectsMissingIdentityAndTime(t *testing.T) {
+func TestSelfRejectsMissingIdentityAndInvalidRange(t *testing.T) {
 	service := NewQuery(&queryStoreStub{})
-	now := time.Date(2026, 9, 15, 0, 0, 0, 0, time.UTC)
-	if _, err := service.Self(context.Background(), appsec.PrincipalIdentity{}, now); !errors.Is(err, appsec.ErrUnauthenticated) {
-		t.Fatalf("missing identity error=%v", err)
-	}
-	if _, err := service.Self(context.Background(), appsec.PrincipalIdentity{ID: 1}, time.Time{}); !errors.Is(err, appsec.ErrInvalidArgument) {
-		t.Fatalf("zero time error=%v", err)
+	from := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	to := from.Add(24 * time.Hour)
+	for _, tc := range []struct {
+		name     string
+		identity appsec.PrincipalIdentity
+		from     time.Time
+		to       time.Time
+		want     error
+	}{
+		{"missing identity", appsec.PrincipalIdentity{}, from, to, appsec.ErrUnauthenticated},
+		{"empty range", appsec.PrincipalIdentity{ID: 1}, time.Time{}, to, appsec.ErrInvalidArgument},
+		{"reversed range", appsec.PrincipalIdentity{ID: 1}, to, from, appsec.ErrInvalidArgument},
+		{"range too long", appsec.PrincipalIdentity{ID: 1}, from, from.Add(367 * 24 * time.Hour), appsec.ErrInvalidArgument},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := service.Self(context.Background(), tc.identity, tc.from, tc.to); !errors.Is(err, tc.want) {
+				t.Fatalf("got %v, want %v", err, tc.want)
+			}
+		})
 	}
 }

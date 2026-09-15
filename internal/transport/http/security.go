@@ -440,7 +440,7 @@ func securityError(w http.ResponseWriter, r *http.Request, err error) {
 		w.Header().Set("Retry-After", strconv.FormatInt(seconds, 10))
 		writeJSON(w, r, http.StatusTooManyRequests, response{
 			Code: "ACCOUNT_LOCKED", Message: "Account temporarily locked.",
-			Data: LoginLockResponse{LockedUntil: locked.LockedUntil, RetryAfterSeconds: seconds},
+			Data: LoginLockResponse{LockedUntil: locked.LockedUntil.UTC(), RetryAfterSeconds: seconds},
 		})
 		return
 	}

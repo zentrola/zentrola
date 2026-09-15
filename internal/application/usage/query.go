@@ -119,6 +119,7 @@ func (s *QueryService) Query(ctx context.Context, a admin.Identity, f Filter) (P
 			return Page{}, appsec.ErrInvalidArgument
 		}
 	}
+	f.From, f.To = f.From.UTC(), f.To.UTC()
 	return s.store.Query(ctx, a, f)
 }
 
@@ -130,6 +131,7 @@ func (s *QueryService) Statistics(ctx context.Context, a admin.Identity, f Stati
 		f.After < 0 || f.Limit < 1 || f.Limit > 100 || f.From.IsZero() || !f.To.After(f.From) || f.To.Sub(f.From) > 366*24*time.Hour {
 		return StatisticPage{}, appsec.ErrInvalidArgument
 	}
+	f.From, f.To = f.From.UTC(), f.To.UTC()
 	return s.store.Statistics(ctx, a, f)
 }
 
@@ -140,5 +142,6 @@ func (s *QueryService) Dashboard(ctx context.Context, a admin.Identity, from, to
 	if from.IsZero() || !to.After(from) || to.Sub(from) > 366*24*time.Hour {
 		return Dashboard{}, appsec.ErrInvalidArgument
 	}
+	from, to = from.UTC(), to.UTC()
 	return s.store.Dashboard(ctx, a, from, to)
 }

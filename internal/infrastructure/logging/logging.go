@@ -213,7 +213,7 @@ func (h *prettyHandler) Handle(_ context.Context, record slog.Record) error {
 	levelText := fmt.Sprintf("%-5s", level)
 
 	var line bytes.Buffer
-	line.WriteString(paint(h.color, "90", when.Local().Format("2006-01-02 15:04:05.000")))
+	line.WriteString(paint(h.color, "90", when.Local().Format("2006-01-02 15:04:05.000 -07:00")))
 	line.WriteByte(' ')
 	line.WriteString(paint(h.color, levelColor(record.Level), levelText))
 	line.WriteByte(' ')
