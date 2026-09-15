@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	mgmt "github.com/zentrola/zentrola/internal/application/management"
@@ -68,6 +69,49 @@ func TestDecodeRequest(t *testing.T) {
 				t.Fatalf("invalid request response = %d %s", recorder.Code, recorder.Body.String())
 			}
 		})
+	}
+}
+
+func TestTimeInputsRequireUTC(t *testing.T) {
+	utc := time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)
+	offset := time.Date(2099, 1, 1, 8, 0, 0, 0, time.FixedZone("CST", 8*60*60))
+	zeroOffset := time.Date(2099, 1, 1, 0, 0, 0, 0, time.FixedZone("UTC+0", 0))
+
+	if !(CreateKeyRequest{Name: "key", ExpiresAt: &utc}).Valid() {
+		t.Fatal("UTC access key expiry was rejected")
+	}
+	for _, value := range []*time.Time{&offset, &zeroOffset} {
+		if (CreateKeyRequest{Name: "key", ExpiresAt: value}).Valid() {
+			t.Fatalf("non-Z access key expiry was accepted: %s", value.Format(time.RFC3339))
+		}
+	}
+
+	validResource := CreateResourceRequest{
+		ProviderID: 1, Name: "resource", Credential: "secret", AuthType: "API_KEY", AuthAdapter: "API_KEY",
+		EffectiveAt: &utc,
+	}
+	if !validResource.Valid() {
+		t.Fatal("UTC resource time was rejected")
+	}
+	validResource.EffectiveAt = &offset
+	if validResource.Valid() {
+		t.Fatal("non-UTC resource time was accepted")
+	}
+}
+
+func TestParseUTCQueryTime(t *testing.T) {
+	parsed, err := parseUTCQueryTime("2026-09-15T03:20:00.123Z")
+	if err != nil || parsed.Location() != time.UTC {
+		t.Fatalf("UTC query time = %s, %v", parsed, err)
+	}
+	for _, value := range []string{
+		"2026-09-15T11:20:00+08:00",
+		"2026-09-15T03:20:00+00:00",
+		"2026-09-15T03:20:00",
+	} {
+		if _, err := parseUTCQueryTime(value); err == nil {
+			t.Fatalf("non-Z query time was accepted: %s", value)
+		}
 	}
 }
 

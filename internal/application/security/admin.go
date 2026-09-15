@@ -85,7 +85,7 @@ func (s *AdminService) Login(ctx context.Context, username, password string, met
 	if err != nil {
 		return LoginResult{}, ErrUnavailable
 	}
-	return LoginResult{Token: token, TokenType: "Bearer", ExpiresAt: expires}, nil
+	return LoginResult{Token: token, TokenType: "Bearer", ExpiresAt: expires.UTC()}, nil
 }
 
 func (s *AdminService) verifyCredentials(ctx context.Context, username, password string, meta RequestMeta) (admin.Identity, error) {

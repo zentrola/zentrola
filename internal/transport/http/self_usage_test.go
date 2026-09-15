@@ -107,6 +107,29 @@ func TestSelfUsageAuthenticatesAccessKeyAndReturnsOwnTokens(t *testing.T) {
 	}
 }
 
+func TestSelfUsageAcceptsExplicitRange(t *testing.T) {
+	store := &selfUsageQueryStore{tokens: 42000}
+	keys := appsec.NewKeys(&selfUsageKeyStore{identity: appsec.PrincipalIdentity{ID: 42}}, nil)
+	router := NewRouter(
+		slog.New(slog.NewTextHandler(io.Discard, nil)), health.New(), config.CORS{}, time.Second, "prod",
+		&SecurityHandlers{Keys: keys, Usage: usageapp.NewQuery(store)},
+	)
+	key := "vk-" + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	from := "2026-08-31T16:00:00Z"
+	to := "2026-09-15T03:20:00Z"
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/me/usage?from="+from+"&to="+to, nil)
+	request.Header.Set("Authorization", "Bearer "+key)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if store.principalID != 42 || store.from.Format(time.RFC3339) != from || store.to.Format(time.RFC3339) != to {
+		t.Fatalf("unexpected store query: principal=%d from=%s to=%s", store.principalID, store.from, store.to)
+	}
+}
+
 func TestSelfUsageRejectsMissingAmbiguousOrInvalidInput(t *testing.T) {
 	store := &selfUsageQueryStore{}
 	keys := appsec.NewKeys(&selfUsageKeyStore{identity: appsec.PrincipalIdentity{ID: 42}}, nil)
@@ -124,7 +147,11 @@ func TestSelfUsageRejectsMissingAmbiguousOrInvalidInput(t *testing.T) {
 	}{
 		{name: "missing key", path: "/api/v1/me/usage", status: http.StatusUnauthorized},
 		{name: "both key forms", path: "/api/v1/me/usage", headers: map[string]string{"Authorization": "Bearer " + key, "X-Api-Key": key}, status: http.StatusUnauthorized},
-		{name: "query parameters", path: "/api/v1/me/usage?from=2026-09-01", headers: map[string]string{"Authorization": "Bearer " + key}, status: http.StatusBadRequest},
+		{name: "missing to", path: "/api/v1/me/usage?from=2026-09-01T00:00:00Z", headers: map[string]string{"Authorization": "Bearer " + key}, status: http.StatusBadRequest},
+		{name: "invalid time", path: "/api/v1/me/usage?from=2026-09-01&to=2026-09-02", headers: map[string]string{"Authorization": "Bearer " + key}, status: http.StatusBadRequest},
+		{name: "non UTC range", path: "/api/v1/me/usage?from=2026-09-01T00:00:00%2B08:00&to=2026-09-02T00:00:00%2B08:00", headers: map[string]string{"Authorization": "Bearer " + key}, status: http.StatusBadRequest},
+		{name: "reversed range", path: "/api/v1/me/usage?from=2026-09-02T00:00:00Z&to=2026-09-01T00:00:00Z", headers: map[string]string{"Authorization": "Bearer " + key}, status: http.StatusBadRequest},
+		{name: "unknown parameter", path: "/api/v1/me/usage?from=2026-09-01T00:00:00Z&to=2026-09-02T00:00:00Z&timezone=UTC", headers: map[string]string{"Authorization": "Bearer " + key}, status: http.StatusBadRequest},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			request := httptest.NewRequest(http.MethodGet, test.path, nil)

@@ -1913,7 +1913,7 @@
                         "GatewayBearer": []
                     }
                 ],
-                "description": "返回 Access Key 所属成员当前 UTC 自然月起至请求时刻的 Token 使用量；Token 为所有真实上游调用的输入与输出 Token 之和。",
+                "description": "返回 Access Key 所属成员指定时间范围内的 Token 使用量；Token 为所有真实上游调用的输入与输出 Token 之和。from 和 to 必须同时提供，均不提供时默认查询当前 UTC 自然月起至请求时刻，时间区间最长 366 天。",
                 "produces": [
                     "application/json"
                 ],
@@ -1921,6 +1921,20 @@
                     "用量统计"
                 ],
                 "summary": "查询我的 Token 使用量",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "起始时间（含），UTC RFC3339，必须以 Z 结尾并与 to 同时提供",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "结束时间（不含），UTC RFC3339，必须以 Z 结尾并与 from 同时提供",
+                        "name": "to",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -4796,13 +4810,13 @@
                     },
                     {
                         "type": "string",
-                        "description": "起始时间 RFC3339，默认 to 前 24 小时",
+                        "description": "起始时间，UTC RFC3339，必须以 Z 结尾；默认 to 前 24 小时",
                         "name": "from",
                         "in": "query"
                     },
                     {
                         "type": "string",
-                        "description": "结束时间 RFC3339，默认当前时间",
+                        "description": "结束时间，UTC RFC3339，必须以 Z 结尾；默认当前时间",
                         "name": "to",
                         "in": "query"
                     },
@@ -4901,14 +4915,14 @@
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "起始时间 RFC3339",
+                        "description": "起始时间，UTC RFC3339，必须以 Z 结尾",
                         "name": "from",
                         "in": "query",
                         "required": true
                     },
                     {
                         "type": "string",
-                        "description": "结束时间 RFC3339",
+                        "description": "结束时间，UTC RFC3339，必须以 Z 结尾",
                         "name": "to",
                         "in": "query",
                         "required": true
@@ -5001,14 +5015,14 @@
                     },
                     {
                         "type": "string",
-                        "description": "起始时间 RFC3339",
+                        "description": "起始时间，UTC RFC3339，必须以 Z 结尾",
                         "name": "from",
                         "in": "query",
                         "required": true
                     },
                     {
                         "type": "string",
-                        "description": "结束时间 RFC3339",
+                        "description": "结束时间，UTC RFC3339，必须以 Z 结尾",
                         "name": "to",
                         "in": "query",
                         "required": true
@@ -5898,6 +5912,7 @@
             ],
             "properties": {
                 "expiresAt": {
+                    "description": "ExpiresAt 是以 Z 结尾的 UTC RFC3339 时间。",
                     "type": "string",
                     "example": "2027-01-01T00:00:00Z"
                 },
@@ -5958,10 +5973,14 @@
                     "example": "your-provider-api-key"
                 },
                 "effectiveAt": {
-                    "type": "string"
+                    "description": "EffectiveAt 是以 Z 结尾的 UTC RFC3339 时间。",
+                    "type": "string",
+                    "example": "2026-09-15T03:20:00Z"
                 },
                 "expiresAt": {
-                    "type": "string"
+                    "description": "ExpiresAt 是以 Z 结尾的 UTC RFC3339 时间。",
+                    "type": "string",
+                    "example": "2027-09-15T03:20:00Z"
                 },
                 "name": {
                     "type": "string",

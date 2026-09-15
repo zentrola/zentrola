@@ -118,10 +118,10 @@ func (s *managementSession) Audit(ctx context.Context, a mgmt.Audit, meta appsec
 	return s.store.audit.appendLog(ctx, s.q, s.actor, module, a.Event, a.Target, a.ID, a.Name, result, a.ErrorCode, meta, before, after, "")
 }
 func memberView(r dbgen.Principal) mgmt.Member {
-	return mgmt.Member{ID: r.ID, Name: r.Name, Remark: r.Remark, Status: r.Status, CreatedAt: r.CreatedAt.Time}
+	return mgmt.Member{ID: r.ID, Name: r.Name, Remark: r.Remark, Status: r.Status, CreatedAt: r.CreatedAt.Time.UTC()}
 }
 func groupView(r dbgen.PrincipalGroup) mgmt.Group {
-	return mgmt.Group{ID: r.ID, Code: r.GroupCode, Name: r.GroupName, Remark: r.Remark, Status: r.Status, CreatedAt: r.CreatedAt.Time}
+	return mgmt.Group{ID: r.ID, Code: r.GroupCode, Name: r.GroupName, Remark: r.Remark, Status: r.Status, CreatedAt: r.CreatedAt.Time.UTC()}
 }
 func modelView(id int64, code, name, status string, inputJSON, outputJSON []byte, remark string, publisherProviderID *int64, publisherProviderName *string, createdAt, updatedAt time.Time) mgmt.Model {
 	// 数组格式由数据库 CHECK 保证；响应只暴露业务字段。
@@ -132,7 +132,7 @@ func modelView(id int64, code, name, status string, inputJSON, outputJSON []byte
 		ID: id, Code: code, Name: name, Status: status,
 		InputModalities: input, OutputModalities: output, Remark: remark,
 		PublisherProviderID: publisherProviderID, PublisherProviderName: publisherProviderName,
-		CreatedAt: createdAt, UpdatedAt: updatedAt,
+		CreatedAt: createdAt.UTC(), UpdatedAt: updatedAt.UTC(),
 	}
 }
 func providerView(r dbgen.Provider) mgmt.Provider {
@@ -146,7 +146,7 @@ func providerView(r dbgen.Provider) mgmt.Provider {
 		ID: r.ID, Code: r.ProviderCode, Name: r.ProviderName, Type: r.ProviderType,
 		Website: r.OfficialWebsite, Endpoints: []mgmt.ProviderEndpoint{},
 		ProxyEnabled: r.ProxyEnabled, ProxyURL: r.ProxyUrlDisplay, ProxyHeaders: headers,
-		Status: r.Status, CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time,
+		Status: r.Status, CreatedAt: r.CreatedAt.Time.UTC(), UpdatedAt: r.UpdatedAt.Time.UTC(),
 	}
 	if r.ProxyUrlKeyVersion != nil {
 		provider.ProxyURLSealed = catalog.SealedCredential{Ciphertext: r.ProxyUrlCiphertext, Nonce: r.ProxyUrlNonce, KeyVersion: *r.ProxyUrlKeyVersion}
@@ -173,7 +173,7 @@ func sealedVersion(sealed catalog.SealedCredential) *int32 {
 	return &version
 }
 func providerMappingView(r dbgen.ProviderModel) mgmt.ProviderMapping {
-	return mgmt.ProviderMapping{ID: r.ID, ProviderID: r.ProviderID, ModelID: r.ModelID, UpstreamModelCode: r.UpstreamModelCode, Priority: r.Priority, CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time}
+	return mgmt.ProviderMapping{ID: r.ID, ProviderID: r.ProviderID, ModelID: r.ModelID, UpstreamModelCode: r.UpstreamModelCode, Priority: r.Priority, CreatedAt: r.CreatedAt.Time.UTC(), UpdatedAt: r.UpdatedAt.Time.UTC()}
 }
 
 func endpointView(r dbgen.ProviderEndpoint) mgmt.ProviderEndpoint {
@@ -202,14 +202,14 @@ func resourceView(r dbgen.ManageResourcesRow) mgmt.Resource {
 		RuntimeStatus: r.RuntimeStatus, BlockedReason: r.BlockedReason,
 		BlockedAt: timePointer(r.BlockedAt), LastErrorAt: timePointer(r.LastErrorAt),
 		LastHTTPStatus: r.LastHttpStatus, LastErrorCode: r.LastErrorCode,
-		CredentialConfigured: true, CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time,
+		CredentialConfigured: true, CreatedAt: r.CreatedAt.Time.UTC(), UpdatedAt: r.UpdatedAt.Time.UTC(),
 	}
 }
 func keyView(r dbgen.ManageKeysRow) mgmt.Key {
-	return mgmt.Key{ID: r.ID, Name: r.Name, MaskedKey: r.MaskedKey, Status: r.Status, ExpiresAt: timePointer(r.ExpiresAt), RevokedAt: timePointer(r.RevokedAt), CreatedAt: r.CreatedAt.Time}
+	return mgmt.Key{ID: r.ID, Name: r.Name, MaskedKey: r.MaskedKey, Status: r.Status, ExpiresAt: timePointer(r.ExpiresAt), RevokedAt: timePointer(r.RevokedAt), CreatedAt: r.CreatedAt.Time.UTC()}
 }
 func operationView(r dbgen.ManageOperationsRow) mgmt.Operation {
-	return mgmt.Operation{ID: r.ID, OperatorName: r.OperatorName, Type: r.OperationType, TargetType: r.TargetType, TargetID: r.TargetID, RequestID: r.RequestID, Result: r.Result, ErrorCode: r.ErrorCode, Before: r.BeforeData, After: r.AfterData, CreatedAt: r.CreatedAt.Time}
+	return mgmt.Operation{ID: r.ID, OperatorName: r.OperatorName, Type: r.OperationType, TargetType: r.TargetType, TargetID: r.TargetID, RequestID: r.RequestID, Result: r.Result, ErrorCode: r.ErrorCode, Before: r.BeforeData, After: r.AfterData, CreatedAt: r.CreatedAt.Time.UTC()}
 }
 func managementPageLimit(p mgmt.Page) int32 {
 	if p.ProbeNext {
@@ -430,7 +430,7 @@ func (s *managementSession) Resource(ctx context.Context, id int64) (mgmt.Resour
 		RuntimeStatus: r.RuntimeStatus, BlockedReason: r.BlockedReason,
 		BlockedAt: timePointer(r.BlockedAt), LastErrorAt: timePointer(r.LastErrorAt),
 		LastHTTPStatus: r.LastHttpStatus, LastErrorCode: r.LastErrorCode,
-		CredentialConfigured: true, CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time,
+		CredentialConfigured: true, CreatedAt: r.CreatedAt.Time.UTC(), UpdatedAt: r.UpdatedAt.Time.UTC(),
 	}, Sealed: catalog.SealedCredential{Ciphertext: r.CredentialCiphertext, Nonce: r.CredentialNonce, KeyVersion: r.KeyVersion}}, err
 }
 func (s *managementSession) ResourceQuotas(ctx context.Context, id int64) ([]mgmt.ResourceQuota, error) {
@@ -445,7 +445,7 @@ func (s *managementSession) ResourceQuotas(ctx context.Context, id int64) ([]mgm
 			LimitValue: numericString(row.LimitValue), UsedValue: numericString(row.UsedValue),
 			RemainingValue: numericString(row.RemainingValue), UsedPercent: numericFloat(row.UsedPercent),
 			WindowDurationSeconds: row.WindowDurationSeconds, ResetsAt: timePointer(row.ResetsAt),
-			ReachedType: row.ReachedType, ObservedAt: row.ObservedAt.Time,
+			ReachedType: row.ReachedType, ObservedAt: row.ObservedAt.Time.UTC(),
 		})
 	}
 	return result, nil

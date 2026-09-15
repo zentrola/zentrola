@@ -38,6 +38,10 @@ func (s *Keys) Create(ctx context.Context, actor admin.Identity, principalID int
 	if principalID <= 0 || strings.TrimSpace(name) == "" || strings.ContainsRune(name, 0) || len(name) > 128 || (expires != nil && !expires.After(now)) {
 		return CreatedKey{}, ErrInvalidArgument
 	}
+	if expires != nil {
+		value := expires.UTC()
+		expires = &value
+	}
 	var entropy [32]byte
 	_, _ = rand.Read(entropy[:])
 	full := keyMarker + base64.RawURLEncoding.EncodeToString(entropy[:])

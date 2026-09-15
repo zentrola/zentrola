@@ -39,7 +39,8 @@ func (keyTestIDs) NextID(context.Context) (int64, error) { return 123, nil }
 func TestCreateVirtualKeyFormatAndAuthentication(t *testing.T) {
 	store := &keyTestStore{identity: PrincipalIdentity{ID: 3, AccessKeyID: 123}}
 	keys := NewKeys(store, keyTestIDs{})
-	created, err := keys.Create(context.Background(), admin.Identity{ID: 1}, 3, "工作站", nil, RequestMeta{})
+	expires := time.Date(2099, 1, 1, 8, 0, 0, 0, time.FixedZone("CST", 8*60*60))
+	created, err := keys.Create(context.Background(), admin.Identity{ID: 1}, 3, "工作站", &expires, RequestMeta{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,6 +54,11 @@ func TestCreateVirtualKeyFormatAndAuthentication(t *testing.T) {
 	wantMaskedKey := created.Key[:11] + "********" + created.Key[len(created.Key)-4:]
 	if created.MaskedKey != wantMaskedKey || store.row.MaskedKey != created.MaskedKey {
 		t.Fatal("unexpected masked key")
+	}
+	if created.ExpiresAt == nil || store.row.ExpiresAt == nil ||
+		created.ExpiresAt.Location() != time.UTC || store.row.ExpiresAt.Location() != time.UTC ||
+		!created.ExpiresAt.Equal(expires) || !store.row.ExpiresAt.Equal(expires) {
+		t.Fatalf("expiry was not normalized to UTC: created=%v stored=%v", created.ExpiresAt, store.row.ExpiresAt)
 	}
 	digest := sha256.Sum256([]byte(created.Key))
 	if !bytes.Equal(store.row.Hash, digest[:]) {

@@ -535,6 +535,8 @@ func (s *Service) CreateResource(ctx context.Context, actor admin.Identity, prov
 }
 
 func (s *Service) CreateAuthenticationResource(ctx context.Context, actor admin.Identity, input CreateResourceInput, meta appsec.RequestMeta) (Resource, error) {
+	input.EffectiveAt = utcTimePointer(input.EffectiveAt)
+	input.ExpiresAt = utcTimePointer(input.ExpiresAt)
 	if input.ProviderID <= 0 || !validText(input.Name, 128) || input.Priority < 0 {
 		return Resource{}, appsec.ErrInvalidArgument
 	}
@@ -585,11 +587,12 @@ func (s *Service) CreateAuthenticationResource(ctx context.Context, actor admin.
 		if err != nil {
 			return Resource{}, appsec.ErrUnavailable
 		}
-		inspection = probe.Inspection
 		if len(probe.Credential) == 0 {
 			clear(probe.Credential)
 			return Resource{}, appsec.ErrUnavailable
 		}
+		normalizeSubscriptionProbe(&probe)
+		inspection = probe.Inspection
 		clear(plain)
 		plain = probe.Credential
 		probe.Credential = nil
@@ -650,6 +653,24 @@ func stringPointer(value string) *string {
 	return &value
 }
 
+func utcTimePointer(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	normalized := value.UTC()
+	return &normalized
+}
+
+func normalizeSubscriptionProbe(probe *SubscriptionProbe) {
+	probe.Inspection.ExpiresAt = utcTimePointer(probe.Inspection.ExpiresAt)
+	probe.Inspection.CredentialRefreshedAt = utcTimePointer(probe.Inspection.CredentialRefreshedAt)
+	probe.Inspection.CredentialExpiresAt = utcTimePointer(probe.Inspection.CredentialExpiresAt)
+	for index := range probe.Quotas {
+		probe.Quotas[index].ResetsAt = utcTimePointer(probe.Quotas[index].ResetsAt)
+		probe.Quotas[index].ObservedAt = probe.Quotas[index].ObservedAt.UTC()
+	}
+}
+
 func (s *Service) UpdateCredential(ctx context.Context, actor admin.Identity, id int64, credential string, meta appsec.RequestMeta) error {
 	if id <= 0 {
 		return appsec.ErrInvalidArgument
@@ -693,6 +714,7 @@ func (s *Service) UpdateCredential(ctx context.Context, actor admin.Identity, id
 			clear(probe.Credential)
 			return appsec.ErrUnavailable
 		}
+		normalizeSubscriptionProbe(&probe)
 		clear(plain)
 		plain = probe.Credential
 		probe.Credential = nil
@@ -868,6 +890,7 @@ func (s *Service) TestResourceProtocol(ctx context.Context, actor admin.Identity
 			} else if probe, probeErr := subscription.Probe(ctx, plain, proxy); probeErr != nil {
 				result.Code = "SUBSCRIPTION_UNAVAILABLE"
 			} else {
+				normalizeSubscriptionProbe(&probe)
 				subscriptionProbe = &probe
 				resource.PlanCode = stringPointer(probe.Inspection.PlanCode)
 				resource.ExternalAccountRef = stringPointer(probe.Inspection.AccountRef)

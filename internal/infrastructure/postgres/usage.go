@@ -86,7 +86,7 @@ func (s *UsageStore) Query(ctx context.Context, actor admin.Identity, f app.Filt
 	}
 	result := make([]app.Row, 0, len(rows))
 	for _, r := range rows {
-		result = append(result, app.Row{ID: r.ID, RequestID: r.RequestID, ClientProtocol: r.ClientProtocol, PrincipalID: r.PrincipalID, PrincipalName: r.PrincipalName, ModelID: r.ModelID, RequestAt: r.StartedAt.Time, CompletedAt: r.CompletedAt.Time, LatencyMS: r.LatencyMs, Status: r.Status, ErrorType: r.ErrorType, AttemptNo: r.AttemptNo, ProviderID: r.ProviderID, ProviderModelID: r.ProviderModelID, ResourceID: r.ResourceID, InputTokens: r.InputTokens, OutputTokens: r.OutputTokens, CachedInputTokens: r.CachedInputTokens})
+		result = append(result, app.Row{ID: r.ID, RequestID: r.RequestID, ClientProtocol: r.ClientProtocol, PrincipalID: r.PrincipalID, PrincipalName: r.PrincipalName, ModelID: r.ModelID, RequestAt: r.StartedAt.Time.UTC(), CompletedAt: r.CompletedAt.Time.UTC(), LatencyMS: r.LatencyMs, Status: r.Status, ErrorType: r.ErrorType, AttemptNo: r.AttemptNo, ProviderID: r.ProviderID, ProviderModelID: r.ProviderModelID, ResourceID: r.ResourceID, InputTokens: r.InputTokens, OutputTokens: r.OutputTokens, CachedInputTokens: r.CachedInputTokens})
 	}
 	total, err := q.CountUsage(ctx, dbgen.CountUsageParams{FromTime: ts(f.From), ToTime: ts(f.To), PrincipalID: f.PrincipalID, ModelID: f.ModelID, ProviderID: f.ProviderID, ResourceID: f.ResourceID})
 	if err != nil {

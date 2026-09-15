@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -44,6 +45,9 @@ func TestPrettyConsoleAndJSONFileShareRecord(t *testing.T) {
 	}
 	if strings.Contains(pretty, "\x1b[") {
 		t.Fatalf("color disabled output contains ANSI escape: %q", pretty)
+	}
+	if !regexp.MustCompile(`^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} [+-]\d{2}:\d{2} `).MatchString(pretty) {
+		t.Fatalf("pretty output timestamp is missing timezone offset: %q", pretty)
 	}
 
 	var entry map[string]any
