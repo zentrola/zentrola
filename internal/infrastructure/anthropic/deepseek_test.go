@@ -3,6 +3,7 @@ package anthropic
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 
 	gw "github.com/zentrola/zentrola/internal/application/gateway"
 	mgmt "github.com/zentrola/zentrola/internal/application/management"
+	"github.com/zentrola/zentrola/internal/domain/catalog"
 )
 
 func TestDeepSeekNativeEndpoint(t *testing.T) {
@@ -104,21 +106,59 @@ func TestUnknownProviderRemovesAdvisorForSafety(t *testing.T) {
 }
 
 func TestDeepSeekConnectionUsesRealInference(t *testing.T) {
-	tester := NewConnectionTester()
-	var headers http.Header
-	tester.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		headers = r.Header
-		if r.URL.String() != "https://api.deepseek.com/anthropic/v1/messages" || r.Header.Get("x-api-key") != "upstream-secret" || r.Header.Get("Authorization") != "" {
-			t.Fatal("wrong inference probe")
-		}
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"type":"message","content":[{"type":"text","text":"OK"}]}`))}, nil
-	})
-	target := mgmt.ConnectionTarget{Protocol: "ANTHROPIC", BaseURL: "https://api.deepseek.com/anthropic", UpstreamModelCode: "deepseek-chat", AuthType: mgmt.AuthTypeAPIKey}
-	if result := tester.Test(context.Background(), target, []byte("upstream-secret"), nil); !result.OK {
-		t.Fatal(result)
-	}
-	if headers.Get("x-api-key") != "" {
-		t.Fatal("completed probe retained credential")
+	for _, tt := range []struct {
+		name, protocol, baseURL, wantURL, response string
+	}{
+		{
+			name: "anthropic", protocol: "ANTHROPIC", baseURL: "https://api.deepseek.com/anthropic",
+			wantURL:  "https://api.deepseek.com/anthropic/v1/messages",
+			response: `{"type":"message","content":[{"type":"text","text":"OK"}]}`,
+		},
+		{
+			name: "openai", protocol: "OPENAI", baseURL: "https://api.deepseek.com",
+			wantURL:  "https://api.deepseek.com/chat/completions",
+			response: `{"choices":[{"message":{"content":"OK"}}]}`,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			tester := NewConnectionTester()
+			var headers http.Header
+			tester.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				headers = r.Header
+				if r.URL.String() != tt.wantURL {
+					t.Fatalf("probe URL=%q; want %q", r.URL.String(), tt.wantURL)
+				}
+				if tt.protocol == "ANTHROPIC" {
+					if r.Header.Get("x-api-key") != "upstream-secret" || r.Header.Get("Authorization") != "" {
+						t.Fatal("wrong Anthropic inference credential")
+					}
+				} else if r.Header.Get("Authorization") != "Bearer upstream-secret" || r.Header.Get("x-api-key") != "" {
+					t.Fatal("wrong OpenAI inference credential")
+				}
+				var payload struct {
+					Model     string `json:"model"`
+					MaxTokens int    `json:"max_tokens"`
+					Thinking  struct {
+						Type string `json:"type"`
+					} `json:"thinking"`
+				}
+				if json.NewDecoder(r.Body).Decode(&payload) != nil || payload.Model != "deepseek-chat" ||
+					payload.MaxTokens != deepSeekProbeMaxOutputTokens || payload.Thinking.Type != "disabled" {
+					t.Fatalf("wrong DeepSeek inference body: %+v", payload)
+				}
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(tt.response))}, nil
+			})
+			target := mgmt.ConnectionTarget{
+				ProviderCode: catalog.DeepSeekOfficialCode, Protocol: tt.protocol, BaseURL: tt.baseURL,
+				UpstreamModelCode: "deepseek-chat", AuthType: mgmt.AuthTypeAPIKey,
+			}
+			if result := tester.Test(context.Background(), target, []byte("upstream-secret"), nil); !result.OK {
+				t.Fatal(result)
+			}
+			if headers.Get("Authorization") != "" || headers.Get("x-api-key") != "" {
+				t.Fatal("completed probe retained credential")
+			}
+		})
 	}
 }
 
