@@ -406,7 +406,7 @@ type ProviderModel struct {
 	ProviderID int64
 	// 逻辑模型 ID
 	ModelID int64
-	// 实际发送到上游的模型编码
+	// 服务商模型编码覆盖；空字符串表示调用时使用系统模型编码
 	UpstreamModelCode string
 	// 创建者引用：system、admin:<id> 或 principal:<id>
 	CreatedBy string

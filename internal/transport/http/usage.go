@@ -11,6 +11,30 @@ import (
 	app "github.com/zentrola/zentrola/internal/application/usage"
 )
 
+// getMyUsage 查询 Access Key 所属成员当前 UTC 自然月的 Token 用量。
+// @Summary 查询我的 Token 使用量
+// @Tags 用量统计
+// @Description 返回 Access Key 所属成员当前 UTC 自然月起至请求时刻的 Token 使用量；Token 为所有真实上游调用的输入与输出 Token 之和。
+// @Produce json
+// @Security GatewayKey
+// @Security GatewayBearer
+// @Success 200 {object} response{data=app.SelfUsage}
+// @Failure 400,401,503 {object} response
+// @Header all {string} X-Request-ID "请求追踪 ID"
+// @Router /api/v1/me/usage [get]
+func (s *SecurityHandlers) getMyUsage(w http.ResponseWriter, r *http.Request) {
+	if r.URL.RawQuery != "" {
+		securityError(w, r, appsec.ErrInvalidArgument)
+		return
+	}
+	result, err := s.Usage.Self(r.Context(), principalFrom(r), time.Now().UTC())
+	if err != nil {
+		securityError(w, r, err)
+		return
+	}
+	writeJSON(w, r, http.StatusOK, response{Code: "OK", Data: result})
+}
+
 func (s *SecurityHandlers) mountUsage(r chi.Router) {
 	// @Summary 首页统计
 	// @Tags 用量统计

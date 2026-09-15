@@ -98,6 +98,19 @@ func (s *UsageStore) Query(ctx context.Context, actor admin.Identity, f app.Filt
 	return app.Page{Items: result, Total: total}, nil
 }
 
+func (s *UsageStore) TokenUsage(ctx context.Context, principalID int64, from, to time.Time) (int64, error) {
+	ts := func(t time.Time) pgtype.Timestamptz { return pgtype.Timestamptz{Time: t, Valid: true} }
+	tokens, err := dbgen.New(s.pool).GetPrincipalTokenUsage(ctx, dbgen.GetPrincipalTokenUsageParams{
+		PrincipalID: principalID,
+		FromTime:    ts(from),
+		ToTime:      ts(to),
+	})
+	if err != nil {
+		return 0, appsec.ErrUnavailable
+	}
+	return tokens, nil
+}
+
 func (s *UsageStore) Statistics(ctx context.Context, actor admin.Identity, f app.StatisticFilter) (app.StatisticPage, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
