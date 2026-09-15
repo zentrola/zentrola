@@ -1903,6 +1903,88 @@
                 }
             }
         },
+        "/api/v1/me/usage": {
+            "get": {
+                "security": [
+                    {
+                        "GatewayKey": []
+                    },
+                    {
+                        "GatewayBearer": []
+                    }
+                ],
+                "description": "返回 Access Key 所属成员当前 UTC 自然月起至请求时刻的 Token 使用量；Token 为所有真实上游调用的输入与输出 Token 之和。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "用量统计"
+                ],
+                "summary": "查询我的 Token 使用量",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/usage.SelfUsage"
+                                        }
+                                    }
+                                }
+                            ]
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "请求追踪 ID"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "请求追踪 ID"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "请求追踪 ID"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "请求追踪 ID"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/members": {
             "get": {
                 "security": [
@@ -6743,8 +6825,7 @@
         "management.ProviderMappingInput": {
             "type": "object",
             "required": [
-                "modelId",
-                "upstreamModelCode"
+                "modelId"
             ],
             "properties": {
                 "modelId": {
@@ -7103,6 +7184,20 @@
                 },
                 "status": {
                     "type": "string"
+                }
+            }
+        },
+        "usage.SelfUsage": {
+            "type": "object",
+            "properties": {
+                "from": {
+                    "type": "string"
+                },
+                "to": {
+                    "type": "string"
+                },
+                "tokens": {
+                    "type": "integer"
                 }
             }
         },

@@ -14,6 +14,8 @@ type queryStoreStub struct {
 	dashboard Dashboard
 	from      time.Time
 	to        time.Time
+	tokens    int64
+	principal int64
 }
 
 func (s *queryStoreStub) Query(context.Context, admin.Identity, Filter) (Page, error) {
@@ -27,6 +29,11 @@ func (s *queryStoreStub) Statistics(context.Context, admin.Identity, StatisticFi
 func (s *queryStoreStub) Dashboard(_ context.Context, _ admin.Identity, from, to time.Time) (Dashboard, error) {
 	s.from, s.to = from, to
 	return s.dashboard, nil
+}
+
+func (s *queryStoreStub) TokenUsage(_ context.Context, principalID int64, from, to time.Time) (int64, error) {
+	s.principal, s.from, s.to = principalID, from, to
+	return s.tokens, nil
 }
 
 func TestStatisticsValidatesDimensionAndPagination(t *testing.T) {
@@ -86,5 +93,35 @@ func TestDashboardValidatesIdentityAndRange(t *testing.T) {
 				t.Fatalf("got %v, want %v", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestSelfReturnsCurrentUTCMonthUsage(t *testing.T) {
+	store := &queryStoreStub{tokens: 156000}
+	service := NewQuery(store)
+	now := time.Date(2026, 9, 15, 11, 20, 30, 0, time.FixedZone("CST", 8*60*60))
+
+	result, err := service.Self(context.Background(), appsec.PrincipalIdentity{ID: 42}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantTo := time.Date(2026, 9, 15, 3, 20, 30, 0, time.UTC)
+	wantFrom := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	if result.Tokens != 156000 || !result.From.Equal(wantFrom) || !result.To.Equal(wantTo) {
+		t.Fatalf("unexpected usage result: %+v", result)
+	}
+	if store.principal != 42 || !store.from.Equal(wantFrom) || !store.to.Equal(wantTo) {
+		t.Fatalf("unexpected store query: principal=%d from=%s to=%s", store.principal, store.from, store.to)
+	}
+}
+
+func TestSelfRejectsMissingIdentityAndTime(t *testing.T) {
+	service := NewQuery(&queryStoreStub{})
+	now := time.Date(2026, 9, 15, 0, 0, 0, 0, time.UTC)
+	if _, err := service.Self(context.Background(), appsec.PrincipalIdentity{}, now); !errors.Is(err, appsec.ErrUnauthenticated) {
+		t.Fatalf("missing identity error=%v", err)
+	}
+	if _, err := service.Self(context.Background(), appsec.PrincipalIdentity{ID: 1}, time.Time{}); !errors.Is(err, appsec.ErrInvalidArgument) {
+		t.Fatalf("zero time error=%v", err)
 	}
 }

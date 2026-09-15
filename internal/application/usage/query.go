@@ -102,6 +102,7 @@ type QueryStore interface {
 	Query(context.Context, admin.Identity, Filter) (Page, error)
 	Statistics(context.Context, admin.Identity, StatisticFilter) (StatisticPage, error)
 	Dashboard(context.Context, admin.Identity, time.Time, time.Time) (Dashboard, error)
+	TokenUsage(context.Context, int64, time.Time, time.Time) (int64, error)
 }
 type QueryService struct{ store QueryStore }
 

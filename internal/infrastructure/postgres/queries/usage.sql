@@ -26,6 +26,16 @@ AND (sqlc.narg(model_id)::bigint IS NULL OR u.model_id=sqlc.narg(model_id))
 AND (sqlc.narg(provider_id)::bigint IS NULL OR u.provider_id=sqlc.narg(provider_id))
 AND (sqlc.narg(resource_id)::bigint IS NULL OR u.provider_credential_id=sqlc.narg(resource_id));
 
+-- name: GetPrincipalTokenUsage :one
+SELECT COALESCE(
+    SUM(COALESCE(u.input_tokens, 0) + COALESCE(u.output_tokens, 0)),
+    0
+)::bigint AS tokens
+FROM usage_record u
+WHERE u.principal_id=sqlc.arg(principal_id)::bigint
+AND u.started_at>=sqlc.arg(from_time)::timestamptz
+AND u.started_at<sqlc.arg(to_time)::timestamptz;
+
 -- name: UsageMemberStatistics :many
 SELECT u.principal_id AS entity_id,
        p.name,

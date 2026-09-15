@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -327,6 +328,26 @@ func TestStage5Integration(t *testing.T) {
 	dashboard, err = app.NewQuery(store).Dashboard(ctx, actor, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
 	if err != nil || dashboard.TotalTokens != 65 || len(dashboard.ClientModelRanking) != 2 || dashboard.ClientModelRanking[0].ModelID != sonnet.ID || dashboard.ClientModelRanking[0].Requests != 8 || dashboard.ClientModelRanking[1].ModelID != opus.ID || dashboard.ClientModelRanking[1].Requests != 1 || len(dashboard.ProviderRanking) != 2 || dashboard.ProviderRanking[0].ProviderID != provider.ID || dashboard.ProviderRanking[0].Calls != 8 || dashboard.ProviderRanking[0].Tokens != 63 || dashboard.ProviderRanking[1].ProviderID != backupProvider.ID || dashboard.ProviderRanking[1].Calls != 1 || dashboard.ProviderRanking[1].Tokens != 2 {
 		t.Fatalf("model and provider rankings were not aggregated independently: result=%+v err=%v", dashboard, err)
+	}
+	selfRequest, _ := http.NewRequest(http.MethodGet, server.URL+"/api/v1/me/usage", nil)
+	selfRequest.Header.Set("X-Api-Key", key.Key)
+	selfResponse, err := server.Client().Do(selfRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var selfBody struct {
+		Code string        `json:"code"`
+		Data app.SelfUsage `json:"data"`
+	}
+	if decodeErr := json.NewDecoder(selfResponse.Body).Decode(&selfBody); decodeErr != nil {
+		selfResponse.Body.Close()
+		t.Fatal(decodeErr)
+	}
+	selfResponse.Body.Close()
+	reportedAt := selfBody.Data.To.UTC()
+	wantMonthStart := time.Date(reportedAt.Year(), reportedAt.Month(), 1, 0, 0, 0, 0, time.UTC)
+	if selfResponse.StatusCode != http.StatusOK || selfBody.Code != "OK" || selfBody.Data.Tokens != 65 || !selfBody.Data.From.Equal(wantMonthStart) || selfBody.Data.To.Before(now) {
+		t.Fatalf("self usage query incorrect: status=%d body=%+v", selfResponse.StatusCode, selfBody)
 	}
 	// 查询 API：组合过滤、分页、时间、认证和非法参数。
 	dashboardRange := "?from=" + time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano) + "&to=" + time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)

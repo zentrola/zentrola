@@ -144,6 +144,12 @@ func (s *SecurityHandlers) mount(r chi.Router) {
 				s.mountUsage(protected)
 			}
 		})
+		if s.Usage != nil {
+			api.Group(func(member chi.Router) {
+				member.Use(s.memberAuth)
+				member.Get("/me/usage", s.getMyUsage)
+			})
+		}
 	})
 	r.Route("/anthropic", func(gateway chi.Router) {
 		gateway.Use(s.gatewayAuth)
@@ -205,6 +211,30 @@ func (s *SecurityHandlers) adminAuth(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), adminIdentityKey{}, identity)))
 	})
 }
+
+func (s *SecurityHandlers) memberAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.Keys == nil {
+			securityError(w, r, appsec.ErrUnavailable)
+			return
+		}
+		keys := r.Header.Values("X-Api-Key")
+		auth := r.Header.Values("Authorization")
+		var key string
+		if len(keys) == 1 && len(auth) == 0 {
+			key = keys[0]
+		} else if len(keys) == 0 && len(auth) == 1 {
+			key = bearer(r)
+		}
+		identity, err := s.Keys.Authenticate(r.Context(), key)
+		if err != nil {
+			securityError(w, r, err)
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), principalIdentityKey{}, identity)))
+	})
+}
+
 func (s *SecurityHandlers) gatewayAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logger := s.gatewayLogger()
@@ -318,6 +348,10 @@ func positiveID(value string) (int64, error) {
 }
 func adminFrom(r *http.Request) admin.Identity {
 	identity, _ := r.Context().Value(adminIdentityKey{}).(admin.Identity)
+	return identity
+}
+func principalFrom(r *http.Request) appsec.PrincipalIdentity {
+	identity, _ := r.Context().Value(principalIdentityKey{}).(appsec.PrincipalIdentity)
 	return identity
 }
 func bearer(r *http.Request) string {

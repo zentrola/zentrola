@@ -44,6 +44,30 @@ func (q *Queries) CountUsage(ctx context.Context, arg CountUsageParams) (int64, 
 	return column_1, err
 }
 
+const getPrincipalTokenUsage = `-- name: GetPrincipalTokenUsage :one
+SELECT COALESCE(
+    SUM(COALESCE(u.input_tokens, 0) + COALESCE(u.output_tokens, 0)),
+    0
+)::bigint AS tokens
+FROM usage_record u
+WHERE u.principal_id=$1::bigint
+AND u.started_at>=$2::timestamptz
+AND u.started_at<$3::timestamptz
+`
+
+type GetPrincipalTokenUsageParams struct {
+	PrincipalID int64
+	FromTime    pgtype.Timestamptz
+	ToTime      pgtype.Timestamptz
+}
+
+func (q *Queries) GetPrincipalTokenUsage(ctx context.Context, arg GetPrincipalTokenUsageParams) (int64, error) {
+	row := q.db.QueryRow(ctx, getPrincipalTokenUsage, arg.PrincipalID, arg.FromTime, arg.ToTime)
+	var tokens int64
+	err := row.Scan(&tokens)
+	return tokens, err
+}
+
 const insertUsageAttempts = `-- name: InsertUsageAttempts :exec
 INSERT INTO usage_record(id,request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,client_protocol,input_tokens,output_tokens,cached_input_tokens,started_at,completed_at,latency_ms,status,error_type,created_at)
 SELECT nextval('zentrola_global_id_seq'),request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,'MODEL_GATEWAY',client_protocol,input_tokens,output_tokens,cached_input_tokens,started_at,completed_at,latency_ms,status,error_type,completed_at
