@@ -43,6 +43,7 @@ const (
 	ResourceCredentialExport Type = "RESOURCE_CREDENTIAL_EXPORT"
 	ResourceDelete           Type = "RESOURCE_DELETE"
 	ResourceConnectionTest   Type = "RESOURCE_CONNECTION_TEST"
+	ResourceRateLimitReset   Type = "RESOURCE_RATE_LIMIT_RESET"
 	LoginSuccess             Type = "LOGIN_SUCCESS"
 	LoginFailed              Type = "LOGIN_FAILED"
 	LoginLocked              Type = "LOGIN_LOCKED"

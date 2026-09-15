@@ -20,6 +20,7 @@ var (
 	ErrProviderCredentialRequired  = errors.New("provider credential required")
 	ErrModelSyncCredentialRequired = errors.New("model sync credential required")
 	ErrCredentialExportUnsupported = errors.New("credential export unsupported")
+	ErrResetCreditUnsupported      = errors.New("rate-limit reset credit unsupported")
 )
 
 const (
@@ -209,9 +210,41 @@ type SubscriptionInspection struct {
 }
 
 type SubscriptionProbe struct {
-	Inspection SubscriptionInspection
-	Credential []byte
-	Quotas     []ResourceQuota
+	Inspection   SubscriptionInspection
+	Credential   []byte
+	Quotas       []ResourceQuota
+	ResetCredits *RateLimitResetCredits
+}
+
+type RateLimitResetCredit struct {
+	ID          string     `json:"id"`
+	ResetType   string     `json:"resetType"`
+	Status      string     `json:"status"`
+	GrantedAt   time.Time  `json:"grantedAt"`
+	ExpiresAt   *time.Time `json:"expiresAt"`
+	Title       *string    `json:"title"`
+	Description *string    `json:"description"`
+}
+
+type RateLimitResetCredits struct {
+	AvailableCount int                    `json:"availableCount"`
+	Credits        []RateLimitResetCredit `json:"credits"`
+}
+
+type ResetCreditConsume struct {
+	Outcome string
+	Probe   SubscriptionProbe
+}
+
+type SubscriptionResetCreditConsumer interface {
+	ConsumeResetCredit(context.Context, []byte, *catalog.OutboundProxy, string, string) (ResetCreditConsume, error)
+}
+
+// SubscriptionConnectionError 允许订阅适配器返回可安全展示的连接错误分类，
+// 具体底层错误仍只保留在服务端。
+type SubscriptionConnectionError interface {
+	error
+	ConnectionCode() string
 }
 
 type SubscriptionAdapter interface {
@@ -328,10 +361,16 @@ type Cipher interface {
 	DecryptProviderProxy(catalog.SealedCredential, catalog.ProviderProxyOwner) ([]byte, error)
 }
 type ConnectionResult struct {
-	OK         bool   `json:"ok"`
-	Code       string `json:"code"`
-	HTTPStatus int    `json:"httpStatus,omitempty"`
-	LatencyMS  int64  `json:"latencyMs"`
+	OK           bool                   `json:"ok"`
+	Code         string                 `json:"code"`
+	HTTPStatus   int                    `json:"httpStatus,omitempty"`
+	LatencyMS    int64                  `json:"latencyMs"`
+	ResetCredits *RateLimitResetCredits `json:"resetCredits,omitempty"`
+}
+
+type ResetCreditConsumeResult struct {
+	Outcome      string                 `json:"outcome"`
+	ResetCredits *RateLimitResetCredits `json:"resetCredits,omitempty"`
 }
 
 type ConnectionTarget struct {

@@ -468,6 +468,8 @@ func securityError(w http.ResponseWriter, r *http.Request, err error) {
 		status, code, message = http.StatusConflict, "MODEL_SYNC_CREDENTIAL_REQUIRED", "Configure a provider credential before synchronizing models."
 	case errors.Is(err, mgmt.ErrCredentialExportUnsupported):
 		status, code, message = http.StatusConflict, "CREDENTIAL_EXPORT_UNSUPPORTED", "Only OpenAI personal subscription credentials can be exported."
+	case errors.Is(err, mgmt.ErrResetCreditUnsupported):
+		status, code, message = http.StatusConflict, "RESET_CREDIT_UNSUPPORTED", "Only OpenAI personal subscriptions support rate-limit reset credits."
 	}
 	writeJSON(w, r, status, response{Code: code, Message: message})
 }

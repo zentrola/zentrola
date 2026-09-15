@@ -473,6 +473,32 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 		data, err := m.ResourceQuotas(req.Context(), adminFrom(req), id)
 		adminResult(w, req, 200, data, err)
 	})
+	// @Summary 使用 ChatGPT 额度重置卡
+	// @Tags 模型与资源
+	// @Description 仅支持 OpenAI 个人订阅；调用 Codex 官方 App Server 消耗一张额度重置卡，并立即刷新额度状态。
+	// @Accept json
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "业务 ID（正整数字符串）"
+	// @Param body body ConsumeResetCreditRequest true "幂等键与可选重置卡 ID"
+	// @Success 200 {object} response{data=mgmt.ResetCreditConsumeResult}
+	// @Failure 400,401,404,409,422,503 {object} response
+	// @Router /api/v1/resources/{id}/rate-limit-reset-credit/consume [post]
+	r.Post("/resources/{id}/rate-limit-reset-credit/consume", func(w http.ResponseWriter, req *http.Request) {
+		id, err := routeID(req, "id")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		input, ok := decodeRequest[ConsumeResetCreditRequest](w, req)
+		if !ok {
+			return
+		}
+		data, err := m.ConsumeResourceResetCredit(
+			req.Context(), adminFrom(req), id, input.IdempotencyKey, input.CreditID, requestMeta(req),
+		)
+		adminResult(w, req, http.StatusOK, data, err)
+	})
 	// @Summary 同步服务商官方模型目录
 	// @Tags 模型与资源
 	// @Description 由后端选择服务商的 API Key 凭据并同步官方模型目录；当前支持 OpenAI、DeepSeek 和智谱 AI。
@@ -745,7 +771,7 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 	})
 	// @Summary 测试资源连接
 	// @Tags 模型与资源
-	// @Description API Key 资源会使用指定协议发起最小模型推理，订阅资源会调用对应认证适配器的额度接口；请求会产生外部网络调用。HTTP 200 后仍需检查 data.ok 和 data.code。
+	// @Description API Key 资源会使用指定协议发起最小模型推理，订阅资源会通过对应认证适配器读取额度（OpenAI 个人订阅使用 Codex 官方 App Server）；请求会产生外部网络调用。HTTP 200 后仍需检查 data.ok 和 data.code。
 	// @Produce json
 	// @Security AdminBearer
 	// @Param id path string true "业务 ID（正整数字符串）"

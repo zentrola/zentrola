@@ -39,6 +39,33 @@ func (claudeSubscriptionAdapterStub) SupportsProvider(provider Provider) bool {
 	return provider.Code == catalog.AnthropicOfficialCode
 }
 
+type resetCreditAdapterStub struct {
+	subscriptionAdapterStub
+	consume   ResetCreditConsume
+	onConsume func(string, string, *catalog.OutboundProxy)
+}
+
+type subscriptionConnectionErrorStub string
+
+func (e subscriptionConnectionErrorStub) Error() string          { return "subscription connection failed" }
+func (e subscriptionConnectionErrorStub) ConnectionCode() string { return string(e) }
+
+func TestSubscriptionConnectionCodeAllowsOnlyKnownSafeCodes(t *testing.T) {
+	if code := subscriptionConnectionCode(subscriptionConnectionErrorStub("CODEX_APP_SERVER_UNAVAILABLE")); code != "CODEX_APP_SERVER_UNAVAILABLE" {
+		t.Fatalf("unexpected connection code: %s", code)
+	}
+	if code := subscriptionConnectionCode(subscriptionConnectionErrorStub("UNSAFE_INTERNAL_DETAIL")); code != "SUBSCRIPTION_UNAVAILABLE" {
+		t.Fatalf("unexpected fallback connection code: %s", code)
+	}
+}
+
+func (s resetCreditAdapterStub) ConsumeResetCredit(_ context.Context, _ []byte, proxy *catalog.OutboundProxy, idempotencyKey, creditID string) (ResetCreditConsume, error) {
+	if s.onConsume != nil {
+		s.onConsume(idempotencyKey, creditID, proxy)
+	}
+	return s.consume, nil
+}
+
 func TestProviderCapabilitiesIncludeMatchingSubscriptionAdapter(t *testing.T) {
 	service := &Service{subscriptions: []SubscriptionAdapter{
 		subscriptionAdapterStub{}, claudeSubscriptionAdapterStub{},
@@ -100,6 +127,7 @@ type resourceTestWriter struct {
 	updated  ResourceRecord
 	quotas   []ResourceQuota
 	restored bool
+	audit    Audit
 }
 
 func (w *resourceTestWriter) Resource(context.Context, int64) (ResourceRecord, error) {
@@ -138,7 +166,10 @@ func (w *resourceTestWriter) BlockResourceRuntime(_ context.Context, _ int64, re
 	w.updated = w.resource
 	return nil
 }
-func (*resourceTestWriter) Audit(context.Context, Audit, appsec.RequestMeta) error { return nil }
+func (w *resourceTestWriter) Audit(_ context.Context, audit Audit, _ appsec.RequestMeta) error {
+	w.audit = audit
+	return nil
+}
 
 type resourceTestStore struct{ writer *resourceTestWriter }
 
@@ -417,6 +448,9 @@ func TestPersonalSubscriptionConnectionUsesQuotaProbeWithoutModelMapping(t *test
 			Quotas: []ResourceQuota{{
 				Code: "codex.primary", Status: QuotaAvailable, UsedPercent: &percent, ResetsAt: &reset,
 			}},
+			ResetCredits: &RateLimitResetCredits{AvailableCount: 1, Credits: []RateLimitResetCredit{{
+				ID: "credit-secret", Status: "available",
+			}}},
 		}, onProbe: func(proxy *catalog.OutboundProxy) {
 			proxySeen = proxy != nil && proxy.URL == "http://proxy.example.com:8080"
 		}}),
@@ -428,7 +462,7 @@ func TestPersonalSubscriptionConnectionUsesQuotaProbeWithoutModelMapping(t *test
 		48,
 		appsec.RequestMeta{},
 	)
-	if err != nil || !result.OK || result.Code != "OK" {
+	if err != nil || !result.OK || result.Code != "OK" || result.ResetCredits == nil || result.ResetCredits.AvailableCount != 1 {
 		t.Fatalf("unexpected subscription test result: %+v err=%v", result, err)
 	}
 	if !proxySeen || !writer.restored || writer.updated.QuotaStatus != QuotaAvailable || len(writer.quotas) != 1 {
@@ -436,6 +470,64 @@ func TestPersonalSubscriptionConnectionUsesQuotaProbeWithoutModelMapping(t *test
 	}
 	if string(writer.updated.Sealed.Ciphertext) != "refreshed-auth-cache" {
 		t.Fatalf("refreshed credential was not persisted: %q", writer.updated.Sealed.Ciphertext)
+	}
+	auditedResult, ok := writer.audit.After.(map[string]any)["test"].(ConnectionResult)
+	if !ok || auditedResult.ResetCredits == nil || auditedResult.ResetCredits.AvailableCount != 1 || len(auditedResult.ResetCredits.Credits) != 0 {
+		t.Fatalf("reset credit IDs must not be written to audit: %+v", writer.audit.After)
+	}
+}
+
+func TestConsumeResourceResetCreditRefreshesQuotaAndRestoresResource(t *testing.T) {
+	updatedAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
+	reset := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	percent := 10.0
+	expires := time.Now().In(time.FixedZone("CST", 8*60*60)).Add(24 * time.Hour).Truncate(time.Second)
+	writer := &resourceTestWriter{
+		resource: ResourceRecord{
+			Resource: Resource{
+				ID: 48, ProviderID: 40, Name: "OpenAI 个人订阅",
+				AuthType: AuthTypeSubscription, AuthAdapter: AuthAdapterOpenAICodex,
+				RuntimeStatus: "BLOCKED", UpdatedAt: updatedAt,
+			},
+			Sealed: catalog.SealedCredential{Ciphertext: []byte("imported-auth-cache"), KeyVersion: 1},
+		},
+		provider: Provider{ID: 40, Code: "openai-official"},
+	}
+	consumeSeen := false
+	adapter := resetCreditAdapterStub{
+		subscriptionAdapterStub: subscriptionAdapterStub{},
+		consume: ResetCreditConsume{Outcome: "reset", Probe: SubscriptionProbe{
+			Inspection: SubscriptionInspection{AccountRef: "account-1", PlanCode: "plus"},
+			Credential: []byte("refreshed-auth-cache"),
+			Quotas: []ResourceQuota{{
+				Code: "codex.primary", Status: QuotaAvailable, UsedPercent: &percent, ResetsAt: &reset,
+			}},
+			ResetCredits: &RateLimitResetCredits{AvailableCount: 0, Credits: []RateLimitResetCredit{{
+				ID: "credit-1", ResetType: "codexRateLimits", Status: "consumed",
+				GrantedAt: expires.Add(-time.Hour), ExpiresAt: &expires,
+			}}},
+		}},
+		onConsume: func(idempotencyKey, creditID string, proxy *catalog.OutboundProxy) {
+			consumeSeen = idempotencyKey == "request-1" && creditID == "credit-1" && proxy == nil
+		},
+	}
+	service := New(resourceTestStore{writer: writer}, nil, providerTestCipher{}, nil, WithSubscriptionAdapter(adapter))
+
+	result, err := service.ConsumeResourceResetCredit(
+		context.Background(), admin.Identity{ID: 1}, 48, "request-1", "credit-1", appsec.RequestMeta{},
+	)
+	if err != nil || result.Outcome != "reset" || result.ResetCredits == nil || result.ResetCredits.AvailableCount != 0 {
+		t.Fatalf("unexpected reset result: %+v err=%v", result, err)
+	}
+	if !consumeSeen || !writer.restored || writer.updated.QuotaStatus != QuotaAvailable || len(writer.quotas) != 1 ||
+		string(writer.updated.Sealed.Ciphertext) != "refreshed-auth-cache" {
+		t.Fatalf("reset state was not persisted: updated=%+v quotas=%+v", writer.updated.Resource, writer.quotas)
+	}
+	if result.ResetCredits.Credits[0].ExpiresAt == nil || result.ResetCredits.Credits[0].ExpiresAt.Location() != time.UTC {
+		t.Fatalf("reset credit time was not normalized: %+v", result.ResetCredits.Credits[0])
+	}
+	if writer.audit.Event != "RESOURCE_RATE_LIMIT_RESET" {
+		t.Fatalf("unexpected audit: %+v", writer.audit)
 	}
 }
 

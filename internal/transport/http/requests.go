@@ -290,6 +290,20 @@ func (r UpdateCredentialRequest) Valid() bool {
 	return len(r.Credential) > 0 && len(r.Credential) <= 64<<10 && utf8.ValidString(r.Credential) && !strings.ContainsRune(r.Credential, 0)
 }
 
+type ConsumeResetCreditRequest struct {
+	IdempotencyKey string `json:"idempotencyKey" binding:"required" example:"8ae96ff3-3425-4f4c-8772-b6fd61502868"`
+	CreditID       string `json:"creditId,omitempty" example:"RateLimitResetCredit_1"`
+}
+
+func (r *ConsumeResetCreditRequest) Normalize() {
+	r.IdempotencyKey = strings.TrimSpace(r.IdempotencyKey)
+	r.CreditID = strings.TrimSpace(r.CreditID)
+}
+
+func (r ConsumeResetCreditRequest) Valid() bool {
+	return validRequestText(r.IdempotencyKey, 128, true) && validRequestText(r.CreditID, 256, false)
+}
+
 type UpdateStatusRequest struct {
 	Status string `json:"status" binding:"required" enums:"ACTIVE,DISABLED" example:"ACTIVE"`
 }

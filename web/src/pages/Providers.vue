@@ -15,6 +15,8 @@ import type {
   ProviderProtocol,
   Resource,
   ResourceQuota,
+  RateLimitResetCredits,
+  ResetCreditConsumeResult,
 } from '../types'
 import Icon from '../components/Icon.vue'
 import ListFooter from '../components/ListFooter.vue'
@@ -95,8 +97,11 @@ const testTarget = ref<{
 const testResult = ref<ConnectionResult | null>(null)
 const credentialVerifiedAt = reactive<Record<string, string>>({})
 const credentialQuotas = reactive<Record<string, ResourceQuota[]>>({})
+const credentialResetCredits = reactive<Record<string, RateLimitResetCredits>>({})
 const quotaRefreshing = reactive<Record<string, boolean>>({})
 const quotaRefreshError = reactive<Record<string, string>>({})
+const resetCreditConsuming = reactive<Record<string, boolean>>({})
+const resetCreditIdempotencyKeys = reactive<Record<string, string>>({})
 const syncTarget = ref<{ provider: Provider } | null>(null)
 const syncResult = ref<ModelSyncResult | null>(null)
 const credential = ref('')
@@ -526,17 +531,53 @@ async function refreshSubscriptionQuota(resource: Resource) {
   quotaRefreshing[resource.id] = true
   delete quotaRefreshError[resource.id]
   delete credentialQuotas[resource.id]
+  delete credentialResetCredits[resource.id]
   try {
     const result = await api<ConnectionResult>(`/resources/${resource.id}/test-connection`, 'POST')
     if (!result.ok) {
       quotaRefreshError[resource.id] = resultMessage(result, resource)
       return
     }
+    if (result.resetCredits) credentialResetCredits[resource.id] = result.resetCredits
     credentialQuotas[resource.id] = await api<ResourceQuota[]>(`/resources/${resource.id}/quotas`)
   } catch (error) {
     quotaRefreshError[resource.id] = errorText(error)
   } finally {
     delete quotaRefreshing[resource.id]
+  }
+}
+
+async function consumeResetCredit(resource: Resource) {
+  if (resetCreditConsuming[resource.id]) return
+  resetCreditConsuming[resource.id] = true
+  try {
+    const idempotencyKey =
+      resetCreditIdempotencyKeys[resource.id] ||
+      (resetCreditIdempotencyKeys[resource.id] = crypto.randomUUID())
+    const creditID = credentialResetCredits[resource.id]?.credits.find(
+      (credit) => credit.status === 'available',
+    )?.id
+    const result = await api<ResetCreditConsumeResult>(
+      `/resources/${resource.id}/rate-limit-reset-credit/consume`,
+      'POST',
+      {
+        idempotencyKey,
+        ...(creditID ? { creditId: creditID } : {}),
+      },
+    )
+    if (result.resetCredits) credentialResetCredits[resource.id] = result.resetCredits
+    credentialQuotas[resource.id] = await api<ResourceQuota[]>(`/resources/${resource.id}/quotas`)
+    await loadResources()
+    if (result.outcome === 'reset' || result.outcome === 'alreadyRedeemed') {
+      showSuccessToast(t('resources.resetCreditConsumed'))
+    } else {
+      showErrorToast(t(`resources.resetCreditOutcomes.${result.outcome}`))
+    }
+    delete resetCreditIdempotencyKeys[resource.id]
+  } catch (error) {
+    showErrorToast(errorText(error))
+  } finally {
+    delete resetCreditConsuming[resource.id]
   }
 }
 
@@ -790,6 +831,7 @@ function testConnection(
         `/resources/${resource.id}/test-connection${query}`,
         'POST',
       )
+      if (result.resetCredits) credentialResetCredits[resource.id] = result.resetCredits
       credentialVerifiedAt[resource.id] = new Date().toISOString()
       await loadResources()
       testResult.value = result
@@ -1759,6 +1801,35 @@ onMounted(() => {
                       {{ t('resources.quotaResetsAt') }} · {{ date(resource.quotaResetsAt) }}
                     </small>
                   </template>
+                  <div
+                    v-if="
+                      resource.authAdapter === 'OPENAI_CODEX' && credentialResetCredits[resource.id]
+                    "
+                    class="credential-reset-credits"
+                  >
+                    <small class="credential-detail">
+                      {{
+                        t('resources.resetCreditsAvailable', {
+                          count: credentialResetCredits[resource.id].availableCount,
+                        })
+                      }}
+                    </small>
+                    <button
+                      v-if="credentialResetCredits[resource.id].availableCount > 0"
+                      type="button"
+                      class="text-button"
+                      :disabled="busy || resetCreditConsuming[resource.id]"
+                      @click="consumeResetCredit(resource)"
+                    >
+                      {{
+                        t(
+                          resetCreditConsuming[resource.id]
+                            ? 'resources.resetCreditConsuming'
+                            : 'resources.consumeResetCredit',
+                        )
+                      }}
+                    </button>
+                  </div>
                 </div>
               </td>
               <td class="credential-runtime" :data-label="t('resources.runtimeStatus')">
@@ -2488,6 +2559,7 @@ onMounted(() => {
   padding-bottom: 8px;
   border-bottom: 1px solid var(--line);
   color: #536d84;
+  font-weight: 600;
 }
 .credential-plan + .credential-quota-windows,
 .credential-plan + .credential-quota-feedback {
@@ -2511,6 +2583,22 @@ onMounted(() => {
   color: var(--danger);
   text-overflow: clip;
   white-space: normal;
+}
+.credential-reset-credits {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.credential-reset-credits .credential-detail {
+  margin-top: 0;
+}
+.credential-reset-credits .text-button {
+  flex: 0 0 auto;
+  font-size: 11px;
 }
 .credential-runtime .status {
   margin: 0;

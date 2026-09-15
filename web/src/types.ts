@@ -114,6 +114,19 @@ export interface ResourceQuota {
   reachedType: string | null
   observedAt: string
 }
+export interface RateLimitResetCredit {
+  id: string
+  resetType: string
+  status: string
+  grantedAt: string
+  expiresAt: string | null
+  title: string | null
+  description: string | null
+}
+export interface RateLimitResetCredits {
+  availableCount: number
+  credits: RateLimitResetCredit[]
+}
 export interface AccessKey {
   id: string
   name: string
@@ -135,6 +148,11 @@ export interface ConnectionResult {
   code: string
   httpStatus?: number
   latencyMs: number
+  resetCredits?: RateLimitResetCredits
+}
+export interface ResetCreditConsumeResult {
+  outcome: 'reset' | 'alreadyRedeemed' | 'nothingToReset' | 'noCredit'
+  resetCredits?: RateLimitResetCredits
 }
 export interface ModelSyncResult extends ConnectionResult {
   discovered: number

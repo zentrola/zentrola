@@ -72,6 +72,18 @@ func TestDecodeRequest(t *testing.T) {
 	}
 }
 
+func TestConsumeResetCreditRequestValidation(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/resources/1/rate-limit-reset-credit/consume", strings.NewReader(`{"idempotencyKey":" request-1 ","creditId":" credit-1 "}`))
+	input, ok := decodeRequest[ConsumeResetCreditRequest](recorder, request)
+	if !ok || input.IdempotencyKey != "request-1" || input.CreditID != "credit-1" {
+		t.Fatalf("valid reset credit request rejected: %+v status=%d", input, recorder.Code)
+	}
+	assertMissingParameter[ConsumeResetCreditRequest](
+		t, http.MethodPost, "/api/v1/resources/1/rate-limit-reset-credit/consume", `{}`, "idempotencyKey",
+	)
+}
+
 func TestTimeInputsRequireUTC(t *testing.T) {
 	utc := time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)
 	offset := time.Date(2099, 1, 1, 8, 0, 0, 0, time.FixedZone("CST", 8*60*60))
