@@ -61,7 +61,7 @@ Codex / Claude Code / OpenAI 兼容客户端
 - Usage 仪表盘和 Operation Log
 - Admin Web 中英文界面
 
-模型目录同步目前为 OpenAI、DeepSeek 和智谱 AI 提供专用适配器。其他 OpenAI 或 Anthropic 兼容服务商可以手动配置。
+模型目录同步目前为 OpenAI、DeepSeek、智谱 AI 和月之暗面提供专用适配器。其他 OpenAI 或 Anthropic 兼容服务商可以手动配置。
 
 ## 快速开始
 

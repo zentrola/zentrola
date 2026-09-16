@@ -3,6 +3,7 @@ package anthropicclaude
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -43,8 +44,53 @@ func TestProbeNormalizesSetupTokenAndReadsUsage(t *testing.T) {
 	}
 }
 
-func TestRejectsNonSetupToken(t *testing.T) {
-	for _, raw := range []string{"", "sk-ant-oat", "sk-ant-api03-test", `{"kind":"claude_code_setup_token","access_token":"bad"}`} {
+func TestProbeClassifiesUsageFailures(t *testing.T) {
+	tests := []struct {
+		name, code string
+		status     int
+		body       string
+	}{
+		{name: "authentication", code: "UPSTREAM_AUTH_FAILED", status: http.StatusUnauthorized},
+		{name: "forbidden", code: "UPSTREAM_AUTH_FAILED", status: http.StatusForbidden},
+		{name: "billing", code: "UPSTREAM_BILLING_BLOCKED", status: http.StatusPaymentRequired},
+		{name: "rate limited", code: "UPSTREAM_RATE_LIMITED", status: http.StatusTooManyRequests},
+		{name: "unavailable", code: "UPSTREAM_UNAVAILABLE", status: http.StatusBadGateway},
+		{name: "invalid response", code: "UPSTREAM_INVALID_RESPONSE", status: http.StatusOK, body: `{`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			defer server.Close()
+			adapter := New()
+			adapter.client = server.Client()
+			adapter.usageEndpoint = server.URL
+
+			_, err := adapter.Probe(context.Background(), []byte(testToken), nil)
+			var connectionError interface{ ConnectionCode() string }
+			if !errors.As(err, &connectionError) || connectionError.ConnectionCode() != tt.code {
+				t.Fatalf("error=%v code=%v; want %s", err, connectionError, tt.code)
+			}
+		})
+	}
+}
+
+func TestAcceptsOpaqueSetupTokenWithoutAssumingAnthropicPrefix(t *testing.T) {
+	for _, raw := range []string{
+		"future-token-format",
+		"sk-ant-api03-test",
+		`{"kind":"claude_code_setup_token","access_token":"future-token-format"}`,
+	} {
+		if _, err := New().Inspect([]byte(raw)); err != nil {
+			t.Fatalf("expected opaque credential %q to be accepted: %v", raw, err)
+		}
+	}
+}
+
+func TestRejectsMalformedSetupToken(t *testing.T) {
+	for _, raw := range []string{"", " ", "token with spaces", "token\x7f", `{"kind":"claude_code_setup_token","access_token":"bad token"}`} {
 		if _, err := New().Inspect([]byte(raw)); err == nil {
 			t.Fatalf("expected invalid credential for %q", raw)
 		}

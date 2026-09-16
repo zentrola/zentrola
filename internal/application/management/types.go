@@ -14,13 +14,14 @@ import (
 )
 
 var (
-	ErrConflict                    = errors.New("conflict")
-	ErrCredential                  = errors.New("credential unrecoverable")
-	ErrProvider                    = errors.New("provider unavailable")
-	ErrProviderCredentialRequired  = errors.New("provider credential required")
-	ErrModelSyncCredentialRequired = errors.New("model sync credential required")
-	ErrCredentialExportUnsupported = errors.New("credential export unsupported")
-	ErrResetCreditUnsupported      = errors.New("rate-limit reset credit unsupported")
+	ErrConflict                     = errors.New("conflict")
+	ErrCredential                   = errors.New("credential unrecoverable")
+	ErrProvider                     = errors.New("provider unavailable")
+	ErrProviderCredentialRequired   = errors.New("provider credential required")
+	ErrProviderModelMappingRequired = errors.New("provider model mapping required")
+	ErrModelSyncCredentialRequired  = errors.New("model sync credential required")
+	ErrCredentialExportUnsupported  = errors.New("credential export unsupported")
+	ErrResetCreditUnsupported       = errors.New("rate-limit reset credit unsupported")
 )
 
 const (
@@ -305,8 +306,8 @@ type Reader interface {
 	Models(context.Context, Page, string) ([]Model, error)
 	CountModels(context.Context, string) (int64, error)
 	Model(context.Context, int64) (Model, error)
-	Providers(context.Context, Page) ([]Provider, error)
-	CountProviders(context.Context) (int64, error)
+	Providers(context.Context, Page, string) ([]Provider, error)
+	CountProviders(context.Context, string) (int64, error)
 	Provider(context.Context, int64) (Provider, error)
 	ProviderMappings(context.Context, int64) ([]ProviderMapping, error)
 	ProviderCredentialConfigured(context.Context, int64) (bool, error)
@@ -387,8 +388,10 @@ type ConnectionTester interface {
 }
 
 type DiscoveredModel struct {
-	Code string
-	Name string
+	Code             string
+	Name             string
+	InputModalities  []string
+	OutputModalities []string
 }
 
 type ModelDiscoverySource struct {
@@ -397,10 +400,11 @@ type ModelDiscoverySource struct {
 
 type ModelSyncResult struct {
 	ConnectionResult
-	Discovered int `json:"discovered"`
-	Created    int `json:"created"`
-	Updated    int `json:"updated"`
-	Mapped     int `json:"mapped"`
+	Discovered int    `json:"discovered"`
+	Created    int    `json:"created"`
+	Updated    int    `json:"updated"`
+	Mapped     int    `json:"mapped"`
+	Source     string `json:"source"`
 }
 
 type ModelDiscoverer interface {

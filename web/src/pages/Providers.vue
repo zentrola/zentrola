@@ -705,12 +705,7 @@ function validSubscriptionCredential(value: string) {
   if (!value.trim() || size > 65536) return false
   if (claudeSubscription.value) {
     const token = value.trim()
-    return (
-      token.startsWith('sk-ant-oat') &&
-      token.length > 'sk-ant-oat'.length &&
-      token.length <= 4096 &&
-      /^[\x21-\x7e]+$/.test(token)
-    )
+    return token.length <= 4096 && /^[\x21-\x7e]+$/.test(token)
   }
   try {
     const parsed = JSON.parse(value)
@@ -971,7 +966,6 @@ function save() {
     validation = t('providers.proxyUrlInvalid')
   else if (input.proxyEnabled && !validProxyHeaders())
     validation = t('providers.proxyHeadersInvalid')
-  else if (!form.mappings.length) validation = t('providers.mappingRequired')
   else if (
     form.mappings.some(
       (mapping) =>
@@ -987,7 +981,6 @@ function save() {
     if (input.proxyEnabled && (!validProxyURL(input.proxyUrl) || !validProxyHeaders()))
       activeConfigTab.value = 'proxy'
     else if (
-      !form.mappings.length ||
       form.mappings.some(
         (mapping) =>
           !models.value.some((model) => model.id === mapping.modelId) ||
@@ -1447,7 +1440,7 @@ onMounted(() => {
                   :value="row.mapping?.upstreamModelCode ?? ''"
                   spellcheck="false"
                   :disabled="busy || !row.mapping"
-                  :placeholder="t('providers.upstreamModelPlaceholder')"
+                  :placeholder="t('providers.upstreamModelPlaceholder', { code: row.model.code })"
                   :aria-label="t('providers.mappingCodeFor', { name: row.model.name })"
                   @input="updateUpstreamModelCode(row.model.id, $event)"
                 />
@@ -2193,6 +2186,8 @@ onMounted(() => {
         }}
       </div>
       <dl class="detail-grid">
+        <dt>{{ t('resources.modelSyncSource') }}</dt>
+        <dd>{{ t(`resources.modelSyncSources.${syncResult.source}`) }}</dd>
         <dt>{{ t('resources.discoveredModels') }}</dt>
         <dd>{{ syncResult.discovered }}</dd>
         <dt>{{ t('resources.createdModels') }}</dt>

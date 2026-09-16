@@ -97,6 +97,32 @@ func TestDiscoverOpenAIModels(t *testing.T) {
 	}
 }
 
+func TestDiscoverMoonshotModels(t *testing.T) {
+	var logs bytes.Buffer
+	discoverer := NewDiscoverer(slog.New(slog.NewJSONHandler(&logs, nil)))
+	discoverer.client.Transport = roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Method != http.MethodGet || request.URL.String() != "https://api.moonshot.cn/v1/models" || request.Header.Get("Authorization") != "Bearer test-secret" || request.Header.Get("x-api-key") != "" {
+			t.Fatalf("invalid discovery request: %s %s", request.Method, request.URL.String())
+		}
+		body := `{"object":"list","data":[{"id":"moonshot-v1-128k","object":"model","created":1709149142,"owned_by":"moonshot"},{"id":"kimi-k2.5","object":"model","owned_by":"moonshot"},{"id":"kimi-k2.5","object":"model","owned_by":"moonshot"}]}`
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	})
+
+	models, result := discoverer.Discover(context.Background(), mgmt.ModelDiscoverySource{ProviderCode: catalog.KimiOfficialCode}, []byte("test-secret"), nil)
+	if !result.OK || result.Code != "OK" || len(models) != 2 || models[0].Code != "kimi-k2.5" || models[0].Name != "Kimi K2.5" || models[1].Code != "moonshot-v1-128k" || models[1].Name != "Moonshot V1 128k" {
+		t.Fatalf("unexpected discovery: %+v %+v", models, result)
+	}
+	output := logs.String()
+	for _, expected := range []string{"official model catalog response", `"provider_code":"kimi-official"`, `"catalog_adapter":"moonshot"`, `"upstream_status":200`} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("discovery response log missing %q: %s", expected, output)
+		}
+	}
+	if strings.Contains(output, "test-secret") {
+		t.Fatalf("discovery response log leaked credential: %s", output)
+	}
+}
+
 func TestDiscovererReportsRegisteredProviderCapabilities(t *testing.T) {
 	discoverer := NewDiscoverer(nil)
 	if !discoverer.Supports(catalog.OpenAIOfficialCode) {
@@ -108,8 +134,29 @@ func TestDiscovererReportsRegisteredProviderCapabilities(t *testing.T) {
 	if !discoverer.Supports(catalog.ZhipuOfficialCode) {
 		t.Fatal("Zhipu model catalog adapter should be reported as supported")
 	}
+	if !discoverer.Supports(catalog.KimiOfficialCode) {
+		t.Fatal("Moonshot model catalog adapter should be reported as supported")
+	}
 	if discoverer.Supports("provider-custom") {
 		t.Fatal("custom provider should not be reported as supported")
+	}
+}
+
+func TestDiscoverMoonshotRejectsInvalidCatalog(t *testing.T) {
+	for _, body := range []string{
+		`{"object":"list","data":[{"id":"bad model\n","object":"model","owned_by":"moonshot"}]}`,
+		`{"object":"list","data":[{"id":"kimi-k2.5","object":"unknown","owned_by":"moonshot"}]}`,
+		`{"object":"list","data":[{"id":"kimi-k2.5","object":"model","owned_by":"other"}]}`,
+		`{"object":"list"}`,
+	} {
+		discoverer := NewDiscoverer(nil)
+		discoverer.client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+		})
+		models, result := discoverer.Discover(context.Background(), mgmt.ModelDiscoverySource{ProviderCode: catalog.KimiOfficialCode}, []byte("test-secret"), nil)
+		if result.Code != "UPSTREAM_INVALID_RESPONSE" || result.OK || models != nil {
+			t.Fatalf("invalid catalog accepted: %q %+v %+v", body, models, result)
+		}
 	}
 }
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { all, api, errorText } from '../api'
 import { useCollection, useAction, useListSearch, validText } from '../composables'
 import { t } from '../i18n'
@@ -80,17 +80,41 @@ function save() {
   })
 }
 const statusTarget = ref<Model | null>(null)
-const { keyword, query, visible, search, reset } = useListSearch(
+const publisherProviderId = ref('')
+const appliedPublisherProviderId = ref('')
+const {
+  keyword,
+  query,
+  visible: searchVisible,
+  search: searchKeyword,
+  reset: resetKeyword,
+} = useListSearch(
   items,
   (model) =>
     `${model.name} ${model.code} ${model.id} ${model.publisherProviderName ?? ''} ${model.remark ?? ''} ${[...(model.inputModalities ?? []), ...(model.outputModalities ?? [])].map((value) => t(`models.${value}`)).join(' ')}`,
   load,
 )
+const visible = computed(() =>
+  searchVisible.value.filter(
+    (model) =>
+      !appliedPublisherProviderId.value ||
+      model.publisherProviderId === appliedPublisherProviderId.value,
+  ),
+)
+function search() {
+  searchKeyword()
+  appliedPublisherProviderId.value = publisherProviderId.value
+}
+function reset() {
+  resetKeyword()
+  publisherProviderId.value = ''
+  appliedPublisherProviderId.value = ''
+}
 async function loadProviders() {
   providerLoading.value = true
   providerError.value = ''
   try {
-    providers.value = await all<Provider>('/providers')
+    providers.value = await all<Provider>('/providers?type=OFFICIAL')
   } catch (error) {
     providerError.value = errorText(error)
   } finally {
@@ -144,6 +168,21 @@ function deleteModel() {
       @search="search"
       @reset="reset"
     >
+      <template #filters>
+        <label class="model-publisher-filter">
+          <span>{{ t('models.publisher') }}</span>
+          <select
+            v-model="publisherProviderId"
+            :aria-label="t('models.publisher')"
+            :disabled="loading || providerLoading"
+          >
+            <option value="">{{ t('common.all') }}</option>
+            <option v-for="provider in providers" :key="provider.id" :value="provider.id">
+              {{ provider.name }}
+            </option>
+          </select>
+        </label>
+      </template>
       <template #actions>
         <div class="list-toolbar-actions">
           <button type="button" class="button primary" :disabled="busy" @click="openEdit()">
@@ -223,7 +262,17 @@ function deleteModel() {
     </TableScroll>
     <div v-if="!visible.length" class="empty-state">
       <Icon name="models" :size="32" />
-      <p>{{ t(loading ? 'common.loading' : query ? 'common.noResults' : 'models.empty') }}</p>
+      <p>
+        {{
+          t(
+            loading
+              ? 'common.loading'
+              : query || appliedPublisherProviderId
+                ? 'common.noResults'
+                : 'models.empty',
+          )
+        }}
+      </p>
     </div>
     <ListFooter
       :cursor="cursor"
@@ -362,6 +411,26 @@ function deleteModel() {
   />
 </template>
 <style scoped>
+.model-publisher-filter {
+  display: flex;
+  flex: none;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.model-publisher-filter select {
+  width: 144px;
+  padding-top: 9px;
+  padding-bottom: 9px;
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  font-size: 12px;
+}
 .model-form {
   display: grid;
   gap: 16px;
@@ -449,6 +518,13 @@ function deleteModel() {
   font-size: 12px;
 }
 @media (max-width: 640px) {
+  .model-publisher-filter {
+    width: 100%;
+  }
+  .model-publisher-filter select {
+    flex: 1;
+    width: auto;
+  }
   .model-form-row {
     grid-template-columns: 1fr;
     gap: 8px;

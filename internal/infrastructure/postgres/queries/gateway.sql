@@ -9,7 +9,7 @@ AND NOT p.is_deleted AND p.status='ACTIVE' AND p.principal_type='MEMBER');
 SELECT id,status FROM model WHERE model_code=$1 AND NOT is_deleted;
 
 -- name: GatewayCandidates :many
-SELECT pm.id AS provider_model_id,pm.provider_id,pm.upstream_model_code,pe.base_url,pe.protocol_type,
+SELECT pm.id AS provider_model_id,pm.provider_id,p.provider_name,pm.upstream_model_code,pe.base_url,pe.protocol_type,
        p.proxy_enabled,p.proxy_url_ciphertext,p.proxy_url_nonce,p.proxy_url_key_version,
        p.proxy_headers_ciphertext,p.proxy_headers_nonce,p.proxy_headers_key_version,
        r.id AS resource_id,r.auth_type,r.auth_adapter,r.subscription_type,r.priority AS resource_priority,r.expires_at,

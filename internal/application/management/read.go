@@ -4,6 +4,7 @@ import (
 	"context"
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	"github.com/zentrola/zentrola/internal/domain/admin"
+	"github.com/zentrola/zentrola/internal/domain/catalog"
 	"strconv"
 )
 
@@ -47,11 +48,19 @@ func (s *Service) Models(ctx context.Context, a admin.Identity, p Page, status s
 	}
 	return readPage(ctx, s, a, func(r Reader) ([]Model, error) { return r.Models(ctx, p, status) }, func(r Reader) (int64, error) { return r.CountModels(ctx, status) })
 }
-func (s *Service) Providers(ctx context.Context, a admin.Identity, p Page) (PageData[Provider], error) {
-	if !validPage(p) {
+func validProviderType(value string) bool {
+	switch catalog.ProviderType(value) {
+	case catalog.Official, catalog.Platform, catalog.Partner, catalog.Custom:
+		return true
+	default:
+		return false
+	}
+}
+func (s *Service) Providers(ctx context.Context, a admin.Identity, p Page, providerType string) (PageData[Provider], error) {
+	if !validPage(p) || (providerType != "" && !validProviderType(providerType)) {
 		return PageData[Provider]{}, appsec.ErrInvalidArgument
 	}
-	result, err := readPage(ctx, s, a, func(r Reader) ([]Provider, error) { return r.Providers(ctx, p) }, func(r Reader) (int64, error) { return r.CountProviders(ctx) })
+	result, err := readPage(ctx, s, a, func(r Reader) ([]Provider, error) { return r.Providers(ctx, p, providerType) }, func(r Reader) (int64, error) { return r.CountProviders(ctx, providerType) })
 	if err != nil {
 		return PageData[Provider]{}, err
 	}

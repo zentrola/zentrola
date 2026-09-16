@@ -37,13 +37,18 @@ func (syncCipher) Decrypt(catalog.SealedCredential, catalog.CredentialOwner) ([]
 }
 
 type syncDiscoverer struct {
-	models []DiscoveredModel
-	result ConnectionResult
-	source ModelDiscoverySource
+	models       []DiscoveredModel
+	result       ConnectionResult
+	source       ModelDiscoverySource
+	supportsCode string
 }
 
 func (d *syncDiscoverer) Supports(providerCode string) bool {
-	return providerCode == catalog.DeepSeekOfficialCode
+	code := d.supportsCode
+	if code == "" {
+		code = catalog.DeepSeekOfficialCode
+	}
+	return providerCode == code
 }
 
 func (d *syncDiscoverer) Discover(_ context.Context, source ModelDiscoverySource, _ []byte, _ *catalog.OutboundProxy) ([]DiscoveredModel, ConnectionResult) {
@@ -71,15 +76,31 @@ type syncState struct {
 
 type providerCapabilityReader struct {
 	Reader
-	providers []Provider
+	providers         []Provider
+	providerType      string
+	countProviderType string
 }
 
-func (r *providerCapabilityReader) Providers(context.Context, Page) ([]Provider, error) {
-	return append([]Provider(nil), r.providers...), nil
+func (r *providerCapabilityReader) Providers(_ context.Context, _ Page, providerType string) ([]Provider, error) {
+	r.providerType = providerType
+	result := make([]Provider, 0, len(r.providers))
+	for _, provider := range r.providers {
+		if providerType == "" || provider.Type == providerType {
+			result = append(result, provider)
+		}
+	}
+	return result, nil
 }
 
-func (r *providerCapabilityReader) CountProviders(context.Context) (int64, error) {
-	return int64(len(r.providers)), nil
+func (r *providerCapabilityReader) CountProviders(_ context.Context, providerType string) (int64, error) {
+	r.countProviderType = providerType
+	var count int64
+	for _, provider := range r.providers {
+		if providerType == "" || provider.Type == providerType {
+			count++
+		}
+	}
+	return count, nil
 }
 
 type providerCapabilityStore struct{ reader *providerCapabilityReader }
@@ -158,21 +179,21 @@ func TestSyncResourceModelsCreatesMissingEntriesAndRefreshesExistingNames(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.OK || result.Discovered != 3 || result.Created != 2 || result.Updated != 1 || result.Mapped != 2 {
+	if !result.OK || result.Source != "PROVIDER" || result.Discovered != 3 || result.Created != 2 || result.Updated != 1 || result.Mapped != 2 {
 		t.Fatalf("unexpected result: %+v", result)
 	}
 	if discoverer.source.ProviderCode != state.provider.Code {
 		t.Fatalf("discovery provider code = %q, want %q", discoverer.source.ProviderCode, state.provider.Code)
 	}
-	if len(state.models) != 3 || state.models[0].Name != "Upstream name" || state.models[0].Status != "ACTIVE" || state.models[0].Remark != "保留说明" || len(state.models[0].InputModalities) != 2 || len(state.models[0].OutputModalities) != 1 || state.models[1].Name != "New Model" || state.models[1].Status != "DISABLED" || state.models[2].Name != "Deepseek v4 flash vision exp" || state.models[2].Status != "DISABLED" {
-		t.Fatalf("existing model metadata was not selectively updated or new model was enabled: %+v", state.models)
+	if len(state.models) != 3 || state.models[0].Name != "Upstream name" || state.models[0].Status != "ACTIVE" || state.models[0].Remark != "保留说明" || len(state.models[0].InputModalities) != 2 || len(state.models[0].OutputModalities) != 1 || state.models[1].Name != "New Model" || state.models[1].Status != "ACTIVE" || state.models[2].Name != "Deepseek v4 flash vision exp" || state.models[2].Status != "ACTIVE" {
+		t.Fatalf("existing model metadata was not selectively updated or synchronized models were not enabled: %+v", state.models)
 	}
 	for _, model := range state.models {
 		if model.PublisherProviderID == nil || *model.PublisherProviderID != state.provider.ID || model.PublisherProviderName == nil || *model.PublisherProviderName != state.provider.Name {
 			t.Fatalf("model publisher was not synchronized: %+v", model)
 		}
 	}
-	if len(state.mappings) != 3 || state.mappings[0].UpstreamModelCode != "custom-existing" || state.mappings[0].Priority != 7 {
+	if len(state.mappings) != 3 || state.mappings[0].UpstreamModelCode != "custom-existing" || state.mappings[0].Priority != 7 || state.mappings[1].UpstreamModelCode != "" || state.mappings[2].UpstreamModelCode != "" {
 		t.Fatalf("existing mapping was overwritten: %+v", state.mappings)
 	}
 	if len(state.audits) != 1 || state.audits[0].ErrorCode != "" {
@@ -185,7 +206,7 @@ func TestSyncResourceModelsCreatesMissingEntriesAndRefreshesExistingNames(t *tes
 	}
 }
 
-func TestSyncProviderModelsRequiresSyncCredential(t *testing.T) {
+func TestSyncProviderModelsFallsBackToBuiltInCatalogWithoutCredential(t *testing.T) {
 	state := &syncState{
 		provider: Provider{ID: 20, Code: catalog.DeepSeekOfficialCode, Name: "DeepSeek"},
 	}
@@ -197,12 +218,65 @@ func TestSyncProviderModelsRequiresSyncCredential(t *testing.T) {
 		WithModelDiscoverer(&syncDiscoverer{}),
 	)
 
-	_, err := service.SyncProviderModels(
+	result, err := service.SyncProviderModels(
 		context.Background(),
 		admin.Identity{ID: 1},
 		20,
 		appsec.RequestMeta{},
 	)
+	if err != nil || !result.OK || result.Source != "BUILTIN" || result.Discovered != 2 || result.Created != 2 || result.Mapped != 2 {
+		t.Fatalf("unexpected built-in fallback result: %+v err=%v", result, err)
+	}
+	if len(state.models) != 2 || state.models[0].Code != "deepseek-flash" || state.models[0].Status != "ACTIVE" || state.models[1].Status != "ACTIVE" ||
+		len(state.models[0].InputModalities) != 2 || state.models[0].InputModalities[0] != "TEXT" ||
+		state.models[0].InputModalities[1] != "IMAGE" || len(state.mappings) != 2 ||
+		state.mappings[0].UpstreamModelCode != "" || state.mappings[1].UpstreamModelCode != "" {
+		t.Fatalf("built-in catalog was not persisted: models=%+v mappings=%+v", state.models, state.mappings)
+	}
+}
+
+func TestBuiltInModelSyncPreservesManuallyAdjustedModalities(t *testing.T) {
+	publisherID := int64(99)
+	publisherName := "旧厂商"
+	state := &syncState{
+		provider: Provider{ID: 20, Code: catalog.DeepSeekOfficialCode, Name: "DeepSeek"},
+		models: []Model{{
+			ID: 30, Code: "deepseek-flash", Name: "旧名称", Status: "ACTIVE",
+			InputModalities: []string{"IMAGE"}, OutputModalities: []string{"AUDIO"},
+			PublisherProviderID: &publisherID, PublisherProviderName: &publisherName,
+		}},
+	}
+	service := New(syncStore{state}, &syncIDs{next: 100}, syncCipher{}, nil)
+
+	result, err := service.SyncProviderModels(
+		context.Background(),
+		admin.Identity{ID: 1},
+		20,
+		appsec.RequestMeta{},
+	)
+	if err != nil || result.Source != "BUILTIN" || result.Created != 1 || result.Updated != 1 || result.Mapped != 2 {
+		t.Fatalf("unexpected built-in update result: %+v err=%v", result, err)
+	}
+	existing := state.models[0]
+	if existing.Name != "DeepSeek V4.1 Flash" ||
+		len(existing.InputModalities) != 1 || existing.InputModalities[0] != "IMAGE" ||
+		len(existing.OutputModalities) != 1 || existing.OutputModalities[0] != "AUDIO" ||
+		existing.PublisherProviderID == nil || *existing.PublisherProviderID != state.provider.ID {
+		t.Fatalf("manual modalities were overwritten during built-in sync: %+v", existing)
+	}
+}
+
+func TestSyncProviderModelsRequiresCredentialWhenBuiltInCatalogIsEmpty(t *testing.T) {
+	state := &syncState{provider: Provider{ID: 20, Code: "provider-custom", Name: "Custom"}}
+	service := New(
+		syncStore{state},
+		&syncIDs{},
+		syncCipher{},
+		nil,
+		WithModelDiscoverer(&syncDiscoverer{supportsCode: "provider-custom"}),
+	)
+
+	_, err := service.SyncProviderModels(context.Background(), admin.Identity{ID: 1}, 20, appsec.RequestMeta{})
 	if !errors.Is(err, ErrModelSyncCredentialRequired) {
 		t.Fatalf("error=%v; want model sync credential required", err)
 	}
@@ -256,7 +330,7 @@ func TestProviderModelSyncCapabilityFollowsDiscovererSupport(t *testing.T) {
 	}}
 	service := New(providerCapabilityStore{reader: reader}, nil, nil, nil, WithModelDiscoverer(&syncDiscoverer{}))
 
-	result, err := service.Providers(context.Background(), admin.Identity{}, Page{Limit: 20})
+	result, err := service.Providers(context.Background(), admin.Identity{}, Page{Limit: 20}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,8 +339,45 @@ func TestProviderModelSyncCapabilityFollowsDiscovererSupport(t *testing.T) {
 	}
 }
 
+func TestProvidersFiltersByValidatedProviderType(t *testing.T) {
+	reader := &providerCapabilityReader{providers: []Provider{
+		{ID: 1, Type: string(catalog.Official)},
+		{ID: 2, Type: string(catalog.Custom)},
+	}}
+	service := New(providerCapabilityStore{reader: reader}, nil, nil, nil)
+
+	result, err := service.Providers(context.Background(), admin.Identity{}, Page{Limit: 20}, string(catalog.Official))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 1 || result.Items[0].ID != 1 || result.Total != 1 ||
+		reader.providerType != string(catalog.Official) || reader.countProviderType != string(catalog.Official) {
+		t.Fatalf("provider type filter was not forwarded consistently: result=%+v reader=%+v", result, reader)
+	}
+	if _, err := service.Providers(context.Background(), admin.Identity{}, Page{Limit: 20}, "UNKNOWN"); !errors.Is(err, appsec.ErrInvalidArgument) {
+		t.Fatalf("invalid provider type error = %v", err)
+	}
+}
+
 func TestModelDisplayName(t *testing.T) {
 	if got := modelDisplayName("deepseek-v4-flash-vision-exp"); got != "Deepseek v4 flash vision exp" {
 		t.Fatalf("modelDisplayName() = %q", got)
+	}
+}
+
+func TestEnrichDiscoveredModelsUsesBuiltInMetadataWithoutAddingModels(t *testing.T) {
+	discovered := enrichDiscoveredModels(catalog.DeepSeekOfficialCode, []DiscoveredModel{{
+		Code: "deepseek-flash", Name: "deepseek-flash",
+	}})
+	if len(discovered) != 1 || discovered[0].Name != "DeepSeek V4.1 Flash" ||
+		len(discovered[0].InputModalities) != 2 || discovered[0].InputModalities[0] != "TEXT" ||
+		discovered[0].InputModalities[1] != "IMAGE" ||
+		len(discovered[0].OutputModalities) != 1 || discovered[0].OutputModalities[0] != "TEXT" {
+		t.Fatalf("built-in metadata was not merged: %+v", discovered)
+	}
+	discovered[0].InputModalities[0] = "IMAGE"
+	again := enrichDiscoveredModels(catalog.DeepSeekOfficialCode, []DiscoveredModel{{Code: "deepseek-flash"}})
+	if again[0].InputModalities[0] != "TEXT" {
+		t.Fatalf("built-in metadata was mutated: %+v", again)
 	}
 }

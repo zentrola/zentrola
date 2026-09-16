@@ -9,6 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/zentrola/zentrola/internal/application/bootstrap"
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	"github.com/zentrola/zentrola/internal/domain/admin"
 	"github.com/zentrola/zentrola/internal/domain/catalog"
@@ -48,7 +49,8 @@ func New(store Store, ids shared.IDGenerator, cipher Cipher, tester ConnectionTe
 }
 
 func (s *Service) withProviderCapabilities(provider Provider) Provider {
-	provider.ModelSyncSupported = s.discoverer != nil && s.discoverer.Supports(provider.Code)
+	provider.ModelSyncSupported = s.discoverer != nil && s.discoverer.Supports(provider.Code) ||
+		len(bootstrap.OfficialProviderModels(provider.Code)) > 0
 	provider.AuthAdapters = []string{AuthAdapterAPIKey}
 	for _, adapter := range s.subscriptions {
 		if adapter.SupportsProvider(provider) {
@@ -566,7 +568,9 @@ func (s *Service) CreateAuthenticationResource(ctx context.Context, actor admin.
 		if !validSubscriptionCredential(input.Credential) || subscription == nil {
 			return Resource{}, appsec.ErrInvalidArgument
 		}
-		if _, err := subscription.Inspect(plain); err != nil {
+		var err error
+		inspection, err = subscription.Inspect(plain)
+		if err != nil {
 			return Resource{}, appsec.ErrInvalidArgument
 		}
 		var provider Provider
@@ -580,24 +584,28 @@ func (s *Service) CreateAuthenticationResource(ctx context.Context, actor admin.
 		if !subscription.SupportsProvider(provider) {
 			return Resource{}, appsec.ErrInvalidArgument
 		}
-		subscriptionProxy, proxyErr := s.decryptedProviderProxy(provider)
-		if proxyErr != nil {
-			return Resource{}, ErrProvider
+		// Claude Code setup token 在保存时只做本地结构检查。在线有效性和额度读取由“测试连接”负责，
+		// 避免网络、代理或 Anthropic 服务异常阻止管理员先保存凭据。
+		if input.AuthAdapter != AuthAdapterClaudeCode {
+			subscriptionProxy, proxyErr := s.decryptedProviderProxy(provider)
+			if proxyErr != nil {
+				return Resource{}, ErrProvider
+			}
+			probe, probeErr := subscription.Probe(ctx, plain, subscriptionProxy)
+			if probeErr != nil {
+				return Resource{}, appsec.ErrUnavailable
+			}
+			if len(probe.Credential) == 0 {
+				clear(probe.Credential)
+				return Resource{}, appsec.ErrUnavailable
+			}
+			normalizeSubscriptionProbe(&probe)
+			inspection = probe.Inspection
+			clear(plain)
+			plain = probe.Credential
+			probe.Credential = nil
+			subscriptionProbe = &probe
 		}
-		probe, err := subscription.Probe(ctx, plain, subscriptionProxy)
-		if err != nil {
-			return Resource{}, appsec.ErrUnavailable
-		}
-		if len(probe.Credential) == 0 {
-			clear(probe.Credential)
-			return Resource{}, appsec.ErrUnavailable
-		}
-		normalizeSubscriptionProbe(&probe)
-		inspection = probe.Inspection
-		clear(plain)
-		plain = probe.Credential
-		probe.Credential = nil
-		subscriptionProbe = &probe
 	default:
 		return Resource{}, appsec.ErrInvalidArgument
 	}
@@ -623,8 +631,10 @@ func (s *Service) CreateAuthenticationResource(ctx context.Context, actor admin.
 		if resource.ExpiresAt == nil {
 			resource.ExpiresAt = inspection.ExpiresAt
 		}
-		resource.QuotaStatus, resource.QuotaResetsAt = aggregateQuota(subscriptionProbe.Quotas)
-		resource.QuotaCheckedAt = &now
+		if subscriptionProbe != nil {
+			resource.QuotaStatus, resource.QuotaResetsAt = aggregateQuota(subscriptionProbe.Quotas)
+			resource.QuotaCheckedAt = &now
+		}
 	}
 	sealed, err := s.cipher.Encrypt(plain, owner(actor, resource))
 	if err != nil {
@@ -712,20 +722,22 @@ func (s *Service) UpdateCredential(ctx context.Context, actor admin.Identity, id
 		if _, err := subscription.Inspect(plain); err != nil {
 			return appsec.ErrInvalidArgument
 		}
-		proxy, err := s.decryptedProviderProxy(provider)
-		if err != nil {
-			return ErrProvider
+		if original.AuthAdapter != AuthAdapterClaudeCode {
+			proxy, err := s.decryptedProviderProxy(provider)
+			if err != nil {
+				return ErrProvider
+			}
+			probe, err := subscription.Probe(ctx, plain, proxy)
+			if err != nil || len(probe.Credential) == 0 {
+				clear(probe.Credential)
+				return appsec.ErrUnavailable
+			}
+			normalizeSubscriptionProbe(&probe)
+			clear(plain)
+			plain = probe.Credential
+			probe.Credential = nil
+			subscriptionProbe = &probe
 		}
-		probe, err := subscription.Probe(ctx, plain, proxy)
-		if err != nil || len(probe.Credential) == 0 {
-			clear(probe.Credential)
-			return appsec.ErrUnavailable
-		}
-		normalizeSubscriptionProbe(&probe)
-		clear(plain)
-		plain = probe.Credential
-		probe.Credential = nil
-		subscriptionProbe = &probe
 	}
 	sealed, err := s.cipher.Encrypt(plain, owner(actor, original.Resource))
 	if err != nil {
@@ -751,6 +763,14 @@ func (s *Service) UpdateCredential(ctx context.Context, actor admin.Identity, id
 			record.QuotaStatus, record.QuotaResetsAt = aggregateQuota(subscriptionProbe.Quotas)
 			now := time.Now().UTC().Truncate(time.Microsecond)
 			record.QuotaCheckedAt = &now
+		} else if record.AuthAdapter == AuthAdapterClaudeCode {
+			record.ExternalAccountRef = nil
+			record.PlanCode = nil
+			record.CredentialRefreshedAt = nil
+			record.CredentialExpiresAt = nil
+			record.QuotaStatus = QuotaUnknown
+			record.QuotaResetsAt = nil
+			record.QuotaCheckedAt = nil
 		}
 		record.UpdatedAt = time.Now().UTC().Truncate(time.Microsecond)
 		if err := w.UpdateResource(ctx, record); err != nil {
@@ -758,6 +778,10 @@ func (s *Service) UpdateCredential(ctx context.Context, actor admin.Identity, id
 		}
 		if subscriptionProbe != nil {
 			if err := w.ReplaceResourceQuotas(ctx, id, subscriptionProbe.Quotas); err != nil {
+				return err
+			}
+		} else if record.AuthAdapter == AuthAdapterClaudeCode {
+			if err := w.ReplaceResourceQuotas(ctx, id, nil); err != nil {
 				return err
 			}
 		}
@@ -1014,7 +1038,9 @@ func subscriptionConnectionCode(err error) string {
 	var connectionError SubscriptionConnectionError
 	if errors.As(err, &connectionError) {
 		switch connectionError.ConnectionCode() {
-		case "CREDENTIAL_INVALID", "CODEX_APP_SERVER_UNAVAILABLE", "UPSTREAM_TIMEOUT":
+		case "CREDENTIAL_INVALID", "CODEX_APP_SERVER_UNAVAILABLE", "UPSTREAM_AUTH_FAILED",
+			"UPSTREAM_BILLING_BLOCKED", "UPSTREAM_RATE_LIMITED", "UPSTREAM_TIMEOUT",
+			"UPSTREAM_UNAVAILABLE", "UPSTREAM_INVALID_RESPONSE":
 			return connectionError.ConnectionCode()
 		}
 	}

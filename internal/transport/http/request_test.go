@@ -197,6 +197,17 @@ func TestProviderCredentialRequiredReturnsConflict(t *testing.T) {
 	}
 }
 
+func TestProviderModelMappingRequiredReturnsConflict(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/providers/8/status", nil)
+
+	securityError(recorder, request, mgmt.ErrProviderModelMappingRequired)
+
+	if recorder.Code != http.StatusConflict || !strings.Contains(recorder.Body.String(), `"code":"PROVIDER_MODEL_MAPPING_REQUIRED"`) {
+		t.Fatalf("unexpected response: status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestModelSyncCredentialRequiredReturnsConflict(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/providers/8/sync-models", nil)

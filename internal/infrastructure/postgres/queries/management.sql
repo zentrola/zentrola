@@ -115,7 +115,12 @@ WHERE model_id=$1 AND is_deleted=false;
 UPDATE model SET is_deleted=true,status='DISABLED',updated_by=$2,updated_at=$3
 WHERE id=$1 AND is_deleted=false;
 -- name: ManageProviders :many
-SELECT * FROM provider WHERE is_deleted=false AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2;
+SELECT * FROM provider
+WHERE is_deleted=false
+  AND (sqlc.arg(provider_type)::text = '' OR provider_type = sqlc.arg(provider_type)::text)
+  AND (id < sqlc.arg(after_id) OR sqlc.arg(after_id) = 0)
+ORDER BY id DESC
+LIMIT sqlc.arg(page_limit);
 -- name: ManageProvider :one
 SELECT * FROM provider WHERE id=$1 AND is_deleted=false;
 -- name: ManageProviderCredentialConfigured :one
@@ -266,7 +271,9 @@ WHERE is_deleted=false
   AND (sqlc.arg(status)::text = '' OR status = sqlc.arg(status)::text);
 
 -- name: CountManageProviders :one
-SELECT COUNT(*)::bigint FROM provider WHERE is_deleted=false;
+SELECT COUNT(*)::bigint FROM provider
+WHERE is_deleted=false
+  AND (sqlc.arg(provider_type)::text = '' OR provider_type = sqlc.arg(provider_type)::text);
 
 -- name: CountManageResources :one
 SELECT COUNT(*)::bigint FROM provider_credential

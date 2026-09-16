@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	mgmt "github.com/zentrola/zentrola/internal/application/management"
@@ -22,10 +21,22 @@ const (
 	OAuthBeta            = "oauth-2025-04-20"
 	defaultUsageEndpoint = "https://api.anthropic.com/api/oauth/usage"
 	credentialKind       = "claude_code_setup_token"
-	tokenPrefix          = "sk-ant-oat"
 )
 
 var errInvalidCredential = errors.New("invalid Claude Code setup token")
+
+type connectionFailure struct {
+	code  string
+	cause error
+}
+
+func (e *connectionFailure) Error() string          { return e.cause.Error() }
+func (e *connectionFailure) Unwrap() error          { return e.cause }
+func (e *connectionFailure) ConnectionCode() string { return e.code }
+
+func connectionError(code string, cause error) error {
+	return &connectionFailure{code: code, cause: cause}
+}
 
 type storedCredential struct {
 	Kind        string `json:"kind"`
@@ -53,7 +64,7 @@ func (a *Adapter) SupportsProvider(provider mgmt.Provider) bool {
 }
 
 func validToken(token string) bool {
-	if !strings.HasPrefix(token, tokenPrefix) || len(token) <= len(tokenPrefix) || len(token) > 4096 {
+	if len(token) == 0 || len(token) > 4096 {
 		return false
 	}
 	for _, value := range []byte(token) {
@@ -161,7 +172,7 @@ func (u usageResponse) quotas(observedAt time.Time) []mgmt.ResourceQuota {
 func (a *Adapter) Probe(ctx context.Context, raw []byte, proxy *catalog.OutboundProxy) (mgmt.SubscriptionProbe, error) {
 	credential, err := parseCredential(raw)
 	if err != nil {
-		return mgmt.SubscriptionProbe{}, err
+		return mgmt.SubscriptionProbe{}, connectionError("CREDENTIAL_INVALID", err)
 	}
 	usage, err := a.readUsage(ctx, credential.AccessToken, proxy)
 	if err != nil {
@@ -182,7 +193,7 @@ func (a *Adapter) Probe(ctx context.Context, raw []byte, proxy *catalog.Outbound
 func (a *Adapter) readUsage(ctx context.Context, token string, proxy *catalog.OutboundProxy) (usageResponse, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, a.usageEndpoint, nil)
 	if err != nil {
-		return usageResponse{}, errors.New("cannot create Claude usage request")
+		return usageResponse{}, connectionError("UPSTREAM_UNAVAILABLE", errors.New("cannot create Claude usage request"))
 	}
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("Authorization", "Bearer "+token)
@@ -193,24 +204,41 @@ func (a *Adapter) readUsage(ctx context.Context, token string, proxy *catalog.Ou
 		Operation: "subscription_usage", ProviderCode: catalog.AnthropicOfficialCode, Protocol: "ANTHROPIC",
 	})
 	if err != nil {
-		return usageResponse{}, errors.New("invalid Claude proxy configuration")
+		return usageResponse{}, connectionError("SUBSCRIPTION_UNAVAILABLE", errors.New("invalid Claude proxy configuration"))
 	}
 	defer cleanup()
 	response, err := client.Do(request)
 	if err != nil {
-		return usageResponse{}, errors.New("cannot reach Claude usage service")
+		code := "SUBSCRIPTION_UNAVAILABLE"
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			code = "UPSTREAM_TIMEOUT"
+		}
+		return usageResponse{}, connectionError(code, errors.New("cannot reach Claude usage service"))
 	}
 	defer response.Body.Close()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
-		return usageResponse{}, fmt.Errorf("Claude usage request failed with HTTP %d", response.StatusCode)
+		return usageResponse{}, connectionError(usageStatusCode(response.StatusCode), fmt.Errorf("Claude usage request failed with HTTP %d", response.StatusCode))
 	}
 	var usage usageResponse
 	decoder := json.NewDecoder(io.LimitReader(response.Body, 1<<20))
 	if decoder.Decode(&usage) != nil {
-		return usageResponse{}, errors.New("invalid Claude usage response")
+		return usageResponse{}, connectionError("UPSTREAM_INVALID_RESPONSE", errors.New("invalid Claude usage response"))
 	}
 	return usage, nil
+}
+
+func usageStatusCode(status int) string {
+	switch status {
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return "UPSTREAM_AUTH_FAILED"
+	case http.StatusPaymentRequired:
+		return "UPSTREAM_BILLING_BLOCKED"
+	case http.StatusTooManyRequests:
+		return "UPSTREAM_RATE_LIMITED"
+	default:
+		return "UPSTREAM_UNAVAILABLE"
+	}
 }
 
 // setup-token 是长期 OAuth Token，没有可供第三方调用的公开刷新接口。

@@ -18,6 +18,8 @@ type failoverStore struct {
 	blocks        []ResourceBlock
 	updatedRoute  int64
 	updatedSealed catalog.SealedCredential
+	resolvedModel string
+	protocols     []string
 }
 
 func (s *failoverStore) UpdateResourceCredential(_ context.Context, route Route, sealed catalog.SealedCredential) error {
@@ -26,14 +28,18 @@ func (s *failoverStore) UpdateResourceCredential(_ context.Context, route Route,
 	return nil
 }
 
-func (s *failoverStore) Resolve(context.Context, appsec.PrincipalIdentity, string, ...string) (Route, error) {
+func (s *failoverStore) Resolve(_ context.Context, _ appsec.PrincipalIdentity, model string, protocols ...string) (Route, error) {
+	s.resolvedModel = model
+	s.protocols = append([]string(nil), protocols...)
 	if len(s.routes) == 0 {
 		return Route{}, ErrRoute
 	}
 	return s.routes[0], nil
 }
 
-func (s *failoverStore) ResolveCandidates(context.Context, appsec.PrincipalIdentity, string, ...string) ([]Route, error) {
+func (s *failoverStore) ResolveCandidates(_ context.Context, _ appsec.PrincipalIdentity, model string, protocols ...string) ([]Route, error) {
+	s.resolvedModel = model
+	s.protocols = append([]string(nil), protocols...)
 	return append([]Route(nil), s.routes...), nil
 }
 
@@ -108,6 +114,43 @@ func testForward(t *testing.T, service *Service, trace *usage.Event) (*Response,
 
 func response(status int, body string) *Response {
 	return &Response{Status: status, Headers: map[string][]string{}, Body: io.NopCloser(strings.NewReader(body))}
+}
+
+func TestProviderReturnsFirstCurrentRouteForModel(t *testing.T) {
+	store := &failoverStore{routes: []Route{
+		{ProviderID: 10, ProviderName: "OpenAI"},
+		{ProviderID: 20, ProviderName: "Anthropic"},
+	}}
+	result, err := New(store, nil, nil).Provider(
+		context.Background(), appsec.PrincipalIdentity{ID: 1, AccessKeyID: 3}, "gpt-5.6-sol",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Name != "OpenAI" || store.resolvedModel != "gpt-5.6-sol" ||
+		len(store.protocols) != 1 || store.protocols[0] != OpenAIResponsesProtocol {
+		t.Fatalf("unexpected provider resolution: result=%+v model=%q protocols=%v", result, store.resolvedModel, store.protocols)
+	}
+}
+
+func TestProviderValidatesIdentityAndModel(t *testing.T) {
+	service := New(&failoverStore{}, nil, nil)
+	for _, test := range []struct {
+		name     string
+		identity appsec.PrincipalIdentity
+		model    string
+		want     error
+	}{
+		{name: "missing identity", model: "gpt-5.6-sol", want: ErrAuthentication},
+		{name: "missing access key", identity: appsec.PrincipalIdentity{ID: 1}, model: "gpt-5.6-sol", want: ErrAuthentication},
+		{name: "invalid model", identity: appsec.PrincipalIdentity{ID: 1, AccessKeyID: 3}, model: "", want: ErrInvalid},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := service.Provider(context.Background(), test.identity, test.model); !errors.Is(err, test.want) {
+				t.Fatalf("got %v, want %v", err, test.want)
+			}
+		})
+	}
 }
 
 func TestForwardFailsOverAndRecordsEveryAttempt(t *testing.T) {

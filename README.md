@@ -61,7 +61,7 @@ The management plane and gateway plane are isolated:
 - Usage dashboards and operation logs
 - Chinese and English Admin Web localization
 
-Model-catalog synchronization currently has dedicated adapters for OpenAI, DeepSeek, and Zhipu AI. Other OpenAI- or Anthropic-compatible providers can be configured manually.
+Model-catalog synchronization currently has dedicated adapters for OpenAI, DeepSeek, Zhipu AI, and Moonshot AI. Other OpenAI- or Anthropic-compatible providers can be configured manually.
 
 ## Quick start
 

@@ -761,7 +761,7 @@ label textarea {
 .modal-body > .list-search {
   padding: 0 0 16px;
 }
-.search-box input {
+.search-box input[type='search'] {
   min-height: 40px;
   padding: 9px 12px 9px 38px;
   font-size: 12px;
@@ -772,6 +772,7 @@ label textarea {
   position: absolute;
   top: 11px;
   left: 11px;
+  pointer-events: none;
 }
 .table-scroll {
   position: relative;

@@ -6,6 +6,9 @@ type Protocol string
 
 const (
 	Official  ProviderType = "OFFICIAL"
+	Platform  ProviderType = "PLATFORM"
+	Partner   ProviderType = "PARTNER"
+	Custom    ProviderType = "CUSTOM"
 	Anthropic Protocol     = "ANTHROPIC"
 	OpenAI    Protocol     = "OPENAI"
 )
@@ -15,6 +18,7 @@ const (
 	OpenAIOfficialCode    = "openai-official"
 	DeepSeekOfficialCode  = "deepseek-official"
 	ZhipuOfficialCode     = "zhipu-official"
+	KimiOfficialCode      = "kimi-official"
 	SonnetCode            = "claude-sonnet"
 	OpusCode              = "claude-opus"
 )

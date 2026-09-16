@@ -94,7 +94,7 @@ func readAllProviders(ctx context.Context, reader Reader) ([]Provider, error) {
 	providers := make([]Provider, 0)
 	var after int64
 	for {
-		page, err := reader.Providers(ctx, Page{After: after, Limit: 100})
+		page, err := reader.Providers(ctx, Page{After: after, Limit: 100}, "")
 		if err != nil {
 			return nil, err
 		}

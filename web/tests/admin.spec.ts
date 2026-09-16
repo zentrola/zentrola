@@ -137,6 +137,7 @@ async function fixture(page: Page) {
     keys: any[] = [],
     groupQueries: URLSearchParams[] = [],
     modelQueries: URLSearchParams[] = [],
+    providerQueries: URLSearchParams[] = [],
     memberListQueries: URLSearchParams[] = [],
     memberSuggestionQueries: URLSearchParams[] = [],
     usageQueries: URLSearchParams[] = [],
@@ -264,7 +265,13 @@ async function fixture(page: Page) {
         const status = url.searchParams.get('status')
         return pageReply(status ? models.filter((model) => model.status === status) : models)
       }
-      if (path === '/providers') return pageReply(providers)
+      if (path === '/providers') {
+        providerQueries.push(new URLSearchParams(url.searchParams))
+        const providerType = url.searchParams.get('type')
+        return pageReply(
+          providerType ? providers.filter((provider) => provider.type === providerType) : providers,
+        )
+      }
       if (path === '/groups') {
         groupQueries.push(new URLSearchParams(url.searchParams))
         const status = url.searchParams.get('status')
@@ -306,15 +313,11 @@ async function fixture(page: Page) {
     }
     if (segments[0] === 'providers' && segments[2] === 'sync-models' && method === 'POST') {
       modelSyncRequests.push(segments[1])
-      if (
-        !resources.some(
-          (resource) =>
-            resource.providerId === segments[1] &&
-            (resource.authType === 'API_KEY' || !resource.authType),
-        )
-      ) {
-        return reply(null, 409, 'MODEL_SYNC_CREDENTIAL_REQUIRED')
-      }
+      const hasAPIKey = resources.some(
+        (resource) =>
+          resource.providerId === segments[1] &&
+          (resource.authType === 'API_KEY' || !resource.authType),
+      )
       return reply({
         ok: !failedTest,
         code: failedTest ? 'UPSTREAM_AUTH_FAILED' : 'OK',
@@ -324,6 +327,7 @@ async function fixture(page: Page) {
         created: failedTest ? 0 : 1,
         updated: 0,
         mapped: failedTest ? 0 : 1,
+        source: hasAPIKey ? 'PROVIDER' : 'BUILTIN',
       })
     }
     if (path === '/providers/initialize' && method === 'POST') {
@@ -370,6 +374,42 @@ async function fixture(page: Page) {
           'Alibaba Cloud',
           'https://dashscope.aliyuncs.com/compatible-mode/v1',
           'https://qwen.ai',
+        ],
+        ['xai-official', 'xAI', 'xAI', 'https://api.x.ai/v1', 'https://x.ai'],
+        [
+          'mistral-official',
+          'Mistral AI',
+          'Mistral AI',
+          'https://api.mistral.ai/v1',
+          'https://mistral.ai',
+        ],
+        [
+          'minimax-official',
+          'MiniMax',
+          'MiniMax',
+          'https://api.minimax.cn/v1',
+          'https://www.minimax.io',
+        ],
+        [
+          'doubao-official',
+          '字节跳动',
+          'ByteDance',
+          'https://ark.cn-beijing.volces.com/api/v3',
+          'https://www.volcengine.com/product/ark',
+        ],
+        [
+          'baidu-qianfan-official',
+          '百度',
+          'Baidu',
+          'https://qianfan.baidubce.com/v2',
+          'https://cloud.baidu.com/product-s/qianfan_home',
+        ],
+        [
+          'tencent-hunyuan-official',
+          '腾讯',
+          'Tencent',
+          'https://api.hunyuan.cloud.tencent.com/v1',
+          'https://cloud.tencent.com/product/hunyuan',
         ],
       ]
       let created = 0,
@@ -804,6 +844,7 @@ async function fixture(page: Page) {
     relationships,
     groupQueries,
     modelQueries,
+    providerQueries,
     memberListQueries,
     memberSuggestionQueries,
     usageQueries,
@@ -1474,6 +1515,7 @@ test('模型新增编辑、模态校验、冲突恢复和窄屏表单', async ({
   const state = await fixture(page)
   await signIn(page)
   await page.getByRole('link', { name: '模型', exact: true }).click()
+  await expect.poll(() => state.providerQueries.at(-1)?.get('type')).toBe('OFFICIAL')
   await expect(page.getByRole('columnheader')).toHaveText([
     '模型名称',
     '模型厂商',
@@ -1488,6 +1530,17 @@ test('模型新增编辑、模态校验、冲突恢复和窄屏表单', async ({
   await expect(existingModelRow.locator('.person small')).toHaveText('deepseek-v4-flash')
   await expect(existingModelRow.getByRole('cell')).toHaveCount(7)
   await expect(existingModelRow.getByRole('cell').nth(1)).toHaveText('DeepSeek')
+  const publisherFilter = page.getByRole('combobox', { name: '模型厂商', exact: true })
+  await expect(publisherFilter.locator('..')).toHaveCSS('flex-direction', 'row')
+  await expect(publisherFilter.locator('option')).toHaveText(['全部', 'DeepSeek'])
+  await publisherFilter.selectOption('81')
+  await page.getByRole('button', { name: '搜索', exact: true }).click()
+  await expect(page.locator('tbody tr')).toHaveCount(1)
+  await expect(existingModelRow).toBeVisible()
+  await expect(page.getByRole('row').filter({ hasText: 'Claude Sonnet' })).toHaveCount(0)
+  await page.getByRole('button', { name: '重置', exact: true }).click()
+  await expect(publisherFilter).toHaveValue('')
+  await expect(page.locator('tbody tr')).toHaveCount(2)
   await page.getByRole('button', { name: '添加模型' }).click()
   const dialog = modal(page)
   const modelFormRows = dialog.locator('.model-form-row')
@@ -1587,8 +1640,10 @@ test('服务商同步入口只由后端能力参数控制', async ({ page }) => 
   await expect(syncModelsButton.locator('svg')).toBeVisible()
   await expect(syncModelsButton.locator('path')).toHaveAttribute('d', /\S+/)
   await syncModelsButton.click()
-  await expect(page.locator('.toast')).toContainText('请先配置服务商密钥，再同步模型。')
-  await expect(page.getByRole('dialog', { name: 'DeepSeek / 模型同步结果' })).toHaveCount(0)
+  const dialog = page.getByRole('dialog', { name: 'DeepSeek / 模型同步结果' })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByRole('status')).toContainText('模型目录同步完成')
+  await expect(dialog.getByText('应用内置目录', { exact: true })).toBeVisible()
 })
 
 test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => {
@@ -1603,10 +1658,11 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await expect(page.getByRole('heading', { name: '服务商', exact: true })).toBeVisible()
 
   const providerSearch = page.getByRole('search')
-  await expect(providerSearch.getByRole('searchbox', { name: '服务商名称' })).toHaveAttribute(
-    'placeholder',
-    '请输入服务商名称',
-  )
+  const providerSearchInput = providerSearch.getByRole('searchbox', { name: '服务商名称' })
+  await expect(providerSearchInput).toHaveAttribute('placeholder', '请输入服务商名称')
+  await expect
+    .poll(() => providerSearchInput.evaluate((input) => getComputedStyle(input).paddingLeft))
+    .toBe('38px')
   await expect(
     page.locator('.page-heading').getByRole('button', { name: '添加服务商', exact: true }),
   ).toHaveCount(0)
@@ -1619,7 +1675,7 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   ).toEqual(['添加服务商', '初始化'])
   await providerSearch.getByRole('button', { name: '初始化', exact: true }).click()
   await expect(page.locator('.toast-success')).toContainText(
-    '已补充 6 个官方服务商，并同步 1 个预置名称或官网，共 7 个',
+    '已补充 12 个官方服务商，并同步 1 个预置名称或官网，共 13 个',
   )
   await expect(page.locator('.provider-initialize-notice')).toHaveCount(0)
   await expect(page.getByRole('row').filter({ hasText: '月之暗面' })).toBeVisible()
@@ -1628,9 +1684,9 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   )
   await providerSearch.getByRole('button', { name: '初始化', exact: true }).click()
   await expect(page.locator('.toast-success')).toContainText(
-    '官方服务商的当前语言名称和官网已是最新，共 7 个',
+    '官方服务商的当前语言名称和官网已是最新，共 13 个',
   )
-  expect(state.providers).toHaveLength(7)
+  expect(state.providers).toHaveLength(13)
 
   const deepSeekRow = page.getByRole('row').filter({ hasText: '深度求索' })
   await expect(page.getByRole('columnheader', { name: '启用状态', exact: true })).toBeVisible()
@@ -1756,7 +1812,7 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await expect(selectAllMappings).toHaveJSProperty('indeterminate', true)
   await expect(providerModelCode).toBeEnabled()
   await expect(providerModelCode).toHaveValue('')
-  await expect(providerModelCode).toHaveAttribute('placeholder', '选填')
+  await expect(providerModelCode).toHaveAttribute('placeholder', '默认为 deepseek-v4-flash')
   await providerModelCode.fill('deepseek-v4-flash')
   await providerModelCode.blur()
   await expect(providerModelCode).toHaveValue('deepseek-v4-flash')
@@ -1864,8 +1920,14 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await dialog.getByLabel('VALUE', { exact: true }).fill('proxy-header-secret')
   await expect(dialog.getByLabel('VALUE', { exact: true })).toHaveValue('proxy-header-secret')
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
-  await expect(page.locator('.toast')).toContainText('请至少启用一个系统模型')
-  await expect(dialog.locator('.alert.error')).toHaveCount(0)
+  await expect(page.locator('dialog')).toHaveCount(0)
+
+  const created = state.providers.find((provider) => provider.name === '阿里云百炼')
+  expect(created.status).toBe('DISABLED')
+  expect(state.providerMappings.get(created.id)).toEqual([])
+
+  const row = page.getByRole('row').filter({ hasText: '阿里云百炼' })
+  await row.getByRole('button', { name: '编辑', exact: true }).click()
   await expect(dialog.getByRole('tab', { name: '模型配置', exact: true })).toHaveAttribute(
     'aria-selected',
     'true',
@@ -1876,9 +1938,7 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expect(page.locator('dialog')).toHaveCount(0)
 
-  const created = state.providers.find((provider) => provider.name === '阿里云百炼')
-  expect(created.status).toBe('DISABLED')
-  expect(state.providerInputs.at(-1)).toEqual(
+  expect(state.providerInputs.at(-2)).toEqual(
     expect.objectContaining({
       endpoints: [
         {
@@ -1891,6 +1951,12 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
       proxyHeaders: [{ key: 'X-Proxy-Token', value: 'proxy-header-secret' }],
     }),
   )
+  expect(state.providerInputs.at(-1)?.mappings).toEqual([
+    {
+      modelId: '71',
+      upstreamModelCode: 'aliyun-deepseek-v4-flash',
+    },
+  ])
   expect(created.proxyUrl).not.toContain('proxy-password')
   expect(state.providerMappings.get(created.id)).toEqual([
     expect.objectContaining({
@@ -1898,7 +1964,6 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
       upstreamModelCode: 'aliyun-deepseek-v4-flash',
     }),
   ])
-  const row = page.getByRole('row').filter({ hasText: '阿里云百炼' })
   const providerNameCellBox = await row.getByRole('cell').first().boundingBox()
   expect(providerNameCellBox).not.toBeNull()
   expect(providerNameCellBox!.width).toBeGreaterThanOrEqual(245)
@@ -2413,7 +2478,7 @@ test('Anthropic 官方渠道直接输入 Claude 个人订阅 Token', async ({ pa
   await modal(page).getByRole('button', { name: '新增凭据', exact: true }).click()
   await modal(page).getByRole('combobox', { name: '认证方式' }).selectOption('SUBSCRIPTION')
 
-  const token = 'sk-ant-oat01-fixture-token'
+  const token = 'future-anthropic-token-format'
   await expect(modal(page)).toContainText('claude setup-token')
   const commandGuide = modal(page).locator('div.subscription-source-guide')
   await expect(commandGuide).toBeVisible()
@@ -2424,7 +2489,7 @@ test('Anthropic 官方渠道直接输入 Claude 个人订阅 Token', async ({ pa
   await expect(modal(page).locator('.subscription-command-list > div')).toHaveCount(1)
   await expect(modal(page).getByRole('button', { name: '复制 Claude Code 命令' })).toBeVisible()
   const tokenInput = modal(page).getByLabel('Claude Code OAuth Token', { exact: true })
-  await tokenInput.fill('invalid-token')
+  await tokenInput.fill('invalid token')
   await modal(page).getByRole('button', { name: '保存', exact: true }).click()
   await expect(page.locator('.toast')).toContainText('有效 Claude Code OAuth Token')
 
@@ -2941,7 +3006,8 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
   await modal(page).getByRole('button', { name: '关闭', exact: true }).last().click()
   expect(state.modelSyncRequests).toHaveLength(0)
   await providerRow.getByRole('button', { name: '同步 DeepSeek 的官方模型', exact: true }).click()
-  await expect(modal(page).getByRole('status')).toContainText('官方模型目录同步完成')
+  await expect(modal(page).getByRole('status')).toContainText('模型目录同步完成')
+  await expect(modal(page).getByText('官方接口', { exact: true })).toBeVisible()
   expect(state.modelSyncRequests).toHaveLength(1)
   await modal(page).getByRole('button', { name: '关闭', exact: true }).last().click()
   const editCredential = providerRow.getByRole('button', {

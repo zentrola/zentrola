@@ -144,12 +144,13 @@ func (s *SecurityHandlers) mount(r chi.Router) {
 				s.mountUsage(protected)
 			}
 		})
-		if s.Usage != nil {
-			api.Group(func(member chi.Router) {
-				member.Use(s.memberAuth)
+		api.Group(func(member chi.Router) {
+			member.Use(s.memberAuth)
+			member.Get("/me/provider", s.getMyProvider)
+			if s.Usage != nil {
 				member.Get("/me/usage", s.getMyUsage)
-			})
-		}
+			}
+		})
 	})
 	r.Route("/anthropic", func(gateway chi.Router) {
 		gateway.Use(s.gatewayAuth)
@@ -424,6 +425,11 @@ func decodeRequest[T any](w http.ResponseWriter, r *http.Request) (T, bool) {
 }
 
 func securityError(w http.ResponseWriter, r *http.Request, err error) {
+	var gatewayFailure *gw.Failure
+	if errors.As(err, &gatewayFailure) {
+		writeJSON(w, r, gatewayFailure.Status, response{Code: gatewayFailure.Code, Message: gatewayFailure.Message})
+		return
+	}
 	var missing *missingRequiredParameterError
 	if errors.As(err, &missing) {
 		writeJSON(w, r, http.StatusBadRequest, response{
@@ -464,6 +470,8 @@ func securityError(w http.ResponseWriter, r *http.Request, err error) {
 		status, code, message = http.StatusConflict, "PROVIDER_UNAVAILABLE", "Provider is unavailable."
 	case errors.Is(err, mgmt.ErrProviderCredentialRequired):
 		status, code, message = http.StatusConflict, "PROVIDER_CREDENTIAL_REQUIRED", "Configure a provider credential before enabling the provider."
+	case errors.Is(err, mgmt.ErrProviderModelMappingRequired):
+		status, code, message = http.StatusConflict, "PROVIDER_MODEL_MAPPING_REQUIRED", "Configure a provider model mapping before enabling the provider."
 	case errors.Is(err, mgmt.ErrModelSyncCredentialRequired):
 		status, code, message = http.StatusConflict, "MODEL_SYNC_CREDENTIAL_REQUIRED", "Configure a provider credential before synchronizing models."
 	case errors.Is(err, mgmt.ErrCredentialExportUnsupported):

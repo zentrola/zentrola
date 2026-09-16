@@ -54,6 +54,9 @@ func TestSubscriptionConnectionCodeAllowsOnlyKnownSafeCodes(t *testing.T) {
 	if code := subscriptionConnectionCode(subscriptionConnectionErrorStub("CODEX_APP_SERVER_UNAVAILABLE")); code != "CODEX_APP_SERVER_UNAVAILABLE" {
 		t.Fatalf("unexpected connection code: %s", code)
 	}
+	if code := subscriptionConnectionCode(subscriptionConnectionErrorStub("UPSTREAM_AUTH_FAILED")); code != "UPSTREAM_AUTH_FAILED" {
+		t.Fatalf("unexpected Anthropic authentication code: %s", code)
+	}
 	if code := subscriptionConnectionCode(subscriptionConnectionErrorStub("UNSAFE_INTERNAL_DETAIL")); code != "SUBSCRIPTION_UNAVAILABLE" {
 		t.Fatalf("unexpected fallback connection code: %s", code)
 	}
@@ -82,11 +85,15 @@ func TestProviderCapabilitiesIncludeMatchingSubscriptionAdapter(t *testing.T) {
 
 type resourceCreateWriter struct {
 	Writer
-	created ResourceRecord
-	quotas  []ResourceQuota
+	created  ResourceRecord
+	quotas   []ResourceQuota
+	provider Provider
 }
 
 func (w *resourceCreateWriter) Provider(context.Context, int64) (Provider, error) {
+	if w.provider.Code != "" {
+		return w.provider, nil
+	}
 	return Provider{ID: 40, Code: "openai-official"}, nil
 }
 func (w *resourceCreateWriter) CreateResource(_ context.Context, resource ResourceRecord) error {
@@ -564,6 +571,31 @@ func TestCreatePersonalSubscriptionProbesAndPersistsQuota(t *testing.T) {
 	}
 	if string(writer.created.Sealed.Ciphertext) != "refreshed-auth-cache" || len(writer.quotas) != 1 || writer.quotas[0].Code != "codex.primary" {
 		t.Fatalf("credential or quotas were not persisted: sealed=%q quotas=%+v", writer.created.Sealed.Ciphertext, writer.quotas)
+	}
+}
+
+func TestCreateClaudeSubscriptionPersistsWithoutOnlineProbe(t *testing.T) {
+	probeCalled := false
+	writer := &resourceCreateWriter{provider: Provider{ID: 36, Code: catalog.AnthropicOfficialCode}}
+	adapter := claudeSubscriptionAdapterStub{subscriptionAdapterStub: subscriptionAdapterStub{
+		onProbe: func(*catalog.OutboundProxy) { probeCalled = true },
+	}}
+	service := New(resourceCreateStore{writer: writer}, fixedMemberID{id: 48}, providerTestCipher{}, nil,
+		WithSubscriptionAdapter(adapter),
+	)
+
+	created, err := service.CreateAuthenticationResource(context.Background(), admin.Identity{ID: 1}, CreateResourceInput{
+		ProviderID: 36, Name: "Anthropic 个人订阅", Credential: "9527",
+		AuthType: AuthTypeSubscription, AuthAdapter: AuthAdapterClaudeCode, Priority: 100,
+	}, appsec.RequestMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if probeCalled {
+		t.Fatal("Claude subscription was probed while saving")
+	}
+	if string(writer.created.Sealed.Ciphertext) != "9527" || created.QuotaStatus != QuotaUnknown || created.QuotaCheckedAt != nil {
+		t.Fatalf("unexpected saved Claude subscription: created=%+v sealed=%q", created, writer.created.Sealed.Ciphertext)
 	}
 }
 

@@ -135,11 +135,13 @@ func (q *Queries) CountManageOperations(ctx context.Context) (int64, error) {
 }
 
 const countManageProviders = `-- name: CountManageProviders :one
-SELECT COUNT(*)::bigint FROM provider WHERE is_deleted=false
+SELECT COUNT(*)::bigint FROM provider
+WHERE is_deleted=false
+  AND ($1::text = '' OR provider_type = $1::text)
 `
 
-func (q *Queries) CountManageProviders(ctx context.Context) (int64, error) {
-	row := q.db.QueryRow(ctx, countManageProviders)
+func (q *Queries) CountManageProviders(ctx context.Context, providerType string) (int64, error) {
+	row := q.db.QueryRow(ctx, countManageProviders, providerType)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -1522,16 +1524,22 @@ func (q *Queries) ManageProviderStatus(ctx context.Context, arg ManageProviderSt
 }
 
 const manageProviders = `-- name: ManageProviders :many
-SELECT id, is_deleted, status, provider_code, provider_name, provider_type, official_website, proxy_enabled, proxy_url_display, proxy_url_ciphertext, proxy_url_nonce, proxy_url_key_version, proxy_header_names, proxy_headers_ciphertext, proxy_headers_nonce, proxy_headers_key_version, created_by, updated_by, created_at, updated_at FROM provider WHERE is_deleted=false AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2
+SELECT id, is_deleted, status, provider_code, provider_name, provider_type, official_website, proxy_enabled, proxy_url_display, proxy_url_ciphertext, proxy_url_nonce, proxy_url_key_version, proxy_header_names, proxy_headers_ciphertext, proxy_headers_nonce, proxy_headers_key_version, created_by, updated_by, created_at, updated_at FROM provider
+WHERE is_deleted=false
+  AND ($1::text = '' OR provider_type = $1::text)
+  AND (id < $2 OR $2 = 0)
+ORDER BY id DESC
+LIMIT $3
 `
 
 type ManageProvidersParams struct {
-	ID    int64
-	Limit int32
+	ProviderType string
+	AfterID      int64
+	PageLimit    int32
 }
 
 func (q *Queries) ManageProviders(ctx context.Context, arg ManageProvidersParams) ([]Provider, error) {
-	rows, err := q.db.Query(ctx, manageProviders, arg.ID, arg.Limit)
+	rows, err := q.db.Query(ctx, manageProviders, arg.ProviderType, arg.AfterID, arg.PageLimit)
 	if err != nil {
 		return nil, err
 	}
