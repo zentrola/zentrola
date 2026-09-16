@@ -1,11 +1,13 @@
 package openai
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -14,6 +16,7 @@ import (
 	"time"
 
 	gw "github.com/zentrola/zentrola/internal/application/gateway"
+	"github.com/zentrola/zentrola/internal/infrastructure/provider"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -180,5 +183,50 @@ func TestRedirectAndTimeout(t *testing.T) {
 		if !errors.Is(err, tc.err) {
 			t.Fatal("timeout/redirect policy incorrect")
 		}
+	}
+}
+
+func TestGatewayTransportDiagnosticsRespectEnvironment(t *testing.T) {
+	for _, test := range []struct {
+		environment string
+		wantSecret  bool
+	}{
+		{environment: "dev", wantSecret: true},
+		{environment: "test", wantSecret: true},
+		{environment: "prod", wantSecret: false},
+	} {
+		t.Run(test.environment, func(t *testing.T) {
+			provider.ConfigureLogEnvironment(test.environment)
+			defer provider.ConfigureLogEnvironment("prod")
+			var logs bytes.Buffer
+			client := NewGatewayClient(time.Second, slog.New(slog.NewJSONHandler(&logs, nil)))
+			client.client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return nil, errors.New("transport failed with credential=network-secret")
+			})
+			_, err := client.Open(context.Background(), gw.Route{
+				BaseURL: "https://api.example.com/v1", ProviderID: 11, ResourceID: 22,
+			}, gw.Request{
+				Protocol: gw.OpenAIResponsesProtocol, Path: "/v1/responses", RequestID: "req_diagnostic",
+			}, []byte("provider-secret"))
+			if !errors.Is(err, gw.ErrUpstream) {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			output := logs.String()
+			for _, expected := range []string{"provider upstream request failed", "req_diagnostic", `"provider_id":11`, `"resource_id":22`} {
+				if !strings.Contains(output, expected) {
+					t.Fatalf("missing diagnostic %q: %s", expected, output)
+				}
+			}
+			hasSecret := strings.Contains(output, "network-secret") && strings.Contains(output, "provider-secret")
+			if hasSecret != test.wantSecret {
+				t.Fatalf("secret logging mismatch: want=%v output=%s", test.wantSecret, output)
+			}
+			if test.wantSecret && !strings.Contains(output, `"redacted":false`) {
+				t.Fatalf("development diagnostic was marked redacted: %s", output)
+			}
+			if !test.wantSecret && (!strings.Contains(output, `"redacted":true`) || !strings.Contains(output, "******")) {
+				t.Fatalf("production diagnostic was not redacted: %s", output)
+			}
+		})
 	}
 }

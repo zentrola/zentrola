@@ -18,16 +18,23 @@ import (
 	"github.com/zentrola/zentrola/internal/infrastructure/provider"
 )
 
-type GatewayClient struct{ client *http.Client }
+type GatewayClient struct {
+	client *http.Client
+	logger *slog.Logger
+}
 
-func NewGatewayClient(headerTimeout time.Duration) *GatewayClient {
+func NewGatewayClient(headerTimeout time.Duration, loggers ...*slog.Logger) *GatewayClient {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil
 	transport.DisableCompression = true
 	transport.DialContext = (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext
 	transport.TLSHandshakeTimeout = 10 * time.Second
 	transport.ResponseHeaderTimeout = headerTimeout
-	return &GatewayClient{client: &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+	logger := slog.Default()
+	if len(loggers) > 0 && loggers[0] != nil {
+		logger = loggers[0]
+	}
+	return &GatewayClient{client: &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, logger: logger}
 }
 func (c *GatewayClient) CloseIdleConnections() { c.client.CloseIdleConnections() }
 func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Request, credential []byte) (*gw.Response, error) {
@@ -47,7 +54,7 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 		}
 		input = adapted
 		if input.Development && (removedTools > 0 || removedBeta) {
-			slog.InfoContext(ctx, "gateway compatibility applied",
+			c.logger.InfoContext(ctx, "gateway compatibility applied",
 				"base_url", baseURL,
 				"removed_tool_type", "advisor_20260301",
 				"removed_tool_count", removedTools,
@@ -119,7 +126,7 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 		req.Header.Set("X-Request-ID", input.RequestID)
 	}
 	client, cleanup, err := provider.ClientWithProxy(ctx, c.client, route.Proxy, provider.ProxyRequestLog{
-		Operation: "gateway_inference", ProviderID: route.ProviderID, ResourceID: route.ResourceID, Protocol: gw.AnthropicEndpoint,
+		Logger: c.logger, Operation: "gateway_inference", ProviderID: route.ProviderID, ResourceID: route.ResourceID, Protocol: gw.AnthropicEndpoint,
 	})
 	if err != nil {
 		return nil, gw.ErrProxy
@@ -127,19 +134,51 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 	instrumented, sentHeaders := provider.TracedClient(client)
 	resp, err := instrumented.Do(req)
 	if err != nil {
+		requestHeaders := provider.HeadersForLog(req.Header)
 		sentHeaders.Delete("x-api-key")
 		sentHeaders.Delete("Authorization")
 		cleanup()
 		if errors.Is(ctx.Err(), context.Canceled) {
 			return nil, gw.ErrCancelled
 		}
+		failure := gw.ErrUpstream
 		var netErr net.Error
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
-			return nil, gw.ErrTimeout
+			failure = gw.ErrTimeout
 		}
-		return nil, gw.ErrUpstream
+		diagnostic := provider.DiagnoseNetworkError(err)
+		c.logger.WarnContext(ctx, "provider upstream request failed",
+			"error_code", failure.Code,
+			"request_id", input.RequestID,
+			"provider_id", route.ProviderID,
+			"resource_id", route.ResourceID,
+			"protocol", input.Protocol,
+			"failure_kind", diagnostic.Kind,
+			"network_op", diagnostic.Operation,
+			"network", diagnostic.Network,
+			"upstream_error_type", diagnostic.ErrorType,
+			"upstream_error", diagnostic.Detail,
+			"upstream_headers", requestHeaders,
+			"redacted", diagnostic.Redacted,
+		)
+		return nil, failure
 	}
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		location, redacted := provider.RedirectLocationForLog(resp.Header.Get("Location"))
+		requestHeaders := provider.HeadersForLog(req.Header)
+		sentHeaders.Delete("x-api-key")
+		sentHeaders.Delete("Authorization")
+		c.logger.WarnContext(ctx, "provider upstream redirect rejected",
+			"error_code", "UPSTREAM_REDIRECT_REJECTED",
+			"request_id", input.RequestID,
+			"provider_id", route.ProviderID,
+			"resource_id", route.ResourceID,
+			"protocol", input.Protocol,
+			"upstream_status", resp.StatusCode,
+			"redirect_location", location,
+			"upstream_headers", requestHeaders,
+			"redacted", redacted,
+		)
 		resp.Body.Close()
 		cleanup()
 		return nil, gw.ErrUpstream

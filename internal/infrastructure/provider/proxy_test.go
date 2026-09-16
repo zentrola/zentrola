@@ -13,8 +13,8 @@ import (
 )
 
 func TestClientWithProxyIsolatedTransport(t *testing.T) {
-	ConfigureProxyLogEnvironment("dev")
-	t.Cleanup(func() { ConfigureProxyLogEnvironment("prod") })
+	ConfigureLogEnvironment("dev")
+	t.Cleanup(func() { ConfigureLogEnvironment("prod") })
 	baseTransport := http.DefaultTransport.(*http.Transport).Clone()
 	baseTransport.Proxy = nil
 	base := &http.Client{Transport: baseTransport}
@@ -57,8 +57,8 @@ func TestClientWithProxyIsolatedTransport(t *testing.T) {
 }
 
 func TestEnvironmentWithProxyOverridesInheritedProxyVariables(t *testing.T) {
-	ConfigureProxyLogEnvironment("prod")
-	t.Cleanup(func() { ConfigureProxyLogEnvironment("prod") })
+	ConfigureLogEnvironment("prod")
+	t.Cleanup(func() { ConfigureLogEnvironment("prod") })
 	var logs bytes.Buffer
 	got, err := EnvironmentWithProxy(context.Background(), []string{
 		"PATH=test", "http_proxy=http://old.example", "HTTPS_PROXY=http://old.example", "NO_PROXY=chatgpt.com", "ALL_PROXY=socks5://old.example",
@@ -82,8 +82,8 @@ func TestEnvironmentWithProxyOverridesInheritedProxyVariables(t *testing.T) {
 }
 
 func TestProductionProxyLogMasksHeaderValues(t *testing.T) {
-	ConfigureProxyLogEnvironment("prod")
-	t.Cleanup(func() { ConfigureProxyLogEnvironment("prod") })
+	ConfigureLogEnvironment("prod")
+	t.Cleanup(func() { ConfigureLogEnvironment("prod") })
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logs, nil))
 	proxyURL, err := parseProxyURL(&catalog.OutboundProxy{URL: "http://proxy-user:proxy-password@proxy.example.com:8080"})

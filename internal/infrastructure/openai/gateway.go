@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"sync"
@@ -18,16 +19,23 @@ import (
 
 const codexSubscriptionBaseURL = "https://chatgpt.com/backend-api/codex"
 
-type GatewayClient struct{ client *http.Client }
+type GatewayClient struct {
+	client *http.Client
+	logger *slog.Logger
+}
 
-func NewGatewayClient(headerTimeout time.Duration) *GatewayClient {
+func NewGatewayClient(headerTimeout time.Duration, loggers ...*slog.Logger) *GatewayClient {
 	t := http.DefaultTransport.(*http.Transport).Clone()
 	t.Proxy = nil
 	t.DisableCompression = true
 	t.DialContext = (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext
 	t.TLSHandshakeTimeout = 10 * time.Second
 	t.ResponseHeaderTimeout = headerTimeout
-	return &GatewayClient{&http.Client{Transport: t, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+	logger := slog.Default()
+	if len(loggers) > 0 && loggers[0] != nil {
+		logger = loggers[0]
+	}
+	return &GatewayClient{client: &http.Client{Transport: t, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, logger: logger}
 }
 func (c *GatewayClient) CloseIdleConnections() { c.client.CloseIdleConnections() }
 func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Request, credential []byte) (*gw.Response, error) {
@@ -85,7 +93,7 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 	}
 	// 客户端 Authorization / Cookie / Anthropic / SDK Header 均不复制到上游。
 	client, cleanup, err := provider.ClientWithProxy(ctx, c.client, route.Proxy, provider.ProxyRequestLog{
-		Operation: "gateway_inference", ProviderID: route.ProviderID, ResourceID: route.ResourceID, Protocol: gw.OpenAIEndpoint,
+		Logger: c.logger, Operation: "gateway_inference", ProviderID: route.ProviderID, ResourceID: route.ResourceID, Protocol: gw.OpenAIEndpoint,
 	})
 	if err != nil {
 		return nil, gw.ErrProxy
@@ -93,19 +101,51 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 	instrumented, sentHeaders := provider.TracedClient(client)
 	resp, err := instrumented.Do(req)
 	if err != nil {
+		requestHeaders := provider.HeadersForLog(req.Header)
 		sentHeaders.Delete("Authorization")
 		sentHeaders.Delete("ChatGPT-Account-Id")
 		cleanup()
 		if errors.Is(ctx.Err(), context.Canceled) {
 			return nil, gw.ErrCancelled
 		}
+		failure := gw.ErrUpstream
 		var ne net.Error
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) || (errors.As(err, &ne) && ne.Timeout()) {
-			return nil, gw.ErrTimeout
+			failure = gw.ErrTimeout
 		}
-		return nil, gw.ErrUpstream
+		diagnostic := provider.DiagnoseNetworkError(err)
+		c.logger.WarnContext(ctx, "provider upstream request failed",
+			"error_code", failure.Code,
+			"request_id", input.RequestID,
+			"provider_id", route.ProviderID,
+			"resource_id", route.ResourceID,
+			"protocol", input.Protocol,
+			"failure_kind", diagnostic.Kind,
+			"network_op", diagnostic.Operation,
+			"network", diagnostic.Network,
+			"upstream_error_type", diagnostic.ErrorType,
+			"upstream_error", diagnostic.Detail,
+			"upstream_headers", requestHeaders,
+			"redacted", diagnostic.Redacted,
+		)
+		return nil, failure
 	}
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		location, redacted := provider.RedirectLocationForLog(resp.Header.Get("Location"))
+		requestHeaders := provider.HeadersForLog(req.Header)
+		sentHeaders.Delete("Authorization")
+		sentHeaders.Delete("ChatGPT-Account-Id")
+		c.logger.WarnContext(ctx, "provider upstream redirect rejected",
+			"error_code", "UPSTREAM_REDIRECT_REJECTED",
+			"request_id", input.RequestID,
+			"provider_id", route.ProviderID,
+			"resource_id", route.ResourceID,
+			"protocol", input.Protocol,
+			"upstream_status", resp.StatusCode,
+			"redirect_location", location,
+			"upstream_headers", requestHeaders,
+			"redacted", redacted,
+		)
 		resp.Body.Close()
 		cleanup()
 		return nil, gw.ErrUpstream
