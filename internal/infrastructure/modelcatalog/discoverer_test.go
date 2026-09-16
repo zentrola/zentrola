@@ -6,6 +6,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -123,6 +126,72 @@ func TestDiscoverMoonshotModels(t *testing.T) {
 	}
 }
 
+func TestDiscoverQwenModelsAcrossWorkspaceCatalogPages(t *testing.T) {
+	var logs bytes.Buffer
+	requestCount := 0
+	discoverer := NewDiscoverer(slog.New(slog.NewJSONHandler(&logs, nil)))
+	discoverer.client.Transport = roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		requestCount++
+		if request.Method != http.MethodGet || request.URL.Scheme != "https" ||
+			request.URL.Host != "workspace-01.cn-beijing.maas.aliyuncs.com" ||
+			request.URL.Path != "/api/v1/models" || request.Header.Get("Authorization") != "Bearer test-secret" ||
+			request.Header.Get("x-api-key") != "" || request.URL.Query().Get("providers") != "qwen" ||
+			request.URL.Query().Get("language") != "en-US" || request.URL.Query().Get("page_size") != "100" ||
+			request.URL.Query().Get("page_no") != strconv.Itoa(requestCount) {
+			t.Fatalf("invalid discovery request: %s %s", request.Method, request.URL.String())
+		}
+		body := `{"success":true,"output":{"total":101,"page_no":1,"page_size":100,"models":[{"model":"qwen3-max","name":"Qwen3-Max","inference_metadata":{"request_modality":["Text"],"response_modality":["Text"]}},{"model":"deepseek-v4","name":"DeepSeek V4","inference_metadata":{"request_modality":["Text"],"response_modality":["Text"]}},{"model":"qwen-image-max","name":"Qwen-Image-Max","inference_metadata":{"request_modality":["Text","Image"],"response_modality":["Image"]}}]}}`
+		if requestCount == 2 {
+			body = `{"success":true,"output":{"total":101,"page_no":2,"page_size":100,"models":[{"model":"qwen-audio-turbo","name":"Qwen-Audio-Turbo","inference_metadata":{"request_modality":["Audio","Text","Audio","Unknown"],"response_modality":["Text"]}},{"model":"qwen3-max","name":"Qwen3-Max","inference_metadata":{"request_modality":["Text"],"response_modality":["Text"]}}]}}`
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	})
+
+	models, result := discoverer.Discover(context.Background(), mgmt.ModelDiscoverySource{
+		ProviderCode: catalog.QwenOfficialCode,
+		Endpoints: []mgmt.ProviderEndpoint{
+			{ProtocolType: "OPENAI", BaseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1"},
+			{ProtocolType: "ANTHROPIC", BaseURL: "https://workspace-01.cn-beijing.maas.aliyuncs.com/apps/anthropic"},
+		},
+	}, []byte("test-secret"), nil)
+	if !result.OK || result.Code != "OK" || requestCount != 2 || len(models) != 3 ||
+		models[0].Code != "qwen-audio-turbo" || !slices.Equal(models[0].InputModalities, []string{"AUDIO", "TEXT"}) ||
+		models[1].Code != "qwen-image-max" || !slices.Equal(models[1].InputModalities, []string{"TEXT", "IMAGE"}) ||
+		!slices.Equal(models[1].OutputModalities, []string{"IMAGE"}) || models[2].Code != "qwen3-max" {
+		t.Fatalf("unexpected discovery: %+v %+v", models, result)
+	}
+	output := logs.String()
+	for _, expected := range []string{"official model catalog response", `"provider_code":"qwen-official"`, `"catalog_adapter":"qwen"`, `"catalog_page":2`} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("discovery response log missing %q: %s", expected, output)
+		}
+	}
+	if strings.Contains(output, "test-secret") {
+		t.Fatalf("discovery response log leaked credential: %s", output)
+	}
+}
+
+func TestQwenCatalogRequestUsesConfiguredRegionalHost(t *testing.T) {
+	request, err := (qwenAdapter{}).Request(mgmt.ModelDiscoverySource{
+		Endpoints: []mgmt.ProviderEndpoint{{
+			ProtocolType: "OPENAI",
+			BaseURL:      "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+		}},
+	}, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(request.URL)
+	if err != nil || parsed.Host != "dashscope-intl.aliyuncs.com" || parsed.Path != "/api/v1/models" ||
+		parsed.Query().Get("providers") != "qwen" || parsed.Query().Get("page_no") != "3" ||
+		parsed.Query().Get("page_size") != "100" || parsed.Query().Get("language") != "en-US" {
+		t.Fatalf("unexpected Qwen catalog request: %+v %v", request, err)
+	}
+	if got := qwenDisplayName("qwen-image-max", ""); got != "Qwen-Image-Max" {
+		t.Fatalf("fallback display name = %q", got)
+	}
+}
+
 func TestDiscovererReportsRegisteredProviderCapabilities(t *testing.T) {
 	discoverer := NewDiscoverer(nil)
 	if !discoverer.Supports(catalog.OpenAIOfficialCode) {
@@ -137,8 +206,56 @@ func TestDiscovererReportsRegisteredProviderCapabilities(t *testing.T) {
 	if !discoverer.Supports(catalog.KimiOfficialCode) {
 		t.Fatal("Moonshot model catalog adapter should be reported as supported")
 	}
+	if !discoverer.Supports(catalog.QwenOfficialCode) {
+		t.Fatal("Qwen model catalog adapter should be reported as supported")
+	}
 	if discoverer.Supports("provider-custom") {
 		t.Fatal("custom provider should not be reported as supported")
+	}
+}
+
+func TestDiscoverQwenRejectsInvalidCatalog(t *testing.T) {
+	for _, body := range []string{
+		`{"success":false,"output":{"total":0,"page_no":1,"page_size":100,"models":[]}}`,
+		`{"success":true,"output":{"total":0,"page_no":1,"page_size":100}}`,
+		`{"success":true,"output":{"total":1001,"page_no":1,"page_size":100,"models":[]}}`,
+		`{"success":true,"output":{"total":1,"page_no":2,"page_size":100,"models":[]}}`,
+		`{"success":true,"output":{"total":1,"page_no":1,"page_size":20,"models":[]}}`,
+		`{"success":true,"output":{"total":1,"page_no":1,"page_size":100,"models":[{"model":"qwen-bad\n","name":"Bad"}]}}`,
+		`{"success":true,"output":{"total":101,"page_no":1,"page_size":100,"models":[]}}`,
+	} {
+		discoverer := NewDiscoverer(nil)
+		discoverer.client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+		})
+		models, result := discoverer.Discover(context.Background(), mgmt.ModelDiscoverySource{
+			ProviderCode: catalog.QwenOfficialCode,
+			Endpoints:    []mgmt.ProviderEndpoint{{ProtocolType: "OPENAI", BaseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1"}},
+		}, []byte("test-secret"), nil)
+		if result.Code != "UPSTREAM_INVALID_RESPONSE" || result.OK || models != nil {
+			t.Fatalf("invalid catalog accepted: %q %+v %+v", body, models, result)
+		}
+	}
+}
+
+func TestDiscoverQwenRejectsMissingOrUnsafeProviderEndpoint(t *testing.T) {
+	for _, endpoints := range [][]mgmt.ProviderEndpoint{
+		nil,
+		{{ProtocolType: "OPENAI", BaseURL: "http://dashscope.aliyuncs.com/compatible-mode/v1"}},
+		{{ProtocolType: "OPENAI", BaseURL: "https://127.0.0.1/compatible-mode/v1"}},
+	} {
+		discoverer := NewDiscoverer(nil)
+		discoverer.client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+			t.Fatal("invalid Qwen endpoint reached transport")
+			return nil, nil
+		})
+		models, result := discoverer.Discover(context.Background(), mgmt.ModelDiscoverySource{
+			ProviderCode: catalog.QwenOfficialCode,
+			Endpoints:    endpoints,
+		}, []byte("test-secret"), nil)
+		if result.Code != "UPSTREAM_URL_REJECTED" || result.OK || models != nil {
+			t.Fatalf("invalid endpoint accepted: %+v %+v", endpoints, result)
+		}
 	}
 }
 

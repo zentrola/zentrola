@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sort"
 	"time"
 
 	mgmt "github.com/zentrola/zentrola/internal/application/management"
@@ -20,12 +21,18 @@ type catalogRequest struct {
 	Bearer bool
 }
 
+const (
+	maxCatalogResponseBytes = 1 << 20
+	maxCatalogModels        = 1000
+	maxCatalogPages         = 10
+)
+
 // adapter 隔离服务商专有的目录地址、认证方式和响应结构。
 // 适配器仅由服务商编码选择，与推理协议无关。
 type adapter interface {
 	Name() string
-	Request() catalogRequest
-	Decode([]byte) ([]mgmt.DiscoveredModel, error)
+	Request(mgmt.ModelDiscoverySource, int) (catalogRequest, error)
+	Decode([]byte, int) ([]mgmt.DiscoveredModel, bool, error)
 }
 
 type Discoverer struct {
@@ -57,6 +64,7 @@ func NewDiscoverer(logger *slog.Logger) *Discoverer {
 			catalog.DeepSeekOfficialCode: deepSeekAdapter{},
 			catalog.ZhipuOfficialCode:    zhipuAdapter{},
 			catalog.KimiOfficialCode:     moonshotAdapter{},
+			catalog.QwenOfficialCode:     qwenAdapter{},
 		},
 	}
 }
@@ -80,18 +88,6 @@ func (d *Discoverer) Discover(ctx context.Context, source mgmt.ModelDiscoverySou
 		return
 	}
 
-	catalogRequest := adapter.Request()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, catalogRequest.URL, nil)
-	if err != nil {
-		result.Code = "UPSTREAM_UNAVAILABLE"
-		return
-	}
-	if catalogRequest.Bearer {
-		req.Header.Set("Authorization", "Bearer "+string(credential))
-	}
-	defer req.Header.Del("Authorization")
-	req.Header.Set("Accept", "application/json")
-
 	client, cleanup, err := provider.ClientWithProxy(ctx, d.client, proxy, provider.ProxyRequestLog{
 		Logger: d.logger, Operation: "model_catalog_sync", ProviderCode: source.ProviderCode,
 	})
@@ -100,43 +96,79 @@ func (d *Discoverer) Discover(ctx context.Context, source mgmt.ModelDiscoverySou
 		return
 	}
 	defer cleanup()
-	resp, err := client.Do(req)
-	if err != nil {
-		result.Code = connectionErrorCode(ctx, err)
-		return
-	}
-	defer resp.Body.Close()
 
-	result.HTTPStatus = resp.StatusCode
-	data, readErr := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
-	d.logger.InfoContext(ctx, "official model catalog response",
-		"provider_code", source.ProviderCode,
-		"catalog_adapter", adapter.Name(),
-		"upstream_url", catalogRequest.URL,
-		"upstream_status", resp.StatusCode,
-		"response_bytes", len(data),
-		"response_body", string(data),
-	)
-	if resp.StatusCode != http.StatusOK {
-		result.Code = connectionStatusCode(resp.StatusCode)
-		return
+	seen := make(map[string]struct{})
+	for page := 1; page <= maxCatalogPages; page++ {
+		requestSpec, requestErr := adapter.Request(source, page)
+		if requestErr != nil {
+			result.Code = "UPSTREAM_URL_REJECTED"
+			return nil, result
+		}
+		req, requestErr := http.NewRequestWithContext(ctx, http.MethodGet, requestSpec.URL, nil)
+		if requestErr != nil {
+			result.Code = "UPSTREAM_URL_REJECTED"
+			return nil, result
+		}
+		if requestSpec.Bearer {
+			req.Header.Set("Authorization", "Bearer "+string(credential))
+		}
+		req.Header.Set("Accept", "application/json")
+
+		resp, requestErr := client.Do(req)
+		req.Header.Del("Authorization")
+		if requestErr != nil {
+			result.Code = connectionErrorCode(ctx, requestErr)
+			return nil, result
+		}
+		result.HTTPStatus = resp.StatusCode
+		data, readErr := io.ReadAll(io.LimitReader(resp.Body, maxCatalogResponseBytes+1))
+		_ = resp.Body.Close()
+		d.logger.InfoContext(ctx, "official model catalog response",
+			"provider_code", source.ProviderCode,
+			"catalog_adapter", adapter.Name(),
+			"catalog_page", page,
+			"upstream_url", requestSpec.URL,
+			"upstream_status", resp.StatusCode,
+			"response_bytes", len(data),
+			"response_body", string(data),
+		)
+		if resp.StatusCode != http.StatusOK {
+			result.Code = connectionStatusCode(resp.StatusCode)
+			return nil, result
+		}
+		if readErr != nil {
+			result.Code = connectionErrorCode(ctx, readErr)
+			return nil, result
+		}
+		if len(data) > maxCatalogResponseBytes {
+			result.Code = "UPSTREAM_INVALID_RESPONSE"
+			return nil, result
+		}
+		pageModels, hasNext, decodeErr := adapter.Decode(data, page)
+		if decodeErr != nil {
+			result.Code = "UPSTREAM_INVALID_RESPONSE"
+			return nil, result
+		}
+		for _, model := range pageModels {
+			if _, duplicate := seen[model.Code]; duplicate {
+				continue
+			}
+			seen[model.Code] = struct{}{}
+			models = append(models, model)
+			if len(models) > maxCatalogModels {
+				result.Code = "UPSTREAM_INVALID_RESPONSE"
+				return nil, result
+			}
+		}
+		if !hasNext {
+			sort.Slice(models, func(i, j int) bool { return models[i].Code < models[j].Code })
+			result.OK = true
+			result.Code = "OK"
+			return models, result
+		}
 	}
-	if readErr != nil {
-		result.Code = connectionErrorCode(ctx, readErr)
-		return
-	}
-	if len(data) > 1<<20 {
-		result.Code = "UPSTREAM_INVALID_RESPONSE"
-		return
-	}
-	models, err = adapter.Decode(data)
-	if err != nil {
-		result.Code = "UPSTREAM_INVALID_RESPONSE"
-		return nil, result
-	}
-	result.OK = true
-	result.Code = "OK"
-	return
+	result.Code = "UPSTREAM_INVALID_RESPONSE"
+	return nil, result
 }
 
 func validCredential(credential []byte) bool {

@@ -182,8 +182,9 @@ func TestSyncResourceModelsCreatesMissingEntriesAndRefreshesExistingNames(t *tes
 	if !result.OK || result.Source != "PROVIDER" || result.Discovered != 3 || result.Created != 2 || result.Updated != 1 || result.Mapped != 2 {
 		t.Fatalf("unexpected result: %+v", result)
 	}
-	if discoverer.source.ProviderCode != state.provider.Code {
-		t.Fatalf("discovery provider code = %q, want %q", discoverer.source.ProviderCode, state.provider.Code)
+	if discoverer.source.ProviderCode != state.provider.Code || len(discoverer.source.Endpoints) != 1 ||
+		discoverer.source.Endpoints[0] != state.provider.Endpoints[0] {
+		t.Fatalf("discovery source = %+v, want provider code and endpoints from %+v", discoverer.source, state.provider)
 	}
 	if len(state.models) != 3 || state.models[0].Name != "Upstream name" || state.models[0].Status != "ACTIVE" || state.models[0].Remark != "保留说明" || len(state.models[0].InputModalities) != 2 || len(state.models[0].OutputModalities) != 1 || state.models[1].Name != "New Model" || state.models[1].Status != "ACTIVE" || state.models[2].Name != "Deepseek v4 flash vision exp" || state.models[2].Status != "ACTIVE" {
 		t.Fatalf("existing model metadata was not selectively updated or synchronized models were not enabled: %+v", state.models)

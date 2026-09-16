@@ -17,11 +17,11 @@ type deepSeekAdapter struct{}
 
 func (deepSeekAdapter) Name() string { return "deepseek" }
 
-func (deepSeekAdapter) Request() catalogRequest {
-	return catalogRequest{URL: "https://api.deepseek.com/models", Bearer: true}
+func (deepSeekAdapter) Request(mgmt.ModelDiscoverySource, int) (catalogRequest, error) {
+	return catalogRequest{URL: "https://api.deepseek.com/models", Bearer: true}, nil
 }
 
-func (deepSeekAdapter) Decode(data []byte) ([]mgmt.DiscoveredModel, error) {
+func (deepSeekAdapter) Decode(data []byte, _ int) ([]mgmt.DiscoveredModel, bool, error) {
 	var payload struct {
 		Object string `json:"object"`
 		Data   []struct {
@@ -31,13 +31,13 @@ func (deepSeekAdapter) Decode(data []byte) ([]mgmt.DiscoveredModel, error) {
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil || payload.Object != "list" || payload.Data == nil {
-		return nil, errInvalidDeepSeekCatalog
+		return nil, false, errInvalidDeepSeekCatalog
 	}
 	models := make([]mgmt.DiscoveredModel, 0, len(payload.Data))
 	seen := make(map[string]struct{}, len(payload.Data))
 	for _, item := range payload.Data {
 		if item.Object != "model" || item.OwnedBy != "deepseek" || !validModelCode(item.ID) {
-			return nil, errInvalidDeepSeekCatalog
+			return nil, false, errInvalidDeepSeekCatalog
 		}
 		if _, duplicate := seen[item.ID]; duplicate {
 			continue
@@ -49,7 +49,7 @@ func (deepSeekAdapter) Decode(data []byte) ([]mgmt.DiscoveredModel, error) {
 		})
 	}
 	sort.Slice(models, func(i, j int) bool { return models[i].Code < models[j].Code })
-	return models, nil
+	return models, false, nil
 }
 
 func deepSeekDisplayName(code string) string {

@@ -19,6 +19,7 @@ const (
 	DeepSeekOfficialCode  = "deepseek-official"
 	ZhipuOfficialCode     = "zhipu-official"
 	KimiOfficialCode      = "kimi-official"
+	QwenOfficialCode      = "qwen-official"
 	SonnetCode            = "claude-sonnet"
 	OpusCode              = "claude-opus"
 )
