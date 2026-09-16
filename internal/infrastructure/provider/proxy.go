@@ -22,18 +22,18 @@ type ProxyRequestLog struct {
 	Protocol     string
 }
 
-var redactProxyLogSecrets atomic.Bool
+var redactProviderLogSecrets atomic.Bool
 
 func init() {
 	// 未显式配置运行环境时采用生产环境策略，避免测试工具或独立调用意外输出凭据。
-	redactProxyLogSecrets.Store(true)
+	redactProviderLogSecrets.Store(true)
 }
 
-// ConfigureProxyLogEnvironment 配置进程级代理日志策略。只有明确的 dev/test 环境
-// 输出完整代理配置，prod 或未知环境均以星号替换认证信息和 Header Value。
-func ConfigureProxyLogEnvironment(environment string) {
+// ConfigureLogEnvironment 配置进程级 Provider 日志策略。只有明确的 dev/test 环境
+// 输出完整诊断信息，prod 或未知环境均脱敏。
+func ConfigureLogEnvironment(environment string) {
 	environment = strings.ToLower(strings.TrimSpace(environment))
-	redactProxyLogSecrets.Store(environment != "dev" && environment != "test")
+	redactProviderLogSecrets.Store(environment != "dev" && environment != "test")
 }
 
 func parseProxyURL(proxy *catalog.OutboundProxy) (*url.URL, error) {
@@ -78,7 +78,7 @@ func logProxyRequest(ctx context.Context, proxyURL *url.URL, headers map[string]
 	if logger == nil {
 		logger = slog.Default()
 	}
-	redact := redactProxyLogSecrets.Load()
+	redact := redactProviderLogSecrets.Load()
 	attributes := []any{
 		"proxy", true,
 		"proxy_url", proxyLogURL(proxyURL, redact),

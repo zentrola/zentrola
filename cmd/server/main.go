@@ -136,7 +136,7 @@ func run(args []string, output io.Writer) (runErr error) {
 }
 
 func runService(command commandOptions, selection configSelection, cfg config.Config, managed *managedProcess, output io.Writer) (runErr error) {
-	provider.ConfigureProxyLogEnvironment(cfg.Environment)
+	provider.ConfigureLogEnvironment(cfg.Environment)
 	mode := command.name
 	// 显式指定配置后，配置中的相对运行路径必须稳定。
 	if selection.pinned {
@@ -295,9 +295,9 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 		management.WithSubscriptionAdapter(codexSubscription),
 		management.WithSubscriptionAdapter(claudeSubscription),
 	)
-	anthropicClient := anthropic.NewGatewayClient(cfg.Gateway.HeaderTimeout)
+	anthropicClient := anthropic.NewGatewayClient(cfg.Gateway.HeaderTimeout, logger)
 	defer anthropicClient.CloseIdleConnections()
-	openaiClient := openai.NewGatewayClient(cfg.Gateway.HeaderTimeout)
+	openaiClient := openai.NewGatewayClient(cfg.Gateway.HeaderTimeout, logger)
 	defer openaiClient.CloseIdleConnections()
 	compatibleUpstream := gateway.NewCompatibleUpstream(anthropicClient, openaiClient)
 	routeState := redisstate.New(cfg.Redis.Host, cfg.Redis.Port, cfg.Redis.Database, cfg.Redis.Password)
