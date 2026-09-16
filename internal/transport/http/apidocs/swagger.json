@@ -1903,6 +1903,121 @@
                 }
             }
         },
+        "/api/v1/me/provider": {
+            "get": {
+                "security": [
+                    {
+                        "GatewayKey": []
+                    },
+                    {
+                        "GatewayBearer": []
+                    }
+                ],
+                "description": "根据当前模型编码，返回 Access Key 按现有权限及网关路由顺序将使用的服务商。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "用量统计"
+                ],
+                "summary": "查询当前模型使用的服务商",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "当前模型编码",
+                        "name": "model",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/gateway.Provider"
+                                        }
+                                    }
+                                }
+                            ]
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "请求追踪 ID"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "请求追踪 ID"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "请求追踪 ID"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "请求追踪 ID"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "请求追踪 ID"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "请求追踪 ID"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/me/usage": {
             "get": {
                 "security": [
@@ -3439,6 +3554,18 @@
                         "description": "每页数量",
                         "name": "limit",
                         "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "OFFICIAL",
+                            "PLATFORM",
+                            "PARTNER",
+                            "CUSTOM"
+                        ],
+                        "type": "string",
+                        "description": "供应商类型",
+                        "name": "type",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -3498,7 +3625,7 @@
                         "AdminBearer": []
                     }
                 ],
-                "description": "新服务商默认停用；至少配置一种 HTTPS 兼容协议地址和一条模型映射，映射与服务商在同一事务创建。",
+                "description": "新服务商默认停用；至少配置一种 HTTPS 兼容协议地址，模型映射可稍后配置。启用服务商时必须至少存在一条模型映射和一个可用凭据。",
                 "consumes": [
                     "application/json"
                 ],
@@ -3940,7 +4067,7 @@
                         "AdminBearer": []
                     }
                 ],
-                "description": "由后端选择服务商的 API Key 凭据并同步官方模型目录；当前支持 OpenAI、DeepSeek 和智谱 AI。",
+                "description": "优先使用已配置的 API Key 从官方接口同步；没有可用 API Key 时读取应用内置 JSON 目录。官方接口当前支持 OpenAI、DeepSeek、智谱 AI 和月之暗面；应用内置 JSON 目录只安装其中已维护的模型。创建的模型默认启用并自动建立服务商映射，其他既有配置保持不变。",
                 "produces": [
                     "application/json"
                 ],
@@ -4692,7 +4819,7 @@
                         "AdminBearer": []
                     }
                 ],
-                "description": "根据服务商编码选择官方模型目录适配器；当前支持 OpenAI、DeepSeek 和智谱 AI。创建缺失模型和映射，同编码模型更新官方名称；新模型默认停用，其他既有配置保持不变。HTTP 200 后仍需检查 data.ok 和 data.code。",
+                "description": "使用指定凭据从官方接口同步模型目录，并用应用内置 JSON 补充已维护模型的名称和模态。当前接口适配器支持 OpenAI、DeepSeek、智谱 AI 和月之暗面。创建缺失模型和映射，同编码模型更新官方名称；新模型默认启用，其他既有配置保持不变。HTTP 200 后仍需检查 data.ok 和 data.code。",
                 "produces": [
                     "application/json"
                 ],
@@ -5901,6 +6028,15 @@
                 }
             }
         },
+        "gateway.Provider": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "example": "OpenAI"
+                }
+            }
+        },
         "github_com_zentrola_zentrola_internal_transport_http.response": {
             "type": "object",
             "properties": {
@@ -6671,6 +6807,9 @@
                 },
                 "resetCredits": {
                     "$ref": "#/definitions/management.RateLimitResetCredits"
+                },
+                "source": {
+                    "type": "string"
                 },
                 "updated": {
                     "type": "integer"

@@ -85,7 +85,7 @@ func managementError(err error) error {
 			return appsec.ErrInvalidArgument
 		}
 	}
-	for _, known := range []error{appsec.ErrInvalidArgument, appsec.ErrUnauthenticated, appsec.ErrNotFound, appsec.ErrUnavailable, mgmt.ErrConflict, mgmt.ErrCredential, mgmt.ErrProvider, mgmt.ErrProviderCredentialRequired, mgmt.ErrModelSyncCredentialRequired, mgmt.ErrCredentialExportUnsupported} {
+	for _, known := range []error{appsec.ErrInvalidArgument, appsec.ErrUnauthenticated, appsec.ErrNotFound, appsec.ErrUnavailable, mgmt.ErrConflict, mgmt.ErrCredential, mgmt.ErrProvider, mgmt.ErrProviderCredentialRequired, mgmt.ErrProviderModelMappingRequired, mgmt.ErrModelSyncCredentialRequired, mgmt.ErrCredentialExportUnsupported} {
 		if errors.Is(err, known) {
 			return known
 		}
@@ -263,8 +263,8 @@ func (s *managementSession) Models(ctx context.Context, p mgmt.Page, status stri
 	}
 	return result, nil
 }
-func (s *managementSession) Providers(ctx context.Context, p mgmt.Page) ([]mgmt.Provider, error) {
-	rows, err := s.q.ManageProviders(ctx, dbgen.ManageProvidersParams{ID: p.After, Limit: managementPageLimit(p)})
+func (s *managementSession) Providers(ctx context.Context, p mgmt.Page, providerType string) ([]mgmt.Provider, error) {
+	rows, err := s.q.ManageProviders(ctx, dbgen.ManageProvidersParams{ProviderType: providerType, AfterID: p.After, PageLimit: managementPageLimit(p)})
 	if err != nil {
 		return nil, err
 	}
@@ -373,8 +373,8 @@ func (s *managementSession) CountGroups(ctx context.Context, status string) (int
 func (s *managementSession) CountModels(ctx context.Context, status string) (int64, error) {
 	return s.q.CountManageModels(ctx, status)
 }
-func (s *managementSession) CountProviders(ctx context.Context) (int64, error) {
-	return s.q.CountManageProviders(ctx)
+func (s *managementSession) CountProviders(ctx context.Context, providerType string) (int64, error) {
+	return s.q.CountManageProviders(ctx, providerType)
 }
 func (s *managementSession) CountResources(ctx context.Context) (int64, error) {
 	return s.q.CountManageResources(ctx)

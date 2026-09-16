@@ -23,6 +23,7 @@ type mappingWriter struct {
 type providerStatusWriter struct {
 	Writer
 	provider             Provider
+	mappings             []ProviderMapping
 	credentialConfigured bool
 	statusChanges        []string
 	audits               []Audit
@@ -33,6 +34,9 @@ func (w *providerStatusWriter) Provider(context.Context, int64) (Provider, error
 }
 func (w *providerStatusWriter) ProviderCredentialConfigured(context.Context, int64) (bool, error) {
 	return w.credentialConfigured, nil
+}
+func (w *providerStatusWriter) ProviderMappings(context.Context, int64) ([]ProviderMapping, error) {
+	return append([]ProviderMapping(nil), w.mappings...), nil
 }
 func (w *providerStatusWriter) SetProviderStatus(_ context.Context, _ int64, status string) error {
 	w.statusChanges = append(w.statusChanges, status)
@@ -123,6 +127,10 @@ func TestProviderInputNormalizationAndValidation(t *testing.T) {
 		input.Mappings[0].UpstreamModelCode != "upstream-model" {
 		t.Fatalf("unexpected normalized provider input: %+v", input)
 	}
+	input.Mappings = nil
+	if !input.Valid() {
+		t.Fatal("provider input without mappings should be valid while disabled")
+	}
 }
 
 func TestProviderMappingValidation(t *testing.T) {
@@ -136,7 +144,6 @@ func TestProviderMappingValidation(t *testing.T) {
 	}
 
 	invalid := [][]ProviderMappingInput{
-		nil,
 		{{ModelID: 0, UpstreamModelCode: "vendor-model"}},
 		{{ModelID: 1, UpstreamModelCode: " vendor-model "}},
 		{{ModelID: 1, UpstreamModelCode: "vendor-model", Priority: 10001}},
@@ -146,6 +153,21 @@ func TestProviderMappingValidation(t *testing.T) {
 		if validProviderMappings(provider, mappings) {
 			t.Fatalf("invalid mappings accepted: %+v", mappings)
 		}
+	}
+}
+
+func TestReplaceProviderMappingsAllowsRemovingAllModels(t *testing.T) {
+	writer := &mappingWriter{mappings: []ProviderMapping{
+		{ID: 10, ProviderID: 8, ModelID: 1, Priority: 100},
+		{ID: 11, ProviderID: 8, ModelID: 2, Priority: 100},
+	}}
+	service := &Service{}
+	result, err := service.replaceProviderMappings(context.Background(), writer, Provider{ID: 8}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result) != 0 || len(writer.deleted) != 2 {
+		t.Fatalf("all mappings were not removed: result=%+v deleted=%v", result, writer.deleted)
 	}
 }
 
@@ -173,7 +195,10 @@ func TestReplaceProviderMappingsLogicallyDeletesUncheckedModels(t *testing.T) {
 }
 
 func TestSetProviderStatusRequiresConfiguredCredentialWhenEnabling(t *testing.T) {
-	writer := &providerStatusWriter{provider: Provider{ID: 8, Name: "待配置服务商", Status: "DISABLED"}}
+	writer := &providerStatusWriter{
+		provider: Provider{ID: 8, Name: "待配置服务商", Status: "DISABLED"},
+		mappings: []ProviderMapping{{ID: 10, ProviderID: 8, ModelID: 1}},
+	}
 	service := New(providerStatusStore{writer: writer}, nil, nil, nil)
 
 	err := service.SetProviderStatus(context.Background(), admin.Identity{}, 8, "ACTIVE", appsec.RequestMeta{})
@@ -190,6 +215,22 @@ func TestSetProviderStatusRequiresConfiguredCredentialWhenEnabling(t *testing.T)
 	}
 	if len(writer.statusChanges) != 1 || writer.statusChanges[0] != "ACTIVE" || len(writer.audits) != 1 {
 		t.Fatalf("configured provider was not enabled and audited: statuses=%v audits=%v", writer.statusChanges, writer.audits)
+	}
+}
+
+func TestSetProviderStatusRequiresModelMappingWhenEnabling(t *testing.T) {
+	writer := &providerStatusWriter{
+		provider:             Provider{ID: 8, Name: "待配置服务商", Status: "DISABLED"},
+		credentialConfigured: true,
+	}
+	service := New(providerStatusStore{writer: writer}, nil, nil, nil)
+
+	err := service.SetProviderStatus(context.Background(), admin.Identity{}, 8, "ACTIVE", appsec.RequestMeta{})
+	if !errors.Is(err, ErrProviderModelMappingRequired) {
+		t.Fatalf("error=%v; want provider model mapping required", err)
+	}
+	if len(writer.statusChanges) != 0 || len(writer.audits) != 0 {
+		t.Fatalf("rejected enable changed state: statuses=%v audits=%v", writer.statusChanges, writer.audits)
 	}
 }
 

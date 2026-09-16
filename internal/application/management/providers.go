@@ -287,9 +287,6 @@ func (s *Service) applyProviderProxy(current Provider, input ProviderInput) (Pro
 }
 
 func validProviderMappings(_ Provider, mappings []ProviderMappingInput) bool {
-	if len(mappings) == 0 {
-		return false
-	}
 	seen := make(map[int64]struct{}, len(mappings))
 	for _, mapping := range mappings {
 		if mapping.ModelID <= 0 ||
@@ -457,6 +454,13 @@ func (s *Service) SetProviderStatus(ctx context.Context, actor admin.Identity, i
 			return nil
 		}
 		if status == "ACTIVE" {
+			mappings, err := w.ProviderMappings(ctx, id)
+			if err != nil {
+				return err
+			}
+			if len(mappings) == 0 {
+				return ErrProviderModelMappingRequired
+			}
 			configured, err := w.ProviderCredentialConfigured(ctx, id)
 			if err != nil {
 				return err

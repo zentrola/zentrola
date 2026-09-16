@@ -3,12 +3,15 @@ package management
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
 
+	"github.com/zentrola/zentrola/internal/application/bootstrap"
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	"github.com/zentrola/zentrola/internal/domain/admin"
+	"github.com/zentrola/zentrola/internal/domain/catalog"
 	"github.com/zentrola/zentrola/internal/domain/operation"
 )
 
@@ -38,18 +41,21 @@ func (s *Service) SyncProviderModels(ctx context.Context, actor admin.Identity, 
 	if id <= 0 {
 		return ModelSyncResult{}, appsec.ErrInvalidArgument
 	}
-	if s.discoverer == nil {
-		return ModelSyncResult{}, ErrProvider
-	}
 
+	var provider Provider
 	var resourceID int64
 	err := s.store.Read(ctx, actor, func(reader Reader) error {
-		provider, err := reader.Provider(ctx, id)
+		var err error
+		provider, err = reader.Provider(ctx, id)
 		if err != nil {
 			return err
 		}
-		if !s.discoverer.Supports(provider.Code) {
+		apiSupported := s.discoverer != nil && s.discoverer.Supports(provider.Code)
+		if !apiSupported && len(bootstrap.OfficialProviderModels(provider.Code)) == 0 {
 			return ErrProvider
+		}
+		if !apiSupported {
+			return nil
 		}
 
 		var after int64
@@ -78,15 +84,24 @@ func (s *Service) SyncProviderModels(ctx context.Context, actor admin.Identity, 
 			}
 			after = next
 		}
-		if resourceID == 0 {
-			return ErrModelSyncCredentialRequired
-		}
 		return nil
 	})
 	if err != nil {
 		return ModelSyncResult{}, err
 	}
-	return s.SyncResourceModels(ctx, actor, resourceID, meta)
+	if resourceID != 0 {
+		return s.SyncResourceModels(ctx, actor, resourceID, meta)
+	}
+	discovered := bundledDiscoveredModels(provider.Code)
+	if len(discovered) == 0 {
+		return ModelSyncResult{}, ErrModelSyncCredentialRequired
+	}
+	result := ModelSyncResult{
+		ConnectionResult: ConnectionResult{OK: true, Code: "OK"},
+		Discovered:       len(discovered),
+		Source:           "BUILTIN",
+	}
+	return s.persistDiscoveredModels(ctx, actor, provider, nil, discovered, result, meta)
 }
 
 func (s *Service) SyncResourceModels(ctx context.Context, actor admin.Identity, id int64, meta appsec.RequestMeta) (ModelSyncResult, error) {
@@ -125,7 +140,8 @@ func (s *Service) SyncResourceModels(ctx context.Context, actor admin.Identity, 
 	discovered, connection := s.discoverer.Discover(ctx, ModelDiscoverySource{
 		ProviderCode: provider.Code,
 	}, plain, proxy)
-	result := ModelSyncResult{ConnectionResult: connection, Discovered: len(discovered)}
+	discovered = enrichDiscoveredModels(provider.Code, discovered)
+	result := ModelSyncResult{ConnectionResult: connection, Discovered: len(discovered), Source: "PROVIDER"}
 	if len(discovered) > modelSyncLimit {
 		result.OK = false
 		result.Code = "UPSTREAM_INVALID_RESPONSE"
@@ -135,14 +151,19 @@ func (s *Service) SyncResourceModels(ctx context.Context, actor admin.Identity, 
 		err = s.auditModelSync(ctx, actor, provider, resource, result, meta)
 		return result, err
 	}
+	return s.persistDiscoveredModels(ctx, actor, provider, &resource, discovered, result, meta)
+}
 
-	err = s.store.Write(ctx, actor, func(writer Writer) error {
-		current, err := writer.Resource(ctx, id)
-		if err != nil {
-			return err
-		}
-		if !current.UpdatedAt.Equal(resource.UpdatedAt) {
-			return ErrConflict
+func (s *Service) persistDiscoveredModels(ctx context.Context, actor admin.Identity, provider Provider, resource *ResourceRecord, discovered []DiscoveredModel, result ModelSyncResult, meta appsec.RequestMeta) (ModelSyncResult, error) {
+	err := s.store.Write(ctx, actor, func(writer Writer) error {
+		if resource != nil {
+			current, err := writer.Resource(ctx, resource.ID)
+			if err != nil {
+				return err
+			}
+			if !current.UpdatedAt.Equal(resource.UpdatedAt) {
+				return ErrConflict
+			}
 		}
 
 		models, err := readAllModels(ctx, writer)
@@ -184,9 +205,10 @@ func (s *Service) SyncResourceModels(ctx context.Context, actor admin.Identity, 
 				if err != nil {
 					return err
 				}
+				inputModalities, outputModalities := discoveredModalities(candidate)
 				model = Model{
-					ID: modelID, Code: candidate.Code, Name: name, Status: "DISABLED",
-					InputModalities: []string{"TEXT"}, OutputModalities: []string{"TEXT"},
+					ID: modelID, Code: candidate.Code, Name: name, Status: "ACTIVE",
+					InputModalities: inputModalities, OutputModalities: outputModalities,
 					PublisherProviderID: &publisherProviderID, PublisherProviderName: &publisherProviderName,
 					CreatedAt: now, UpdatedAt: now,
 				}
@@ -215,7 +237,7 @@ func (s *Service) SyncResourceModels(ctx context.Context, actor admin.Identity, 
 			}
 			if err := writer.CreateProviderMapping(ctx, ProviderMapping{
 				ID: mappingID, ProviderID: provider.ID, ModelID: model.ID,
-				UpstreamModelCode: candidate.Code, Priority: defaultProviderMappingPriority,
+				UpstreamModelCode: "", Priority: defaultProviderMappingPriority,
 				CreatedAt: now, UpdatedAt: now,
 			}); err != nil {
 				return err
@@ -223,12 +245,52 @@ func (s *Service) SyncResourceModels(ctx context.Context, actor admin.Identity, 
 			mappedModels[model.ID] = struct{}{}
 			result.Mapped++
 		}
+		after := map[string]any{"source": result.Source, "sync": result}
+		if resource != nil {
+			after["resourceId"] = idString(resource.ID)
+		}
 		return writer.Audit(ctx, Audit{
 			Event: operation.ModelCatalogSync, Target: "PROVIDER", ID: provider.ID, Name: provider.Name,
-			After: map[string]any{"resourceId": idString(resource.ID), "sync": result},
+			After: after,
 		}, meta)
 	})
 	return result, err
+}
+
+func bundledDiscoveredModels(providerCode string) []DiscoveredModel {
+	models := bootstrap.OfficialProviderModels(providerCode)
+	result := make([]DiscoveredModel, len(models))
+	for index, model := range models {
+		result[index] = DiscoveredModel{
+			Code: model.Code, Name: model.Name,
+			InputModalities: slices.Clone(model.InputModalities), OutputModalities: slices.Clone(model.OutputModalities),
+		}
+	}
+	return result
+}
+
+func enrichDiscoveredModels(providerCode string, discovered []DiscoveredModel) []DiscoveredModel {
+	metadata := make(map[string]DiscoveredModel)
+	for _, model := range bundledDiscoveredModels(providerCode) {
+		metadata[model.Code] = model
+	}
+	result := make([]DiscoveredModel, len(discovered))
+	for index, model := range discovered {
+		result[index] = model
+		if builtIn, ok := metadata[model.Code]; ok {
+			result[index].Name = builtIn.Name
+			result[index].InputModalities = slices.Clone(builtIn.InputModalities)
+			result[index].OutputModalities = slices.Clone(builtIn.OutputModalities)
+		}
+	}
+	return result
+}
+
+func discoveredModalities(model DiscoveredModel) ([]string, []string) {
+	if catalog.ValidModalities(model.InputModalities) && catalog.ValidModalities(model.OutputModalities) {
+		return slices.Clone(model.InputModalities), slices.Clone(model.OutputModalities)
+	}
+	return []string{"TEXT"}, []string{"TEXT"}
 }
 
 func modelDisplayName(code string) string {

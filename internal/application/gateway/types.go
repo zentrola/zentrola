@@ -39,17 +39,17 @@ var (
 )
 
 type Route struct {
-	ModelID, ProviderID, ProviderModelID, ResourceID int64
-	UpstreamModel, BaseURL, EndpointProtocol         string
-	AuthType, AuthAdapter, SubscriptionType          string
-	ResourcePriority                                 int32
-	QuotaStatus                                      string
-	ExpiresAt                                        *time.Time
-	CredentialRefreshedAt, CredentialExpiresAt       *time.Time
-	Credential                                       catalog.SealedCredential
-	ProxyEnabled                                     bool
-	ProxyURL, ProxyHeaders                           catalog.SealedCredential
-	Proxy                                            *catalog.OutboundProxy
+	ModelID, ProviderID, ProviderModelID, ResourceID       int64
+	ProviderName, UpstreamModel, BaseURL, EndpointProtocol string
+	AuthType, AuthAdapter, SubscriptionType                string
+	ResourcePriority                                       int32
+	QuotaStatus                                            string
+	ExpiresAt                                              *time.Time
+	CredentialRefreshedAt, CredentialExpiresAt             *time.Time
+	Credential                                             catalog.SealedCredential
+	ProxyEnabled                                           bool
+	ProxyURL, ProxyHeaders                                 catalog.SealedCredential
+	Proxy                                                  *catalog.OutboundProxy
 }
 
 const AnthropicProtocol = "ANTHROPIC_MESSAGES"
@@ -70,6 +70,10 @@ type Model struct {
 	Object  string `json:"object"`
 	Created int64  `json:"created"`
 	OwnedBy string `json:"owned_by"`
+}
+
+type Provider struct {
+	Name string `json:"name" example:"OpenAI"`
 }
 type ModelStore interface {
 	Models(context.Context, appsec.PrincipalIdentity) ([]Model, error)
@@ -277,4 +281,22 @@ func (s *Service) Models(ctx context.Context, identity appsec.PrincipalIdentity)
 		return nil, ErrUnavailable
 	}
 	return store.Models(ctx, identity)
+}
+
+// Provider 返回指定模型按当前网关路由顺序将使用的服务商。
+func (s *Service) Provider(ctx context.Context, identity appsec.PrincipalIdentity, model string) (Provider, error) {
+	if identity.ID <= 0 || identity.AccessKeyID <= 0 {
+		return Provider{}, ErrAuthentication
+	}
+	if !validModel(model) {
+		return Provider{}, ErrInvalid
+	}
+	routes, err := s.routes(ctx, identity, model, OpenAIResponsesProtocol)
+	if err != nil {
+		return Provider{}, err
+	}
+	if len(routes) == 0 || routes[0].ProviderName == "" {
+		return Provider{}, ErrRoute
+	}
+	return Provider{Name: routes[0].ProviderName}, nil
 }

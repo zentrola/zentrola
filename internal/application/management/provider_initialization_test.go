@@ -28,7 +28,7 @@ type providerInitializationState struct {
 	audits    []Audit
 }
 
-func (s *providerInitializationState) Providers(_ context.Context, page Page) ([]Provider, error) {
+func (s *providerInitializationState) Providers(_ context.Context, page Page, _ string) ([]Provider, error) {
 	if page.After != 0 {
 		return []Provider{}, nil
 	}
@@ -67,7 +67,7 @@ func TestInitializeOfficialProvidersCreatesMissingTemplatesAndSynchronizesLocali
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Total != 7 || result.Created != 6 || result.Updated != 1 || result.Existing != 1 || len(state.providers) != 7 || len(state.audits) != 7 {
+	if result.Total != 13 || result.Created != 12 || result.Updated != 1 || result.Existing != 1 || len(state.providers) != 13 || len(state.audits) != 13 {
 		t.Fatalf("unexpected initialization result: %+v providers=%d audits=%d", result, len(state.providers), len(state.audits))
 	}
 	if state.providers[0].Name != "OpenAI" || state.providers[0].Website == nil || *state.providers[0].Website != "https://openai.com" || state.providers[0].Endpoints[0].BaseURL != existing.Endpoints[0].BaseURL || state.providers[0].Status != existing.Status {
@@ -80,12 +80,12 @@ func TestInitializeOfficialProvidersCreatesMissingTemplatesAndSynchronizesLocali
 	}
 
 	result, err = service.InitializeOfficialProviders(context.Background(), actor, ProviderInitializeInput{Locale: "zh-CN"}, appsec.RequestMeta{})
-	if err != nil || result.Created != 0 || result.Updated != 0 || result.Existing != 7 || len(state.providers) != 7 || len(state.audits) != 7 {
+	if err != nil || result.Created != 0 || result.Updated != 0 || result.Existing != 13 || len(state.providers) != 13 || len(state.audits) != 13 {
 		t.Fatalf("initialization is not idempotent: %+v err=%v", result, err)
 	}
 
 	result, err = service.InitializeOfficialProviders(context.Background(), actor, ProviderInitializeInput{Locale: "en-US"}, appsec.RequestMeta{})
-	if err != nil || result.Created != 0 || result.Updated != 4 || result.Existing != 7 || len(state.providers) != 7 || len(state.audits) != 11 {
+	if err != nil || result.Created != 0 || result.Updated != 7 || result.Existing != 13 || len(state.providers) != 13 || len(state.audits) != 20 {
 		t.Fatalf("localized names were not synchronized: %+v err=%v", result, err)
 	}
 	if state.providers[0].Name != "OpenAI" {

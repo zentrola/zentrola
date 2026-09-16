@@ -104,7 +104,7 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 	r.Delete("/models/{id}", deleteEndpoint(m.DeleteModel))
 	// @Summary 创建服务商
 	// @Tags 模型与资源
-	// @Description 新服务商默认停用；至少配置一种 HTTPS 兼容协议地址和一条模型映射，映射与服务商在同一事务创建。
+	// @Description 新服务商默认停用；至少配置一种 HTTPS 兼容协议地址，模型映射可稍后配置。启用服务商时必须至少存在一条模型映射和一个可用凭据。
 	// @Accept json
 	// @Produce json
 	// @Security AdminBearer
@@ -282,6 +282,7 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 	// @Security AdminBearer
 	// @Param after query string false "上一页 nextCursor，默认从头查询"
 	// @Param limit query int false "每页数量" minimum(1) maximum(100) default(50)
+	// @Param type query string false "供应商类型" Enums(OFFICIAL,PLATFORM,PARTNER,CUSTOM)
 	// @Success 200 {object} response{data=PageResponse[mgmt.Provider]}
 	// @Header all {string} X-Request-ID "请求追踪 ID"
 	// @Failure 400 {object} response
@@ -290,8 +291,12 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 	// @Failure 404 {object} response
 	// @Router /api/v1/providers [get]
 	r.Get("/providers", listEndpoint(func(req *http.Request, p mgmt.Page) (mgmt.PageData[mgmt.Provider], error) {
-		return m.Providers(req.Context(), adminFrom(req), p)
-	}, func(v mgmt.Provider) int64 { return v.ID }))
+		providerType, err := optionalQueryValue(req, "type")
+		if err != nil {
+			return mgmt.PageData[mgmt.Provider]{}, err
+		}
+		return m.Providers(req.Context(), adminFrom(req), p, providerType)
+	}, func(v mgmt.Provider) int64 { return v.ID }, "type"))
 	// @Summary 资源列表
 	// @Tags 模型与资源
 	// @Description 按 ID 倒序分页，最新资源在前；将 nextCursor 作为下一次请求的 after，继续查询更小的 ID。
@@ -501,7 +506,7 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 	})
 	// @Summary 同步服务商官方模型目录
 	// @Tags 模型与资源
-	// @Description 由后端选择服务商的 API Key 凭据并同步官方模型目录；当前支持 OpenAI、DeepSeek 和智谱 AI。
+	// @Description 优先使用已配置的 API Key 从官方接口同步；没有可用 API Key 时读取应用内置 JSON 目录。官方接口当前支持 OpenAI、DeepSeek、智谱 AI 和月之暗面；应用内置 JSON 目录只安装其中已维护的模型。创建的模型默认启用并自动建立服务商映射，其他既有配置保持不变。
 	// @Produce json
 	// @Security AdminBearer
 	// @Param id path string true "服务商 ID（正整数字符串）"
@@ -807,7 +812,7 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 	})
 	// @Summary 同步官方模型目录
 	// @Tags 模型与资源
-	// @Description 根据服务商编码选择官方模型目录适配器；当前支持 OpenAI、DeepSeek 和智谱 AI。创建缺失模型和映射，同编码模型更新官方名称；新模型默认停用，其他既有配置保持不变。HTTP 200 后仍需检查 data.ok 和 data.code。
+	// @Description 使用指定凭据从官方接口同步模型目录，并用应用内置 JSON 补充已维护模型的名称和模态。当前接口适配器支持 OpenAI、DeepSeek、智谱 AI 和月之暗面。创建缺失模型和映射，同编码模型更新官方名称；新模型默认启用，其他既有配置保持不变。HTTP 200 后仍需检查 data.ok 和 data.code。
 	// @Produce json
 	// @Security AdminBearer
 	// @Param id path string true "业务 ID（正整数字符串）"
