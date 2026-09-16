@@ -263,7 +263,7 @@ func (q *Queries) ManageCreateMember(ctx context.Context, arg ManageCreateMember
 
 const manageCreateModel = `-- name: ManageCreateModel :exec
 INSERT INTO model(id,model_code,display_name,input_modalities,output_modalities,remark,status,publisher_provider_id,created_by,updated_by,created_at,updated_at)
-VALUES($1,$2,$3,$4,$5,$6,'DISABLED',$7,$8,$8,$9,$9)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10,$10)
 `
 
 type ManageCreateModelParams struct {
@@ -273,6 +273,7 @@ type ManageCreateModelParams struct {
 	InputModalities     []byte
 	OutputModalities    []byte
 	Remark              string
+	Status              string
 	PublisherProviderID *int64
 	CreatedBy           string
 	CreatedAt           pgtype.Timestamptz
@@ -286,6 +287,7 @@ func (q *Queries) ManageCreateModel(ctx context.Context, arg ManageCreateModelPa
 		arg.InputModalities,
 		arg.OutputModalities,
 		arg.Remark,
+		arg.Status,
 		arg.PublisherProviderID,
 		arg.CreatedBy,
 		arg.CreatedAt,

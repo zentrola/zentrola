@@ -136,6 +136,8 @@ func TestDiscoverQwenModelsAcrossWorkspaceCatalogPages(t *testing.T) {
 			request.URL.Host != "workspace-01.cn-beijing.maas.aliyuncs.com" ||
 			request.URL.Path != "/api/v1/models" || request.Header.Get("Authorization") != "Bearer test-secret" ||
 			request.Header.Get("x-api-key") != "" || request.URL.Query().Get("providers") != "qwen" ||
+			request.URL.Query().Get("capabilities") != "TG" || request.URL.Query().Get("features") != "model-experience" ||
+			request.URL.Query().Get("supports") != "inference" ||
 			request.URL.Query().Get("language") != "en-US" || request.URL.Query().Get("page_size") != "100" ||
 			request.URL.Query().Get("page_no") != strconv.Itoa(requestCount) {
 			t.Fatalf("invalid discovery request: %s %s", request.Method, request.URL.String())
@@ -184,7 +186,9 @@ func TestQwenCatalogRequestUsesConfiguredRegionalHost(t *testing.T) {
 	parsed, err := url.Parse(request.URL)
 	if err != nil || parsed.Host != "dashscope-intl.aliyuncs.com" || parsed.Path != "/api/v1/models" ||
 		parsed.Query().Get("providers") != "qwen" || parsed.Query().Get("page_no") != "3" ||
-		parsed.Query().Get("page_size") != "100" || parsed.Query().Get("language") != "en-US" {
+		parsed.Query().Get("page_size") != "100" || parsed.Query().Get("language") != "en-US" ||
+		parsed.Query().Get("capabilities") != "TG" || parsed.Query().Get("features") != "model-experience" ||
+		parsed.Query().Get("supports") != "inference" {
 		t.Fatalf("unexpected Qwen catalog request: %+v %v", request, err)
 	}
 	if got := qwenDisplayName("qwen-image-max", ""); got != "Qwen-Image-Max" {

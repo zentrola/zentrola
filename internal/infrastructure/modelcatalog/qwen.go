@@ -35,10 +35,13 @@ func (qwenAdapter) Request(source mgmt.ModelDiscoverySource, page int) (catalogR
 	endpoint.Path = "/api/v1/models"
 	endpoint.RawPath = ""
 	query := endpoint.Query()
+	query.Set("capabilities", "TG")
+	query.Set("features", "model-experience")
 	query.Set("language", "en-US")
 	query.Set("page_no", strconv.Itoa(page))
 	query.Set("page_size", strconv.Itoa(qwenCatalogPageSize))
 	query.Set("providers", "qwen")
+	query.Set("supports", "inference")
 	endpoint.RawQuery = query.Encode()
 	return catalogRequest{URL: endpoint.String(), Bearer: true}, nil
 }

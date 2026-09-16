@@ -615,7 +615,7 @@ func (s *managementSession) CreateModel(ctx context.Context, m mgmt.Model) error
 	if err != nil {
 		return err
 	}
-	return s.q.ManageCreateModel(ctx, dbgen.ManageCreateModelParams{ID: m.ID, ModelCode: m.Code, DisplayName: m.Name, InputModalities: input, OutputModalities: output, Remark: m.Remark, PublisherProviderID: m.PublisherProviderID, CreatedBy: actorRef(s.actor.ID), CreatedAt: pgTime(m.CreatedAt)})
+	return s.q.ManageCreateModel(ctx, dbgen.ManageCreateModelParams{ID: m.ID, ModelCode: m.Code, DisplayName: m.Name, InputModalities: input, OutputModalities: output, Remark: m.Remark, Status: m.Status, PublisherProviderID: m.PublisherProviderID, CreatedBy: actorRef(s.actor.ID), CreatedAt: pgTime(m.CreatedAt)})
 }
 func (s *managementSession) UpdateModel(ctx context.Context, m mgmt.Model) error {
 	input, err := json.Marshal(m.InputModalities)

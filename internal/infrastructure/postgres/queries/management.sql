@@ -101,7 +101,7 @@ WHERE m.id=$1 AND m.is_deleted=false;
 UPDATE model SET status=$2,updated_by=$3,updated_at=$4 WHERE id=$1 AND is_deleted=false;
 -- name: ManageCreateModel :exec
 INSERT INTO model(id,model_code,display_name,input_modalities,output_modalities,remark,status,publisher_provider_id,created_by,updated_by,created_at,updated_at)
-VALUES($1,$2,$3,$4,$5,$6,'DISABLED',$7,$8,$8,$9,$9);
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,$10,$10);
 -- name: ManageUpdateModel :exec
 UPDATE model SET model_code=$2,display_name=$3,input_modalities=$4,output_modalities=$5,remark=$6,publisher_provider_id=$7,updated_by=$8,updated_at=$9
 WHERE id=$1 AND is_deleted=false;
