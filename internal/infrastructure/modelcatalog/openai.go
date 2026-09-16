@@ -15,11 +15,11 @@ type openAIAdapter struct{}
 
 func (openAIAdapter) Name() string { return "openai" }
 
-func (openAIAdapter) Request() catalogRequest {
-	return catalogRequest{URL: "https://api.openai.com/v1/models", Bearer: true}
+func (openAIAdapter) Request(mgmt.ModelDiscoverySource, int) (catalogRequest, error) {
+	return catalogRequest{URL: "https://api.openai.com/v1/models", Bearer: true}, nil
 }
 
-func (openAIAdapter) Decode(data []byte) ([]mgmt.DiscoveredModel, error) {
+func (openAIAdapter) Decode(data []byte, _ int) ([]mgmt.DiscoveredModel, bool, error) {
 	var payload struct {
 		Object string `json:"object"`
 		Data   []struct {
@@ -29,14 +29,14 @@ func (openAIAdapter) Decode(data []byte) ([]mgmt.DiscoveredModel, error) {
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil || payload.Object != "list" || payload.Data == nil {
-		return nil, errInvalidOpenAICatalog
+		return nil, false, errInvalidOpenAICatalog
 	}
 
 	models := make([]mgmt.DiscoveredModel, 0, len(payload.Data))
 	seen := make(map[string]struct{}, len(payload.Data))
 	for _, item := range payload.Data {
 		if item.Object != "model" || !validModelCode(item.ID) || item.OwnedBy == "" || item.OwnedBy != strings.TrimSpace(item.OwnedBy) {
-			return nil, errInvalidOpenAICatalog
+			return nil, false, errInvalidOpenAICatalog
 		}
 		if _, duplicate := seen[item.ID]; duplicate {
 			continue
@@ -48,7 +48,7 @@ func (openAIAdapter) Decode(data []byte) ([]mgmt.DiscoveredModel, error) {
 		})
 	}
 	sort.Slice(models, func(i, j int) bool { return models[i].Code < models[j].Code })
-	return models, nil
+	return models, false, nil
 }
 
 func openAIDisplayName(code string) string {

@@ -396,6 +396,7 @@ type DiscoveredModel struct {
 
 type ModelDiscoverySource struct {
 	ProviderCode string
+	Endpoints    []ProviderEndpoint
 }
 
 type ModelSyncResult struct {

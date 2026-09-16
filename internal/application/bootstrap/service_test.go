@@ -36,7 +36,7 @@ func TestOfficialProviderTemplatesRemainAvailableForExplicitInitialization(t *te
 		"deepseek-official":        {"深度求索", "DeepSeek"},
 		"zhipu-official":           {"智谱 AI", "Zhipu AI"},
 		"kimi-official":            {"月之暗面", "Moonshot AI"},
-		"qwen-official":            {"通义千问", "Alibaba Cloud"},
+		"qwen-official":            {"阿里云百炼", "Alibaba Cloud"},
 		"xai-official":             {"xAI", "xAI"},
 		"mistral-official":         {"Mistral AI", "Mistral AI"},
 		"minimax-official":         {"MiniMax", "MiniMax"},

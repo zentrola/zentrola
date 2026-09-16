@@ -370,10 +370,10 @@ async function fixture(page: Page) {
         ],
         [
           'qwen-official',
-          '通义千问',
+          '阿里云百炼',
           'Alibaba Cloud',
           'https://dashscope.aliyuncs.com/compatible-mode/v1',
-          'https://qwen.ai',
+          'https://bailian.console.aliyun.com/',
         ],
         ['xai-official', 'xAI', 'xAI', 'https://api.x.ai/v1', 'https://x.ai'],
         [
@@ -436,7 +436,7 @@ async function fixture(page: Page) {
           proxyEnabled: false,
           proxyUrl: null,
           proxyHeaders: [],
-          modelSyncSupported: code === 'deepseek-official',
+          modelSyncSupported: code === 'deepseek-official' || code === 'qwen-official',
           authAdapters: code === 'openai-official' ? ['API_KEY', 'OPENAI_CODEX'] : ['API_KEY'],
           createdAt: stamp,
           updatedAt: stamp,
@@ -1679,6 +1679,10 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   )
   await expect(page.locator('.provider-initialize-notice')).toHaveCount(0)
   await expect(page.getByRole('row').filter({ hasText: '月之暗面' })).toBeVisible()
+  const qwenRow = page.getByRole('row').filter({ hasText: '阿里云百炼' })
+  await expect(
+    qwenRow.getByRole('button', { name: '同步 阿里云百炼 的官方模型', exact: true }),
+  ).toBeVisible()
   expect(state.providers.find((provider) => provider.code === 'kimi-official')?.website).toBe(
     'https://www.moonshot.cn',
   )
@@ -1818,7 +1822,7 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await expect(providerModelCode).toHaveValue('deepseek-v4-flash')
   await mappingCheckbox.uncheck()
   await expect(providerModelCode).toBeDisabled()
-  await dialog.getByLabel('服务商名称').fill('阿里云百炼')
+  await dialog.getByLabel('服务商名称').fill('自定义百炼')
   await dialog.getByLabel('官方网站').fill('https://www.aliyun.com')
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expect(page.locator('.toast')).toContainText('至少填写一种协议接口地址')
@@ -1922,11 +1926,11 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expect(page.locator('dialog')).toHaveCount(0)
 
-  const created = state.providers.find((provider) => provider.name === '阿里云百炼')
+  const created = state.providers.find((provider) => provider.name === '自定义百炼')
   expect(created.status).toBe('DISABLED')
   expect(state.providerMappings.get(created.id)).toEqual([])
 
-  const row = page.getByRole('row').filter({ hasText: '阿里云百炼' })
+  const row = page.getByRole('row').filter({ hasText: '自定义百炼' })
   await row.getByRole('button', { name: '编辑', exact: true }).click()
   await expect(dialog.getByRole('tab', { name: '模型配置', exact: true })).toHaveAttribute(
     'aria-selected',
@@ -1998,17 +2002,17 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await expect(row.locator('.provider-runtime .subline')).toHaveCount(0)
   await expect(row.locator('.provider-runtime-state')).toHaveAttribute(
     'title',
-    '查看 阿里云百炼 的凭证，当前运行状态：未配置：尚未配置服务商凭证',
+    '查看 自定义百炼 的凭证，当前运行状态：未配置：尚未配置服务商凭证',
   )
   await expect(
-    row.getByRole('img', { name: '阿里云百炼 已启用代理访问', exact: true }),
+    row.getByRole('img', { name: '自定义百炼 已启用代理访问', exact: true }),
   ).toBeVisible()
-  const createdStatus = row.getByRole('switch', { name: '阿里云百炼的启用状态' })
+  const createdStatus = row.getByRole('switch', { name: '自定义百炼的启用状态' })
   await expect(createdStatus).toHaveText('')
   await expect(createdStatus).toBeDisabled()
   await expect(createdStatus).toHaveAttribute('title', '请先配置服务商认证凭据，再启用服务商。')
   const missingCredential = row.getByRole('button', {
-    name: '管理 阿里云百炼 的认证凭据',
+    name: '管理 自定义百炼 的认证凭据',
     exact: true,
   })
   await expect(missingCredential).toHaveText('凭证')
@@ -2025,36 +2029,36 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await expect(credentialFormRows.first()).toHaveCSS('grid-template-columns', /\S+ \S+/)
   await dialog.getByLabel('API Key', { exact: true }).fill('aliyun-fixture-credential')
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
-  await expect(dialog.getByRole('row').filter({ hasText: '阿里云百炼 API Key' })).toBeVisible()
+  await expect(dialog.getByRole('row').filter({ hasText: '自定义百炼 API Key' })).toBeVisible()
   await expect(page.locator('.toast-success')).toContainText('已保存')
   await dialog.getByRole('button', { name: '关闭', exact: true }).click()
   await expect(page.locator('dialog')).toHaveCount(0)
   await expect(
-    row.getByRole('button', { name: '同步 阿里云百炼 的官方模型', exact: true }),
+    row.getByRole('button', { name: '同步 自定义百炼 的官方模型', exact: true }),
   ).toHaveCount(0)
   expect(state.modelSyncRequests).toHaveLength(0)
   await expect(
     row.getByRole('button', {
-      name: '管理 阿里云百炼 的认证凭据',
+      name: '管理 自定义百炼 的认证凭据',
       exact: true,
     }),
   ).toHaveText('凭证')
   await expect(createdStatus).toBeEnabled()
   await expect(createdStatus).not.toHaveAttribute('title')
   await expect(
-    row.getByRole('button', { name: '验证 阿里云百炼 的模型调用', exact: true }),
+    row.getByRole('button', { name: '验证 自定义百炼 的模型调用', exact: true }),
   ).toHaveCount(0)
   await row
     .getByRole('button', {
-      name: '管理 阿里云百炼 的认证凭据',
+      name: '管理 自定义百炼 的认证凭据',
       exact: true,
     })
     .click()
   const createdCredentialRow = modal(page)
     .getByRole('row')
-    .filter({ hasText: '阿里云百炼 API Key' })
+    .filter({ hasText: '自定义百炼 API Key' })
   const testCredential = createdCredentialRow.getByRole('button', {
-    name: '验证 阿里云百炼 API Key 的可用性',
+    name: '验证 自定义百炼 API Key 的可用性',
     exact: true,
   })
   await expect(testCredential).toBeVisible()

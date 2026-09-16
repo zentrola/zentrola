@@ -139,6 +139,7 @@ func (s *Service) SyncResourceModels(ctx context.Context, actor admin.Identity, 
 
 	discovered, connection := s.discoverer.Discover(ctx, ModelDiscoverySource{
 		ProviderCode: provider.Code,
+		Endpoints:    slices.Clone(provider.Endpoints),
 	}, plain, proxy)
 	discovered = enrichDiscoveredModels(provider.Code, discovered)
 	result := ModelSyncResult{ConnectionResult: connection, Discovered: len(discovered), Source: "PROVIDER"}
