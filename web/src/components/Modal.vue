@@ -12,6 +12,7 @@ const props = withDefaults(
     confirm?: boolean
     tone?: 'neutral' | 'success' | 'warning' | 'danger'
     descriptionId?: string
+    bodyClass?: string
   }>(),
   { tone: 'neutral' },
 )
@@ -56,7 +57,7 @@ onBeforeUnmount(() => {
           <Icon name="close" />
         </button>
       </header>
-      <div class="modal-body"><slot /></div>
+      <div class="modal-body" :class="bodyClass"><slot /></div>
       <footer v-if="$slots.footer" class="modal-footer"><slot name="footer" /></footer></dialog
   ></Teleport>
 </template>
