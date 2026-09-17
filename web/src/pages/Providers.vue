@@ -137,6 +137,8 @@ const form = reactive({
   proxyHeaders: [] as ProxyHeaderDraft[],
   mappings: [] as MappingDraft[],
 })
+const mappingQuery = ref('')
+const onlySelectedMappings = ref(false)
 const enabledModels = computed(() => models.value.filter((model) => model.status === 'ACTIVE'))
 const availableMappingModels = computed(() => {
   if (editTarget.value?.type !== 'OFFICIAL') return enabledModels.value
@@ -148,14 +150,34 @@ const mappingRows = computed(() =>
     mapping: form.mappings.find((mapping) => mapping.modelId === model.id),
   })),
 )
+const filteredMappingRows = computed(() => {
+  const keyword = mappingQuery.value.trim().toLocaleLowerCase()
+  return mappingRows.value.filter(
+    (row) =>
+      (!onlySelectedMappings.value || Boolean(row.mapping)) &&
+      (!keyword ||
+        [
+          row.model.name,
+          row.model.code,
+          row.model.publisherProviderName || '',
+          row.mapping?.upstreamModelCode || '',
+        ].some((value) => value.toLocaleLowerCase().includes(keyword))),
+  )
+})
+const mappingFilterActive = computed(
+  () => Boolean(mappingQuery.value.trim()) || onlySelectedMappings.value,
+)
 const selectedMappingCount = computed(() => mappingRows.value.filter((row) => row.mapping).length)
+const visibleSelectedMappingCount = computed(
+  () => filteredMappingRows.value.filter((row) => row.mapping).length,
+)
 const allMappingsSelected = computed(
   () =>
-    availableMappingModels.value.length > 0 &&
-    selectedMappingCount.value === availableMappingModels.value.length,
+    filteredMappingRows.value.length > 0 &&
+    visibleSelectedMappingCount.value === filteredMappingRows.value.length,
 )
 const someMappingsSelected = computed(
-  () => selectedMappingCount.value > 0 && !allMappingsSelected.value,
+  () => visibleSelectedMappingCount.value > 0 && !allMappingsSelected.value,
 )
 const route = useRoute()
 const router = useRouter()
@@ -199,6 +221,7 @@ function normalizeURL(value: string) {
 }
 
 function assignForm(provider: Provider | null, mappings: MappingDraft[] = []) {
+  resetMappingFilters()
   editTarget.value = provider
   Object.assign(form, {
     name: provider?.name ?? '',
@@ -218,6 +241,11 @@ function assignForm(provider: Provider | null, mappings: MappingDraft[] = []) {
     mappings,
   })
   actionError.value = ''
+}
+
+function resetMappingFilters() {
+  mappingQuery.value = ''
+  onlySelectedMappings.value = false
 }
 
 function addProxyHeader() {
@@ -322,16 +350,17 @@ function toggleMapping(model: Model) {
 
 function toggleAllMappings(event: Event) {
   const checked = (event.target as HTMLInputElement).checked
-  const availableModelIDs = new Set(availableMappingModels.value.map((model) => model.id))
+  const visibleModels = filteredMappingRows.value.map((row) => row.model)
+  const visibleModelIDs = new Set(visibleModels.map((model) => model.id))
   if (checked) {
-    for (const model of availableMappingModels.value) {
+    for (const model of visibleModels) {
       if (!form.mappings.some((mapping) => mapping.modelId === model.id)) {
         form.mappings.push({ modelId: model.id, upstreamModelCode: '' })
       }
     }
     return
   }
-  const remaining = form.mappings.filter((mapping) => !availableModelIDs.has(mapping.modelId))
+  const remaining = form.mappings.filter((mapping) => !visibleModelIDs.has(mapping.modelId))
   form.mappings.splice(0, form.mappings.length, ...remaining)
 }
 
@@ -1578,7 +1607,47 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
               }}
             </span>
           </header>
-          <div v-if="availableMappingModels.length" class="mapping-list">
+          <div v-if="availableMappingModels.length" class="mapping-toolbar">
+            <div class="mapping-search-box">
+              <Icon name="search" :size="16" />
+              <input
+                id="provider-mapping-search"
+                v-model="mappingQuery"
+                type="search"
+                :aria-label="t('providers.mappingSearch')"
+                :placeholder="t('providers.mappingSearchPlaceholder')"
+                :disabled="busy"
+              />
+              <button
+                v-if="mappingQuery"
+                type="button"
+                class="mapping-search-clear"
+                :aria-label="t('providers.clearMappingSearch')"
+                :disabled="busy"
+                @click="mappingQuery = ''"
+              >
+                <Icon name="close" :size="14" />
+              </button>
+            </div>
+            <button
+              type="button"
+              class="mapping-selected-filter"
+              :class="{ active: onlySelectedMappings }"
+              :aria-pressed="onlySelectedMappings"
+              :disabled="busy"
+              @click="onlySelectedMappings = !onlySelectedMappings"
+            >
+              <span class="mapping-filter-indicator"><Icon name="check" :size="12" /></span>
+              {{ t('providers.onlySelectedMappings') }}
+            </button>
+          </div>
+          <div v-if="mappingFilterActive" class="mapping-filter-summary">
+            {{ t('providers.filteredMappingCount', { count: filteredMappingRows.length }) }}
+          </div>
+          <div
+            v-if="availableMappingModels.length && filteredMappingRows.length"
+            class="mapping-list"
+          >
             <div class="mapping-grid mapping-grid-head">
               <label class="mapping-check mapping-select-all">
                 <input
@@ -1586,7 +1655,13 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
                   :checked="allMappingsSelected"
                   :indeterminate="someMappingsSelected"
                   :disabled="busy"
-                  :aria-label="t('providers.selectAllMappings')"
+                  :aria-label="
+                    t(
+                      mappingFilterActive
+                        ? 'providers.selectFilteredMappings'
+                        : 'providers.selectAllMappings',
+                    )
+                  "
                   @change="toggleAllMappings"
                 />
               </label>
@@ -1594,7 +1669,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
               <span>{{ t('providers.upstreamModelCode') }}</span>
             </div>
             <div
-              v-for="row in mappingRows"
+              v-for="row in filteredMappingRows"
               :key="row.model.id"
               class="mapping-grid mapping-row"
               :class="{ 'is-selected': row.mapping }"
@@ -1622,6 +1697,12 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
               </label>
             </div>
           </div>
+          <p v-else-if="availableMappingModels.length" class="mapping-empty mapping-filter-empty">
+            {{ t('providers.noMatchingMappings') }}
+            <button type="button" class="text-button" @click="resetMappingFilters">
+              {{ t('providers.clearMappingFilters') }}
+            </button>
+          </p>
           <p v-else class="mapping-empty">
             {{ t('providers.noModels') }}
           </p>
@@ -3658,6 +3739,95 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   font-size: 12px;
   white-space: nowrap;
 }
+.mapping-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.mapping-search-box {
+  position: relative;
+  flex: 1 1 320px;
+  min-width: 0;
+  color: #92a0af;
+}
+.mapping-search-box > svg {
+  position: absolute;
+  top: 10px;
+  left: 11px;
+  pointer-events: none;
+}
+.mapping-search-box input[type='search'] {
+  min-height: 36px;
+  padding: 7px 36px 7px 35px;
+  font-size: 12px;
+  background: #f8fafc;
+}
+.mapping-search-box input[type='search']::-webkit-search-cancel-button {
+  display: none;
+}
+.mapping-search-clear {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  display: grid;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  place-items: center;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.mapping-search-clear:hover {
+  color: var(--color-text);
+  background: #e9eff6;
+}
+.mapping-selected-filter {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 7px 11px;
+  color: var(--color-text-secondary);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  font-size: 12px;
+  cursor: pointer;
+}
+.mapping-selected-filter:hover {
+  border-color: #b8c6d5;
+  background: #f8fafc;
+}
+.mapping-selected-filter.active {
+  color: var(--color-primary-hover);
+  background: var(--color-primary-soft);
+  border-color: #bfdbfe;
+}
+.mapping-filter-indicator {
+  display: grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  color: transparent;
+  background: var(--color-surface);
+  border: 1px solid #b8c6d5;
+  border-radius: 4px;
+}
+.mapping-selected-filter.active .mapping-filter-indicator {
+  color: #fff;
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+.mapping-filter-summary {
+  margin: -2px 2px 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
 .mapping-list {
   min-width: 0;
   overflow: clip;
@@ -3740,6 +3910,13 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   color: var(--muted);
   font-size: 12px;
   text-align: center;
+}
+.mapping-filter-empty {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+}
+.mapping-filter-empty .text-button {
+  margin-left: 6px;
 }
 @media (max-width: 760px) {
   .credential-test-option {
@@ -3927,6 +4104,16 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   }
   .mapping-selection-count {
     padding-top: 0;
+  }
+  .mapping-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .mapping-search-box {
+    flex-basis: auto;
+  }
+  .mapping-selected-filter {
+    justify-content: center;
   }
   .mapping-grid-head {
     display: none;
