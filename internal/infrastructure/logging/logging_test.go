@@ -11,11 +11,12 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
-func TestPrettyConsoleAndJSONFileShareRecord(t *testing.T) {
+func TestPrettyConsoleAndFileShareFormattedLine(t *testing.T) {
 	var console bytes.Buffer
 	var file bytes.Buffer
 	logger := NewWithOptions(Options{
@@ -50,15 +51,36 @@ func TestPrettyConsoleAndJSONFileShareRecord(t *testing.T) {
 		t.Fatalf("pretty output timestamp is missing timezone offset: %q", pretty)
 	}
 
-	var entry map[string]any
-	if err := json.Unmarshal(file.Bytes(), &entry); err != nil {
-		t.Fatalf("invalid JSON log %q: %v", file.String(), err)
+	if file.String() != pretty {
+		t.Fatalf("file output differs from console output:\nconsole: %q\nfile: %q", pretty, file.String())
 	}
-	if entry["msg"] != "service started" || entry["trace_id"] != traceID || entry["span_id"] != spanID || entry["status"] != float64(200) || entry["detail"] != "two words" {
-		t.Fatalf("JSON file did not receive the same record: %#v", entry)
-	}
-	if _, ok := entry["source"]; !ok {
-		t.Fatalf("JSON file is missing source: %#v", entry)
+}
+
+func TestFileUsesConsoleFormatWithoutANSIColor(t *testing.T) {
+	for _, format := range []string{"pretty", "text", "json"} {
+		t.Run(format, func(t *testing.T) {
+			var console bytes.Buffer
+			var file bytes.Buffer
+			logger := NewWithOptions(Options{
+				Console:       &console,
+				ConsoleFormat: format,
+				Color:         "always",
+				File:          &file,
+				Level:         slog.LevelInfo,
+				AddSource:     true,
+			})
+			logger.Info("one line", "status", 200)
+
+			if strings.Count(file.String(), "\n") != 1 || !strings.HasSuffix(file.String(), "\n") {
+				t.Fatalf("file output should contain one newline-terminated record: %q", file.String())
+			}
+			if strings.Contains(file.String(), "\x1b[") {
+				t.Fatalf("file output contains ANSI color: %q", file.String())
+			}
+			if format != "pretty" && file.String() != console.String() {
+				t.Fatalf("%s file output differs from console output:\nconsole: %q\nfile: %q", format, console.String(), file.String())
+			}
+		})
 	}
 }
 
@@ -130,6 +152,28 @@ func TestPrettyColorAlways(t *testing.T) {
 	}
 }
 
+func TestPrettyColorAutoSupportsIDEConsole(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("TERM", "")
+	var output bytes.Buffer
+	logger := NewWithOptions(Options{Console: &output, ConsoleFormat: "pretty", Color: "auto", Level: slog.LevelInfo})
+	logger.Info("IDE console")
+	if !strings.Contains(output.String(), "\x1b[") {
+		t.Fatalf("auto color should support an ANSI-capable piped console: %q", output.String())
+	}
+}
+
+func TestPrettyColorAutoHonorsNoColor(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	t.Setenv("TERM", "")
+	var output bytes.Buffer
+	logger := NewWithOptions(Options{Console: &output, ConsoleFormat: "pretty", Color: "auto", Level: slog.LevelInfo})
+	logger.Info("plain console")
+	if strings.Contains(output.String(), "\x1b[") {
+		t.Fatalf("NO_COLOR output contains ANSI color: %q", output.String())
+	}
+}
+
 func TestPrettyDoesNotPadComponent(t *testing.T) {
 	var output bytes.Buffer
 	logger := NewWithOptions(Options{Console: &output, ConsoleFormat: "pretty", Color: "never", Level: slog.LevelInfo})
@@ -182,8 +226,11 @@ func (failingWriter) Write([]byte) (int, error) {
 }
 
 func TestRotatingFileKeepsWholeRecordsAndBackups(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "zentrola.jsonl")
-	writer := &RotatingFile{path: path, maxBytes: 12, maxBackups: 2}
+	directory := t.TempDir()
+	writer := &RotatingFile{
+		directory: directory, maxBytes: 12, maxBackups: 2,
+		now: func() time.Time { return time.Date(2026, 9, 17, 12, 0, 0, 0, time.Local) },
+	}
 	if err := writer.open(); err != nil {
 		t.Fatal(err)
 	}
@@ -198,18 +245,18 @@ func TestRotatingFileKeepsWholeRecordsAndBackups(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	assertFileContent(t, path, "record-three\n")
-	assertFileContent(t, path+".1", "record-two\n")
-	assertFileContent(t, path+".2", "record-one\n")
+	assertFileContent(t, filepath.Join(directory, "log-2026-09-17-1.log"), "record-one\n")
+	assertFileContent(t, filepath.Join(directory, "log-2026-09-17-2.log"), "record-two\n")
+	assertFileContent(t, filepath.Join(directory, "log-2026-09-17-3.log"), "record-three\n")
 }
 
 func TestRotatingFileRejectsConcurrentProcessesAndReleasesLock(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "service.jsonl")
-	first, err := OpenRotatingFile(path, 1, 1)
+	directory := filepath.Join(t.TempDir(), "logs")
+	first, err := OpenRotatingFile(directory, 1, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := OpenRotatingFile(path, 1, 1); !errors.Is(err, ErrFileInUse) {
+	if _, err := OpenRotatingFile(directory, 1, 1); !errors.Is(err, ErrFileInUse) {
 		if err == nil {
 			t.Fatal("second writer unexpectedly acquired the same log path")
 		}
@@ -218,13 +265,97 @@ func TestRotatingFileRejectsConcurrentProcessesAndReleasesLock(t *testing.T) {
 	if err := first.Close(); err != nil {
 		t.Fatal(err)
 	}
-	second, err := OpenRotatingFile(path, 1, 1)
+	second, err := OpenRotatingFile(directory, 1, 1)
 	if err != nil {
 		t.Fatalf("lock was not released: %v", err)
 	}
 	if err := second.Close(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestRotatingFileStartsNewDateAtFirstSegment(t *testing.T) {
+	directory := t.TempDir()
+	now := time.Date(2026, 9, 17, 23, 59, 0, 0, time.Local)
+	writer := &RotatingFile{
+		directory: directory, maxBytes: 1024, maxBackups: 10,
+		now: func() time.Time { return now },
+	}
+	if err := writer.open(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = writer.Close() })
+
+	if _, err := writer.Write([]byte("before midnight\n")); err != nil {
+		t.Fatal(err)
+	}
+	now = time.Date(2026, 9, 18, 0, 1, 0, 0, time.Local)
+	if _, err := writer.Write([]byte("after midnight\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	assertFileContent(t, filepath.Join(directory, "log-2026-09-17-1.log"), "before midnight\n")
+	assertFileContent(t, filepath.Join(directory, "log-2026-09-18-1.log"), "after midnight\n")
+}
+
+func TestRotatingFileResumesLatestSegmentForCurrentDate(t *testing.T) {
+	directory := t.TempDir()
+	now := func() time.Time { return time.Date(2026, 9, 17, 12, 0, 0, 0, time.Local) }
+	first := &RotatingFile{directory: directory, maxBytes: 1024, maxBackups: 10, now: now}
+	if err := first.open(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.Write([]byte("before restart\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	second := &RotatingFile{directory: directory, maxBytes: 1024, maxBackups: 10, now: now}
+	if err := second.open(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = second.Close() })
+	if _, err := second.Write([]byte("after restart\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	assertFileContent(t, filepath.Join(directory, "log-2026-09-17-1.log"), "before restart\nafter restart\n")
+}
+
+func TestRotatingFileRetainsConfiguredHistoryAndIgnoresOtherFiles(t *testing.T) {
+	directory := t.TempDir()
+	otherPath := filepath.Join(directory, "notes.txt")
+	if err := os.WriteFile(otherPath, []byte("keep"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	writer := &RotatingFile{
+		directory: directory, maxBytes: 4, maxBackups: 1,
+		now: func() time.Time { return time.Date(2026, 9, 17, 12, 0, 0, 0, time.Local) },
+	}
+	if err := writer.open(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = writer.Close() })
+
+	for _, record := range []string{"one\n", "two\n", "three\n"} {
+		if _, err := writer.Write([]byte(record)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(directory, "log-2026-09-17-1.log")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("oldest log segment should be removed, got %v", err)
+	}
+	assertFileContent(t, filepath.Join(directory, "log-2026-09-17-2.log"), "two\n")
+	assertFileContent(t, filepath.Join(directory, "log-2026-09-17-3.log"), "three\n")
+	assertFileContent(t, otherPath, "keep")
 }
 
 func assertFileContent(t *testing.T, path, expected string) {

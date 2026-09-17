@@ -82,16 +82,17 @@ docker compose stop postgres
 
 ```dotenv
 LOG_LEVEL=info
-LOG_CONSOLE_FORMAT=json
-LOG_COLOR=never
 LOG_FILE_PATH=
 LOG_FILE_MAX_SIZE_MB=100
 LOG_FILE_MAX_BACKUPS=10
 ```
 
-- Docker 和 Kubernetes：将 JSON 写入 stdout，由容器运行时或日志 Agent 轮转并采集。
-- 没有日志 Agent 的单机：设置 `LOG_FILE_PATH`，启用应用管理的 JSON Lines 轮转日志。
-- 多个进程不能写入同一个日志文件。
+- 控制台固定使用自动着色的 `pretty` 格式；支持 ANSI 的 IDE Run Console（包括 GoLand）也会着色。设置标准环境变量 `NO_COLOR` 可关闭颜色。
+- Docker 和 Kubernetes：将 stdout 交由容器运行时或日志 Agent 轮转并采集。
+- 没有日志 Agent 的单机：设置 `LOG_FILE_PATH`，启用应用管理的轮转日志。文件使用无颜色的 `pretty` 格式，每条记录换行输出。
+- `LOG_FILE_PATH` 是日志目录。例如 `./runtime/logs` 会写入 `log-2026-09-17-1.log`，当文件达到 `LOG_FILE_MAX_SIZE_MB` 后继续写入 `log-2026-09-17-2.log`；跨天后从新日期的 `-1.log` 开始。`LOG_FILE_MAX_BACKUPS` 表示当前文件之外保留的历史分卷数。
+- 使用 `--config` 时，相对目录以配置文件所在目录为基准；否则以进程工作目录为基准。
+- 多个进程不能写入同一个日志目录。
 - `APP_ENV=dev` 和 `APP_ENV=test` 会记录未经脱敏、未经截断的完整请求和响应正文，其中可能包含凭据、prompt、消息和模型输出。不得对外发送这些日志；`APP_ENV=prod` 不记录请求和响应正文。
 
 访问日志摘要会排除敏感认证 Header。可以使用响应中的 `X-Trace-ID` 和 `X-Span-ID` 关联请求。
