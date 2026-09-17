@@ -1570,6 +1570,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
     v-if="editing"
     :title="t(editTarget ? 'providers.editTitle' : 'providers.create')"
     :busy="busy"
+    :body-class="activeConfigTab === 'models' ? 'provider-model-modal-body' : undefined"
     wide
     @close="editing = false"
   >
@@ -3495,6 +3496,15 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   display: grid;
   gap: 14px;
 }
+:global(.modal-body.provider-model-modal-body) {
+  overflow-y: hidden;
+  scrollbar-gutter: auto;
+}
+:global(.modal-body.provider-model-modal-body) .provider-form {
+  height: 100%;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+}
 .provider-form label {
   margin: 0;
 }
@@ -3562,7 +3572,10 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   content: '*';
 }
 .config-editor {
+  display: grid;
+  min-height: 0;
   margin-top: 0;
+  grid-template-rows: auto minmax(0, 1fr);
 }
 .config-tabs {
   display: flex;
@@ -3601,6 +3614,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   background: var(--blue);
 }
 .config-panel {
+  min-height: 0;
   padding-top: 14px;
 }
 .config-panel:focus-visible {
@@ -3920,15 +3934,26 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   border-color: var(--color-primary);
 }
 .mapping-filter-summary {
+  grid-row: 3;
   margin: -2px 2px 6px;
   color: var(--muted);
   font-size: 12px;
 }
 .mapping-list {
+  grid-row: 4;
+  min-height: 0;
   min-width: 0;
-  overflow: clip;
+  overflow-x: clip;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-control);
+}
+.mapping-editor {
+  display: grid;
+  overflow: hidden;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
 }
 .mapping-grid {
   display: grid;
@@ -3939,6 +3964,9 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   border-top: 1px solid #f1f5f9;
 }
 .mapping-grid-head {
+  position: sticky;
+  z-index: 1;
+  top: 0;
   padding-top: 6px;
   padding-bottom: 6px;
   border-top: 0;
@@ -4000,6 +4028,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   color: var(--color-text-muted);
 }
 .mapping-empty {
+  grid-row: 4;
   margin: 0;
   padding: 18px 0;
   border-top: 1px solid #e5ebf1;
