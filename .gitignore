@@ -15,6 +15,7 @@ coverage.out
 *.test
 *.exe
 /run/
+/runtime/
 .zentrola-config-*
 .idea/
 .vscode/

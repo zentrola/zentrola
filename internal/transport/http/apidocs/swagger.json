@@ -4067,7 +4067,7 @@
                         "AdminBearer": []
                     }
                 ],
-                "description": "优先使用已配置的 API Key 从官方接口同步；没有可用 API Key 时读取应用内置 JSON 目录。官方接口当前支持 OpenAI、DeepSeek、智谱 AI 和月之暗面；应用内置 JSON 目录只安装其中已维护的模型。创建的模型默认启用并自动建立服务商映射，其他既有配置保持不变。",
+                "description": "优先使用已配置的 API Key 从官方接口同步；没有可用 API Key 时读取应用内置 JSON 目录。官方接口当前支持 OpenAI、Google、DeepSeek、智谱 AI、月之暗面、通义千问、MiniMax 和字节跳动；应用内置 JSON 目录只安装其中已维护的模型。创建的模型默认启用并自动建立服务商映射，其他既有配置保持不变。",
                 "produces": [
                     "application/json"
                 ],
@@ -4819,7 +4819,7 @@
                         "AdminBearer": []
                     }
                 ],
-                "description": "使用指定凭据从官方接口同步模型目录，并用应用内置 JSON 补充已维护模型的名称和模态。当前接口适配器支持 OpenAI、DeepSeek、智谱 AI 和月之暗面。创建缺失模型和映射，同编码模型更新官方名称；新模型默认启用，其他既有配置保持不变。HTTP 200 后仍需检查 data.ok 和 data.code。",
+                "description": "使用指定凭据从官方接口同步模型目录，并用应用内置 JSON 补充已维护模型的名称和模态。当前接口适配器支持 OpenAI、Google、DeepSeek、智谱 AI、月之暗面、通义千问、MiniMax 和字节跳动。创建缺失模型和映射，同编码模型更新官方名称；新模型默认启用，其他既有配置保持不变。HTTP 200 后仍需检查 data.ok 和 data.code。",
                 "produces": [
                     "application/json"
                 ],
@@ -4931,6 +4931,12 @@
                         "type": "string",
                         "description": "API Key 资源要测试的上游协议；未指定时优先 Anthropic",
                         "name": "protocol",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "API Key 资源要测试的服务商模型映射 ID；未指定时自动选择有效映射",
+                        "name": "providerModelMappingId",
                         "in": "query"
                     }
                 ],
@@ -6610,8 +6616,19 @@
                 "ok": {
                     "type": "boolean"
                 },
+                "providerModelMappingId": {
+                    "type": "string",
+                    "example": "0"
+                },
                 "resetCredits": {
                     "$ref": "#/definitions/management.RateLimitResetCredits"
+                },
+                "testedModelCode": {
+                    "type": "string"
+                },
+                "testedModelId": {
+                    "type": "string",
+                    "example": "0"
                 }
             }
         },
@@ -6805,11 +6822,22 @@
                 "ok": {
                     "type": "boolean"
                 },
+                "providerModelMappingId": {
+                    "type": "string",
+                    "example": "0"
+                },
                 "resetCredits": {
                     "$ref": "#/definitions/management.RateLimitResetCredits"
                 },
                 "source": {
                     "type": "string"
+                },
+                "testedModelCode": {
+                    "type": "string"
+                },
+                "testedModelId": {
+                    "type": "string",
+                    "example": "0"
                 },
                 "updated": {
                     "type": "integer"
@@ -6881,6 +6909,9 @@
                     "type": "string",
                     "example": "0"
                 },
+                "modelCount": {
+                    "type": "integer"
+                },
                 "modelSyncSupported": {
                     "type": "boolean"
                 },
@@ -6943,6 +6974,9 @@
                     "items": {
                         "$ref": "#/definitions/management.ProviderMapping"
                     }
+                },
+                "modelCount": {
+                    "type": "integer"
                 },
                 "modelSyncSupported": {
                     "type": "boolean"

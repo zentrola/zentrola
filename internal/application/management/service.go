@@ -857,13 +857,19 @@ func (s *Service) DeleteResource(ctx context.Context, actor admin.Identity, id i
 	})
 }
 func (s *Service) TestResource(ctx context.Context, actor admin.Identity, id int64, meta appsec.RequestMeta) (ConnectionResult, error) {
-	return s.TestResourceProtocol(ctx, actor, id, "", meta)
+	return s.TestResourceSelection(ctx, actor, id, "", 0, meta)
 }
 
 // TestResourceProtocol 使用指定的上游协议测试 API Key 资源；protocol 为空时
 // 优先 Anthropic，未配置 Anthropic 时回退 OpenAI。订阅资源仍由认证适配器探测。
 func (s *Service) TestResourceProtocol(ctx context.Context, actor admin.Identity, id int64, protocol string, meta appsec.RequestMeta) (ConnectionResult, error) {
-	if id <= 0 {
+	return s.TestResourceSelection(ctx, actor, id, protocol, 0, meta)
+}
+
+// TestResourceSelection 使用指定的上游协议和模型映射测试 API Key 资源。
+// providerModelMappingID 为零时自动选择有效映射；指定后不会回退到其他模型。
+func (s *Service) TestResourceSelection(ctx context.Context, actor admin.Identity, id int64, protocol string, providerModelMappingID int64, meta appsec.RequestMeta) (ConnectionResult, error) {
+	if id <= 0 || providerModelMappingID < 0 {
 		return ConnectionResult{}, appsec.ErrInvalidArgument
 	}
 	protocol = strings.ToUpper(strings.TrimSpace(protocol))
@@ -873,6 +879,8 @@ func (s *Service) TestResourceProtocol(ctx context.Context, actor admin.Identity
 	var resource ResourceRecord
 	var provider Provider
 	var mappings []ProviderMapping
+	selectedMappingID := int64(0)
+	selectedModelID := int64(0)
 	upstreamModelCode := ""
 	err := s.store.Read(ctx, actor, func(r Reader) error {
 		var err error
@@ -885,24 +893,70 @@ func (s *Service) TestResourceProtocol(ctx context.Context, actor admin.Identity
 			return err
 		}
 		mappings, err = r.ProviderMappings(ctx, resource.ProviderID)
-		if err != nil || resource.AuthType == AuthTypeSubscription || len(mappings) == 0 {
-			return err
-		}
-		upstreamModelCode = strings.TrimSpace(mappings[0].UpstreamModelCode)
-		if upstreamModelCode != "" {
-			return nil
-		}
-		model, err := r.Model(ctx, mappings[0].ModelID)
 		if err != nil {
 			return err
 		}
-		upstreamModelCode = model.Code
+		if resource.AuthType == AuthTypeSubscription {
+			if providerModelMappingID > 0 {
+				return appsec.ErrInvalidArgument
+			}
+			return nil
+		}
+		if len(mappings) == 0 {
+			if providerModelMappingID > 0 {
+				return appsec.ErrInvalidArgument
+			}
+			return nil
+		}
+		models, modelErr := readAllModels(ctx, r)
+		if modelErr != nil {
+			return modelErr
+		}
+		modelsByID := make(map[int64]Model, len(models))
+		for _, model := range models {
+			modelsByID[model.ID] = model
+		}
+		bestRank := int(^uint(0) >> 1)
+		for _, mapping := range mappings {
+			if mapping.ProviderID != resource.ProviderID {
+				continue
+			}
+			if providerModelMappingID > 0 && mapping.ID != providerModelMappingID {
+				continue
+			}
+			model, exists := modelsByID[mapping.ModelID]
+			if !exists || model.Status != "ACTIVE" {
+				continue
+			}
+			candidate := strings.TrimSpace(mapping.UpstreamModelCode)
+			if candidate == "" {
+				candidate = model.Code
+			}
+			rank := connectionProbeModelRank(provider.Code, candidate)
+			if selectedMappingID == 0 || rank < bestRank {
+				selectedMappingID = mapping.ID
+				selectedModelID = model.ID
+				upstreamModelCode = candidate
+				bestRank = rank
+			}
+			if providerModelMappingID > 0 || bestRank == 0 {
+				break
+			}
+		}
+		if providerModelMappingID > 0 && selectedMappingID == 0 {
+			return appsec.ErrInvalidArgument
+		}
 		return nil
 	})
 	if err != nil {
 		return ConnectionResult{}, err
 	}
-	result := ConnectionResult{Code: "PROVIDER_UNAVAILABLE"}
+	result := ConnectionResult{
+		Code:                   "PROVIDER_UNAVAILABLE",
+		ProviderModelMappingID: selectedMappingID,
+		TestedModelID:          selectedModelID,
+		TestedModelCode:        upstreamModelCode,
+	}
 	var subscriptionProbe *SubscriptionProbe
 	var refreshedSealed catalog.SealedCredential
 	plain, decryptErr := s.cipher.Decrypt(resource.Sealed, owner(actor, resource.Resource))
@@ -970,6 +1024,9 @@ func (s *Service) TestResourceProtocol(ctx context.Context, actor admin.Identity
 				result.Code = "PROXY_CONFIGURATION_UNRECOVERABLE"
 			} else {
 				result = s.tester.Test(ctx, target, plain, proxy)
+				result.ProviderModelMappingID = selectedMappingID
+				result.TestedModelID = selectedModelID
+				result.TestedModelCode = upstreamModelCode
 			}
 		}
 	}
@@ -1032,6 +1089,31 @@ func (s *Service) TestResourceProtocol(ctx context.Context, actor admin.Identity
 		return w.Audit(auditCtx, Audit{Event: operation.ResourceConnectionTest, Target: "RESOURCE", ID: id, Name: resource.Name, After: map[string]any{"test": auditResult, "testedUpdatedAt": resource.UpdatedAt}, ErrorCode: code}, meta)
 	})
 	return result, err
+}
+
+func connectionProbeModelRank(providerCode, modelCode string) int {
+	if providerCode != catalog.GoogleOfficialCode {
+		return 0
+	}
+	code := strings.ToLower(strings.TrimSpace(modelCode))
+	if code == "gemini-3.6-flash" {
+		return 0
+	}
+	if !strings.HasPrefix(code, "gemini-") {
+		return 30
+	}
+	for _, specialized := range []string{"audio", "computer-use", "image", "live", "robotics", "transcribe", "tts"} {
+		if strings.Contains(code, specialized) {
+			return 30
+		}
+	}
+	if strings.Contains(code, "preview") || strings.Contains(code, "-exp") {
+		return 20
+	}
+	if strings.HasPrefix(code, "gemini-2.5-") {
+		return 25
+	}
+	return 10
 }
 
 func subscriptionConnectionCode(err error) string {

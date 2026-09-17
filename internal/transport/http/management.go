@@ -506,7 +506,7 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 	})
 	// @Summary 同步服务商官方模型目录
 	// @Tags 模型与资源
-	// @Description 优先使用已配置的 API Key 从官方接口同步；没有可用 API Key 时读取应用内置 JSON 目录。官方接口当前支持 OpenAI、DeepSeek、智谱 AI 和月之暗面；应用内置 JSON 目录只安装其中已维护的模型。创建的模型默认启用并自动建立服务商映射，其他既有配置保持不变。
+	// @Description 优先使用已配置的 API Key 从官方接口同步；没有可用 API Key 时读取应用内置 JSON 目录。官方接口当前支持 OpenAI、Google、DeepSeek、智谱 AI、月之暗面、通义千问、MiniMax 和字节跳动；应用内置 JSON 目录只安装其中已维护的模型。创建的模型默认启用并自动建立服务商映射，其他既有配置保持不变。
 	// @Produce json
 	// @Security AdminBearer
 	// @Param id path string true "服务商 ID（正整数字符串）"
@@ -781,6 +781,7 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 	// @Security AdminBearer
 	// @Param id path string true "业务 ID（正整数字符串）"
 	// @Param protocol query string false "API Key 资源要测试的上游协议；未指定时优先 Anthropic" Enums(ANTHROPIC,OPENAI)
+	// @Param providerModelMappingId query string false "API Key 资源要测试的服务商模型映射 ID；未指定时自动选择有效映射"
 	// @Success 200 {object} response{data=mgmt.ConnectionResult}
 	// @Header all {string} X-Request-ID "请求追踪 ID"
 	// @Failure 400 {object} response
@@ -797,7 +798,7 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 			return
 		}
 		for name, values := range req.URL.Query() {
-			if name != "protocol" || len(values) != 1 {
+			if (name != "protocol" && name != "providerModelMappingId") || len(values) != 1 {
 				securityError(w, req, appsec.ErrInvalidArgument)
 				return
 			}
@@ -807,12 +808,25 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 			securityError(w, req, err)
 			return
 		}
-		data, err := m.TestResourceProtocol(req.Context(), adminFrom(req), id, protocol, requestMeta(req))
+		providerModelMappingID := int64(0)
+		mappingValue, err := optionalQueryValue(req, "providerModelMappingId")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		if mappingValue != "" {
+			providerModelMappingID, err = positiveID(mappingValue)
+			if err != nil {
+				securityError(w, req, err)
+				return
+			}
+		}
+		data, err := m.TestResourceSelection(req.Context(), adminFrom(req), id, protocol, providerModelMappingID, requestMeta(req))
 		adminResult(w, req, 200, data, err)
 	})
 	// @Summary 同步官方模型目录
 	// @Tags 模型与资源
-	// @Description 使用指定凭据从官方接口同步模型目录，并用应用内置 JSON 补充已维护模型的名称和模态。当前接口适配器支持 OpenAI、DeepSeek、智谱 AI 和月之暗面。创建缺失模型和映射，同编码模型更新官方名称；新模型默认启用，其他既有配置保持不变。HTTP 200 后仍需检查 data.ok 和 data.code。
+	// @Description 使用指定凭据从官方接口同步模型目录，并用应用内置 JSON 补充已维护模型的名称和模态。当前接口适配器支持 OpenAI、Google、DeepSeek、智谱 AI、月之暗面、通义千问、MiniMax 和字节跳动。创建缺失模型和映射，同编码模型更新官方名称；新模型默认启用，其他既有配置保持不变。HTTP 200 后仍需检查 data.ok 和 data.code。
 	// @Produce json
 	// @Security AdminBearer
 	// @Param id path string true "业务 ID（正整数字符串）"

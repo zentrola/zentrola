@@ -164,6 +164,30 @@ func (s *Service) Provider(ctx context.Context, a admin.Identity, id int64) (Pro
 			return ProviderDetail{}, err
 		}
 		mappings, err := r.ProviderMappings(ctx, id)
-		return ProviderDetail{Provider: s.withProviderCapabilities(provider), Mappings: mappings}, err
+		if err != nil {
+			return ProviderDetail{}, err
+		}
+		models, err := readAllModels(ctx, r)
+		if err != nil {
+			return ProviderDetail{}, err
+		}
+		liveModelIDs := make(map[int64]struct{}, len(models))
+		activeModelIDs := make(map[int64]struct{}, len(models))
+		for _, model := range models {
+			liveModelIDs[model.ID] = struct{}{}
+			if model.Status == "ACTIVE" {
+				activeModelIDs[model.ID] = struct{}{}
+			}
+		}
+		liveMappings := make([]ProviderMapping, 0, len(mappings))
+		for _, mapping := range mappings {
+			if _, exists := liveModelIDs[mapping.ModelID]; exists {
+				liveMappings = append(liveMappings, mapping)
+				if _, active := activeModelIDs[mapping.ModelID]; active {
+					provider.ModelCount++
+				}
+			}
+		}
+		return ProviderDetail{Provider: s.withProviderCapabilities(provider), Mappings: liveMappings}, nil
 	})
 }

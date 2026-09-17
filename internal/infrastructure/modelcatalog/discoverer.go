@@ -17,8 +17,9 @@ import (
 )
 
 type catalogRequest struct {
-	URL    string
-	Bearer bool
+	URL          string
+	Bearer       bool
+	APIKeyHeader string
 }
 
 const (
@@ -31,8 +32,8 @@ const (
 // 适配器仅由服务商编码选择，与推理协议无关。
 type adapter interface {
 	Name() string
-	Request(mgmt.ModelDiscoverySource, int) (catalogRequest, error)
-	Decode([]byte, int) ([]mgmt.DiscoveredModel, bool, error)
+	Request(mgmt.ModelDiscoverySource, int, string) (catalogRequest, error)
+	Decode([]byte, int) ([]mgmt.DiscoveredModel, string, error)
 }
 
 type Discoverer struct {
@@ -60,11 +61,14 @@ func NewDiscoverer(logger *slog.Logger) *Discoverer {
 		},
 		logger: logger,
 		adapters: map[string]adapter{
-			catalog.OpenAIOfficialCode:   openAIAdapter{},
-			catalog.DeepSeekOfficialCode: deepSeekAdapter{},
-			catalog.ZhipuOfficialCode:    zhipuAdapter{},
-			catalog.KimiOfficialCode:     moonshotAdapter{},
-			catalog.QwenOfficialCode:     qwenAdapter{},
+			catalog.OpenAIOfficialCode:    openAIAdapter{},
+			catalog.GoogleOfficialCode:    googleAdapter{},
+			catalog.DeepSeekOfficialCode:  deepSeekAdapter{},
+			catalog.ZhipuOfficialCode:     zhipuAdapter{},
+			catalog.KimiOfficialCode:      moonshotAdapter{},
+			catalog.QwenOfficialCode:      qwenAdapter{},
+			catalog.MiniMaxOfficialCode:   miniMaxAdapter{},
+			catalog.ByteDanceOfficialCode: byteDanceAdapter{},
 		},
 	}
 }
@@ -98,8 +102,10 @@ func (d *Discoverer) Discover(ctx context.Context, source mgmt.ModelDiscoverySou
 	defer cleanup()
 
 	seen := make(map[string]struct{})
+	seenCursors := make(map[string]struct{})
+	var cursor string
 	for page := 1; page <= maxCatalogPages; page++ {
-		requestSpec, requestErr := adapter.Request(source, page)
+		requestSpec, requestErr := adapter.Request(source, page, cursor)
 		if requestErr != nil {
 			result.Code = "UPSTREAM_URL_REJECTED"
 			return nil, result
@@ -112,10 +118,16 @@ func (d *Discoverer) Discover(ctx context.Context, source mgmt.ModelDiscoverySou
 		if requestSpec.Bearer {
 			req.Header.Set("Authorization", "Bearer "+string(credential))
 		}
+		if requestSpec.APIKeyHeader != "" {
+			req.Header.Set(requestSpec.APIKeyHeader, string(credential))
+		}
 		req.Header.Set("Accept", "application/json")
 
 		resp, requestErr := client.Do(req)
 		req.Header.Del("Authorization")
+		if requestSpec.APIKeyHeader != "" {
+			req.Header.Del(requestSpec.APIKeyHeader)
+		}
 		if requestErr != nil {
 			result.Code = connectionErrorCode(ctx, requestErr)
 			return nil, result
@@ -144,7 +156,7 @@ func (d *Discoverer) Discover(ctx context.Context, source mgmt.ModelDiscoverySou
 			result.Code = "UPSTREAM_INVALID_RESPONSE"
 			return nil, result
 		}
-		pageModels, hasNext, decodeErr := adapter.Decode(data, page)
+		pageModels, nextCursor, decodeErr := adapter.Decode(data, page)
 		if decodeErr != nil {
 			result.Code = "UPSTREAM_INVALID_RESPONSE"
 			return nil, result
@@ -160,12 +172,18 @@ func (d *Discoverer) Discover(ctx context.Context, source mgmt.ModelDiscoverySou
 				return nil, result
 			}
 		}
-		if !hasNext {
+		if nextCursor == "" {
 			sort.Slice(models, func(i, j int) bool { return models[i].Code < models[j].Code })
 			result.OK = true
 			result.Code = "OK"
 			return models, result
 		}
+		if _, duplicate := seenCursors[nextCursor]; duplicate {
+			result.Code = "UPSTREAM_INVALID_RESPONSE"
+			return nil, result
+		}
+		seenCursors[nextCursor] = struct{}{}
+		cursor = nextCursor
 	}
 	result.Code = "UPSTREAM_INVALID_RESPONSE"
 	return nil, result

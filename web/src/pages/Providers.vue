@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, useId, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { all, api, download, errorText } from '../api'
 import { date, useAction, useCollection, useListSearch, validText } from '../composables'
@@ -44,6 +44,11 @@ const {
   setPageSize,
 } = useCollection<Provider>(() => '/providers')
 const { busy, error: actionError, run } = useAction()
+const createMenuOpen = ref(false)
+const createMenuRoot = ref<HTMLElement>()
+const createMenuTrigger = ref<HTMLButtonElement>()
+const createMenu = ref<HTMLElement>()
+const createMenuId = useId()
 const editing = ref(false)
 const editTarget = ref<Provider | null>(null)
 const statusTarget = ref<Provider | null>(null)
@@ -87,8 +92,10 @@ const subscriptionCommands = computed(() => {
     : codexSubscriptionPasteCommands
 })
 const testSelectionTarget = ref<Provider | null>(null)
+const testSelectionDetail = ref<ProviderDetail | null>(null)
 const selectedTestResourceID = ref('')
 const selectedTestProtocol = ref<ProviderProtocol | ''>('')
+const selectedTestMappingID = ref('')
 const testTarget = ref<{
   provider: Provider
   resource: Resource
@@ -131,15 +138,21 @@ const form = reactive({
   mappings: [] as MappingDraft[],
 })
 const enabledModels = computed(() => models.value.filter((model) => model.status === 'ACTIVE'))
+const availableMappingModels = computed(() => {
+  if (editTarget.value?.type !== 'OFFICIAL') return enabledModels.value
+  return enabledModels.value.filter((model) => model.publisherProviderId === editTarget.value?.id)
+})
 const mappingRows = computed(() =>
-  enabledModels.value.map((model) => ({
+  availableMappingModels.value.map((model) => ({
     model,
     mapping: form.mappings.find((mapping) => mapping.modelId === model.id),
   })),
 )
 const selectedMappingCount = computed(() => mappingRows.value.filter((row) => row.mapping).length)
 const allMappingsSelected = computed(
-  () => enabledModels.value.length > 0 && selectedMappingCount.value === enabledModels.value.length,
+  () =>
+    availableMappingModels.value.length > 0 &&
+    selectedMappingCount.value === availableMappingModels.value.length,
 )
 const someMappingsSelected = computed(
   () => selectedMappingCount.value > 0 && !allMappingsSelected.value,
@@ -309,16 +322,16 @@ function toggleMapping(model: Model) {
 
 function toggleAllMappings(event: Event) {
   const checked = (event.target as HTMLInputElement).checked
-  const enabledModelIDs = new Set(enabledModels.value.map((model) => model.id))
+  const availableModelIDs = new Set(availableMappingModels.value.map((model) => model.id))
   if (checked) {
-    for (const model of enabledModels.value) {
+    for (const model of availableMappingModels.value) {
       if (!form.mappings.some((mapping) => mapping.modelId === model.id)) {
         form.mappings.push({ modelId: model.id, upstreamModelCode: '' })
       }
     }
     return
   }
-  const remaining = form.mappings.filter((mapping) => !enabledModelIDs.has(mapping.modelId))
+  const remaining = form.mappings.filter((mapping) => !availableModelIDs.has(mapping.modelId))
   form.mappings.splice(0, form.mappings.length, ...remaining)
 }
 
@@ -622,6 +635,53 @@ function initializeProviders() {
   })
 }
 
+function closeCreateMenu(restoreFocus = false) {
+  createMenuOpen.value = false
+  if (restoreFocus) createMenuTrigger.value?.focus()
+}
+
+async function showCreateMenu(last = false) {
+  createMenuOpen.value = true
+  await nextTick()
+  const items = createMenu.value?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
+  items?.[last ? items.length - 1 : 0]?.focus()
+}
+
+function selectCreateAction(action: 'thirdParty' | 'modelVendor') {
+  closeCreateMenu(true)
+  if (action === 'thirdParty') openEdit()
+  else initializeProviders()
+}
+
+function onCreateMenuKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    closeCreateMenu(true)
+    return
+  }
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+  event.preventDefault()
+  const items = Array.from(
+    createMenu.value?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [],
+  )
+  const current = items.indexOf(document.activeElement as HTMLButtonElement)
+  const next =
+    event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? items.length - 1
+        : (current + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length
+  items[next]?.focus()
+}
+
+function onCreateMenuOutside(event: PointerEvent) {
+  if (!createMenuRoot.value?.contains(event.target as Node)) closeCreateMenu()
+}
+
+function onCreateMenuFocusOut(event: FocusEvent) {
+  if (!createMenuRoot.value?.contains(event.relatedTarget as Node | null)) closeCreateMenu()
+}
+
 function configureCredential(provider: Provider) {
   credentialTarget.value = provider
   credentialCreating.value = false
@@ -815,26 +875,37 @@ function testConnection(
   provider: Provider,
   resource: Resource,
   protocol = resource.authType === 'API_KEY' ? preferredTestProtocol(provider) : undefined,
+  providerModelMappingID?: string,
+) {
+  void run(() => submitConnectionTest(provider, resource, protocol, providerModelMappingID))
+}
+
+async function submitConnectionTest(
+  provider: Provider,
+  resource: Resource,
+  protocol?: ProviderProtocol,
+  providerModelMappingID?: string,
 ) {
   testTarget.value = { provider, resource, protocol }
   testResult.value = null
   actionError.value = ''
-  void run(async () => {
-    try {
-      const query = protocol ? `?protocol=${encodeURIComponent(protocol)}` : ''
-      const result = await api<ConnectionResult>(
-        `/resources/${resource.id}/test-connection${query}`,
-        'POST',
-      )
-      if (result.resetCredits) credentialResetCredits[resource.id] = result.resetCredits
-      credentialVerifiedAt[resource.id] = new Date().toISOString()
-      await loadResources()
-      testResult.value = result
-    } catch (error) {
-      testTarget.value = null
-      throw error
-    }
-  })
+  try {
+    const query = new URLSearchParams()
+    if (protocol) query.set('protocol', protocol)
+    if (providerModelMappingID) query.set('providerModelMappingId', providerModelMappingID)
+    const suffix = query.size ? `?${query.toString()}` : ''
+    const result = await api<ConnectionResult>(
+      `/resources/${resource.id}/test-connection${suffix}`,
+      'POST',
+    )
+    if (result.resetCredits) credentialResetCredits[resource.id] = result.resetCredits
+    credentialVerifiedAt[resource.id] = new Date().toISOString()
+    await loadResources()
+    testResult.value = result
+  } catch (error) {
+    testTarget.value = null
+    throw error
+  }
 }
 
 const selectedTestResource = computed(() => {
@@ -850,41 +921,89 @@ const testProtocolOptions = computed(() => {
     return left.protocolType === 'ANTHROPIC' ? -1 : 1
   })
 })
+function testModelOptionsFor(detail: ProviderDetail) {
+  return detail.mappings
+    .map((mapping) => ({
+      mapping,
+      model: models.value.find((model) => model.id === mapping.modelId),
+    }))
+    .filter((option) => option.model?.status === 'ACTIVE')
+}
+const testModelOptions = computed(() =>
+  testSelectionDetail.value ? testModelOptionsFor(testSelectionDetail.value) : [],
+)
 const testCredentialSelectionRequired = computed(
   () => !!testSelectionTarget.value && resourcesFor(testSelectionTarget.value).length > 1,
 )
 const testProtocolSelectionRequired = computed(
   () => selectedTestResource.value?.authType === 'API_KEY' && testProtocolOptions.value.length > 1,
 )
+const testModelSelectionRequired = computed(
+  () => selectedTestResource.value?.authType === 'API_KEY' && testModelOptions.value.length > 1,
+)
 const testSelectionReady = computed(
   () =>
     !!selectedTestResource.value &&
-    (!testProtocolSelectionRequired.value || !!selectedTestProtocol.value),
+    (!testProtocolSelectionRequired.value || !!selectedTestProtocol.value) &&
+    (!testModelSelectionRequired.value || !!selectedTestMappingID.value),
 )
 
-function openTestSelection(provider: Provider, resource?: Resource) {
+function preferredTestMappingID(detail: ProviderDetail) {
+  const options = testModelOptionsFor(detail)
+  const preferred =
+    detail.code === 'google-gemini-official'
+      ? options.find(({ mapping, model }) => {
+          return (
+            (mapping.upstreamModelCode || model?.code || '').toLowerCase() === 'gemini-3.6-flash'
+          )
+        })
+      : undefined
+  return preferred?.mapping.id ?? options[0]?.mapping.id ?? ''
+}
+
+function openTestSelection(provider: Provider, detail: ProviderDetail, resource?: Resource) {
   testSelectionTarget.value = provider
+  testSelectionDetail.value = detail
   selectedTestResourceID.value = resource?.id ?? resourceFor(provider)?.id ?? ''
   selectedTestProtocol.value = preferredTestProtocol(provider) ?? ''
+  selectedTestMappingID.value = preferredTestMappingID(detail)
+}
+
+function prepareTestConnection(provider: Provider, resource?: Resource) {
+  const candidates = resourcesFor(provider)
+  if (!candidates.length) return
+  void run(async () => {
+    const detail = await api<ProviderDetail>(`/providers/${provider.id}`)
+    const selectedResource = resource ?? candidates[0]
+    const mappingID =
+      selectedResource.authType === 'API_KEY' ? preferredTestMappingID(detail) : undefined
+    const selectionRequired =
+      (!resource && candidates.length > 1) ||
+      (selectedResource.authType === 'API_KEY' &&
+        (provider.endpoints.length > 1 || testModelOptionsFor(detail).length > 1))
+    if (selectionRequired) {
+      openTestSelection(provider, detail, resource)
+      return
+    }
+    await submitConnectionTest(
+      provider,
+      selectedResource,
+      selectedResource.authType === 'API_KEY' ? preferredTestProtocol(provider) : undefined,
+      mappingID,
+    )
+  })
 }
 
 function testProviderConnection(provider: Provider) {
-  const candidates = resourcesFor(provider)
-  if (!candidates.length) return
-  if (
-    candidates.length === 1 &&
-    (candidates[0].authType !== 'API_KEY' || provider.endpoints.length <= 1)
-  ) {
-    testConnection(provider, candidates[0])
-    return
-  }
-  openTestSelection(provider)
+  prepareTestConnection(provider)
 }
 
 function closeTestSelection() {
   testSelectionTarget.value = null
+  testSelectionDetail.value = null
   selectedTestResourceID.value = ''
   selectedTestProtocol.value = ''
+  selectedTestMappingID.value = ''
 }
 
 function testSelectedProviderCredential() {
@@ -896,17 +1015,15 @@ function testSelectedProviderCredential() {
   if (!resource) return
   const protocol =
     resource.authType === 'API_KEY' ? selectedTestProtocol.value || undefined : undefined
+  const mappingID =
+    resource.authType === 'API_KEY' ? selectedTestMappingID.value || undefined : undefined
   closeTestSelection()
-  testConnection(provider, resource, protocol)
+  testConnection(provider, resource, protocol, mappingID)
 }
 
 function testCredentialFromModal(provider: Provider, resource: Resource) {
   closeCredential()
-  if (resource.authType === 'API_KEY' && provider.endpoints.length > 1) {
-    openTestSelection(provider, resource)
-    return
-  }
-  testConnection(provider, resource)
+  prepareTestConnection(provider, resource)
 }
 
 function syncModels(provider: Provider) {
@@ -1022,7 +1139,9 @@ onMounted(() => {
   void load()
   void loadResources()
   void loadModels()
+  document.addEventListener('pointerdown', onCreateMenuOutside)
 })
+onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutside))
 </script>
 
 <template>
@@ -1048,12 +1167,68 @@ onMounted(() => {
       </template>
       <template #actions>
         <div class="provider-toolbar-actions">
-          <button type="button" class="button primary" :disabled="busy" @click="openEdit()">
-            <Icon name="plus" :size="18" />{{ t('providers.create') }}
-          </button>
-          <button type="button" class="button" :disabled="busy" @click="initializeProviders">
-            <Icon name="refresh" :size="17" />{{ t('providers.initialize') }}
-          </button>
+          <div ref="createMenuRoot" class="provider-create-menu" @focusout="onCreateMenuFocusOut">
+            <button
+              ref="createMenuTrigger"
+              type="button"
+              class="button primary provider-create-trigger"
+              :disabled="busy"
+              aria-haspopup="menu"
+              :aria-expanded="createMenuOpen"
+              :aria-controls="createMenuId"
+              @click="createMenuOpen ? closeCreateMenu() : showCreateMenu()"
+              @keydown.down.prevent="showCreateMenu()"
+              @keydown.up.prevent="showCreateMenu(true)"
+              @keydown.esc.prevent="closeCreateMenu(true)"
+            >
+              <Icon name="plus" :size="18" />
+              <span>{{ t('providers.createMenu') }}</span>
+              <Icon
+                class="provider-create-chevron"
+                :class="{ expanded: createMenuOpen }"
+                name="arrow"
+                :size="14"
+              />
+            </button>
+            <div
+              v-if="createMenuOpen"
+              :id="createMenuId"
+              ref="createMenu"
+              class="provider-create-dropdown"
+              role="menu"
+              :aria-label="t('providers.createMenu')"
+              @keydown="onCreateMenuKeydown"
+            >
+              <button
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                class="provider-create-option"
+                @click="selectCreateAction('thirdParty')"
+              >
+                <span class="provider-create-option-icon">
+                  <Icon name="connection" :size="17" />
+                </span>
+                <span>
+                  <strong>{{ t('providers.thirdPartyProvider') }}</strong>
+                  <small>{{ t('providers.thirdPartyProviderHint') }}</small>
+                </span>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                class="provider-create-option"
+                @click="selectCreateAction('modelVendor')"
+              >
+                <span class="provider-create-option-icon"><Icon name="models" :size="17" /></span>
+                <span>
+                  <strong>{{ t('providers.modelVendor') }}</strong>
+                  <small>{{ t('providers.modelVendorHint') }}</small>
+                </span>
+              </button>
+            </div>
+          </div>
         </div>
       </template>
     </ListSearch>
@@ -1106,7 +1281,7 @@ onMounted(() => {
                   >
                     <Icon name="website" :size="15" /></a
                   ><button
-                    v-if="resourceFor(provider)"
+                    v-if="resourceFor(provider) && provider.modelCount > 0"
                     type="button"
                     class="provider-quick-action provider-direct-action"
                     :aria-label="t('providers.testConnectionFor', { name: provider.name })"
@@ -1394,16 +1569,16 @@ onMounted(() => {
             <div>
               <p>{{ t('providers.mappingHint') }}</p>
             </div>
-            <span v-if="enabledModels.length" class="mapping-selection-count">
+            <span v-if="availableMappingModels.length" class="mapping-selection-count">
               {{
                 t('providers.mappingSelectionCount', {
                   count: selectedMappingCount,
-                  total: enabledModels.length,
+                  total: availableMappingModels.length,
                 })
               }}
             </span>
           </header>
-          <div v-if="enabledModels.length" class="mapping-list">
+          <div v-if="availableMappingModels.length" class="mapping-list">
             <div class="mapping-grid mapping-grid-head">
               <label class="mapping-check mapping-select-all">
                 <input
@@ -1592,7 +1767,9 @@ onMounted(() => {
       t(
         testCredentialSelectionRequired
           ? 'resources.selectTestCredentialTitle'
-          : 'resources.selectTestProtocolTitle',
+          : testProtocolSelectionRequired
+            ? 'resources.selectTestProtocolTitle'
+            : 'resources.selectTestModelTitle',
         { name: testSelectionTarget.name },
       )
     "
@@ -1665,6 +1842,47 @@ onMounted(() => {
           <span class="credential-test-option-main">
             <strong>{{ endpoint.protocolType === 'ANTHROPIC' ? 'Anthropic' : 'OpenAI' }}</strong>
             <TechnicalValue :value="endpoint.baseUrl" :copyable="false" muted />
+          </span>
+        </label>
+      </div>
+    </section>
+    <section v-if="testModelSelectionRequired" class="credential-test-section">
+      <p class="muted credential-test-selection-hint">
+        {{ t('resources.selectTestModelHint') }}
+      </p>
+      <div
+        class="credential-test-options"
+        role="radiogroup"
+        :aria-label="t('resources.selectTestModel')"
+      >
+        <label
+          v-for="option in testModelOptions"
+          :key="option.mapping.id"
+          class="credential-test-option"
+          :class="{ 'is-selected': selectedTestMappingID === option.mapping.id }"
+        >
+          <input
+            v-model="selectedTestMappingID"
+            type="radio"
+            name="provider-test-model"
+            :value="option.mapping.id"
+            :aria-label="
+              t('resources.selectModelForTest', {
+                name:
+                  option.model?.name ||
+                  option.mapping.upstreamModelCode ||
+                  option.model?.code ||
+                  t('common.none'),
+              })
+            "
+          />
+          <span class="credential-test-option-main">
+            <strong>{{ option.model?.name || option.mapping.upstreamModelCode || '-' }}</strong>
+            <TechnicalValue
+              :value="option.mapping.upstreamModelCode || option.model?.code || '-'"
+              :copyable="false"
+              muted
+            />
           </span>
         </label>
       </div>
@@ -1830,6 +2048,10 @@ onMounted(() => {
                   <div class="credential-runtime-line">
                     <Status :value="resource.runtimeStatus || 'HEALTHY'" />
                     <button
+                      v-if="
+                        credentialTarget &&
+                        (resource.authType === 'SUBSCRIPTION' || credentialTarget.modelCount > 0)
+                      "
                       type="button"
                       class="icon-button credential-verify-action"
                       :class="{ 'is-blocked': resource.runtimeStatus === 'BLOCKED' }"
@@ -1921,8 +2143,8 @@ onMounted(() => {
           <input
             id="credential-api-key"
             v-model="credential"
-            type="password"
-            autocomplete="new-password"
+            type="text"
+            autocomplete="off"
             required
             autofocus
             :disabled="busy"
@@ -2142,6 +2364,10 @@ onMounted(() => {
           <dt>{{ t('resources.protocol') }}</dt>
           <dd>{{ testTarget.protocol === 'ANTHROPIC' ? 'Anthropic' : 'OpenAI' }}</dd>
         </template>
+        <template v-if="testResult.testedModelCode">
+          <dt>{{ t('resources.testedModel') }}</dt>
+          <dd><TechnicalValue :value="testResult.testedModelCode" :copyable="false" /></dd>
+        </template>
         <dt>{{ t('common.code') }}</dt>
         <dd>{{ testResult.code }}</dd>
         <dt>HTTP</dt>
@@ -2212,6 +2438,81 @@ onMounted(() => {
   display: flex;
   gap: 8px;
   margin-left: auto;
+}
+.provider-create-menu {
+  position: relative;
+  flex: none;
+}
+.provider-create-trigger {
+  min-width: 144px;
+}
+.provider-create-trigger > span {
+  flex: 1;
+  text-align: left;
+}
+.provider-create-chevron {
+  margin-left: 2px;
+  transform: rotate(90deg);
+  transition: transform 150ms;
+}
+.provider-create-chevron.expanded {
+  transform: rotate(-90deg);
+}
+.provider-create-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  width: 268px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: #fff;
+  box-shadow: 0 12px 28px rgb(15 23 42 / 12%);
+}
+.provider-create-option {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text);
+  text-align: left;
+}
+.provider-create-option:hover,
+.provider-create-option:focus-visible {
+  background: var(--color-primary-soft);
+  outline: none;
+}
+.provider-create-option + .provider-create-option {
+  margin-top: 2px;
+}
+.provider-create-option-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 7px;
+  background: #eff6ff;
+  color: var(--blue);
+}
+.provider-create-option strong,
+.provider-create-option small {
+  display: block;
+}
+.provider-create-option strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+.provider-create-option small {
+  margin-top: 3px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.45;
 }
 .provider-runtime-filter {
   display: flex;
@@ -3557,6 +3858,15 @@ onMounted(() => {
   }
   .provider-toolbar-actions .button {
     flex: 1;
+  }
+  .provider-create-menu,
+  .provider-create-trigger {
+    width: 100%;
+  }
+  .provider-create-dropdown {
+    right: auto;
+    left: 0;
+    width: min(100%, 320px);
   }
   .connection-fields {
     grid-template-columns: 1fr;

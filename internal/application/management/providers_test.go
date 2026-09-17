@@ -89,7 +89,7 @@ func (providerTestCipher) DecryptProviderProxy(sealed catalog.SealedCredential, 
 func TestProviderFromInput(t *testing.T) {
 	current := Provider{ID: 1, Code: "provider-1", Type: "CUSTOM", Status: "DISABLED"}
 	got, ok := providerFromInput(current, ProviderInput{
-		Name:    "阿里云百炼",
+		Name:    "通义千问",
 		Website: "  https://www.deepseek.com/  ",
 		Endpoints: []ProviderEndpoint{{
 			ProtocolType: "OPENAI",

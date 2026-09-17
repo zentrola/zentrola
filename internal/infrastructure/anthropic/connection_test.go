@@ -13,6 +13,7 @@ import (
 	"time"
 
 	mgmt "github.com/zentrola/zentrola/internal/application/management"
+	"github.com/zentrola/zentrola/internal/domain/catalog"
 	"github.com/zentrola/zentrola/internal/infrastructure/anthropicclaude"
 )
 
@@ -101,6 +102,47 @@ func TestOpenAIConnectionUsesRealInference(t *testing.T) {
 	result := tester.Test(context.Background(), mgmt.ConnectionTarget{Protocol: "OPENAI", BaseURL: "https://gateway.example.com/v1", UpstreamModelCode: "gpt-test", AuthType: mgmt.AuthTypeAPIKey}, []byte("test-secret"), nil)
 	if !result.OK {
 		t.Fatalf("unexpected result: %+v", result)
+	}
+}
+
+func TestGoogleConnectionUsesNativeGenerateContent(t *testing.T) {
+	tester := NewConnectionTester()
+	tester.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodPost ||
+			r.URL.String() != "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent" ||
+			r.Header.Get("X-Goog-Api-Key") != "test-secret" || r.Header.Get("Authorization") != "" ||
+			r.Header.Get("x-api-key") != "" {
+			t.Fatalf("invalid Google probe request: %s %s %+v", r.Method, r.URL.String(), r.Header)
+		}
+		var payload struct {
+			Contents []struct {
+				Role  string `json:"role"`
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"contents"`
+			GenerationConfig struct {
+				MaxOutputTokens int `json:"maxOutputTokens"`
+			} `json:"generationConfig"`
+		}
+		if json.NewDecoder(r.Body).Decode(&payload) != nil || len(payload.Contents) != 1 ||
+			payload.Contents[0].Role != "user" || len(payload.Contents[0].Parts) != 1 ||
+			payload.Contents[0].Parts[0].Text != "Reply only with OK." ||
+			payload.GenerationConfig.MaxOutputTokens != googleProbeMaxOutputTokens {
+			t.Fatalf("invalid Google probe body: %+v", payload)
+		}
+		body := `{"candidates":[{"content":{"parts":[{"text":"OK"}],"role":"model"},"finishReason":"STOP"}]}`
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	})
+	result := tester.Test(context.Background(), mgmt.ConnectionTarget{
+		ProviderCode:      catalog.GoogleOfficialCode,
+		Protocol:          "OPENAI",
+		BaseURL:           "https://generativelanguage.googleapis.com/v1beta/openai",
+		UpstreamModelCode: "gemini-2.5-flash",
+		AuthType:          mgmt.AuthTypeAPIKey,
+	}, []byte("test-secret"), nil)
+	if !result.OK || result.Code != "OK" || result.HTTPStatus != http.StatusOK {
+		t.Fatalf("unexpected Google connection result: %+v", result)
 	}
 }
 

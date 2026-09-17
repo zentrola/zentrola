@@ -88,7 +88,7 @@ export const i18n = createI18n({
         username: '管理员账号',
         password: '密码',
         submit: '登录控制台',
-        session: '登录状态将在此浏览器中保留至到期，使用完毕可退出登录。',
+        session: '此浏览器将保持登录，可随时退出。',
         restoring: '正在恢复登录状态…',
         heading: '企业 AI Coding 能力治理平台',
         description:
@@ -381,6 +381,11 @@ export const i18n = createI18n({
       },
       providers: {
         create: '添加服务商',
+        createMenu: '创建服务商',
+        thirdPartyProvider: '三方服务商',
+        thirdPartyProviderHint: '手动配置接口地址与模型映射',
+        modelVendor: '模型厂商',
+        modelVendorHint: '初始化官方厂商与预置配置',
         initialize: '初始化',
         initializeCompleted:
           '已补充 {created} 个官方服务商，并同步 {updated} 个预置名称或官网，共 {total} 个。',
@@ -551,12 +556,17 @@ export const i18n = createI18n({
         selectTestProtocolHint: '该服务商配置了多个协议，请选择本次连接测试使用的协议。',
         selectTestProtocol: '测试协议',
         selectProtocolForTest: '使用 {protocol} 协议测试连接',
+        selectTestModelTitle: '{name} / 选择测试模型',
+        selectTestModelHint: '该服务商配置了多个有效模型，请选择本次连接测试使用的模型。',
+        selectTestModel: '测试模型',
+        selectModelForTest: '使用 {name} 测试连接',
+        testedModel: '实际测试模型',
         test: '测试连接',
         startTest: '开始测试',
         testing: '正在调用模型验证…',
         testPassed: '模型调用验证通过',
         testHint:
-          '固定当前服务商凭证和首个模型映射发送一次最多 5 tokens 的真实请求，不会切换到其他服务商；可能产生极少量上游费用。验证成功后会恢复该资源。',
+          '固定当前服务商凭证和所选模型发送一次最小真实请求，不会切换模型或服务商；可能产生极少量上游费用。验证成功后会恢复该资源。',
         subscriptionTesting: '正在验证个人订阅…',
         subscriptionTestPassed: '个人订阅验证通过',
         subscriptionTestHint:

@@ -322,8 +322,8 @@ function verificationLabel(resource: Resource) {
         >{{ t('resources.apiKey')
         }}<input
           v-model="credential"
-          type="password"
-          autocomplete="new-password"
+          type="text"
+          autocomplete="off"
           required
           :disabled="busy"
           spellcheck="false"
@@ -371,6 +371,10 @@ function verificationLabel(resource: Resource) {
         {{ resultMessage(testResult) }}
       </div>
       <dl class="detail-grid">
+        <template v-if="testResult.testedModelCode">
+          <dt>{{ t('resources.testedModel') }}</dt>
+          <dd>{{ testResult.testedModelCode }}</dd>
+        </template>
         <dt>{{ t('common.code') }}</dt>
         <dd>{{ testResult.code }}</dd>
         <dt>HTTP</dt>

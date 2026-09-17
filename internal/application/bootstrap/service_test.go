@@ -7,7 +7,7 @@ import (
 )
 
 func TestOfficialProviderTemplatesRemainAvailableForExplicitInitialization(t *testing.T) {
-	if version := OfficialProviderCatalogVersion(); version != "2026-09-16" {
+	if version := OfficialProviderCatalogVersion(); version != "2026-09-17" {
 		t.Fatalf("unexpected provider catalog version: %q", version)
 	}
 	providers := OfficialProviderTemplates()
@@ -36,7 +36,7 @@ func TestOfficialProviderTemplatesRemainAvailableForExplicitInitialization(t *te
 		"deepseek-official":        {"深度求索", "DeepSeek"},
 		"zhipu-official":           {"智谱 AI", "Zhipu AI"},
 		"kimi-official":            {"月之暗面", "Moonshot AI"},
-		"qwen-official":            {"阿里云百炼", "Alibaba Cloud"},
+		"qwen-official":            {"通义千问", "Qwen"},
 		"xai-official":             {"xAI", "xAI"},
 		"mistral-official":         {"Mistral AI", "Mistral AI"},
 		"minimax-official":         {"MiniMax", "MiniMax"},
@@ -87,7 +87,7 @@ func TestOfficialProviderModelsAreLoadedFromCatalogAndCloned(t *testing.T) {
 func TestProviderCatalogRejectsInvalidContentVersion(t *testing.T) {
 	invalid := bytes.Replace(
 		providerCatalogJSON,
-		[]byte(`"catalogVersion": "2026-09-16"`),
+		[]byte(`"catalogVersion": "2026-09-17"`),
 		[]byte(`"catalogVersion": "2026-02-30"`),
 		1,
 	)

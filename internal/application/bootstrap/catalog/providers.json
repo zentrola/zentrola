@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "catalogVersion": "2026-09-16",
+  "catalogVersion": "2026-09-17",
   "providers": [
     {
       "code": "openai-official",
@@ -278,8 +278,8 @@
     },
     {
       "code": "qwen-official",
-      "nameZH": "阿里云百炼",
-      "nameEN": "Alibaba Cloud",
+      "nameZH": "通义千问",
+      "nameEN": "Qwen",
       "website": "https://bailian.console.aliyun.com/",
       "endpoints": [
         {

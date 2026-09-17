@@ -268,8 +268,16 @@ async function fixture(page: Page) {
       if (path === '/providers') {
         providerQueries.push(new URLSearchParams(url.searchParams))
         const providerType = url.searchParams.get('type')
+        const withModelCount = providers.map((provider) => ({
+          ...provider,
+          modelCount: (providerMappings.get(provider.id) || []).filter((mapping) =>
+            models.some((model) => model.id === mapping.modelId && model.status === 'ACTIVE'),
+          ).length,
+        }))
         return pageReply(
-          providerType ? providers.filter((provider) => provider.type === providerType) : providers,
+          providerType
+            ? withModelCount.filter((provider) => provider.type === providerType)
+            : withModelCount,
         )
       }
       if (path === '/groups') {
@@ -309,7 +317,14 @@ async function fixture(page: Page) {
     if (segments[0] === 'providers' && segments.length === 2 && method === 'GET') {
       const row = providers.find((provider) => provider.id === segments[1])
       if (!row) return reply(null, 404, 'NOT_FOUND')
-      return reply({ ...row, mappings: providerMappings.get(row.id) || [] })
+      const mappings = providerMappings.get(row.id) || []
+      return reply({
+        ...row,
+        modelCount: mappings.filter((mapping) =>
+          models.some((model) => model.id === mapping.modelId && model.status === 'ACTIVE'),
+        ).length,
+        mappings,
+      })
     }
     if (segments[0] === 'providers' && segments[2] === 'sync-models' && method === 'POST') {
       modelSyncRequests.push(segments[1])
@@ -370,8 +385,8 @@ async function fixture(page: Page) {
         ],
         [
           'qwen-official',
-          '阿里云百炼',
-          'Alibaba Cloud',
+          '通义千问',
+          'Qwen',
           'https://dashscope.aliyuncs.com/compatible-mode/v1',
           'https://bailian.console.aliyun.com/',
         ],
@@ -757,6 +772,11 @@ async function fixture(page: Page) {
     }
     if (segments[2] === 'test-connection') {
       const resource = resources.find((candidate) => candidate.id === segments[1])
+      const providerModelMappingId = url.searchParams.get('providerModelMappingId')
+      const testedMapping = [...providerMappings.values()]
+        .flat()
+        .find((mapping) => mapping.id === providerModelMappingId)
+      const testedModel = models.find((model) => model.id === testedMapping?.modelId)
       if (resource?.authType === 'SUBSCRIPTION' && !failedTest) {
         resource.quotaStatus = 'AVAILABLE'
         resource.quotaCheckedAt = stamp
@@ -811,6 +831,9 @@ async function fixture(page: Page) {
         code: failedTest ? 'UPSTREAM_AUTH_FAILED' : 'OK',
         httpStatus: failedTest ? 401 : 200,
         latencyMs: 140,
+        providerModelMappingId: testedMapping?.id,
+        testedModelId: testedModel?.id,
+        testedModelCode: testedMapping?.upstreamModelCode || testedModel?.code,
         resetCredits:
           resource?.authAdapter === 'OPENAI_CODEX'
             ? {
@@ -1646,6 +1669,136 @@ test('服务商同步入口只由后端能力参数控制', async ({ page }) => 
   await expect(dialog.getByText('应用内置目录', { exact: true })).toBeVisible()
 })
 
+test('连接测试允许选择模型并显示实际测试模型', async ({ page }) => {
+  const state = await fixture(page)
+  state.providers[0].name = 'Google'
+  state.providers[0].code = 'google-gemini-official'
+  state.providers[0].endpoints = [
+    {
+      protocolType: 'OPENAI',
+      baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    },
+  ]
+  state.models.splice(
+    0,
+    state.models.length,
+    {
+      id: '73',
+      code: 'gemini-3.6-flash',
+      name: 'Gemini 3.6 Flash',
+      status: 'ACTIVE',
+      inputModalities: ['TEXT'],
+      outputModalities: ['TEXT'],
+      remark: '',
+      publisherProviderId: '81',
+      publisherProviderName: 'Google',
+      createdAt: stamp,
+      updatedAt: stamp,
+    },
+    {
+      id: '74',
+      code: 'gemini-3.6-pro',
+      name: 'Gemini 3.6 Pro',
+      status: 'ACTIVE',
+      inputModalities: ['TEXT'],
+      outputModalities: ['TEXT'],
+      remark: '',
+      publisherProviderId: '81',
+      publisherProviderName: 'Google',
+      createdAt: stamp,
+      updatedAt: stamp,
+    },
+  )
+  state.providerMappings.set('81', [
+    {
+      id: '92',
+      providerId: '81',
+      modelId: '73',
+      upstreamModelCode: 'gemini-3.6-flash',
+      priority: 100,
+      createdAt: stamp,
+      updatedAt: stamp,
+    },
+    {
+      id: '93',
+      providerId: '81',
+      modelId: '74',
+      upstreamModelCode: 'gemini-3.6-pro',
+      priority: 100,
+      createdAt: stamp,
+      updatedAt: stamp,
+    },
+  ])
+  state.resources.push({
+    id: '88',
+    providerId: '81',
+    name: 'Google API Key',
+    authType: 'API_KEY',
+    authAdapter: 'API_KEY',
+    status: 'ACTIVE',
+    runtimeStatus: 'HEALTHY',
+    credentialConfigured: true,
+    createdAt: stamp,
+    updatedAt: stamp,
+  })
+
+  await signIn(page, 'home')
+  await page.getByRole('link', { name: '服务商', exact: true }).click()
+  await page.getByRole('button', { name: '测试 Google 的连接', exact: true }).click()
+
+  const selection = page.getByRole('dialog', { name: 'Google / 选择测试模型' })
+  await expect(selection).toBeVisible()
+  await expect(
+    selection.getByRole('radio', { name: '使用 Gemini 3.6 Flash 测试连接' }),
+  ).toBeChecked()
+  await selection.getByRole('radio', { name: '使用 Gemini 3.6 Pro 测试连接' }).check()
+  const requestPromise = page.waitForRequest((request) => {
+    const url = new URL(request.url())
+    return request.method() === 'POST' && url.pathname.endsWith('/test-connection')
+  })
+  await selection.getByRole('button', { name: '开始测试', exact: true }).click()
+  const request = await requestPromise
+  expect(new URL(request.url()).searchParams.get('providerModelMappingId')).toBe('93')
+
+  const result = page.getByRole('dialog', { name: 'Google / 连接测试结果' })
+  await expect(result.getByRole('status')).toContainText('模型调用验证通过')
+  await expect(result.getByText('gemini-3.6-pro', { exact: true })).toBeVisible()
+})
+
+test('服务商没有可用模型映射时隐藏连接测试入口', async ({ page }) => {
+  const state = await fixture(page)
+  state.providerMappings.set('81', [])
+  state.resources.push({
+    id: '88',
+    providerId: '81',
+    name: 'DeepSeek API Key',
+    authType: 'API_KEY',
+    authAdapter: 'API_KEY',
+    status: 'ACTIVE',
+    runtimeStatus: 'HEALTHY',
+    credentialConfigured: true,
+    createdAt: stamp,
+    updatedAt: stamp,
+  })
+
+  await signIn(page, 'home')
+  await page.getByRole('link', { name: '服务商', exact: true }).click()
+
+  const providerRow = page.getByRole('row').filter({ hasText: 'DeepSeek' })
+  await expect(
+    providerRow.getByRole('button', { name: '测试 DeepSeek 的连接', exact: true }),
+  ).toHaveCount(0)
+  const credentialButton = providerRow.getByRole('button', {
+    name: '管理 DeepSeek 的认证凭据',
+    exact: true,
+  })
+  await expect(credentialButton).toBeVisible()
+  await credentialButton.click()
+  await expect(
+    modal(page).getByRole('button', { name: '验证 DeepSeek API Key 的可用性', exact: true }),
+  ).toHaveCount(0)
+})
+
 test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => {
   const state = await fixture(page)
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
@@ -1667,26 +1820,30 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
     page.locator('.page-heading').getByRole('button', { name: '添加服务商', exact: true }),
   ).toHaveCount(0)
   await expect(
-    providerSearch.getByRole('button', { name: '添加服务商', exact: true }),
+    providerSearch.getByRole('button', { name: '创建服务商', exact: true }),
   ).toBeVisible()
-  await expect(providerSearch.getByRole('button', { name: '初始化', exact: true })).toBeVisible()
-  expect(
-    (await providerSearch.locator('button').allTextContents()).slice(-2).map((text) => text.trim()),
-  ).toEqual(['添加服务商', '初始化'])
-  await providerSearch.getByRole('button', { name: '初始化', exact: true }).click()
+  await providerSearch.getByRole('button', { name: '创建服务商', exact: true }).click()
+  const createMenu = providerSearch.getByRole('menu', { name: '创建服务商' })
+  await expect(createMenu.getByRole('menuitem', { name: /三方服务商/ })).toBeVisible()
+  await expect(createMenu.getByRole('menuitem', { name: /模型厂商/ })).toBeVisible()
+  await createMenu.getByRole('menuitem', { name: /模型厂商/ }).click()
   await expect(page.locator('.toast-success')).toContainText(
     '已补充 12 个官方服务商，并同步 1 个预置名称或官网，共 13 个',
   )
   await expect(page.locator('.provider-initialize-notice')).toHaveCount(0)
   await expect(page.getByRole('row').filter({ hasText: '月之暗面' })).toBeVisible()
-  const qwenRow = page.getByRole('row').filter({ hasText: '阿里云百炼' })
+  const qwenRow = page.getByRole('row').filter({ hasText: '通义千问' })
   await expect(
-    qwenRow.getByRole('button', { name: '同步 阿里云百炼 的官方模型', exact: true }),
+    qwenRow.getByRole('button', { name: '同步 通义千问 的官方模型', exact: true }),
   ).toBeVisible()
   expect(state.providers.find((provider) => provider.code === 'kimi-official')?.website).toBe(
     'https://www.moonshot.cn',
   )
-  await providerSearch.getByRole('button', { name: '初始化', exact: true }).click()
+  await providerSearch.getByRole('button', { name: '创建服务商', exact: true }).click()
+  await providerSearch
+    .getByRole('menu', { name: '创建服务商' })
+    .getByRole('menuitem', { name: /模型厂商/ })
+    .click()
   await expect(page.locator('.toast-success')).toContainText(
     '官方服务商的当前语言名称和官网已是最新，共 13 个',
   )
@@ -1727,11 +1884,11 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   ).toBeChecked()
   const existingProviderModelCode = modal(page).getByLabel('DeepSeek V4 Flash 的服务商模型编码')
   await expect(existingProviderModelCode).toHaveValue('deepseek-v4-flash')
-  await expect(modal(page).getByText('Claude Sonnet', { exact: true })).toBeVisible()
-  await expect(
-    modal(page).getByRole('checkbox', { name: '启用 Claude Sonnet 映射' }),
-  ).not.toBeChecked()
-  await expect(modal(page).getByLabel('Claude Sonnet 的服务商模型编码')).toBeDisabled()
+  await expect(modal(page).getByText('Claude Sonnet', { exact: true })).toHaveCount(0)
+  await expect(modal(page).getByRole('checkbox', { name: '启用 Claude Sonnet 映射' })).toHaveCount(
+    0,
+  )
+  await expect(modal(page).getByText('已启用 1 / 1', { exact: true })).toBeVisible()
   const editDialog = modal(page)
   const dialogBody = editDialog.locator('.modal-body')
   const dialogHeader = editDialog.locator('.modal-head')
@@ -1767,7 +1924,11 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await expect(modal(page).getByLabel('DeepSeek V4 Flash 的服务商模型编码')).toHaveValue('')
   await modal(page).getByRole('button', { name: '取消', exact: true }).click()
 
-  await page.getByRole('button', { name: '添加服务商' }).click()
+  await providerSearch.getByRole('button', { name: '创建服务商', exact: true }).click()
+  await providerSearch
+    .getByRole('menu', { name: '创建服务商' })
+    .getByRole('menuitem', { name: /三方服务商/ })
+    .click()
   const dialog = modal(page)
   const providerFieldRows = dialog.locator('.connection-fields .provider-field-row')
   await expect(providerFieldRows).toHaveCount(4)
@@ -1796,6 +1957,7 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   const claudeMappingCheckbox = dialog.getByRole('checkbox', {
     name: '启用 Claude Sonnet 映射',
   })
+  await expect(dialog.getByText('已启用 0 / 2', { exact: true })).toBeVisible()
   await expect(mappingCheckbox).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   await expect(mappingCheckbox).toHaveCSS('border-top-style', 'none')
   await expect(dialog.locator('.mapping-list')).toHaveCSS('max-height', 'none')
@@ -2027,7 +2189,9 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
     'API Key',
   ])
   await expect(credentialFormRows.first()).toHaveCSS('grid-template-columns', /\S+ \S+/)
-  await dialog.getByLabel('API Key', { exact: true }).fill('aliyun-fixture-credential')
+  const apiKeyInput = dialog.getByLabel('API Key', { exact: true })
+  await expect(apiKeyInput).toHaveAttribute('type', 'text')
+  await apiKeyInput.fill('aliyun-fixture-credential')
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expect(dialog.getByRole('row').filter({ hasText: '自定义百炼 API Key' })).toBeVisible()
   await expect(page.locator('.toast-success')).toContainText('已保存')
@@ -2221,6 +2385,30 @@ test('服务商支持个人订阅优先并保留 API Key 兜底', async ({ page 
     createdAt: stamp,
     updatedAt: stamp,
   })
+  state.models.push({
+    id: '75',
+    code: 'gpt-fixture',
+    name: 'GPT Fixture',
+    status: 'ACTIVE',
+    inputModalities: ['TEXT'],
+    outputModalities: ['TEXT'],
+    remark: '',
+    publisherProviderId: '82',
+    publisherProviderName: 'OpenAI',
+    createdAt: stamp,
+    updatedAt: stamp,
+  })
+  state.providerMappings.set('82', [
+    {
+      id: '94',
+      providerId: '82',
+      modelId: '75',
+      upstreamModelCode: 'gpt-fixture',
+      priority: 100,
+      createdAt: stamp,
+      updatedAt: stamp,
+    },
+  ])
   await signIn(page)
   await page.getByRole('link', { name: '服务商', exact: true }).click()
   const providerRow = page.getByRole('row').filter({ hasText: 'OpenAI' })

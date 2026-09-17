@@ -57,7 +57,7 @@ export default {
     username: 'Administrator username',
     password: 'Password',
     submit: 'Sign in to console',
-    session: 'This browser keeps your session until it expires. Sign out when you are finished.',
+    session: 'Stay signed in here. Sign out anytime.',
     restoring: 'Restoring your session…',
     heading: 'Open-source AI Coding Control Plane for engineering teams.',
     description:
@@ -355,6 +355,11 @@ export default {
   },
   providers: {
     create: 'Add provider',
+    createMenu: 'Create provider',
+    thirdPartyProvider: 'Third-party provider',
+    thirdPartyProviderHint: 'Configure endpoints and model mappings manually',
+    modelVendor: 'Model vendor',
+    modelVendorHint: 'Initialize official vendors and presets',
     initialize: 'Initialize',
     initializeCompleted:
       'Added {created} official providers and synchronized {updated} preset names or websites; {total} are now available.',
@@ -534,12 +539,18 @@ export default {
       'This provider has multiple protocols. Select the protocol to use for this connection test.',
     selectTestProtocol: 'Test protocol',
     selectProtocolForTest: 'Test connection with the {protocol} protocol',
+    selectTestModelTitle: '{name} / Select test model',
+    selectTestModelHint:
+      'This provider has multiple valid models. Select the model to use for this connection test.',
+    selectTestModel: 'Test model',
+    selectModelForTest: 'Test connection with {name}',
+    testedModel: 'Tested model',
     test: 'Test connection',
     startTest: 'Start test',
     testing: 'Verifying model access…',
     testPassed: 'Model access verified',
     testHint:
-      'Sends one real request of up to 5 tokens using this credential and its first model mapping without provider failover. This may incur a minimal upstream charge. A successful check restores the resource.',
+      'Sends one minimal real request using this credential and the selected model without switching models or providers. This may incur a minimal upstream charge. A successful check restores the resource.',
     subscriptionTesting: 'Verifying personal subscription…',
     subscriptionTestPassed: 'Personal subscription verified',
     subscriptionTestHint:

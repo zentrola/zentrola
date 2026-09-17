@@ -37,6 +37,7 @@ export interface Provider {
   code: string
   name: string
   type: 'OFFICIAL' | 'PLATFORM' | 'PARTNER' | 'CUSTOM'
+  modelCount: number
   status: string
   website: string | null
   endpoints: ProviderEndpoint[]
@@ -148,6 +149,9 @@ export interface ConnectionResult {
   code: string
   httpStatus?: number
   latencyMs: number
+  providerModelMappingId?: string
+  testedModelId?: string
+  testedModelCode?: string
   resetCredits?: RateLimitResetCredits
 }
 export interface ResetCreditConsumeResult {

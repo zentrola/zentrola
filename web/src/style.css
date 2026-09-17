@@ -1962,9 +1962,11 @@ tbody tr:hover {
   font-size: 12px;
   line-height: 1.6;
   text-align: center;
+  white-space: nowrap;
   margin-top: 24px;
 }
 .session-note svg {
+  flex: 0 0 auto;
   color: #94a3b8;
 }
 .dashboard-alert {

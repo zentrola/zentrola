@@ -16,10 +16,13 @@ const (
 const (
 	AnthropicOfficialCode = "anthropic-official"
 	OpenAIOfficialCode    = "openai-official"
+	GoogleOfficialCode    = "google-gemini-official"
 	DeepSeekOfficialCode  = "deepseek-official"
 	ZhipuOfficialCode     = "zhipu-official"
 	KimiOfficialCode      = "kimi-official"
 	QwenOfficialCode      = "qwen-official"
+	MiniMaxOfficialCode   = "minimax-official"
+	ByteDanceOfficialCode = "doubao-official"
 	SonnetCode            = "claude-sonnet"
 	OpusCode              = "claude-opus"
 )
