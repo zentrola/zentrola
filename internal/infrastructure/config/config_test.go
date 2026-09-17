@@ -21,6 +21,7 @@ func TestConfigValidation(t *testing.T) {
 		{"missing password", "POSTGRES_PASSWORD", "", "POSTGRES_PASSWORD"},
 		{"invalid log file size", "LOG_FILE_MAX_SIZE_MB", "0", "LOG_FILE_MAX_SIZE_MB"},
 		{"invalid log file backups", "LOG_FILE_MAX_BACKUPS", "0", "LOG_FILE_MAX_BACKUPS"},
+		{"invalid log retention", "LOG_FILE_RETENTION_DAYS", "-1", "LOG_FILE_RETENTION_DAYS"},
 		{"invalid boolean", "CORS_ENABLED", "maybe", "CORS_ENABLED"},
 		{"unbounded gateway", "GATEWAY_REQUEST_TIMEOUT", "0s", "GATEWAY_REQUEST_TIMEOUT"},
 		{"invalid identity cache TTL", "GATEWAY_IDENTITY_CACHE_TTL", "0s", "GATEWAY_IDENTITY_CACHE_TTL"},
@@ -67,10 +68,11 @@ func TestLogConfiguration(t *testing.T) {
 	t.Run("file settings", func(t *testing.T) {
 		cfg, err := parse(func(key string) (string, bool) {
 			values := map[string]string{
-				"POSTGRES_PASSWORD":    "test-only",
-				"LOG_FILE_PATH":        " data/logs ",
-				"LOG_FILE_MAX_SIZE_MB": "25",
-				"LOG_FILE_MAX_BACKUPS": "7",
+				"POSTGRES_PASSWORD":       "test-only",
+				"LOG_FILE_PATH":           " data/logs ",
+				"LOG_FILE_MAX_SIZE_MB":    "25",
+				"LOG_FILE_MAX_BACKUPS":    "7",
+				"LOG_FILE_RETENTION_DAYS": "30",
 			}
 			value, ok := values[key]
 			return value, ok
@@ -79,8 +81,23 @@ func TestLogConfiguration(t *testing.T) {
 			t.Fatal(err)
 		}
 		if cfg.LogFilePath != "data/logs" ||
-			cfg.LogFileMaxSizeMB != 25 || cfg.LogFileMaxBackups != 7 {
+			cfg.LogFileMaxSizeMB != 25 || cfg.LogFileMaxBackups != 7 ||
+			cfg.LogFileRetentionDays != 30 {
 			t.Fatalf("unexpected log configuration: %+v", cfg)
+		}
+	})
+	t.Run("retention defaults to seven days", func(t *testing.T) {
+		cfg, err := parse(func(key string) (string, bool) {
+			if key == "POSTGRES_PASSWORD" {
+				return "test-only", true
+			}
+			return "", false
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.LogFileRetentionDays != 7 {
+			t.Fatalf("retention days = %d, want 7", cfg.LogFileRetentionDays)
 		}
 	})
 }

@@ -85,12 +85,17 @@ LOG_LEVEL=info
 LOG_FILE_PATH=
 LOG_FILE_MAX_SIZE_MB=100
 LOG_FILE_MAX_BACKUPS=10
+LOG_FILE_RETENTION_DAYS=7
 ```
 
 - 控制台固定使用自动着色的 `pretty` 格式；支持 ANSI 的 IDE Run Console（包括 GoLand）也会着色。设置标准环境变量 `NO_COLOR` 可关闭颜色。
 - Docker 和 Kubernetes：将 stdout 交由容器运行时或日志 Agent 轮转并采集。
 - 没有日志 Agent 的单机：设置 `LOG_FILE_PATH`，启用应用管理的轮转日志。文件使用无颜色的 `pretty` 格式，每条记录换行输出。
-- `LOG_FILE_PATH` 是日志目录。例如 `./runtime/logs` 会写入 `log-2026-09-17-1.log`，当文件达到 `LOG_FILE_MAX_SIZE_MB` 后继续写入 `log-2026-09-17-2.log`；跨天后从新日期的 `-1.log` 开始。`LOG_FILE_MAX_BACKUPS` 表示当前文件之外保留的历史分卷数。
+- `LOG_FILE_PATH` 是日志根目录。日志按 UTC 日期建目录；例如 `./runtime/logs` 会写入 `./runtime/logs/2026-09-17/app-1.log` 和 `error-1.log`。
+- `app-*.log` 包含达到 `LOG_LEVEL` 的完整日志；`error-*.log` 是其中 `ERROR` 及以上记录的附加副本。两类文件分别按 `LOG_FILE_MAX_SIZE_MB` 轮转，并分别保留当前文件之外最多 `LOG_FILE_MAX_BACKUPS` 个历史分卷。
+- `LOG_FILE_RETENTION_DAYS` 默认是 `7`，表示保留最近 7 个 UTC 自然日（含当天）；设为 `0` 可关闭按天清理。清理在启动和 UTC 跨日轮转时执行，与分卷数量限制同时生效。
+- 日志清理是尽力而为的后台维护：目录不存在视为无需清理；删除失败只向 stderr 报告一次，不阻止服务启动或后续日志写入。
+- 升级前已有的 `log-日期-序号.log` 不会自动迁移或删除。
 - 使用 `--config` 时，相对目录以配置文件所在目录为基准；否则以进程工作目录为基准。
 - 多个进程不能写入同一个日志目录。
 - `APP_ENV=dev` 和 `APP_ENV=test` 会记录未经脱敏、未经截断的完整请求和响应正文，其中可能包含凭据、prompt、消息和模型输出。不得对外发送这些日志；`APP_ENV=prod` 不记录请求和响应正文。
