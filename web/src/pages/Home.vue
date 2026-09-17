@@ -6,6 +6,7 @@ import { activeLocale, i18n, t } from '../i18n'
 import { showErrorToast, showSuccessToast } from '../toast'
 import type { Dashboard, Provider, Resource } from '../types'
 import Icon from '../components/Icon.vue'
+import InitializationGuide from '../components/InitializationGuide.vue'
 import Modal from '../components/Modal.vue'
 import PageHeader from '../components/PageHeader.vue'
 
@@ -21,6 +22,7 @@ const error = ref('')
 const providerHealthLoading = ref(false)
 const providerHealthError = ref('')
 const copied = ref('')
+const initializationGuideOpen = ref(false)
 const setupProtocol = ref<AccessProtocol | null>(null)
 const setupMethod = ref<SetupMethod>('script')
 const scriptCopied = ref('')
@@ -266,9 +268,19 @@ onMounted(load)
 
 <template>
   <PageHeader name="home" :show-description="false">
-    <button class="button" :disabled="loading" @click="load">
-      <Icon name="refresh" :size="16" />{{ t('home.refresh') }}
-    </button>
+    <div class="dashboard-heading-actions">
+      <button
+        type="button"
+        class="button"
+        aria-haspopup="dialog"
+        @click="initializationGuideOpen = true"
+      >
+        <Icon name="guide" :size="17" />{{ t('home.initializationAction') }}
+      </button>
+      <button class="button" :disabled="loading" @click="load">
+        <Icon name="refresh" :size="16" />{{ t('home.refresh') }}
+      </button>
+    </div>
   </PageHeader>
 
   <p v-if="error" class="alert error dashboard-alert" role="alert">
@@ -673,4 +685,21 @@ onMounted(load)
       </div>
     </div>
   </Modal>
+  <InitializationGuide v-if="initializationGuideOpen" @close="initializationGuideOpen = false" />
 </template>
+
+<style scoped>
+.dashboard-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+@media (max-width: 560px) {
+  .dashboard-heading-actions {
+    width: 100%;
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+</style>

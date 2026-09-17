@@ -8,6 +8,7 @@ const paths: Record<string, string> = {
   models: 'm12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5',
   providers: 'M4 7h16v12H4zM8 7V4h8v3M8 12h8m-8 4h5',
   connection: 'M8 3v5m8-5v5M5 8h14v3a7 7 0 0 1-14 0V8Zm7 10v4',
+  guide: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Zm3.8-13.8-2.2 5.4-5.4 2.2 2.2-5.4 5.4-2.2Z',
   activity: 'M3 12h4l2-6 4 12 3-9 2 3h3',
   external: 'M14 4h6v6M20 4l-9 9M18 13v6H5V6h6',
   website:

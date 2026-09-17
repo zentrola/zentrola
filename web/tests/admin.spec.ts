@@ -895,6 +895,44 @@ async function signIn(page: Page, destination: 'home' | 'members' = 'members') {
   await expect(page.getByRole('heading', { name: '用户管理', exact: true })).toBeVisible()
 }
 const modal = (page: Page) => page.locator('dialog').last()
+test('仪表盘初始化向导依次高亮配置入口', async ({ page }) => {
+  await fixture(page)
+  await signIn(page, 'home')
+
+  await page.getByRole('button', { name: '初始化向导', exact: true }).click()
+  const guide = page.locator('.initialization-tour')
+  await expect(guide).toBeVisible()
+  await expect(guide.getByRole('heading', { name: '添加服务商' })).toBeVisible()
+  await expect(guide).toHaveAttribute('data-target', 'provider')
+  await expect(page.locator('#nav-providers')).toHaveClass(/initialization-tour-target/)
+  await expect(page.locator('#nav-models')).not.toHaveClass(/initialization-tour-target/)
+
+  await guide.getByRole('button', { name: '下一步', exact: true }).click()
+  await expect(guide).toHaveAttribute('data-target', 'model')
+  await expect(guide.getByRole('heading', { name: '添加模型' })).toBeVisible()
+  await expect(page.locator('#nav-models')).toHaveClass(/initialization-tour-target/)
+
+  await guide.getByRole('button', { name: '下一步', exact: true }).click()
+  await expect(guide).toHaveAttribute('data-target', 'group')
+  await expect(guide.getByRole('heading', { name: '创建用户分组' })).toBeVisible()
+  await expect(page.locator('#nav-groups')).toHaveClass(/initialization-tour-target/)
+
+  await guide.getByRole('button', { name: '下一步', exact: true }).click()
+  await expect(guide).toHaveAttribute('data-target', 'member')
+  await expect(guide.getByRole('heading', { name: '添加用户' })).toBeVisible()
+  await expect(page.locator('#nav-members')).toHaveClass(/initialization-tour-target/)
+
+  await guide.getByRole('button', { name: '下一步', exact: true }).click()
+  await expect(guide).toHaveAttribute('data-target', 'usage')
+  await expect(guide.getByRole('heading', { name: '查看用量分析' })).toBeVisible()
+  await expect(guide.getByText('第 5 步，共 5 步', { exact: true })).toBeVisible()
+  await expect(page.locator('#nav-usage')).toHaveClass(/initialization-tour-target/)
+
+  await guide.getByRole('button', { name: '完成', exact: true }).click()
+  await expect(guide).toHaveCount(0)
+  await expect(page.locator('.initialization-tour-target')).toHaveCount(0)
+})
+
 test('首页展示本月指标、应用接入、配置脚本和分项排行榜', async ({ page }) => {
   const state = await fixture(page)
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
@@ -1797,6 +1835,90 @@ test('服务商没有可用模型映射时隐藏连接测试入口', async ({ pa
   await expect(
     modal(page).getByRole('button', { name: '验证 DeepSeek API Key 的可用性', exact: true }),
   ).toHaveCount(0)
+})
+
+test('服务商操作引导依次高亮配置入口', async ({ page }) => {
+  const state = await fixture(page)
+  state.providers[0].website = 'https://www.deepseek.com'
+  state.resources.push({
+    id: '88',
+    providerId: '81',
+    name: 'DeepSeek API Key',
+    authType: 'API_KEY',
+    authAdapter: 'API_KEY',
+    status: 'ACTIVE',
+    runtimeStatus: 'HEALTHY',
+    credentialConfigured: true,
+    createdAt: stamp,
+    updatedAt: stamp,
+  })
+
+  await signIn(page, 'home')
+  await page.getByRole('link', { name: '服务商', exact: true }).click()
+  await page.getByRole('button', { name: '操作引导', exact: true }).click()
+
+  const guide = page.locator('.initialization-tour')
+  await expect(guide).toHaveAttribute('data-target', 'create')
+  await expect(guide.getByRole('heading', { name: '添加服务商' })).toBeVisible()
+  await expect(page.locator('#provider-guide-create')).toHaveClass(/initialization-tour-target/)
+
+  await guide.getByRole('button', { name: '下一步', exact: true }).click()
+  await expect(guide).toHaveAttribute('data-target', 'website')
+  await expect(guide.getByRole('heading', { name: '前往官网获取凭证' })).toBeVisible()
+  const websiteLink = page.locator('#provider-guide-website')
+  await expect(websiteLink).toHaveClass(/initialization-tour-target/)
+  await expect(websiteLink).toHaveAttribute('href', 'https://www.deepseek.com')
+  await websiteLink.evaluate((element) => {
+    element.addEventListener(
+      'click',
+      (event) => {
+        event.preventDefault()
+        element.setAttribute('data-guide-clicked', 'true')
+      },
+      { once: true },
+    )
+  })
+  await page.locator('.initialization-highlight').click()
+  await expect(websiteLink).toHaveAttribute('data-guide-clicked', 'true')
+
+  await guide.getByRole('button', { name: '下一步', exact: true }).click()
+  await expect(guide).toHaveAttribute('data-target', 'credential')
+  await expect(guide.getByRole('heading', { name: '添加凭证' })).toBeVisible()
+  await expect(page.locator('#provider-guide-credential')).toHaveClass(/initialization-tour-target/)
+
+  await guide.getByRole('button', { name: '下一步', exact: true }).click()
+  await expect(guide).toHaveAttribute('data-target', 'sync')
+  await expect(guide.getByRole('heading', { name: '同步模型' })).toBeVisible()
+  await expect(page.locator('#provider-guide-sync')).toHaveClass(/initialization-tour-target/)
+
+  await guide.getByRole('button', { name: '下一步', exact: true }).click()
+  await expect(guide).toHaveAttribute('data-target', 'test')
+  await expect(guide.getByRole('heading', { name: '测试连接' })).toBeVisible()
+  await expect(page.locator('#provider-guide-test')).toHaveClass(/initialization-tour-target/)
+
+  await guide.getByRole('button', { name: '下一步', exact: true }).click()
+  await expect(guide).toHaveAttribute('data-target', 'edit')
+  await expect(guide.getByRole('heading', { name: '编辑服务商配置' })).toBeVisible()
+  await expect(guide.getByText('第 6 步，共 6 步', { exact: true })).toBeVisible()
+  await expect(page.locator('#provider-guide-edit')).toHaveClass(/initialization-tour-target/)
+
+  await guide.getByRole('button', { name: '完成', exact: true }).click()
+  await expect(guide).toHaveCount(0)
+})
+
+test('没有服务商时操作引导只显示添加服务商', async ({ page }) => {
+  const state = await fixture(page)
+  state.providers.splice(0)
+
+  await signIn(page, 'home')
+  await page.getByRole('link', { name: '服务商', exact: true }).click()
+  await page.getByRole('button', { name: '操作引导', exact: true }).click()
+
+  const guide = page.locator('.initialization-tour')
+  await expect(guide).toHaveAttribute('data-target', 'create')
+  await expect(guide.getByText('第 1 步，共 1 步', { exact: true })).toBeVisible()
+  await expect(guide.getByRole('button', { name: '完成', exact: true })).toBeVisible()
+  await expect(page.locator('#provider-guide-create')).toHaveClass(/initialization-tour-target/)
 })
 
 test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => {
