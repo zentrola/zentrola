@@ -91,6 +91,35 @@ export default {
   },
   home: {
     refresh: 'Refresh',
+    initializationAction: 'Initialization guide',
+    initializationStep: 'Step {current} of {total}',
+    initializationExit: 'Exit initialization guide',
+    initializationPrevious: 'Previous',
+    initializationNext: 'Next',
+    initializationFinish: 'Finish',
+    initializationSteps: {
+      provider: {
+        title: 'Add a provider',
+        description: 'Configure the model server endpoint and credentials.',
+      },
+      model: {
+        title: 'Add a model',
+        description: 'Add a model for client applications.',
+      },
+      group: {
+        title: 'Create a user group',
+        description: 'Choose the models the group can access and manage permissions together.',
+      },
+      member: {
+        title: 'Add a user',
+        description: 'Create a user, assign a group, and issue an Access Key for client requests.',
+      },
+      usage: {
+        title: 'Review usage analytics',
+        description:
+          'Explore trends by user, model, and provider, then inspect individual requests.',
+      },
+    },
     monthOverview: 'This month at a glance',
     activeMembers: 'Active users',
     supportedModels: 'Supported models',
@@ -361,6 +390,41 @@ export default {
       'Related provider mappings and group grants will be removed; usage history and operation logs are retained.',
   },
   providers: {
+    guideAction: 'Setup guide',
+    guideStep: 'Step {current} of {total}',
+    guideExit: 'Exit provider guide',
+    guidePrevious: 'Previous',
+    guideNext: 'Next',
+    guideFinish: 'Finish',
+    guideSteps: {
+      create: {
+        title: 'Add a provider',
+        description: 'Add a third-party provider, or initialize a model vendor and its presets.',
+      },
+      website: {
+        title: 'Get credentials from the official website',
+        description:
+          'Select the website icon beside the provider name to get an API key or subscription credential.',
+      },
+      credential: {
+        title: 'Add credentials',
+        description: 'Add an API key or subscription credential to access the upstream service.',
+      },
+      sync: {
+        title: 'Sync models',
+        description:
+          'Sync the official model catalog and provider mappings after adding credentials.',
+      },
+      test: {
+        title: 'Test the connection',
+        description:
+          'Send a minimal request to verify that the credential and model are available.',
+      },
+      edit: {
+        title: 'Edit provider configuration',
+        description: 'Select Edit to manage model mappings and proxy settings for the provider.',
+      },
+    },
     create: 'Add provider',
     createMenu: 'Create provider',
     thirdPartyProvider: 'Third-party provider',

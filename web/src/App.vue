@@ -409,7 +409,11 @@ async function signOut() {
               <Icon name="external" :size="12" />
             </a>
           </p>
-          <RouterLink :to="`/${item}`" :aria-label="t(`nav.${item}`)" :data-label="t(`nav.${item}`)"
+          <RouterLink
+            :to="`/${item}`"
+            :aria-label="t(`nav.${item}`)"
+            :data-label="t(`nav.${item}`)"
+            :id="'nav-' + item"
             ><Icon :name="item" /><span>{{ t(`nav.${item}`) }}</span></RouterLink
           ></template
         >

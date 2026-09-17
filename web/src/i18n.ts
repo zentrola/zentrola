@@ -122,6 +122,34 @@ export const i18n = createI18n({
       },
       home: {
         refresh: '刷新数据',
+        initializationAction: '初始化向导',
+        initializationStep: '第 {current} 步，共 {total} 步',
+        initializationExit: '退出初始化向导',
+        initializationPrevious: '上一步',
+        initializationNext: '下一步',
+        initializationFinish: '完成',
+        initializationSteps: {
+          provider: {
+            title: '添加服务商',
+            description: '配置模型服务器的接口地址和调用凭证。',
+          },
+          model: {
+            title: '添加模型',
+            description: '添加供客户端调用的模型。',
+          },
+          group: {
+            title: '创建用户分组',
+            description: '选择分组允许访问的模型，统一管理用户权限。',
+          },
+          member: {
+            title: '添加用户',
+            description: '创建用户并加入用户分组，再签发用于客户端调用的 Access Key。',
+          },
+          usage: {
+            title: '查看用量分析',
+            description: '按用户、模型和服务商查看调用趋势，并追踪每次调用明细。',
+          },
+        },
         monthOverview: '本月概览',
         activeMembers: '激活用户数',
         supportedModels: '支持模型',
@@ -387,6 +415,38 @@ export const i18n = createI18n({
         deleteConsequence: '相关服务商映射和分组授权将同时失效；历史用量与操作日志保留。',
       },
       providers: {
+        guideAction: '操作引导',
+        guideStep: '第 {current} 步，共 {total} 步',
+        guideExit: '退出服务商引导',
+        guidePrevious: '上一步',
+        guideNext: '下一步',
+        guideFinish: '完成',
+        guideSteps: {
+          create: {
+            title: '添加服务商',
+            description: '可以添加三方服务商，或初始化模型厂商及其预置配置。',
+          },
+          website: {
+            title: '前往官网获取凭证',
+            description: '点击服务商名称旁的官网图标，在新页面获取 API Key 或订阅凭证。',
+          },
+          credential: {
+            title: '添加凭证',
+            description: '服务商创建后，添加 API Key 或订阅凭证，用于访问上游服务。',
+          },
+          sync: {
+            title: '同步模型',
+            description: '凭证配置完成后，同步官方模型目录和对应的服务商映射。',
+          },
+          test: {
+            title: '测试连接',
+            description: '模型同步完成后，发送一次最小请求验证凭证和模型是否可用。',
+          },
+          edit: {
+            title: '编辑服务商配置',
+            description: '点击编辑，维护服务商的模型映射关系和代理配置。',
+          },
+        },
         create: '添加服务商',
         createMenu: '创建服务商',
         thirdPartyProvider: '三方服务商',

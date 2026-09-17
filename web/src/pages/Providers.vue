@@ -19,6 +19,7 @@ import type {
   ResetCreditConsumeResult,
 } from '../types'
 import Icon from '../components/Icon.vue'
+import GuideTour from '../components/InitializationGuide.vue'
 import ListFooter from '../components/ListFooter.vue'
 import ListSearch from '../components/ListSearch.vue'
 import Modal from '../components/Modal.vue'
@@ -45,6 +46,51 @@ const {
 } = useCollection<Provider>(() => '/providers')
 const { busy, error: actionError, run } = useAction()
 const createMenuOpen = ref(false)
+const providerGuideOpen = ref(false)
+const providerGuideAllSteps = [
+  {
+    key: 'create',
+    target: '#provider-guide-create',
+    icon: 'providers',
+    titleKey: 'providers.guideSteps.create.title',
+    descriptionKey: 'providers.guideSteps.create.description',
+  },
+  {
+    key: 'website',
+    target: '#provider-guide-website',
+    icon: 'website',
+    titleKey: 'providers.guideSteps.website.title',
+    descriptionKey: 'providers.guideSteps.website.description',
+  },
+  {
+    key: 'credential',
+    target: '#provider-guide-credential',
+    icon: 'key',
+    titleKey: 'providers.guideSteps.credential.title',
+    descriptionKey: 'providers.guideSteps.credential.description',
+  },
+  {
+    key: 'sync',
+    target: '#provider-guide-sync',
+    icon: 'refresh',
+    titleKey: 'providers.guideSteps.sync.title',
+    descriptionKey: 'providers.guideSteps.sync.description',
+  },
+  {
+    key: 'test',
+    target: '#provider-guide-test',
+    icon: 'activity',
+    titleKey: 'providers.guideSteps.test.title',
+    descriptionKey: 'providers.guideSteps.test.description',
+  },
+  {
+    key: 'edit',
+    target: '#provider-guide-edit',
+    icon: 'edit',
+    titleKey: 'providers.guideSteps.edit.title',
+    descriptionKey: 'providers.guideSteps.edit.description',
+  },
+] as const
 const createMenuRoot = ref<HTMLElement>()
 const createMenuTrigger = ref<HTMLButtonElement>()
 const createMenu = ref<HTMLElement>()
@@ -480,6 +526,28 @@ const visible = computed(() =>
     return appliedRuntimeFilter.value === 'ABNORMAL'
       ? abnormal
       : provider.status === 'ACTIVE' && !abnormal
+  }),
+)
+
+const guideCredentialProviderID = computed(() => visible.value[0]?.id ?? '')
+const guideWebsiteProviderID = computed(
+  () => visible.value.find((provider) => provider.website)?.id ?? '',
+)
+const guideSyncProviderID = computed(
+  () => visible.value.find((provider) => provider.modelSyncSupported)?.id ?? '',
+)
+const guideTestProviderID = computed(
+  () =>
+    visible.value.find((provider) => resourceFor(provider) && provider.modelCount > 0)?.id ?? '',
+)
+const providerGuideSteps = computed(() =>
+  providerGuideAllSteps.filter((step) => {
+    if (step.key === 'create') return true
+    if (!guideCredentialProviderID.value) return false
+    if (step.key === 'website') return Boolean(guideWebsiteProviderID.value)
+    if (step.key === 'sync') return Boolean(guideSyncProviderID.value)
+    if (step.key === 'test') return Boolean(guideTestProviderID.value)
+    return true
   }),
 )
 
@@ -1174,7 +1242,11 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
 </script>
 
 <template>
-  <PageHeader name="providers" />
+  <PageHeader name="providers">
+    <button type="button" class="button" aria-haspopup="dialog" @click="providerGuideOpen = true">
+      <Icon name="guide" :size="17" />{{ t('providers.guideAction') }}
+    </button>
+  </PageHeader>
   <section class="panel">
     <ListSearch
       v-model="keyword"
@@ -1199,6 +1271,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
           <div ref="createMenuRoot" class="provider-create-menu" @focusout="onCreateMenuFocusOut">
             <button
               ref="createMenuTrigger"
+              id="provider-guide-create"
               type="button"
               class="button primary provider-create-trigger"
               :disabled="busy"
@@ -1301,6 +1374,9 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
                 <span class="provider-name-actions"
                   ><a
                     v-if="provider.website"
+                    :id="
+                      provider.id === guideWebsiteProviderID ? 'provider-guide-website' : undefined
+                    "
                     class="provider-quick-action provider-website-action"
                     :href="provider.website"
                     target="_blank"
@@ -1313,6 +1389,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
                     v-if="resourceFor(provider) && provider.modelCount > 0"
                     type="button"
                     class="provider-quick-action provider-direct-action"
+                    :id="provider.id === guideTestProviderID ? 'provider-guide-test' : undefined"
                     :aria-label="t('providers.testConnectionFor', { name: provider.name })"
                     :title="t('resources.test')"
                     :disabled="busy"
@@ -1323,6 +1400,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
                     v-if="provider.modelSyncSupported"
                     type="button"
                     class="provider-quick-action provider-direct-action"
+                    :id="provider.id === guideSyncProviderID ? 'provider-guide-sync' : undefined"
                     :aria-label="t('providers.syncModelsFor', { name: provider.name })"
                     :title="t('resources.syncModels')"
                     :disabled="busy"
@@ -1403,13 +1481,25 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
             </td>
             <td class="align-right">
               <div class="provider-actions">
-                <button class="text-button" :disabled="busy" @click="openEdit(provider)">
+                <button
+                  :id="
+                    provider.id === guideCredentialProviderID ? 'provider-guide-edit' : undefined
+                  "
+                  class="text-button"
+                  :disabled="busy"
+                  @click="openEdit(provider)"
+                >
                   {{ t('providers.edit') }}
                 </button>
                 <button
                   type="button"
                   class="text-button"
                   :disabled="busy"
+                  :id="
+                    provider.id === guideCredentialProviderID
+                      ? 'provider-guide-credential'
+                      : undefined
+                  "
                   :aria-label="t('providers.editCredentialFor', { name: provider.name })"
                   :title="t('providers.editCredentialFor', { name: provider.name })"
                   @click="configureCredential(provider)"
@@ -2512,6 +2602,12 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
       <button class="button" :disabled="busy" @click="syncTarget = null">{{ t('close') }}</button>
     </footer>
   </Modal>
+  <GuideTour
+    v-if="providerGuideOpen"
+    :steps="providerGuideSteps"
+    control-prefix="providers.guide"
+    @close="providerGuideOpen = false"
+  />
 </template>
 
 <style scoped>
