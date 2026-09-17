@@ -16,11 +16,11 @@ type moonshotAdapter struct{}
 
 func (moonshotAdapter) Name() string { return "moonshot" }
 
-func (moonshotAdapter) Request(mgmt.ModelDiscoverySource, int) (catalogRequest, error) {
+func (moonshotAdapter) Request(mgmt.ModelDiscoverySource, int, string) (catalogRequest, error) {
 	return catalogRequest{URL: "https://api.moonshot.cn/v1/models", Bearer: true}, nil
 }
 
-func (moonshotAdapter) Decode(data []byte, _ int) ([]mgmt.DiscoveredModel, bool, error) {
+func (moonshotAdapter) Decode(data []byte, _ int) ([]mgmt.DiscoveredModel, string, error) {
 	var payload struct {
 		Object string `json:"object"`
 		Data   []struct {
@@ -30,14 +30,14 @@ func (moonshotAdapter) Decode(data []byte, _ int) ([]mgmt.DiscoveredModel, bool,
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil || payload.Object != "list" || payload.Data == nil {
-		return nil, false, errInvalidMoonshotCatalog
+		return nil, "", errInvalidMoonshotCatalog
 	}
 
 	models := make([]mgmt.DiscoveredModel, 0, len(payload.Data))
 	seen := make(map[string]struct{}, len(payload.Data))
 	for _, item := range payload.Data {
 		if item.Object != "model" || item.OwnedBy != "moonshot" || !validModelCode(item.ID) {
-			return nil, false, errInvalidMoonshotCatalog
+			return nil, "", errInvalidMoonshotCatalog
 		}
 		if _, duplicate := seen[item.ID]; duplicate {
 			continue
@@ -49,7 +49,7 @@ func (moonshotAdapter) Decode(data []byte, _ int) ([]mgmt.DiscoveredModel, bool,
 		})
 	}
 	sort.Slice(models, func(i, j int) bool { return models[i].Code < models[j].Code })
-	return models, false, nil
+	return models, "", nil
 }
 
 func moonshotDisplayName(code string) string {

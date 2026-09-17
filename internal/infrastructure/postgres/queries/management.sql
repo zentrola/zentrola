@@ -123,6 +123,16 @@ ORDER BY id DESC
 LIMIT sqlc.arg(page_limit);
 -- name: ManageProvider :one
 SELECT * FROM provider WHERE id=$1 AND is_deleted=false;
+-- name: ManageProviderModelCounts :many
+SELECT pm.provider_id, COUNT(*)::bigint AS model_count
+FROM provider_model pm
+JOIN model m ON m.id=pm.model_id
+WHERE pm.provider_id=ANY(sqlc.arg(provider_ids)::bigint[])
+  AND pm.is_deleted=false
+  AND m.is_deleted=false
+  AND m.status='ACTIVE'
+GROUP BY pm.provider_id
+ORDER BY pm.provider_id;
 -- name: ManageProviderCredentialConfigured :one
 SELECT EXISTS(
     SELECT 1 FROM provider_credential

@@ -1504,6 +1504,43 @@ func (q *Queries) ManageProviderMappings(ctx context.Context, providerID int64) 
 	return items, nil
 }
 
+const manageProviderModelCounts = `-- name: ManageProviderModelCounts :many
+SELECT pm.provider_id, COUNT(*)::bigint AS model_count
+FROM provider_model pm
+JOIN model m ON m.id=pm.model_id
+WHERE pm.provider_id=ANY($1::bigint[])
+  AND pm.is_deleted=false
+  AND m.is_deleted=false
+  AND m.status='ACTIVE'
+GROUP BY pm.provider_id
+ORDER BY pm.provider_id
+`
+
+type ManageProviderModelCountsRow struct {
+	ProviderID int64
+	ModelCount int64
+}
+
+func (q *Queries) ManageProviderModelCounts(ctx context.Context, providerIds []int64) ([]ManageProviderModelCountsRow, error) {
+	rows, err := q.db.Query(ctx, manageProviderModelCounts, providerIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ManageProviderModelCountsRow{}
+	for rows.Next() {
+		var i ManageProviderModelCountsRow
+		if err := rows.Scan(&i.ProviderID, &i.ModelCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const manageProviderStatus = `-- name: ManageProviderStatus :exec
 UPDATE provider SET status=$2,updated_by=$3,updated_at=$4 WHERE id=$1 AND is_deleted=false
 `

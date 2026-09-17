@@ -88,6 +88,7 @@ type Provider struct {
 	Code               string                   `json:"code"`
 	Name               string                   `json:"name"`
 	Type               string                   `json:"type"`
+	ModelCount         int64                    `json:"modelCount"`
 	Website            *string                  `json:"website"`
 	Endpoints          []ProviderEndpoint       `json:"endpoints"`
 	ModelSyncSupported bool                     `json:"modelSyncSupported"`
@@ -362,11 +363,14 @@ type Cipher interface {
 	DecryptProviderProxy(catalog.SealedCredential, catalog.ProviderProxyOwner) ([]byte, error)
 }
 type ConnectionResult struct {
-	OK           bool                   `json:"ok"`
-	Code         string                 `json:"code"`
-	HTTPStatus   int                    `json:"httpStatus,omitempty"`
-	LatencyMS    int64                  `json:"latencyMs"`
-	ResetCredits *RateLimitResetCredits `json:"resetCredits,omitempty"`
+	OK                     bool                   `json:"ok"`
+	Code                   string                 `json:"code"`
+	HTTPStatus             int                    `json:"httpStatus,omitempty"`
+	LatencyMS              int64                  `json:"latencyMs"`
+	ProviderModelMappingID int64                  `json:"providerModelMappingId,string,omitempty"`
+	TestedModelID          int64                  `json:"testedModelId,string,omitempty"`
+	TestedModelCode        string                 `json:"testedModelCode,omitempty"`
+	ResetCredits           *RateLimitResetCredits `json:"resetCredits,omitempty"`
 }
 
 type ResetCreditConsumeResult struct {

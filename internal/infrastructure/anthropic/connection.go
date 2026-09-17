@@ -25,6 +25,7 @@ type connectionProbe struct {
 	URL            string
 	Body           []byte
 	ResponseFormat inferenceProbeFormat
+	APIKeyHeader   string
 }
 
 // connectionProbeAdapter 为连接探测定义统一扩展点。标准实现按协议构造和校验探测，
@@ -77,6 +78,7 @@ func NewConnectionTester() *ConnectionTester {
 		standardAdapter: standardAdapter,
 		providerAdapters: map[string]connectionProbeAdapter{
 			catalog.DeepSeekOfficialCode: deepSeekConnectionProbeAdapter{standard: standardAdapter},
+			catalog.GoogleOfficialCode:   googleConnectionProbeAdapter{},
 		},
 	}
 }
@@ -161,7 +163,9 @@ func (t *ConnectionTester) Test(ctx context.Context, target mgmt.ConnectionTarge
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Accept-Encoding", "identity")
-	if target.Protocol == "OPENAI" || oauthBearer {
+	if probe.APIKeyHeader != "" {
+		req.Header.Set(probe.APIKeyHeader, requestCredential)
+	} else if target.Protocol == "OPENAI" || oauthBearer {
 		req.Header.Set("Authorization", "Bearer "+requestCredential)
 		if accountID != "" {
 			req.Header.Set("ChatGPT-Account-Id", accountID)
@@ -179,6 +183,9 @@ func (t *ConnectionTester) Test(ctx context.Context, target mgmt.ConnectionTarge
 		req.Header.Del("Authorization")
 		req.Header.Del("x-api-key")
 		req.Header.Del("ChatGPT-Account-Id")
+		if probe.APIKeyHeader != "" {
+			req.Header.Del(probe.APIKeyHeader)
+		}
 	}()
 
 	client, cleanup, err := provider.ClientWithProxy(ctx, t.client, proxy, provider.ProxyRequestLog{

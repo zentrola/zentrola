@@ -162,6 +162,12 @@ func TestStage3Integration(t *testing.T) {
 		},
 	}
 	customProvider := stage3Data[mgmt.Provider](t, request("POST", "/api/v1/providers", customProviderInput, 201))
+	providers = stage3Data[struct {
+		Items []mgmt.Provider `json:"items"`
+	}](t, request("GET", "/api/v1/providers", nil, 200)).Items
+	if len(providers) != 1 || providers[0].ID != customProvider.ID || providers[0].ModelCount != 1 {
+		t.Fatalf("provider model count=%+v, want one active mapped model", providers)
+	}
 	missingCredential := request("PATCH", "/api/v1/providers/"+sid(customProvider.ID)+"/status", map[string]string{"status": "ACTIVE"}, 409)
 	if !strings.Contains(missingCredential.Body.String(), `"code":"PROVIDER_CREDENTIAL_REQUIRED"`) {
 		t.Fatalf("provider without a credential returned an unexpected error: %s", missingCredential.Body.String())
@@ -189,6 +195,12 @@ func TestStage3Integration(t *testing.T) {
 	customProviderInput.Mappings[0].UpstreamModelCode = ""
 	customProviderInput.Mappings = customProviderInput.Mappings[:1]
 	stage3Data[mgmt.Provider](t, request("PUT", customProviderPath, customProviderInput, 200))
+	providers = stage3Data[struct {
+		Items []mgmt.Provider `json:"items"`
+	}](t, request("GET", "/api/v1/providers", nil, 200)).Items
+	if len(providers) != 1 || providers[0].ModelCount != 0 {
+		t.Fatalf("provider model count=%+v, want zero active mapped models", providers)
+	}
 	providerDetail = stage3Data[mgmt.ProviderDetail](t, request("GET", customProviderPath, nil, 200))
 	if len(providerDetail.Mappings) != 1 || providerDetail.Mappings[0].ID != mappingID || providerDetail.Mappings[0].UpstreamModelCode != "" {
 		t.Fatalf("provider mapping update not preserved: %+v", providerDetail.Mappings)

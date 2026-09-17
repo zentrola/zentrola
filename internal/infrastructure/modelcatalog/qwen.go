@@ -22,7 +22,7 @@ type qwenAdapter struct{}
 
 func (qwenAdapter) Name() string { return "qwen" }
 
-func (qwenAdapter) Request(source mgmt.ModelDiscoverySource, page int) (catalogRequest, error) {
+func (qwenAdapter) Request(source mgmt.ModelDiscoverySource, page int, _ string) (catalogRequest, error) {
 	baseURL := qwenCatalogBaseURL(source.Endpoints)
 	baseURL, ok := provider.BaseURL(baseURL)
 	if !ok || page <= 0 || page > maxCatalogPages {
@@ -46,7 +46,7 @@ func (qwenAdapter) Request(source mgmt.ModelDiscoverySource, page int) (catalogR
 	return catalogRequest{URL: endpoint.String(), Bearer: true}, nil
 }
 
-func (qwenAdapter) Decode(data []byte, requestedPage int) ([]mgmt.DiscoveredModel, bool, error) {
+func (qwenAdapter) Decode(data []byte, requestedPage int) ([]mgmt.DiscoveredModel, string, error) {
 	var payload struct {
 		Success bool `json:"success"`
 		Output  struct {
@@ -66,7 +66,7 @@ func (qwenAdapter) Decode(data []byte, requestedPage int) ([]mgmt.DiscoveredMode
 	if err := json.Unmarshal(data, &payload); err != nil || !payload.Success || payload.Output.Models == nil ||
 		payload.Output.Total < 0 || payload.Output.Total > maxCatalogModels || payload.Output.PageNo != requestedPage ||
 		payload.Output.PageSize != qwenCatalogPageSize || len(payload.Output.Models) > payload.Output.PageSize {
-		return nil, false, errInvalidQwenCatalog
+		return nil, "", errInvalidQwenCatalog
 	}
 
 	models := make([]mgmt.DiscoveredModel, 0, len(payload.Output.Models))
@@ -76,7 +76,7 @@ func (qwenAdapter) Decode(data []byte, requestedPage int) ([]mgmt.DiscoveredMode
 			continue
 		}
 		if !validModelCode(item.Model) {
-			return nil, false, errInvalidQwenCatalog
+			return nil, "", errInvalidQwenCatalog
 		}
 		if _, duplicate := seen[item.Model]; duplicate {
 			continue
@@ -92,9 +92,12 @@ func (qwenAdapter) Decode(data []byte, requestedPage int) ([]mgmt.DiscoveredMode
 	sort.Slice(models, func(i, j int) bool { return models[i].Code < models[j].Code })
 	hasNext := payload.Output.PageNo*payload.Output.PageSize < payload.Output.Total
 	if hasNext && len(payload.Output.Models) == 0 {
-		return nil, false, errInvalidQwenCatalog
+		return nil, "", errInvalidQwenCatalog
 	}
-	return models, hasNext, nil
+	if hasNext {
+		return models, strconv.Itoa(requestedPage + 1), nil
+	}
+	return models, "", nil
 }
 
 func qwenCatalogBaseURL(endpoints []mgmt.ProviderEndpoint) string {

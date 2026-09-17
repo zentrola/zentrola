@@ -130,6 +130,7 @@ type resourceTestWriter struct {
 	resource ResourceRecord
 	provider Provider
 	model    Model
+	models   []Model
 	mappings []ProviderMapping
 	updated  ResourceRecord
 	quotas   []ResourceQuota
@@ -148,6 +149,15 @@ func (w *resourceTestWriter) ProviderMappings(context.Context, int64) ([]Provide
 }
 func (w *resourceTestWriter) Model(context.Context, int64) (Model, error) {
 	return w.model, nil
+}
+func (w *resourceTestWriter) Models(context.Context, Page, string) ([]Model, error) {
+	if w.models != nil {
+		return append([]Model(nil), w.models...), nil
+	}
+	if w.model.ID != 0 {
+		return []Model{w.model}, nil
+	}
+	return []Model{}, nil
 }
 func (w *resourceTestWriter) UpdateResource(_ context.Context, resource ResourceRecord) error {
 	w.updated = resource
@@ -375,7 +385,8 @@ func TestResourceInferenceProbeBlocksBillingFailure(t *testing.T) {
 			{ProtocolType: "OPENAI", BaseURL: "https://api.example.com/v1"},
 			{ProtocolType: "ANTHROPIC", BaseURL: "https://api.anthropic.com"},
 		}},
-		mappings: []ProviderMapping{{ProviderID: 40, UpstreamModelCode: "claude-test", Priority: 0}},
+		model:    Model{ID: 90, Code: "claude-test", Status: "ACTIVE"},
+		mappings: []ProviderMapping{{ID: 1, ProviderID: 40, ModelID: 90, UpstreamModelCode: "claude-test", Priority: 0}},
 	}
 	tester := connectionTesterFunc(func(_ context.Context, target ConnectionTarget, credential []byte, _ *catalog.OutboundProxy) ConnectionResult {
 		if target.ProviderCode != "anthropic-official" || target.Protocol != "ANTHROPIC" || target.BaseURL != "https://api.anthropic.com" || target.UpstreamModelCode != "claude-test" || string(credential) != "provider-key" {
@@ -408,8 +419,8 @@ func TestResourceInferenceProbeUsesSelectedProtocol(t *testing.T) {
 			{ProtocolType: "OPENAI", BaseURL: "https://api.example.com/v1"},
 			{ProtocolType: "ANTHROPIC", BaseURL: "https://api.example.com/anthropic"},
 		}},
-		model:    Model{ID: 90, Code: "logical-model"},
-		mappings: []ProviderMapping{{ProviderID: 40, ModelID: 90, UpstreamModelCode: "", Priority: 0}},
+		model:    Model{ID: 90, Code: "logical-model", Status: "ACTIVE"},
+		mappings: []ProviderMapping{{ID: 1, ProviderID: 40, ModelID: 90, UpstreamModelCode: "", Priority: 0}},
 	}
 	tester := connectionTesterFunc(func(_ context.Context, target ConnectionTarget, _ []byte, _ *catalog.OutboundProxy) ConnectionResult {
 		if target.ProviderCode != "custom-provider" || target.Protocol != "OPENAI" || target.BaseURL != "https://api.example.com/v1" || target.UpstreamModelCode != "logical-model" {
@@ -422,6 +433,111 @@ func TestResourceInferenceProbeUsesSelectedProtocol(t *testing.T) {
 	result, err := service.TestResourceProtocol(context.Background(), admin.Identity{ID: 1}, 48, "openai", appsec.RequestMeta{})
 	if err != nil || !result.OK || result.Code != "OK" || !writer.restored {
 		t.Fatalf("selected protocol test failed: result=%+v restored=%v err=%v", result, writer.restored, err)
+	}
+}
+
+func TestResourceInferenceProbeUsesExplicitModelMapping(t *testing.T) {
+	updatedAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
+	writer := &resourceTestWriter{
+		resource: ResourceRecord{
+			Resource: Resource{ID: 48, ProviderID: 40, Name: "上游账号", AuthType: AuthTypeAPIKey, AuthAdapter: AuthAdapterAPIKey, RuntimeStatus: "HEALTHY", UpdatedAt: updatedAt},
+			Sealed:   catalog.SealedCredential{Ciphertext: []byte("provider-key"), KeyVersion: 1},
+		},
+		provider: Provider{ID: 40, Code: "custom-provider", Endpoints: []ProviderEndpoint{{ProtocolType: "OPENAI", BaseURL: "https://api.example.com/v1"}}},
+		models: []Model{
+			{ID: 90, Code: "model-one", Status: "ACTIVE"},
+			{ID: 91, Code: "model-two", Status: "ACTIVE"},
+			{ID: 92, Code: "model-disabled", Status: "DISABLED"},
+		},
+		mappings: []ProviderMapping{
+			{ID: 1, ProviderID: 40, ModelID: 90, UpstreamModelCode: "upstream-one"},
+			{ID: 2, ProviderID: 40, ModelID: 91, UpstreamModelCode: "upstream-two"},
+			{ID: 3, ProviderID: 40, ModelID: 99, UpstreamModelCode: "deleted-model"},
+			{ID: 4, ProviderID: 41, ModelID: 90, UpstreamModelCode: "other-provider"},
+			{ID: 5, ProviderID: 40, ModelID: 92, UpstreamModelCode: "disabled-model"},
+		},
+	}
+	testCalls := 0
+	tester := connectionTesterFunc(func(_ context.Context, target ConnectionTarget, _ []byte, _ *catalog.OutboundProxy) ConnectionResult {
+		testCalls++
+		if target.UpstreamModelCode != "upstream-two" {
+			t.Fatalf("unexpected selected model: %+v", target)
+		}
+		return ConnectionResult{OK: true, Code: "OK", HTTPStatus: 200}
+	})
+	service := New(resourceTestStore{writer: writer}, nil, providerTestCipher{}, tester)
+
+	result, err := service.TestResourceSelection(context.Background(), admin.Identity{ID: 1}, 48, "OPENAI", 2, appsec.RequestMeta{})
+	if err != nil || !result.OK {
+		t.Fatalf("explicit model connection test failed: result=%+v err=%v", result, err)
+	}
+	if result.ProviderModelMappingID != 2 || result.TestedModelID != 91 || result.TestedModelCode != "upstream-two" {
+		t.Fatalf("unexpected tested model metadata: %+v", result)
+	}
+	for _, invalidMappingID := range []int64{3, 4, 5, 999} {
+		_, err = service.TestResourceSelection(context.Background(), admin.Identity{ID: 1}, 48, "OPENAI", invalidMappingID, appsec.RequestMeta{})
+		if !errors.Is(err, appsec.ErrInvalidArgument) {
+			t.Fatalf("mapping %d error=%v; want invalid argument", invalidMappingID, err)
+		}
+	}
+	if testCalls != 1 {
+		t.Fatalf("connection tester calls=%d; want 1", testCalls)
+	}
+}
+
+func TestGoogleConnectionProbeModelRanking(t *testing.T) {
+	tests := []struct {
+		code string
+		want int
+	}{
+		{code: "gemini-3.6-flash", want: 0},
+		{code: "gemini-2.5-flash", want: 25},
+		{code: "gemini-3.1-flash-lite", want: 10},
+		{code: "gemini-3-flash-preview", want: 20},
+		{code: "gemini-3-pro-image", want: 30},
+		{code: "gemini-2.5-flash-preview-tts", want: 30},
+		{code: "gemini-3.5-transcribe", want: 30},
+		{code: "antigravity-preview-05-2026", want: 30},
+	}
+	for _, test := range tests {
+		if got := connectionProbeModelRank(catalog.GoogleOfficialCode, test.code); got != test.want {
+			t.Errorf("connectionProbeModelRank(%q) = %d, want %d", test.code, got, test.want)
+		}
+	}
+	if got := connectionProbeModelRank(catalog.OpenAIOfficialCode, "gpt-test"); got != 0 {
+		t.Fatalf("non-Google model rank = %d, want 0", got)
+	}
+}
+
+func TestGoogleConnectionProbeIgnoresMappingsForMissingModels(t *testing.T) {
+	updatedAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
+	writer := &resourceTestWriter{
+		resource: ResourceRecord{
+			Resource: Resource{ID: 48, ProviderID: 40, Name: "Google API Key", AuthType: AuthTypeAPIKey, AuthAdapter: AuthAdapterAPIKey, RuntimeStatus: "HEALTHY", UpdatedAt: updatedAt},
+			Sealed:   catalog.SealedCredential{Ciphertext: []byte("provider-key"), KeyVersion: 1},
+		},
+		provider: Provider{ID: 40, Code: catalog.GoogleOfficialCode, Endpoints: []ProviderEndpoint{{ProtocolType: "OPENAI", BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai"}}},
+		models: []Model{
+			{ID: 91, Code: "gemini-3-flash-preview", Status: "ACTIVE"},
+			{ID: 92, Code: "gemini-3.6-flash", Status: "ACTIVE"},
+		},
+		mappings: []ProviderMapping{
+			{ID: 1, ProviderID: 40, ModelID: 90, Priority: 100},
+			{ID: 2, ProviderID: 40, ModelID: 91, Priority: 100},
+			{ID: 3, ProviderID: 40, ModelID: 92, Priority: 100},
+		},
+	}
+	tester := connectionTesterFunc(func(_ context.Context, target ConnectionTarget, _ []byte, _ *catalog.OutboundProxy) ConnectionResult {
+		if target.UpstreamModelCode != "gemini-3.6-flash" {
+			t.Fatalf("unexpected Google probe model: %+v", target)
+		}
+		return ConnectionResult{OK: true, Code: "OK", HTTPStatus: 200}
+	})
+	service := New(resourceTestStore{writer: writer}, nil, providerTestCipher{}, tester)
+
+	result, err := service.TestResourceProtocol(context.Background(), admin.Identity{ID: 1}, 48, "OPENAI", appsec.RequestMeta{})
+	if err != nil || !result.OK || !writer.restored {
+		t.Fatalf("Google connection test failed: result=%+v restored=%v err=%v", result, writer.restored, err)
 	}
 }
 

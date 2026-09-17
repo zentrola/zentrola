@@ -100,6 +100,73 @@ func TestDiscoverOpenAIModels(t *testing.T) {
 	}
 }
 
+func TestDiscoverGoogleModels(t *testing.T) {
+	var logs bytes.Buffer
+	requestCount := 0
+	discoverer := NewDiscoverer(slog.New(slog.NewJSONHandler(&logs, nil)))
+	discoverer.client.Transport = roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		requestCount++
+		if request.Method != http.MethodGet || request.URL.Scheme != "https" ||
+			request.URL.Host != "generativelanguage.googleapis.com" || request.URL.Path != "/v1beta/models" ||
+			request.URL.Query().Get("pageSize") != googleCatalogPageSize ||
+			request.Header.Get("X-Goog-Api-Key") != "test-secret" || request.Header.Get("Authorization") != "" {
+			t.Fatalf("invalid discovery request: %s %s", request.Method, request.URL.String())
+		}
+		body := `{"nextPageToken":"page-token-2","models":[{"name":"models/text-embedding-004","displayName":"Text Embedding 004","supportedGenerationMethods":["embedContent"]},{"name":"models/gemini-2.5-pro","displayName":"Gemini 2.5 Pro","supportedGenerationMethods":["generateContent","countTokens"]}]}`
+		if requestCount == 1 && request.URL.Query().Get("pageToken") != "" {
+			t.Fatalf("first Google catalog page contains a page token: %s", request.URL.String())
+		}
+		if requestCount == 2 {
+			if request.URL.Query().Get("pageToken") != "page-token-2" {
+				t.Fatalf("second Google catalog page is missing its page token: %s", request.URL.String())
+			}
+			body = `{"models":[{"name":"models/gemini-2.5-flash","displayName":"","supportedGenerationMethods":["generateContent"]},{"name":"models/gemini-2.5-pro","displayName":"Duplicate","supportedGenerationMethods":["generateContent"]},{"name":"models/gemini-3-flash-preview","displayName":"Preview","supportedGenerationMethods":["generateContent"]},{"name":"models/gemini-3-pro-image","displayName":"Image","supportedGenerationMethods":["generateContent"]},{"name":"models/gemini-flash-latest","displayName":"Latest","supportedGenerationMethods":["generateContent"]},{"name":"models/antigravity-preview-09-2026","displayName":"Antigravity","supportedGenerationMethods":["generateContent"]}]}`
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	})
+
+	models, result := discoverer.Discover(context.Background(), mgmt.ModelDiscoverySource{ProviderCode: catalog.GoogleOfficialCode}, []byte("test-secret"), nil)
+	if !result.OK || result.Code != "OK" || requestCount != 2 || len(models) != 2 ||
+		models[0].Code != "gemini-2.5-flash" || models[0].Name != "Gemini 2.5 flash" ||
+		models[1].Code != "gemini-2.5-pro" || models[1].Name != "Gemini 2.5 Pro" {
+		t.Fatalf("unexpected discovery: %+v %+v", models, result)
+	}
+	output := logs.String()
+	for _, expected := range []string{"official model catalog response", `"provider_code":"google-gemini-official"`, `"catalog_adapter":"google"`, `"upstream_status":200`} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("discovery response log missing %q: %s", expected, output)
+		}
+	}
+	if strings.Contains(output, "test-secret") {
+		t.Fatalf("discovery response log leaked credential: %s", output)
+	}
+}
+
+func TestGoogleStableGeneralModelFilter(t *testing.T) {
+	tests := []struct {
+		code string
+		want bool
+	}{
+		{code: "gemini-2.5-flash", want: true},
+		{code: "gemini-2.5-flash-001", want: true},
+		{code: "gemini-2.5-pro", want: true},
+		{code: "gemini-3-flash-preview", want: false},
+		{code: "gemini-2.0-flash-thinking-exp", want: false},
+		{code: "gemini-flash-latest", want: false},
+		{code: "gemini-3-pro-image", want: false},
+		{code: "gemini-2.5-flash-preview-tts", want: false},
+		{code: "gemini-2.5-computer-use", want: false},
+		{code: "gemini-3.5-transcribe", want: false},
+		{code: "antigravity-preview-09-2026", want: false},
+		{code: "gemma-3-27b-it", want: false},
+	}
+	for _, test := range tests {
+		if got := isGoogleStableGeneralModel(test.code); got != test.want {
+			t.Errorf("isGoogleStableGeneralModel(%q) = %t, want %t", test.code, got, test.want)
+		}
+	}
+}
+
 func TestDiscoverMoonshotModels(t *testing.T) {
 	var logs bytes.Buffer
 	discoverer := NewDiscoverer(slog.New(slog.NewJSONHandler(&logs, nil)))
@@ -179,7 +246,7 @@ func TestQwenCatalogRequestUsesConfiguredRegionalHost(t *testing.T) {
 			ProtocolType: "OPENAI",
 			BaseURL:      "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
 		}},
-	}, 3)
+	}, 3, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,6 +267,9 @@ func TestDiscovererReportsRegisteredProviderCapabilities(t *testing.T) {
 	discoverer := NewDiscoverer(nil)
 	if !discoverer.Supports(catalog.OpenAIOfficialCode) {
 		t.Fatal("OpenAI model catalog adapter should be reported as supported")
+	}
+	if !discoverer.Supports(catalog.GoogleOfficialCode) {
+		t.Fatal("Google model catalog adapter should be reported as supported")
 	}
 	if !discoverer.Supports(catalog.DeepSeekOfficialCode) {
 		t.Fatal("DeepSeek model catalog adapter should be reported as supported")
@@ -323,6 +393,25 @@ func TestDiscoverOpenAIRejectsInvalidCatalog(t *testing.T) {
 			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
 		})
 		models, result := discoverer.Discover(context.Background(), mgmt.ModelDiscoverySource{ProviderCode: catalog.OpenAIOfficialCode}, []byte("test-secret"), nil)
+		if result.Code != "UPSTREAM_INVALID_RESPONSE" || result.OK || models != nil {
+			t.Fatalf("invalid catalog accepted: %q %+v %+v", body, models, result)
+		}
+	}
+}
+
+func TestDiscoverGoogleRejectsInvalidCatalog(t *testing.T) {
+	for _, body := range []string{
+		`{"nextPageToken":"bad\n","models":[]}`,
+		`{"models":[{"name":"gemini-2.5-pro","supportedGenerationMethods":["generateContent"]}]}`,
+		`{"models":[{"name":"models/gemini-2.5-pro/bad","supportedGenerationMethods":["generateContent"]}]}`,
+		`{"models":[{"name":"models/bad model\n","supportedGenerationMethods":["generateContent"]}]}`,
+		`{}`,
+	} {
+		discoverer := NewDiscoverer(nil)
+		discoverer.client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+		})
+		models, result := discoverer.Discover(context.Background(), mgmt.ModelDiscoverySource{ProviderCode: catalog.GoogleOfficialCode}, []byte("test-secret"), nil)
 		if result.Code != "UPSTREAM_INVALID_RESPONSE" || result.OK || models != nil {
 			t.Fatalf("invalid catalog accepted: %q %+v %+v", body, models, result)
 		}

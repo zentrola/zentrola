@@ -26,6 +26,23 @@ func TestConnectionTestEndpointSelection(t *testing.T) {
 	}
 }
 
+func TestProviderDetailIgnoresMappingsForMissingModels(t *testing.T) {
+	state := &syncState{
+		provider: Provider{ID: 20, Code: catalog.GoogleOfficialCode, Name: "Google"},
+		models:   []Model{{ID: 30, Code: "gemini-2.5-flash", Name: "Gemini 2.5 Flash", Status: "ACTIVE"}},
+		mappings: []ProviderMapping{
+			{ID: 40, ProviderID: 20, ModelID: 29, UpstreamModelCode: "deleted-model"},
+			{ID: 41, ProviderID: 20, ModelID: 30, UpstreamModelCode: "gemini-2.5-flash"},
+		},
+	}
+	service := New(syncStore{state: state}, nil, nil, nil)
+
+	detail, err := service.Provider(context.Background(), admin.Identity{}, 20)
+	if err != nil || len(detail.Mappings) != 1 || detail.Mappings[0].ModelID != 30 || detail.ModelCount != 1 {
+		t.Fatalf("unexpected provider detail: detail=%+v err=%v", detail, err)
+	}
+}
+
 type syncIDs struct{ next int64 }
 
 func (g *syncIDs) NextID(context.Context) (int64, error) { g.next++; return g.next, nil }
