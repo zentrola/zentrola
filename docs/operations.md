@@ -85,12 +85,17 @@ LOG_LEVEL=info
 LOG_FILE_PATH=
 LOG_FILE_MAX_SIZE_MB=100
 LOG_FILE_MAX_BACKUPS=10
+LOG_FILE_RETENTION_DAYS=7
 ```
 
 - Console logs always use the automatically colored `pretty` format, including ANSI-capable IDE run consoles such as GoLand. Set the standard `NO_COLOR` environment variable to disable colors.
 - Containers and Kubernetes: let the container runtime or logging agent rotate and ship stdout.
 - A single host without a logging agent: set `LOG_FILE_PATH` to enable application-managed log rotation. Files use uncolored `pretty` format and write one record per line.
-- `LOG_FILE_PATH` is a log directory. For example, `./runtime/logs` writes `log-2026-09-17-1.log`; after the file reaches `LOG_FILE_MAX_SIZE_MB`, logging continues in `log-2026-09-17-2.log`. A new day starts at `-1.log` for that date. `LOG_FILE_MAX_BACKUPS` is the number of historical segments retained in addition to the active file.
+- `LOG_FILE_PATH` is the log root directory. Logs use UTC date directories; for example, `./runtime/logs` writes `./runtime/logs/2026-09-17/app-1.log` and `error-1.log`.
+- `app-*.log` contains the complete timeline at or above `LOG_LEVEL`; `error-*.log` is an additional copy of its `ERROR` and higher records. Each stream rotates independently at `LOG_FILE_MAX_SIZE_MB` and retains up to `LOG_FILE_MAX_BACKUPS` historical segments in addition to its active file.
+- `LOG_FILE_RETENTION_DAYS` defaults to `7`, retaining the latest seven UTC calendar dates including today. Set it to `0` to disable age-based cleanup. Cleanup runs at startup and UTC date rollover, alongside the segment-count limit.
+- Log cleanup is best effort: a missing directory needs no cleanup, and deletion failures are reported to stderr once without preventing service startup or subsequent log writes.
+- Existing `log-date-index.log` files from older versions are not migrated or deleted automatically.
 - With `--config`, a relative directory is resolved from the configuration file's directory; otherwise it is resolved from the process working directory.
 - Do not let multiple processes write the same log directory.
 - `APP_ENV=dev` and `APP_ENV=test` log complete request and response bodies without redaction or truncation. They can contain credentials, prompts, messages, and model output, so do not share those logs. `APP_ENV=prod` does not log request or response bodies.

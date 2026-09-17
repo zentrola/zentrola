@@ -157,9 +157,11 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 		}
 		master = loadedMaster
 	}
-	var logFile *logging.AsyncWriter
+	var logFile, errorLogFile *logging.AsyncWriter
 	if cfg.LogFilePath != "" {
-		opened, openErr := logging.OpenRotatingFile(cfg.LogFilePath, cfg.LogFileMaxSizeMB, cfg.LogFileMaxBackups)
+		opened, errorOpened, openErr := logging.OpenRotatingFiles(
+			cfg.LogFilePath, cfg.LogFileMaxSizeMB, cfg.LogFileMaxBackups, cfg.LogFileRetentionDays,
+		)
 		if openErr != nil {
 			if errors.Is(openErr, logging.ErrFileInUse) {
 				return errors.New("log directory is already in use by another process")
@@ -167,10 +169,11 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 			return errors.New("cannot open log directory")
 		}
 		logFile = logging.NewAsyncWriter(opened, os.Stderr, 4096)
+		errorLogFile = logging.NewAsyncWriter(errorOpened, os.Stderr, 1024)
 		defer func() {
 			flush, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			if err := logFile.Close(flush); err != nil {
+			if err := errors.Join(errorLogFile.Close(flush), logFile.Close(flush)); err != nil {
 				runErr = errors.Join(runErr, errors.New("cannot flush log file"))
 			}
 		}()
@@ -191,6 +194,7 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 		ConsoleFormat: "pretty",
 		Color:         consoleColor,
 		File:          logFile,
+		ErrorFile:     errorLogFile,
 		ErrorOutput:   os.Stderr,
 		Level:         cfg.LogLevel,
 		AddSource:     true,

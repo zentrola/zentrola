@@ -84,6 +84,29 @@ func TestFileUsesConsoleFormatWithoutANSIColor(t *testing.T) {
 	}
 }
 
+func TestErrorFileReceivesOnlyErrorsAsCopy(t *testing.T) {
+	var appFile bytes.Buffer
+	var errorFile bytes.Buffer
+	logger := NewWithOptions(Options{
+		ConsoleFormat: "pretty",
+		File:          &appFile,
+		ErrorFile:     &errorFile,
+		Level:         slog.LevelInfo,
+	})
+
+	logger.Info("service started")
+	logger.Error("service failed")
+
+	if !strings.Contains(appFile.String(), "service started") ||
+		!strings.Contains(appFile.String(), "service failed") {
+		t.Fatalf("app log does not contain the complete timeline: %q", appFile.String())
+	}
+	if strings.Contains(errorFile.String(), "service started") ||
+		!strings.Contains(errorFile.String(), "service failed") {
+		t.Fatalf("error log level filtering is wrong: %q", errorFile.String())
+	}
+}
+
 func TestPrettyCompactsHTTPAccessLog(t *testing.T) {
 	var output bytes.Buffer
 	logger := NewWithOptions(Options{Console: &output, ConsoleFormat: "pretty", Color: "never", Level: slog.LevelInfo})
@@ -245,9 +268,9 @@ func TestRotatingFileKeepsWholeRecordsAndBackups(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	assertFileContent(t, filepath.Join(directory, "log-2026-09-17-1.log"), "record-one\n")
-	assertFileContent(t, filepath.Join(directory, "log-2026-09-17-2.log"), "record-two\n")
-	assertFileContent(t, filepath.Join(directory, "log-2026-09-17-3.log"), "record-three\n")
+	assertFileContent(t, filepath.Join(directory, "2026-09-17", "app-1.log"), "record-one\n")
+	assertFileContent(t, filepath.Join(directory, "2026-09-17", "app-2.log"), "record-two\n")
+	assertFileContent(t, filepath.Join(directory, "2026-09-17", "app-3.log"), "record-three\n")
 }
 
 func TestRotatingFileRejectsConcurrentProcessesAndReleasesLock(t *testing.T) {
@@ -274,9 +297,34 @@ func TestRotatingFileRejectsConcurrentProcessesAndReleasesLock(t *testing.T) {
 	}
 }
 
-func TestRotatingFileStartsNewDateAtFirstSegment(t *testing.T) {
+func TestRotatingFilesShareLockUntilBothClose(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), "logs")
+	app, errorOnly, err := OpenRotatingFiles(directory, 1, 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenRotatingFile(directory, 1, 1); !errors.Is(err, ErrFileInUse) {
+		t.Fatalf("closing one output unexpectedly released the shared lock: %v", err)
+	}
+	if err := errorOnly.Close(); err != nil {
+		t.Fatal(err)
+	}
+	writer, err := OpenRotatingFile(directory, 1, 1)
+	if err != nil {
+		t.Fatalf("shared lock was not released: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRotatingFileStartsNewUTCDateAtFirstSegment(t *testing.T) {
 	directory := t.TempDir()
-	now := time.Date(2026, 9, 17, 23, 59, 0, 0, time.Local)
+	shanghai := time.FixedZone("Asia/Shanghai", 8*60*60)
+	now := time.Date(2026, 9, 18, 7, 59, 0, 0, shanghai)
 	writer := &RotatingFile{
 		directory: directory, maxBytes: 1024, maxBackups: 10,
 		now: func() time.Time { return now },
@@ -289,7 +337,7 @@ func TestRotatingFileStartsNewDateAtFirstSegment(t *testing.T) {
 	if _, err := writer.Write([]byte("before midnight\n")); err != nil {
 		t.Fatal(err)
 	}
-	now = time.Date(2026, 9, 18, 0, 1, 0, 0, time.Local)
+	now = time.Date(2026, 9, 18, 8, 1, 0, 0, shanghai)
 	if _, err := writer.Write([]byte("after midnight\n")); err != nil {
 		t.Fatal(err)
 	}
@@ -297,8 +345,8 @@ func TestRotatingFileStartsNewDateAtFirstSegment(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	assertFileContent(t, filepath.Join(directory, "log-2026-09-17-1.log"), "before midnight\n")
-	assertFileContent(t, filepath.Join(directory, "log-2026-09-18-1.log"), "after midnight\n")
+	assertFileContent(t, filepath.Join(directory, "2026-09-17", "app-1.log"), "before midnight\n")
+	assertFileContent(t, filepath.Join(directory, "2026-09-18", "app-1.log"), "after midnight\n")
 }
 
 func TestRotatingFileResumesLatestSegmentForCurrentDate(t *testing.T) {
@@ -327,7 +375,7 @@ func TestRotatingFileResumesLatestSegmentForCurrentDate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	assertFileContent(t, filepath.Join(directory, "log-2026-09-17-1.log"), "before restart\nafter restart\n")
+	assertFileContent(t, filepath.Join(directory, "2026-09-17", "app-1.log"), "before restart\nafter restart\n")
 }
 
 func TestRotatingFileRetainsConfiguredHistoryAndIgnoresOtherFiles(t *testing.T) {
@@ -350,12 +398,102 @@ func TestRotatingFileRetainsConfiguredHistoryAndIgnoresOtherFiles(t *testing.T) 
 			t.Fatal(err)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(directory, "log-2026-09-17-1.log")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(directory, "2026-09-17", "app-1.log")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("oldest log segment should be removed, got %v", err)
 	}
-	assertFileContent(t, filepath.Join(directory, "log-2026-09-17-2.log"), "two\n")
-	assertFileContent(t, filepath.Join(directory, "log-2026-09-17-3.log"), "three\n")
+	assertFileContent(t, filepath.Join(directory, "2026-09-17", "app-2.log"), "two\n")
+	assertFileContent(t, filepath.Join(directory, "2026-09-17", "app-3.log"), "three\n")
 	assertFileContent(t, otherPath, "keep")
+}
+
+func TestRotatingFileRetainsSevenUTCDates(t *testing.T) {
+	directory := t.TempDir()
+	for _, date := range []string{"2026-09-10", "2026-09-11"} {
+		dateDirectory := filepath.Join(directory, date)
+		if err := os.MkdirAll(dateDirectory, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dateDirectory, "app-1.log"), []byte(date), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writer := &RotatingFile{
+		directory: directory, maxBytes: 1024, maxBackups: 100, retentionDays: 7,
+		now: func() time.Time { return time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC) },
+	}
+	if err := writer.open(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = writer.Close() })
+
+	if _, err := os.Stat(filepath.Join(directory, "2026-09-10")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("log date older than seven UTC dates should be removed, got %v", err)
+	}
+	assertFileContent(t, filepath.Join(directory, "2026-09-11", "app-1.log"), "2026-09-11")
+}
+
+func TestRotatingFileCleanupFailureDoesNotFailOpenOrWrite(t *testing.T) {
+	directory := t.TempDir()
+	oldDirectory := filepath.Join(directory, "2026-09-01")
+	if err := os.MkdirAll(oldDirectory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	oldPath := filepath.Join(oldDirectory, "app-1.log")
+	if err := os.WriteFile(oldPath, []byte("old"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var failures bytes.Buffer
+	writer := &RotatingFile{
+		directory: directory, maxBytes: 1024, maxBackups: 100, retentionDays: 7,
+		now:     func() time.Time { return time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC) },
+		cleanup: &cleanupReporter{out: &failures},
+		remove:  func(string) error { return errors.New("cleanup denied") },
+	}
+	if err := writer.open(); err != nil {
+		t.Fatalf("cleanup failure prevented log opening: %v", err)
+	}
+	t.Cleanup(func() { _ = writer.Close() })
+	if _, err := writer.Write([]byte("still logging\n")); err != nil {
+		t.Fatalf("cleanup failure prevented log writing: %v", err)
+	}
+	assertFileContent(t, filepath.Join(directory, "2026-09-17", "app-1.log"), "still logging\n")
+	assertFileContent(t, oldPath, "old")
+	if strings.Count(failures.String(), "logging cleanup failed") != 1 {
+		t.Fatalf("cleanup failure should be reported once, got %q", failures.String())
+	}
+}
+
+func TestRotatingFileCleanupIgnoresMissingDirectory(t *testing.T) {
+	writer := &RotatingFile{
+		directory: filepath.Join(t.TempDir(), "missing"),
+		date:      "2026-09-17", maxBackups: 10, retentionDays: 7, remove: os.Remove,
+	}
+	if err := writer.removeExpiredFiles(""); err != nil {
+		t.Fatalf("missing log directory should not fail cleanup: %v", err)
+	}
+}
+
+func TestRotationGroupMovesAllOutputsToNewUTCDate(t *testing.T) {
+	directory := t.TempDir()
+	now := time.Date(2026, 9, 17, 23, 59, 0, 0, time.UTC)
+	clock := func() time.Time { return now }
+	app := &RotatingFile{directory: directory, name: appLogName, maxBytes: 1024, maxBackups: 10, now: clock}
+	errorOnly := &RotatingFile{directory: directory, name: errorLogName, maxBytes: 1024, maxBackups: 10, now: clock}
+	rotation := &rotationGroup{writers: []*RotatingFile{app, errorOnly}}
+	app.rotation, errorOnly.rotation = rotation, rotation
+	for _, writer := range []*RotatingFile{app, errorOnly} {
+		if err := writer.open(); err != nil {
+			t.Fatal(err)
+		}
+		defer writer.Close()
+	}
+
+	now = time.Date(2026, 9, 18, 0, 1, 0, 0, time.UTC)
+	if _, err := app.Write([]byte("new day\n")); err != nil {
+		t.Fatal(err)
+	}
+	assertFileContent(t, filepath.Join(directory, "2026-09-18", "app-1.log"), "new day\n")
+	assertFileContent(t, filepath.Join(directory, "2026-09-18", "error-1.log"), "")
 }
 
 func assertFileContent(t *testing.T, path, expected string) {

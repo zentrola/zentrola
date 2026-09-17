@@ -46,12 +46,13 @@ func New(out io.Writer, format string, level slog.Level) *slog.Logger {
 
 // Options 配置同一条日志记录的控制台和文件输出。
 // 文件复用 ConsoleFormat，但始终禁用 ANSI 颜色。
-// File 为 nil 时只输出到控制台。
+// ErrorFile 只接收 ERROR 及以上日志，并作为 File 中完整日志的附加副本。
 type Options struct {
 	Console       io.Writer
 	ConsoleFormat string
 	Color         string
 	File          io.Writer
+	ErrorFile     io.Writer
 	ErrorOutput   io.Writer
 	Level         slog.Level
 	AddSource     bool
@@ -64,11 +65,14 @@ func NewWithOptions(options Options) *slog.Logger {
 		handlers = append(handlers, newOutputHandler(options.Console, options.ConsoleFormat, options.Color, handlerOptions))
 	}
 	if writerConfigured(options.File) {
-		fileOutput := options.File
-		if options.ErrorOutput != nil {
-			fileOutput = &reportingWriter{out: options.File, errors: options.ErrorOutput}
-		}
+		fileOutput := reportingOutput(options.File, options.ErrorOutput)
 		handlers = append(handlers, newOutputHandler(fileOutput, options.ConsoleFormat, "never", handlerOptions))
+	}
+	if writerConfigured(options.ErrorFile) {
+		errorOptions := *handlerOptions
+		errorOptions.Level = slog.LevelError
+		errorOutput := reportingOutput(options.ErrorFile, options.ErrorOutput)
+		handlers = append(handlers, newOutputHandler(errorOutput, options.ConsoleFormat, "never", &errorOptions))
 	}
 	var handler slog.Handler
 	if len(handlers) == 1 {
@@ -77,6 +81,13 @@ func NewWithOptions(options Options) *slog.Logger {
 		handler = fanoutHandler(handlers)
 	}
 	return slog.New(contextHandler{Handler: handler})
+}
+
+func reportingOutput(out, errorOutput io.Writer) io.Writer {
+	if errorOutput == nil {
+		return out
+	}
+	return &reportingWriter{out: out, errors: errorOutput}
 }
 
 func newOutputHandler(out io.Writer, format, color string, options *slog.HandlerOptions) slog.Handler {

@@ -16,24 +16,25 @@ import (
 )
 
 type Config struct {
-	Environment       string
-	HTTPAddr          string
-	ReadHeaderTimeout time.Duration
-	IdleTimeout       time.Duration
-	ShutdownTimeout   time.Duration
-	StartupTimeout    time.Duration
-	HealthTimeout     time.Duration
-	LogLevel          slog.Level
-	LogFilePath       string
-	LogFileMaxSizeMB  int
-	LogFileMaxBackups int
-	Postgres          Postgres
-	Redis             Redis
-	AutoMigrate       bool
-	CORS              CORS
-	Security          Security
-	Gateway           Gateway
-	Usage             Usage
+	Environment          string
+	HTTPAddr             string
+	ReadHeaderTimeout    time.Duration
+	IdleTimeout          time.Duration
+	ShutdownTimeout      time.Duration
+	StartupTimeout       time.Duration
+	HealthTimeout        time.Duration
+	LogLevel             slog.Level
+	LogFilePath          string
+	LogFileMaxSizeMB     int
+	LogFileMaxBackups    int
+	LogFileRetentionDays int
+	Postgres             Postgres
+	Redis                Redis
+	AutoMigrate          bool
+	CORS                 CORS
+	Security             Security
+	Gateway              Gateway
+	Usage                Usage
 }
 
 type Usage struct {
@@ -239,17 +240,18 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 		return value
 	}
 	cfg := Config{
-		Environment:       get("APP_ENV", "dev"),
-		HTTPAddr:          get("HTTP_ADDR", ":9527"),
-		ReadHeaderTimeout: duration("HTTP_READ_HEADER_TIMEOUT", "5s"),
-		IdleTimeout:       duration("HTTP_IDLE_TIMEOUT", "120s"),
-		ShutdownTimeout:   duration("SHUTDOWN_TIMEOUT", "20s"),
-		StartupTimeout:    duration("STARTUP_TIMEOUT", "30s"),
-		HealthTimeout:     duration("HEALTH_CHECK_TIMEOUT", "2s"),
-		LogFilePath:       strings.TrimSpace(get("LOG_FILE_PATH", "")),
-		LogFileMaxSizeMB:  integer("LOG_FILE_MAX_SIZE_MB", "100", 10240),
-		LogFileMaxBackups: integer("LOG_FILE_MAX_BACKUPS", "10", 1000),
-		AutoMigrate:       boolean("MIGRATIONS_AUTO_APPLY", "true"),
+		Environment:          get("APP_ENV", "dev"),
+		HTTPAddr:             get("HTTP_ADDR", ":9527"),
+		ReadHeaderTimeout:    duration("HTTP_READ_HEADER_TIMEOUT", "5s"),
+		IdleTimeout:          duration("HTTP_IDLE_TIMEOUT", "120s"),
+		ShutdownTimeout:      duration("SHUTDOWN_TIMEOUT", "20s"),
+		StartupTimeout:       duration("STARTUP_TIMEOUT", "30s"),
+		HealthTimeout:        duration("HEALTH_CHECK_TIMEOUT", "2s"),
+		LogFilePath:          strings.TrimSpace(get("LOG_FILE_PATH", "")),
+		LogFileMaxSizeMB:     integer("LOG_FILE_MAX_SIZE_MB", "100", 10240),
+		LogFileMaxBackups:    integer("LOG_FILE_MAX_BACKUPS", "10", 1000),
+		LogFileRetentionDays: nonNegativeInteger("LOG_FILE_RETENTION_DAYS", "7", 3650),
+		AutoMigrate:          boolean("MIGRATIONS_AUTO_APPLY", "true"),
 		Postgres: Postgres{
 			Host:     get("POSTGRES_HOST", "127.0.0.1"),
 			Port:     integer("POSTGRES_PORT", "5432", 65535),
