@@ -33,7 +33,9 @@ const creating = ref(false),
   remark = ref(''),
   creationModels = ref<Model[]>([]),
   createModelIDs = ref<string[]>([]),
-  createModelsReady = ref(false)
+  createModelsReady = ref(false),
+  createModelQuery = ref(''),
+  createOnlySelected = ref(false)
 const selected = ref<Group | null>(null),
   editName = ref(''),
   editRemark = ref(''),
@@ -41,6 +43,8 @@ const selected = ref<Group | null>(null),
   grantedModels = ref<Model[]>([]),
   modelCandidates = ref<Model[]>([]),
   relationReady = ref(false),
+  editModelQuery = ref(''),
+  editOnlySelected = ref(false),
   statusTarget = ref<Group | null>(null),
   deleteTarget = ref<Group | null>(null)
 const { keyword, query, visible, search, reset } = useListSearch(
@@ -49,13 +53,49 @@ const { keyword, query, visible, search, reset } = useListSearch(
   load,
 )
 const grantedModelIDs = computed(() => new Set(grantedModels.value.map((model) => model.id)))
+const filteredCreationModels = computed(() =>
+  creationModels.value.filter(
+    (model) =>
+      matchesModel(model, createModelQuery.value) &&
+      (!createOnlySelected.value || createModelIDs.value.includes(model.id)),
+  ),
+)
+const filteredModelCandidates = computed(() =>
+  modelCandidates.value.filter(
+    (model) =>
+      matchesModel(model, editModelQuery.value) &&
+      (!editOnlySelected.value || editModelIDs.value.includes(model.id)),
+  ),
+)
+const createModelFilterActive = computed(
+  () => Boolean(createModelQuery.value.trim()) || createOnlySelected.value,
+)
+const editModelFilterActive = computed(
+  () => Boolean(editModelQuery.value.trim()) || editOnlySelected.value,
+)
 onMounted(() => load())
+function matchesModel(model: Model, keyword: string) {
+  const normalized = keyword.trim().toLocaleLowerCase()
+  if (!normalized) return true
+  return [model.name, model.code, model.publisherProviderName || ''].some((value) =>
+    value.toLocaleLowerCase().includes(normalized),
+  )
+}
+function resetCreateModelFilter() {
+  createModelQuery.value = ''
+  createOnlySelected.value = false
+}
+function resetEditModelFilter() {
+  editModelQuery.value = ''
+  editOnlySelected.value = false
+}
 function newGroup() {
   name.value = ''
   remark.value = ''
   creationModels.value = []
   createModelIDs.value = []
   createModelsReady.value = false
+  resetCreateModelFilter()
   actionError.value = ''
   creating.value = false
   void run(async () => {
@@ -114,6 +154,7 @@ function manage(group: Group) {
   editModelIDs.value = []
   grantedModels.value = []
   modelCandidates.value = []
+  resetEditModelFilter()
   actionError.value = ''
   void run(refreshModels)
 }
@@ -273,8 +314,45 @@ function deleteGroup() {
             aria-labelledby="create-models-title"
             aria-required="true"
           >
+            <div v-if="createModelsReady" class="group-model-toolbar">
+              <div class="model-search-box">
+                <Icon name="search" :size="16" />
+                <input
+                  id="create-model-search"
+                  v-model="createModelQuery"
+                  type="search"
+                  :aria-label="t('groups.modelSearch')"
+                  :placeholder="t('groups.modelSearchPlaceholder')"
+                  :disabled="busy"
+                />
+                <button
+                  v-if="createModelQuery"
+                  type="button"
+                  class="model-search-clear"
+                  :aria-label="t('groups.clearModelSearch')"
+                  :disabled="busy"
+                  @click="createModelQuery = ''"
+                >
+                  <Icon name="close" :size="14" />
+                </button>
+              </div>
+              <button
+                type="button"
+                class="model-selected-filter"
+                :class="{ active: createOnlySelected }"
+                :aria-pressed="createOnlySelected"
+                :disabled="busy"
+                @click="createOnlySelected = !createOnlySelected"
+              >
+                <span class="model-filter-indicator"><Icon name="check" :size="12" /></span>
+                {{ t('groups.onlySelected') }}
+              </button>
+            </div>
             <div v-if="createModelsReady" class="group-model-field-head">
-              <span>{{
+              <span v-if="createModelFilterActive">{{
+                t('groups.filteredModelCount', { count: filteredCreationModels.length })
+              }}</span>
+              <span class="model-selection-summary">{{
                 t('groups.selectionCount', {
                   count: createModelIDs.length,
                   total: creationModels.length,
@@ -283,7 +361,7 @@ function deleteGroup() {
             </div>
             <div class="create-models">
               <TableScroll
-                v-if="createModelsReady && creationModels.length"
+                v-if="createModelsReady && filteredCreationModels.length"
                 class="create-model-list"
               >
                 <table>
@@ -302,7 +380,7 @@ function deleteGroup() {
                     </tr>
                   </thead>
                   <tbody>
-                    <tr v-for="model in creationModels" :key="model.id">
+                    <tr v-for="model in filteredCreationModels" :key="model.id">
                       <td class="model-check-cell">
                         <input
                           v-model="createModelIDs"
@@ -343,8 +421,14 @@ function deleteGroup() {
               <p v-else-if="busy && !createModelsReady" class="empty-compact">
                 {{ t('common.loading') }}
               </p>
-              <p v-else-if="createModelsReady" class="empty-compact">
+              <p v-else-if="createModelsReady && !creationModels.length" class="empty-compact">
                 {{ t('groups.noModelCatalog') }}
+              </p>
+              <p v-else-if="createModelsReady" class="empty-compact model-filter-empty">
+                {{ t('groups.noMatchingModels') }}
+                <button type="button" class="text-button" @click="resetCreateModelFilter">
+                  {{ t('groups.clearModelFilters') }}
+                </button>
               </p>
             </div>
           </section>
@@ -405,8 +489,45 @@ function deleteGroup() {
             {{ t('groups.allowedModels') }}
           </div>
           <section class="group-form-control group-model-field" aria-labelledby="edit-models-title">
+            <div v-if="relationReady" class="group-model-toolbar">
+              <div class="model-search-box">
+                <Icon name="search" :size="16" />
+                <input
+                  id="edit-model-search"
+                  v-model="editModelQuery"
+                  type="search"
+                  :aria-label="t('groups.modelSearch')"
+                  :placeholder="t('groups.modelSearchPlaceholder')"
+                  :disabled="busy"
+                />
+                <button
+                  v-if="editModelQuery"
+                  type="button"
+                  class="model-search-clear"
+                  :aria-label="t('groups.clearModelSearch')"
+                  :disabled="busy"
+                  @click="editModelQuery = ''"
+                >
+                  <Icon name="close" :size="14" />
+                </button>
+              </div>
+              <button
+                type="button"
+                class="model-selected-filter"
+                :class="{ active: editOnlySelected }"
+                :aria-pressed="editOnlySelected"
+                :disabled="busy"
+                @click="editOnlySelected = !editOnlySelected"
+              >
+                <span class="model-filter-indicator"><Icon name="check" :size="12" /></span>
+                {{ t('groups.onlySelected') }}
+              </button>
+            </div>
             <div v-if="relationReady" class="group-model-field-head">
-              <span>{{
+              <span v-if="editModelFilterActive">{{
+                t('groups.filteredModelCount', { count: filteredModelCandidates.length })
+              }}</span>
+              <span class="model-selection-summary">{{
                 t('groups.selectionCount', {
                   count: editModelIDs.length,
                   total: modelCandidates.length,
@@ -414,7 +535,10 @@ function deleteGroup() {
               }}</span>
             </div>
             <div class="create-models">
-              <TableScroll v-if="relationReady && modelCandidates.length" class="create-model-list">
+              <TableScroll
+                v-if="relationReady && filteredModelCandidates.length"
+                class="create-model-list"
+              >
                 <table>
                   <colgroup>
                     <col class="model-check-column" />
@@ -431,7 +555,7 @@ function deleteGroup() {
                     </tr>
                   </thead>
                   <tbody>
-                    <tr v-for="model in modelCandidates" :key="model.id">
+                    <tr v-for="model in filteredModelCandidates" :key="model.id">
                       <td class="model-check-cell">
                         <input
                           v-model="editModelIDs"
@@ -477,8 +601,14 @@ function deleteGroup() {
               <p v-else-if="busy && !relationReady" class="empty-compact">
                 {{ t('common.loading') }}
               </p>
-              <p v-else-if="relationReady" class="empty-compact">
+              <p v-else-if="relationReady && !modelCandidates.length" class="empty-compact">
                 {{ t('groups.noModelCatalog') }}
+              </p>
+              <p v-else-if="relationReady" class="empty-compact model-filter-empty">
+                {{ t('groups.noMatchingModels') }}
+                <button type="button" class="text-button" @click="resetEditModelFilter">
+                  {{ t('groups.clearModelFilters') }}
+                </button>
               </p>
             </div>
           </section>
@@ -558,13 +688,101 @@ function deleteGroup() {
 .group-model-field-head {
   display: flex;
   align-items: baseline;
-  justify-content: flex-end;
+  gap: 12px;
   margin-bottom: 6px;
+  padding: 0 2px;
 }
 .group-model-field-head span {
   color: var(--muted);
   font-size: 12px;
   font-weight: 400;
+}
+.model-selection-summary {
+  margin-left: auto;
+}
+.group-model-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.model-search-box {
+  position: relative;
+  flex: 1 1 260px;
+  min-width: 0;
+  color: #92a0af;
+}
+.model-search-box > svg {
+  position: absolute;
+  top: 10px;
+  left: 11px;
+  pointer-events: none;
+}
+.model-search-box input[type='search'] {
+  min-height: 36px;
+  padding: 7px 36px 7px 35px;
+  font-size: 12px;
+  background: #f8fafc;
+}
+.model-search-box input[type='search']::-webkit-search-cancel-button {
+  display: none;
+}
+.model-search-clear {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  display: grid;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  place-items: center;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.model-search-clear:hover {
+  color: var(--color-text);
+  background: #e9eff6;
+}
+.model-selected-filter {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 7px 11px;
+  color: var(--color-text-secondary);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  font-size: 12px;
+  cursor: pointer;
+}
+.model-selected-filter:hover {
+  border-color: #b8c6d5;
+  background: #f8fafc;
+}
+.model-selected-filter.active {
+  color: var(--color-primary-hover);
+  background: var(--color-primary-soft);
+  border-color: #bfdbfe;
+}
+.model-filter-indicator {
+  display: grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  color: transparent;
+  background: var(--color-surface);
+  border: 1px solid #b8c6d5;
+  border-radius: 4px;
+}
+.model-selected-filter.active .model-filter-indicator {
+  color: #fff;
+  background: var(--color-primary);
+  border-color: var(--color-primary);
 }
 .create-models {
   border: 1px solid var(--line);
@@ -572,7 +790,7 @@ function deleteGroup() {
   overflow: hidden;
 }
 .create-model-list {
-  max-height: 224px;
+  max-height: min(38vh, 320px);
   overflow: auto;
 }
 .create-model-list table {
@@ -581,6 +799,9 @@ function deleteGroup() {
   min-width: 420px;
 }
 .create-model-list th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
   padding: 8px 10px;
 }
 .create-model-list td {
@@ -631,6 +852,9 @@ function deleteGroup() {
   cursor: not-allowed;
   opacity: 0.5;
 }
+.model-filter-empty .text-button {
+  margin-left: 6px;
+}
 .model-selection-count {
   margin: 0 0 12px;
   font-size: 12px;
@@ -645,6 +869,16 @@ function deleteGroup() {
   .group-model-label {
     padding-top: 0;
     text-align: left;
+  }
+  .group-model-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .model-search-box {
+    flex-basis: auto;
+  }
+  .model-selected-filter {
+    justify-content: center;
   }
 }
 </style>
