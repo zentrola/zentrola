@@ -19,9 +19,6 @@ func TestConfigValidation(t *testing.T) {
 		{"missing redis host", "REDIS_HOST", "", "REDIS_HOST"},
 		{"invalid port", "HTTP_ADDR", ":99999", "HTTP_ADDR"},
 		{"missing password", "POSTGRES_PASSWORD", "", "POSTGRES_PASSWORD"},
-		{"unknown log format", "LOG_FORMAT", "xml", "LOG_FORMAT"},
-		{"unknown console log format", "LOG_CONSOLE_FORMAT", "xml", "LOG_CONSOLE_FORMAT"},
-		{"unknown log color", "LOG_COLOR", "sometimes", "LOG_COLOR"},
 		{"invalid log file size", "LOG_FILE_MAX_SIZE_MB", "0", "LOG_FILE_MAX_SIZE_MB"},
 		{"invalid log file backups", "LOG_FILE_MAX_BACKUPS", "0", "LOG_FILE_MAX_BACKUPS"},
 		{"invalid boolean", "CORS_ENABLED", "maybe", "CORS_ENABLED"},
@@ -67,27 +64,11 @@ func TestSubscriptionRefreshDefaults(t *testing.T) {
 }
 
 func TestLogConfiguration(t *testing.T) {
-	t.Run("legacy format remains the console fallback", func(t *testing.T) {
-		cfg, err := parse(func(key string) (string, bool) {
-			values := map[string]string{"POSTGRES_PASSWORD": "test-only", "LOG_FORMAT": "json"}
-			value, ok := values[key]
-			return value, ok
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if cfg.LogConsoleFormat != "json" {
-			t.Fatalf("got console format %q, want json", cfg.LogConsoleFormat)
-		}
-	})
-
-	t.Run("independent console and file settings", func(t *testing.T) {
+	t.Run("file settings", func(t *testing.T) {
 		cfg, err := parse(func(key string) (string, bool) {
 			values := map[string]string{
 				"POSTGRES_PASSWORD":    "test-only",
-				"LOG_CONSOLE_FORMAT":   "pretty",
-				"LOG_COLOR":            "always",
-				"LOG_FILE_PATH":        " data/logs/zentrola.jsonl ",
+				"LOG_FILE_PATH":        " data/logs ",
 				"LOG_FILE_MAX_SIZE_MB": "25",
 				"LOG_FILE_MAX_BACKUPS": "7",
 			}
@@ -97,7 +78,7 @@ func TestLogConfiguration(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if cfg.LogConsoleFormat != "pretty" || cfg.LogColor != "always" || cfg.LogFilePath != "data/logs/zentrola.jsonl" ||
+		if cfg.LogFilePath != "data/logs" ||
 			cfg.LogFileMaxSizeMB != 25 || cfg.LogFileMaxBackups != 7 {
 			t.Fatalf("unexpected log configuration: %+v", cfg)
 		}
@@ -151,11 +132,10 @@ func TestLoadLayeredConfiguration(t *testing.T) {
 		system      map[string]string
 		environment string
 		addr        string
-		format      string
 		wantError   string
 	}{
 		{
-			name: "default dev without files", environment: "dev", addr: ":9527", format: "text",
+			name: "default dev without files", environment: "dev", addr: ":9527",
 		},
 		{
 			name:        "default dev loads overlay without common file",
@@ -166,20 +146,20 @@ func TestLoadLayeredConfiguration(t *testing.T) {
 			name: "common selects test and overlay adds and overrides",
 			files: map[string]string{
 				"":     "APP_ENV=test\nHTTP_ADDR=:8001\nLOG_LEVEL=debug\n",
-				"test": "HTTP_ADDR=:8002\nLOG_FORMAT=json\n",
+				"test": "HTTP_ADDR=:8002\n",
 				"dev":  "HTTP_ADDR=:8003\n", "prod": "invalid=\"unterminated\n",
 			},
-			environment: "test", addr: ":8002", format: "json",
+			environment: "test", addr: ":8002",
 		},
 		{
 			name: "system selects prod and wins over both files",
 			files: map[string]string{
 				"":     "APP_ENV=dev\nHTTP_ADDR=:8001\n",
-				"prod": "HTTP_ADDR=:8002\nLOG_FORMAT=json\n",
+				"prod": "HTTP_ADDR=:8002\n",
 				"dev":  "invalid=\"unterminated\n",
 			},
 			system:      map[string]string{"APP_ENV": "prod", "HTTP_ADDR": ":8003"},
-			environment: "prod", addr: ":8003", format: "json",
+			environment: "prod", addr: ":8003",
 		},
 		{
 			name:        "missing overlay inherits common",
@@ -275,9 +255,6 @@ func TestLoadLayeredConfiguration(t *testing.T) {
 			}
 			if cfg.Gateway.Development != (tt.environment == "dev") {
 				t.Fatalf("gateway development logging mismatch for %s", tt.environment)
-			}
-			if tt.format != "" && cfg.LogFormat != tt.format {
-				t.Fatalf("got log format %s, want %s", cfg.LogFormat, tt.format)
 			}
 			if cfg.Postgres.MaxConns != 10 {
 				t.Fatal("missing settings must retain code defaults")

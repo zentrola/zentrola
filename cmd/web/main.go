@@ -29,8 +29,6 @@ type webConfig struct {
 	APIBaseURL     string
 	APIOrigin      string
 	GatewayBaseURL string
-	LogFormat      string
-	LogColor       string
 }
 
 type webOptions struct {
@@ -117,20 +115,11 @@ func loadConfig(file string, options webOptions) (webConfig, error) {
 		gateway.User != nil || gateway.RawQuery != "" || gateway.Fragment != "" {
 		return webConfig{}, errors.New("WEB_GATEWAY_BASE_URL must be a valid HTTP(S) URL without credentials, query parameters, or a fragment")
 	}
-	logFormat, logColor := get("LOG_CONSOLE_FORMAT", "pretty"), get("LOG_COLOR", "auto")
-	if logFormat != "pretty" && logFormat != "text" && logFormat != "json" {
-		return webConfig{}, errors.New("LOG_CONSOLE_FORMAT must be text, pretty or json")
-	}
-	if logColor != "auto" && logColor != "always" && logColor != "never" && logColor != "true" && logColor != "false" {
-		return webConfig{}, errors.New("LOG_COLOR must be auto, always, never, true or false")
-	}
 	return webConfig{
 		Address:        address,
 		APIBaseURL:     rawBase,
 		APIOrigin:      parsed.Scheme + "://" + parsed.Host,
 		GatewayBaseURL: rawGateway,
-		LogFormat:      logFormat,
-		LogColor:       logColor,
 	}, nil
 }
 
@@ -201,7 +190,7 @@ func run(options webOptions) error {
 	if _, err := fs.Stat(os.DirFS("dist"), "index.html"); err != nil {
 		return errors.New("dist/index.html not found; check the release package and run from its directory")
 	}
-	logger := logging.NewWithOptions(logging.Options{Console: os.Stdout, ConsoleFormat: config.LogFormat, Color: config.LogColor, Level: slog.LevelInfo, AddSource: true})
+	logger := logging.NewWithOptions(logging.Options{Console: os.Stdout, ConsoleFormat: "pretty", Color: "auto", Level: slog.LevelInfo, AddSource: true})
 	slog.SetDefault(logger)
 	server := &http.Server{
 		Addr:              config.Address,

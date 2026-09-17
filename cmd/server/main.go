@@ -58,7 +58,7 @@ func main() {
 	if err := run(os.Args[1:], os.Stdout); err != nil {
 		// run 的错误只包含安全诊断，不输出原始数据库错误或配置对象。
 		slog.Error("zentrola stopped", "error", err.Error())
-		// 后台子进程会关闭控制台日志，并把常规日志写入 JSON 文件。
+		// 后台子进程会关闭控制台日志，并把常规日志写入配置的日志文件。
 		// run 返回时文件 writer 已经 flush/close，因此最终错误额外写到 stderr，
 		// 由进程管理器保存到 run/server.log，避免致命错误丢失。
 		if os.Getenv("ZENTROLA_BACKGROUND_CHILD") == "1" {
@@ -162,9 +162,9 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 		opened, openErr := logging.OpenRotatingFile(cfg.LogFilePath, cfg.LogFileMaxSizeMB, cfg.LogFileMaxBackups)
 		if openErr != nil {
 			if errors.Is(openErr, logging.ErrFileInUse) {
-				return errors.New("log file is already in use by another process")
+				return errors.New("log directory is already in use by another process")
 			}
-			return errors.New("cannot open log file")
+			return errors.New("cannot open log directory")
 		}
 		logFile = logging.NewAsyncWriter(opened, os.Stderr, 4096)
 		defer func() {
@@ -176,15 +176,20 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 		}()
 	}
 	var console io.Writer = os.Stdout
-	// 内置后台模式已经把 stdout/stderr 重定向到 run/server.log；启用应用 JSON 文件时
+	// 内置后台模式已经把 stdout/stderr 重定向到 run/server.log；启用应用日志文件时
 	// 关闭常规控制台副本，避免同一条日志写入两个文件。
 	if managed != nil && logFile != nil {
 		console = nil
 	}
+	consoleColor := "auto"
+	if managed != nil {
+		// 内置后台进程的 stdout 是日志文件，不能写入 ANSI 颜色码。
+		consoleColor = "never"
+	}
 	logger := logging.NewWithOptions(logging.Options{
 		Console:       console,
-		ConsoleFormat: cfg.LogConsoleFormat,
-		Color:         cfg.LogColor,
+		ConsoleFormat: "pretty",
+		Color:         consoleColor,
 		File:          logFile,
 		ErrorOutput:   os.Stderr,
 		Level:         cfg.LogLevel,

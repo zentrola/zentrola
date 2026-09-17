@@ -44,7 +44,8 @@ func New(out io.Writer, format string, level slog.Level) *slog.Logger {
 	return NewWithOptions(Options{Console: out, ConsoleFormat: format, Color: "never", Level: level})
 }
 
-// Options 配置同一条日志记录的控制台和 JSON 文件输出。
+// Options 配置同一条日志记录的控制台和文件输出。
+// 文件复用 ConsoleFormat，但始终禁用 ANSI 颜色。
 // File 为 nil 时只输出到控制台。
 type Options struct {
 	Console       io.Writer
@@ -60,21 +61,14 @@ func NewWithOptions(options Options) *slog.Logger {
 	handlerOptions := &slog.HandlerOptions{Level: options.Level, AddSource: options.AddSource}
 	var handlers []slog.Handler
 	if writerConfigured(options.Console) {
-		switch options.ConsoleFormat {
-		case "json":
-			handlers = append(handlers, slog.NewJSONHandler(options.Console, handlerOptions))
-		case "pretty":
-			handlers = append(handlers, newPrettyHandler(options.Console, options.Color, options.Level))
-		default:
-			handlers = append(handlers, slog.NewTextHandler(options.Console, handlerOptions))
-		}
+		handlers = append(handlers, newOutputHandler(options.Console, options.ConsoleFormat, options.Color, handlerOptions))
 	}
 	if writerConfigured(options.File) {
 		fileOutput := options.File
 		if options.ErrorOutput != nil {
 			fileOutput = &reportingWriter{out: options.File, errors: options.ErrorOutput}
 		}
-		handlers = append(handlers, slog.NewJSONHandler(fileOutput, handlerOptions))
+		handlers = append(handlers, newOutputHandler(fileOutput, options.ConsoleFormat, "never", handlerOptions))
 	}
 	var handler slog.Handler
 	if len(handlers) == 1 {
@@ -83,6 +77,17 @@ func NewWithOptions(options Options) *slog.Logger {
 		handler = fanoutHandler(handlers)
 	}
 	return slog.New(contextHandler{Handler: handler})
+}
+
+func newOutputHandler(out io.Writer, format, color string, options *slog.HandlerOptions) slog.Handler {
+	switch format {
+	case "json":
+		return slog.NewJSONHandler(out, options)
+	case "pretty":
+		return newPrettyHandler(out, color, options.Level)
+	default:
+		return slog.NewTextHandler(out, options)
+	}
 }
 
 // io.Writer 可能包含一个 typed nil 指针，此时接口值本身并不等于 nil。
@@ -249,7 +254,7 @@ var compactAccessKeys = map[string]struct{}{
 	"upstream_request_id": {},
 }
 
-// compactPrettyRecord 为访问日志提供固定的人类可读布局；JSON Handler 仍保留完整字段名。
+// compactPrettyRecord 为 pretty 格式的访问日志提供固定的人类可读布局。
 func compactPrettyRecord(message string, attributes []slog.Attr) (string, []slog.Attr) {
 	if message != "http request" {
 		return singleLine(message), attributes
@@ -434,7 +439,7 @@ func singleLine(value string) string {
 	return escaped.String()
 }
 
-func useColor(out io.Writer, mode string) bool {
+func useColor(_ io.Writer, mode string) bool {
 	switch mode {
 	case "always", "true":
 		return true
@@ -444,12 +449,9 @@ func useColor(out io.Writer, mode string) bool {
 	if os.Getenv("NO_COLOR") != "" || strings.EqualFold(os.Getenv("TERM"), "dumb") {
 		return false
 	}
-	file, ok := out.(*os.File)
-	if !ok {
-		return false
-	}
-	info, err := file.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
+	// GoLand 等 IDE 的 Run Console 支持 ANSI，但 stdout 通常是管道而不是 TTY。
+	// 输出目标由调用方区分：控制台使用 auto，日志文件显式使用 never。
+	return true
 }
 
 func paint(enabled bool, code, value string) string {

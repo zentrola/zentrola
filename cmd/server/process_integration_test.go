@@ -70,7 +70,7 @@ func TestProcessLifecycleIntegration(t *testing.T) {
 	for key, value := range map[string]string{
 		"APP_ENV": "dev", "POSTGRES_HOST": cfg.Postgres.Host, "POSTGRES_PORT": strconv.Itoa(cfg.Postgres.Port), "POSTGRES_DB": cfg.Postgres.Database,
 		"POSTGRES_USER": cfg.Postgres.User, "POSTGRES_PASSWORD": cfg.Postgres.Password, "POSTGRES_SSLMODE": cfg.Postgres.SSLMode, "POSTGRES_MAX_CONNS": "3",
-		"PGOPTIONS": "-c search_path=" + schema, "MIGRATIONS_AUTO_APPLY": "true", "LOG_FORMAT": "json", "HTTP_ADDR": "127.0.0.1:8080",
+		"PGOPTIONS": "-c search_path=" + schema, "MIGRATIONS_AUTO_APPLY": "true", "HTTP_ADDR": "127.0.0.1:8080",
 		"STARTUP_TIMEOUT": "15s", "SHUTDOWN_TIMEOUT": "5s", "USAGE_SHUTDOWN_TIMEOUT": "5s", "ZENTROLA_BACKGROUND_CHILD": "",
 		"ADMIN_JWT_SECRET": randomTestSecret(),
 	} {

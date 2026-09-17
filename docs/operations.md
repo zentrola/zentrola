@@ -82,16 +82,17 @@ Important settings:
 
 ```dotenv
 LOG_LEVEL=info
-LOG_CONSOLE_FORMAT=json
-LOG_COLOR=never
 LOG_FILE_PATH=
 LOG_FILE_MAX_SIZE_MB=100
 LOG_FILE_MAX_BACKUPS=10
 ```
 
-- Containers and Kubernetes: write JSON to stdout and let the runtime or logging agent rotate and ship it.
-- A single host without a logging agent: set `LOG_FILE_PATH` to enable JSON Lines with application-managed rotation.
-- Do not let multiple processes write the same log file.
+- Console logs always use the automatically colored `pretty` format, including ANSI-capable IDE run consoles such as GoLand. Set the standard `NO_COLOR` environment variable to disable colors.
+- Containers and Kubernetes: let the container runtime or logging agent rotate and ship stdout.
+- A single host without a logging agent: set `LOG_FILE_PATH` to enable application-managed log rotation. Files use uncolored `pretty` format and write one record per line.
+- `LOG_FILE_PATH` is a log directory. For example, `./runtime/logs` writes `log-2026-09-17-1.log`; after the file reaches `LOG_FILE_MAX_SIZE_MB`, logging continues in `log-2026-09-17-2.log`. A new day starts at `-1.log` for that date. `LOG_FILE_MAX_BACKUPS` is the number of historical segments retained in addition to the active file.
+- With `--config`, a relative directory is resolved from the configuration file's directory; otherwise it is resolved from the process working directory.
+- Do not let multiple processes write the same log directory.
 - `APP_ENV=dev` and `APP_ENV=test` log complete request and response bodies without redaction or truncation. They can contain credentials, prompts, messages, and model output, so do not share those logs. `APP_ENV=prod` does not log request or response bodies.
 
 Sensitive authentication headers are excluded from access-log summaries. Response `X-Trace-ID` and `X-Span-ID` values can be used to correlate requests.
