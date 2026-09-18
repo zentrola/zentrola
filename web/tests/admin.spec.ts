@@ -299,7 +299,7 @@ async function fixture(page: Page) {
             principalName: '林知远',
             modelId: '71',
             resourceId: '88',
-            clientProtocol: 'OPENAI',
+            clientProtocol: 'OPENAI_RESPONSES',
             requestAt: stamp,
             completedAt: stamp,
             status: 'FAILED',
@@ -3545,6 +3545,13 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
   expect(state.usageQueries.at(-1)?.get('providerId')).toBe('81')
   expect(state.usageQueries.at(-1)?.get('resourceId')).toBeNull()
   const usageRow = page.getByRole('row').filter({ hasText: 'OpenAI' })
+  const protocolBadge = usageRow.locator('.protocol-label')
+  await expect(protocolBadge).toHaveText('OpenAI Responses')
+  const protocolBox = await protocolBadge.boundingBox()
+  const statusBox = await usageRow.locator('.status').boundingBox()
+  expect(protocolBox).not.toBeNull()
+  expect(statusBox).not.toBeNull()
+  expect(protocolBox!.x + protocolBox!.width).toBeLessThanOrEqual(statusBox!.x)
   await expect(usageRow.locator('td').nth(5)).toHaveText('0')
   await expect(usageRow.locator('td').nth(6)).toHaveText('-')
   await expect(usageRow.locator('td').nth(7)).toHaveText('0')

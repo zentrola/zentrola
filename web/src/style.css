@@ -1655,6 +1655,12 @@ tbody tr:hover {
   font-weight: 650;
 }
 .protocol-label {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  white-space: nowrap;
   font-size: 10px;
   color: #587895;
   border: 1px solid #dde7f0;
@@ -1677,7 +1683,7 @@ tbody tr:hover {
   table-layout: fixed;
 }
 .usage-table {
-  min-width: 1030px;
+  min-width: 1070px;
   table-layout: fixed;
 }
 .usage-rank-column {
@@ -1699,7 +1705,7 @@ tbody tr:hover {
   width: 190px;
 }
 .usage-protocol-column {
-  width: 92px;
+  width: 132px;
 }
 .usage-status-column {
   width: 102px;
