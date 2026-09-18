@@ -60,6 +60,17 @@ function errorDescription(errorType: string | null) {
     ? t('usage.upstreamHTTPError', { status: upstreamHTTPStatus })
     : t('errors.UNKNOWN')
 }
+function protocolLabel(protocol: string) {
+  const labels: Record<string, string> = {
+    OPENAI: 'OpenAI',
+    OPENAI_CHAT: 'OpenAI Chat',
+    OPENAI_RESPONSES: 'OpenAI Responses',
+    OPENAI_IMAGES: 'OpenAI Images',
+    ANTHROPIC: 'Anthropic',
+    ANTHROPIC_MESSAGES: 'Anthropic',
+  }
+  return labels[protocol] || protocol
+}
 const {
   items: recordItems,
   cursor: recordCursor,
@@ -737,13 +748,9 @@ onBeforeUnmount(() => {
                 }}<small class="subline">{{ label(resources, row.resourceId) }}</small>
               </td>
               <td>
-                <span class="protocol-label">{{
-                  row.clientProtocol === 'OPENAI'
-                    ? 'OpenAI'
-                    : row.clientProtocol === 'ANTHROPIC'
-                      ? 'Anthropic'
-                      : row.clientProtocol
-                }}</span>
+                <span class="protocol-label" :title="protocolLabel(row.clientProtocol)">
+                  {{ protocolLabel(row.clientProtocol) }}
+                </span>
               </td>
               <td><Status :value="row.status" /></td>
               <td class="numeric">{{ count(row.inputTokens) }}</td>
