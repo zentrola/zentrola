@@ -47,7 +47,6 @@ const keyName = ref(''),
 const { keyword, query, visible, search, reset } = useListSearch(
   items,
   (m) => `${m.name} ${m.id} ${m.remark || ''}`,
-  load,
 )
 const originalGroupIDSet = computed(() => new Set(originalGroupIDs.value))
 onMounted(() => load())
@@ -239,7 +238,7 @@ async function copyKey() {
                       :title="t('members.viewKeys')"
                       @click="viewingKeys = member"
                     >
-                      <Icon name="eye" :size="16" />
+                      <Icon name="shield" :size="16" />
                     </button>
                   </div>
                 </div>

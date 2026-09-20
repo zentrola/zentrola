@@ -944,9 +944,11 @@ test('首页展示本月指标、应用接入、配置脚本和分项排行榜',
   const dashboardURL = new URL((await dashboardRequest).url())
   const expectedRange = await page.evaluate(() => {
     const now = new Date()
+    const year = now.getUTCFullYear()
+    const month = now.getUTCMonth()
     return {
-      from: new Date(now.getFullYear(), now.getMonth(), 1).toISOString(),
-      to: new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString(),
+      from: new Date(Date.UTC(year, month, 1)).toISOString(),
+      to: new Date(Date.UTC(year, month + 1, 1)).toISOString(),
     }
   })
   expect(dashboardURL.searchParams.get('from')).toBe(expectedRange.from)
@@ -956,7 +958,11 @@ test('首页展示本月指标、应用接入、配置脚本和分项排行榜',
   await expect(page.locator('.token-total dd')).toHaveAttribute('title', '12,840')
   await expect(page.getByRole('heading', { name: '本月概览', exact: true })).toBeVisible()
   const expectedMonthLabel = await page.evaluate(() =>
-    new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long' }).format(new Date()),
+    new Intl.DateTimeFormat('zh-CN', {
+      year: 'numeric',
+      month: 'long',
+      timeZone: 'UTC',
+    }).format(new Date()),
   )
   await expect(page.locator('.dashboard-section-head > .dashboard-period')).toHaveText(
     expectedMonthLabel,
@@ -1394,10 +1400,7 @@ test('成员列表按需查看 Key 并处理删除和失败恢复', async ({ pag
     'vk-work1234********1234',
   ])
   const maskedKey = modal(page).getByRole('row').filter({ hasText: '工作站' })
-  await maskedKey.getByRole('button', { name: '复制', exact: true }).click()
-  await expect
-    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
-    .toBe('vk-work1234********1234')
+  await expect(maskedKey.getByRole('button', { name: '复制', exact: true })).toHaveCount(0)
   await expect(modal(page)).toContainText('长期有效')
   await expect(modal(page)).toContainText('2020年1月1日')
   await expect(modal(page).locator('tbody tr').first().locator('td').nth(2)).toHaveText(
@@ -1429,6 +1432,7 @@ test('成员列表按需查看 Key 并处理删除和失败恢复', async ({ pag
   await expect(page.locator('.toast-success')).toContainText('Key 已撤销')
   await expect(historyDialog.locator('.notice')).toHaveCount(0)
   await expect(historyRevoke).toHaveCount(0)
+  await expect(maskedKey).not.toContainText('长期有效')
   expect(state.keys[0].status).toBe('REVOKED')
   expect(state.keys[1].status).toBe('ACTIVE')
   await mkdir('../.cache/web-visual', { recursive: true })
@@ -1705,8 +1709,10 @@ test('模型新增编辑、模态校验、冲突恢复和窄屏表单', async ({
   const modelSearch = page.getByRole('searchbox', { name: '模型名称' })
   await expect(modelSearch).toHaveAttribute('placeholder', '请输入模型名称')
   await expect(page.locator('.list-search-label')).toHaveText('模型名称')
+  const modelQueryCount = state.modelQueries.length
   await modelSearch.fill('图文理解用途')
   await page.getByRole('button', { name: '搜索', exact: true }).click()
+  expect(state.modelQueries).toHaveLength(modelQueryCount)
   await expect(page.getByRole('row').filter({ hasText: 'official-test-v2' })).toHaveCount(1)
   await page.screenshot({ path: '../.cache/web-visual/model-catalog-desktop.png' })
   const updatedRow = page.getByRole('row').filter({ hasText: 'official-test-v2' })
@@ -1925,10 +1931,7 @@ test('服务商启用开关分别提示缺少模型映射和认证凭据', async
       .filter({ hasText: name })
       .getByRole('switch', { name: `${name}的启用状态` })
   await expect(switchFor('模型凭据均未配置')).toBeDisabled()
-  await expect(switchFor('模型凭据均未配置')).toHaveAttribute(
-    'title',
-    '请先配置模型和凭证。',
-  )
+  await expect(switchFor('模型凭据均未配置')).toHaveAttribute('title', '请先配置模型和凭证。')
   await expect(switchFor('仅配置凭据')).toBeDisabled()
   await expect(switchFor('仅配置凭据')).toHaveAttribute('title', '请先配置模型。')
   await expect(switchFor('仅配置模型')).toBeDisabled()
@@ -3659,6 +3662,13 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
       )
     })
     .toBe(7 * 86400000)
+  const initialUsageQuery = state.usageQueries.at(-1)
+  const defaultStartValue = defaultStart.replaceAll('/', '-')
+  const defaultEndValue = defaultEnd.replaceAll('/', '-')
+  expect(initialUsageQuery?.get('from')).toBe(`${defaultStartValue}T00:00:00.000Z`)
+  expect(initialUsageQuery?.get('to')).toBe(
+    new Date(Date.parse(`${defaultEndValue}T00:00:00Z`) + 86400000).toISOString(),
+  )
   await dateRangeButton.click()
   const dateRangeDialog = page.getByRole('dialog', { name: '选择起止日期' })
   await expect(dateRangeDialog.locator('.calendar-panel')).toHaveCount(2)
@@ -3734,7 +3744,8 @@ test('会话失效清理页面、移动端导航与刷新不恢复失效 JWT', a
   })
   state.expire()
   await expect(page.getByRole('button', { name: '刷新', exact: true })).toHaveCount(0)
-  await page.getByRole('button', { name: '搜索', exact: true }).click()
+  await page.getByRole('button', { name: '打开导航' }).click()
+  await page.getByRole('link', { name: '操作日志', exact: true }).click()
   await expect(page.getByRole('heading', { name: '欢迎回来' })).toBeVisible()
   await expect(page.getByRole('alert')).toContainText('登录已失效')
   await page.reload()

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { api } from '../api'
 import type { AccessKey, Member } from '../types'
 import { useCollection, useAction, dateOnly } from '../composables'
@@ -19,20 +19,36 @@ const { items, cursor, page, pageSize, total, loading, error, load, previous, re
 const { busy, error: actionError, run } = useAction()
 const revokeTarget = ref<AccessKey | null>(null),
   now = ref(Date.now())
-let timer: ReturnType<typeof setInterval> | undefined
+let timer: ReturnType<typeof setTimeout> | undefined
+function scheduleExpiryUpdate() {
+  clearTimeout(timer)
+  now.value = Date.now()
+  const nextExpiry = items.value.reduce((nearest, key) => {
+    if (key.status !== 'ACTIVE' || key.revokedAt || !key.expiresAt) return nearest
+    const expiresAt = Date.parse(key.expiresAt)
+    return expiresAt > now.value && expiresAt < nearest ? expiresAt : nearest
+  }, Number.POSITIVE_INFINITY)
+  if (!Number.isFinite(nextExpiry)) {
+    timer = undefined
+    return
+  }
+  timer = setTimeout(scheduleExpiryUpdate, Math.min(nextExpiry - now.value + 1, 2147483647))
+}
 onMounted(() => {
   void load()
-  timer = setInterval(() => {
-    now.value = Date.now()
-  }, 1000)
 })
-onUnmounted(() => clearInterval(timer))
+watch(items, scheduleExpiryUpdate, { deep: true })
+onUnmounted(() => clearTimeout(timer))
 function canRevoke(key: AccessKey) {
   return (
     key.status === 'ACTIVE' &&
     !key.revokedAt &&
     (!key.expiresAt || Date.parse(key.expiresAt) > now.value)
   )
+}
+function expiryDate(key: AccessKey) {
+  const expiredAt = key.revokedAt ?? key.expiresAt
+  return expiredAt ? dateOnly(expiredAt) : t('members.noExpiry')
 }
 function openRevoke(key: AccessKey) {
   now.value = Date.now()
@@ -88,9 +104,9 @@ function revoke() {
           <tr v-for="key in items" :key="key.id">
             <td class="key-display-name">{{ key.name }}</td>
             <td>
-              <TechnicalValue :value="key.maskedKey" />
+              <TechnicalValue :value="key.maskedKey" :copyable="false" />
             </td>
-            <td>{{ key.expiresAt ? dateOnly(key.expiresAt) : t('members.noExpiry') }}</td>
+            <td>{{ expiryDate(key) }}</td>
             <td class="align-right">
               <button
                 v-if="canRevoke(key)"

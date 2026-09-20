@@ -50,7 +50,6 @@ const selected = ref<Group | null>(null),
 const { keyword, query, visible, search, reset } = useListSearch(
   items,
   (g) => `${g.name} ${g.id} ${g.remark || ''}`,
-  load,
 )
 const grantedModelIDs = computed(() => new Set(grantedModels.value.map((model) => model.id)))
 const filteredCreationModels = computed(() =>

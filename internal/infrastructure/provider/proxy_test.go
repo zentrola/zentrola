@@ -64,6 +64,19 @@ func TestProxyTransportRejectsPrivateProviderTarget(t *testing.T) {
 	}
 }
 
+func TestNonPublicLiteralError(t *testing.T) {
+	for _, host := range []string{"127.0.0.1", "10.0.0.1", "192.168.1.5", "169.254.169.254", "::1"} {
+		if err := nonPublicLiteralError(host); err == nil {
+			t.Fatalf("non-public literal accepted: %s", host)
+		}
+	}
+	for _, host := range []string{"8.8.8.8", "1.1.1.1", "chatgpt.com", "api.deepseek.com"} {
+		if err := nonPublicLiteralError(host); err != nil {
+			t.Fatalf("public literal or domain rejected: %s, err=%v", host, err)
+		}
+	}
+}
+
 func TestEnvironmentWithProxyOverridesInheritedProxyVariables(t *testing.T) {
 	ConfigureLogEnvironment("prod")
 	t.Cleanup(func() { ConfigureLogEnvironment("prod") })
