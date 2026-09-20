@@ -30,7 +30,8 @@ const memberID = ref(''),
   from = ref(''),
   to = ref(''),
   query = ref(''),
-  lookupError = ref('')
+  lookupError = ref(''),
+  lookupsReady = ref(false)
 const models = ref<Model[]>([]),
   providers = ref<Provider[]>([]),
   resources = ref<Resource[]>([]),
@@ -49,7 +50,8 @@ const memberAutocomplete = ref<HTMLElement | null>(null),
   hoveredDate = ref(''),
   datePickerValidation = ref('')
 let memberSearchTimer: ReturnType<typeof setTimeout> | undefined,
-  memberSearchRevision = 0
+  memberSearchRevision = 0,
+  lookupPromise: Promise<void> | null = null
 
 function errorDescription(errorType: string | null) {
   if (!errorType) return t('common.none')
@@ -111,39 +113,39 @@ const weekdays = computed(() =>
 function resetTimes() {
   const now = new Date()
   const weekStart = new Date(now)
-  weekStart.setDate(weekStart.getDate() - 6)
+  weekStart.setUTCDate(weekStart.getUTCDate() - 6)
   to.value = dateValue(now)
   from.value = dateValue(weekStart)
 }
 function dateValue(value: Date) {
-  const offset = value.getTimezoneOffset() * 60000
-  return new Date(value.getTime() - offset).toISOString().slice(0, 10)
+  return value.toISOString().slice(0, 10)
 }
 function dateFromValue(value: string) {
   const [year, month, day] = value.split('-').map(Number)
-  return new Date(year, month - 1, day)
+  return new Date(Date.UTC(year, month - 1, day))
 }
 function startOfMonth(value: Date) {
-  return new Date(value.getFullYear(), value.getMonth(), 1)
+  return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), 1))
 }
 function addMonths(value: Date, amount: number) {
-  return new Date(value.getFullYear(), value.getMonth() + amount, 1)
+  return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth() + amount, 1))
 }
 function monthTitle(value: Date) {
-  return t('usage.monthTitle', { year: value.getFullYear(), month: value.getMonth() + 1 })
+  return t('usage.monthTitle', { year: value.getUTCFullYear(), month: value.getUTCMonth() + 1 })
 }
 function calendarDays(month: Date) {
   const first = startOfMonth(month),
     start = new Date(first)
-  start.setDate(start.getDate() - start.getDay())
+  start.setUTCDate(start.getUTCDate() - start.getUTCDay())
   return Array.from({ length: 42 }, (_, index) => {
     const value = new Date(start)
-    value.setDate(start.getDate() + index)
+    value.setUTCDate(start.getUTCDate() + index)
     return {
       value: dateValue(value),
-      day: value.getDate(),
+      day: value.getUTCDate(),
       currentMonth:
-        value.getMonth() === month.getMonth() && value.getFullYear() === month.getFullYear(),
+        value.getUTCMonth() === month.getUTCMonth() &&
+        value.getUTCFullYear() === month.getUTCFullYear(),
     }
   })
 }
@@ -165,9 +167,9 @@ function calendarDayClass(value: string, currentMonth: boolean) {
   }
 }
 function dateBounds(startValue: string, endValue: string) {
-  const start = Date.parse(`${startValue}T00:00:00`),
-    endDate = new Date(`${endValue}T00:00:00`)
-  endDate.setDate(endDate.getDate() + 1)
+  const start = Date.parse(`${startValue}T00:00:00Z`),
+    endDate = new Date(`${endValue}T00:00:00Z`)
+  endDate.setUTCDate(endDate.getUTCDate() + 1)
   const end = endDate.getTime()
   if (
     !Number.isFinite(start) ||
@@ -247,6 +249,7 @@ function reset() {
 function selectView(view: UsageView) {
   if (loading.value || activeView.value === view) return
   activeView.value = view
+  if (view === 'records') void ensureLookups()
   search()
 }
 function selectStatisticDimension(dimension: StatisticDimension) {
@@ -265,6 +268,7 @@ function viewStatisticRecords(item: UsageStatistic) {
   } else if (statisticDimension.value === 'model') modelID.value = item.entityId
   else providerID.value = item.entityId
   activeView.value = 'records'
+  void ensureLookups()
   searchRecords()
 }
 function percentage(value: number, totalValue: number) {
@@ -373,9 +377,15 @@ async function lookups() {
       all<Provider>('/providers'),
       all<Resource>('/resources'),
     ])
+    lookupsReady.value = true
   } catch (e) {
     lookupError.value = errorText(e)
   }
+}
+function ensureLookups() {
+  if (lookupsReady.value) return Promise.resolve()
+  if (!lookupPromise) lookupPromise = lookups().finally(() => (lookupPromise = null))
+  return lookupPromise
 }
 function label(list: { id: string; name: string }[], id: string | null) {
   return id === null ? t('common.none') : list.find((x) => x.id === id)?.name || id
@@ -401,8 +411,8 @@ function applyRoute() {
 }
 onMounted(() => {
   document.addEventListener('pointerdown', closeFloatingPanels)
-  void lookups()
   applyRoute()
+  if (activeView.value === 'records') void ensureLookups()
   search()
 })
 onBeforeUnmount(() => {
@@ -595,7 +605,8 @@ onBeforeUnmount(() => {
       </div>
     </form>
     <p v-if="lookupError" class="alert error" role="alert">
-      {{ lookupError }}<button class="text-button" @click="lookups">{{ t('common.retry') }}</button>
+      {{ lookupError
+      }}<button class="text-button" @click="ensureLookups">{{ t('common.retry') }}</button>
     </p>
     <p v-if="activeView === 'statistics' && statisticsError" class="alert error" role="alert">
       {{ statisticsError

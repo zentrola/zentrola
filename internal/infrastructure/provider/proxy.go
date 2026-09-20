@@ -34,13 +34,24 @@ func (t *publicTargetTransport) RoundTrip(request *http.Request) (*http.Response
 	if request.URL == nil || request.URL.Hostname() == "" {
 		return nil, errors.New("invalid provider endpoint")
 	}
-	if _, err := resolvePublicAddresses(request.Context(), net.DefaultResolver, request.URL.Hostname()); err != nil {
+	// 走代理时本地只连接代理，目标域名的解析发生在代理端；本机 DNS 在
+	// fake-ip 代理环境下不可信，因此仅拦截字面量内网地址，不做域名解析校验。
+	if err := nonPublicLiteralError(request.URL.Hostname()); err != nil {
 		return nil, err
 	}
 	return t.transport.RoundTrip(request)
 }
 
 func (t *publicTargetTransport) CloseIdleConnections() { t.transport.CloseIdleConnections() }
+
+// nonPublicLiteralError 仅拒绝字面量内网地址。域名不做本地解析校验，
+// 因为代理场景下目标由代理端解析，本机 DNS（如 fake-ip）不可信。
+func nonPublicLiteralError(host string) error {
+	if ip := net.ParseIP(host); ip != nil && !publicIP(ip) {
+		return errors.New("provider endpoint is a non-public address")
+	}
+	return nil
+}
 
 func init() {
 	// 未显式配置运行环境时采用生产环境策略，避免测试工具或独立调用意外输出凭据。
@@ -138,8 +149,8 @@ func ClientWithProxy(ctx context.Context, base *http.Client, proxy *catalog.Outb
 	}
 	transport := baseTransport.Clone()
 	transport.Proxy = http.ProxyURL(proxyURL)
-	// 代理地址是管理员显式配置的网络出口，允许使用内网代理；实际 Provider
-	// 目标仍由 publicTargetTransport 在每次请求前完成公网 DNS 校验。
+	// 代理地址是管理员显式配置的网络出口，允许使用内网代理；字面量内网
+	// 目标仍由 publicTargetTransport 拦截，域名目标交由代理端解析。
 	transport.DialContext = (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext
 	transport.ProxyConnectHeader = make(http.Header, len(proxy.Headers))
 	for key, value := range proxy.Headers {

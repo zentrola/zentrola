@@ -43,6 +43,7 @@ test('刷新及关闭后重新打开恢复身份和路由，不重新登录或�
   const saved = await stored(page)
   expect(JSON.parse(saved!)).toEqual({ token: 'session-test-token', expiresAt: state.expiresAt })
   await page.getByRole('link', { name: '模型', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '模型', exact: true })).toBeVisible()
   await page.reload()
   await expect(page.getByRole('heading', { name: '模型', exact: true })).toBeVisible()
   expect(state.meCalls).toBe(2)

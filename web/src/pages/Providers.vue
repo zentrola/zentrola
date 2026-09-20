@@ -112,6 +112,41 @@ const resources = ref<Resource[]>([])
 const resourceError = ref('')
 const models = ref<Model[]>([])
 const modelError = ref('')
+const emptyResources: Resource[] = []
+const resourcesByProvider = computed(() => {
+  const grouped = new Map<string, Resource[]>()
+  for (const resource of resources.value) {
+    const group = grouped.get(resource.providerId)
+    if (group) group.push(resource)
+    else grouped.set(resource.providerId, [resource])
+  }
+  return grouped
+})
+function resourcePreference(resource: Resource) {
+  if (
+    resource.authType === 'SUBSCRIPTION' &&
+    (resource.quotaStatus === 'AVAILABLE' || resource.quotaStatus === 'NEAR_LIMIT')
+  )
+    return 0
+  return resource.authType === 'API_KEY' || !resource.authType ? 1 : 2
+}
+const preferredResourceByProvider = computed(() => {
+  const preferred = new Map<string, Resource>()
+  for (const [providerID, candidates] of resourcesByProvider.value) {
+    let selected: Resource | undefined
+    for (const candidate of candidates) {
+      if (
+        !selected ||
+        resourcePreference(candidate) < resourcePreference(selected) ||
+        (resourcePreference(candidate) === resourcePreference(selected) &&
+          candidate.priority < selected.priority)
+      )
+        selected = candidate
+    }
+    if (selected) preferred.set(providerID, selected)
+  }
+  return preferred
+})
 const credentialTarget = ref<Provider | null>(null)
 const credentialDeleteTarget = ref<Resource | null>(null)
 const credentialCreating = ref(false)
@@ -199,10 +234,13 @@ const availableMappingModels = computed(() => {
   if (editTarget.value?.type !== 'OFFICIAL') return enabledModels.value
   return enabledModels.value.filter((model) => model.publisherProviderId === editTarget.value?.id)
 })
+const mappingByModelID = computed(
+  () => new Map(form.mappings.map((mapping) => [mapping.modelId, mapping])),
+)
 const mappingRows = computed(() =>
   availableMappingModels.value.map((model) => ({
     model,
-    mapping: form.mappings.find((mapping) => mapping.modelId === model.id),
+    mapping: mappingByModelID.value.get(model.id),
   })),
 )
 const filteredMappingRows = computed(() => {
@@ -252,7 +290,6 @@ const {
   items,
   (provider) =>
     `${provider.name} ${provider.code} ${provider.website ?? ''} ${provider.endpoints.map((endpoint) => endpoint.baseUrl).join(' ')}`,
-  load,
 )
 
 function validURL(value: string, endpoint = false) {
@@ -431,20 +468,11 @@ function endpointURL(provider: Provider, protocolType: ProviderProtocol) {
 }
 
 function resourceFor(provider: Provider) {
-  return [...resourcesFor(provider)].sort((left, right) => {
-    const preferred = (resource: Resource) =>
-      resource.authType === 'SUBSCRIPTION' &&
-      (resource.quotaStatus === 'AVAILABLE' || resource.quotaStatus === 'NEAR_LIMIT')
-        ? 0
-        : resource.authType === 'API_KEY' || !resource.authType
-          ? 1
-          : 2
-    return preferred(left) - preferred(right) || left.priority - right.priority
-  })[0]
+  return preferredResourceByProvider.value.get(provider.id)
 }
 
 function resourcesFor(provider: Provider) {
-  return resources.value.filter((resource) => resource.providerId === provider.id)
+  return resourcesByProvider.value.get(provider.id) ?? emptyResources
 }
 
 function providerEnableBlockReason(provider: Provider) {
@@ -477,7 +505,7 @@ function verificationLabel(resource: Resource) {
   )
 }
 
-function providerRuntime(provider: Provider) {
+function calculateProviderRuntime(provider: Provider) {
   const configured = resourcesFor(provider)
   if (!configured.length) {
     return {
@@ -487,12 +515,17 @@ function providerRuntime(provider: Provider) {
     }
   }
 
-  const healthy = configured.filter((resource) => resource.runtimeStatus !== 'BLOCKED')
-  const blocked = configured
-    .filter((resource) => resource.runtimeStatus === 'BLOCKED')
-    .sort((left, right) => (right.lastErrorAt || '').localeCompare(left.lastErrorAt || ''))
+  let healthy = false
+  let failed: Resource | undefined
+  for (const resource of configured) {
+    if (resource.runtimeStatus !== 'BLOCKED') {
+      healthy = true
+      continue
+    }
+    if (!failed || (resource.lastErrorAt || '') > (failed.lastErrorAt || '')) failed = resource
+  }
 
-  if (healthy.length && !blocked.length) {
+  if (healthy && !failed) {
     return {
       status: provider.status === 'ACTIVE' ? 'HEALTHY' : 'DISABLED',
       reason: '',
@@ -500,24 +533,25 @@ function providerRuntime(provider: Provider) {
     }
   }
 
-  const failed = blocked[0]
   return {
-    status: healthy.length ? 'DEGRADED' : 'BLOCKED',
+    status: healthy ? 'DEGRADED' : 'BLOCKED',
     reason: failed ? blockedResourceReason(failed) : t('providers.runtimeReasons.UNKNOWN'),
     errorCode: failed?.lastErrorCode || '',
   }
 }
+const providerRuntimeByID = computed(
+  () => new Map(items.value.map((provider) => [provider.id, calculateProviderRuntime(provider)])),
+)
 
-function providerRuntimeHint(provider: Provider) {
-  const runtime = providerRuntime(provider)
-  return [runtime.reason, runtime.errorCode].filter(Boolean).join(' · ')
+function providerRuntime(provider: Provider) {
+  return providerRuntimeByID.value.get(provider.id) ?? calculateProviderRuntime(provider)
 }
 
 function providerRuntimeLabel(provider: Provider) {
   const runtime = providerRuntime(provider)
   const stateKey = `state.${runtime.status}`
   const status = i18n.global.te(stateKey) ? t(stateKey) : runtime.status
-  const hint = providerRuntimeHint(provider)
+  const hint = [runtime.reason, runtime.errorCode].filter(Boolean).join(' · ')
   return hint ? `${status}：${hint}` : status
 }
 
@@ -534,9 +568,8 @@ function lastCredentialVerification(resource: Resource) {
 
 function providerRuntimeAbnormal(provider: Provider) {
   if (provider.status !== 'ACTIVE') return false
-  const configured = resourcesFor(provider)
-  if (!configured.length) return true
-  return !configured.some((resource) => resource.runtimeStatus !== 'BLOCKED')
+  const runtime = providerRuntime(provider)
+  return runtime.status === 'UNCONFIGURED' || runtime.status === 'BLOCKED'
 }
 
 const visible = computed(() =>

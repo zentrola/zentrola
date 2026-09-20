@@ -4,11 +4,7 @@ import type { Page } from './types'
 import { activeLocale, t } from './i18n'
 import { showErrorToast } from './toast'
 
-export function useListSearch<T>(
-  items: Ref<T[]>,
-  text: (item: T) => string,
-  reload?: () => Promise<void>,
-) {
+export function useListSearch<T>(items: Ref<T[]>, text: (item: T) => string) {
   const keyword = ref(''),
     query = ref('')
   const visible = computed(() =>
@@ -16,12 +12,10 @@ export function useListSearch<T>(
   )
   function search() {
     query.value = keyword.value.trim().toLowerCase()
-    void reload?.()
   }
   function reset() {
     keyword.value = ''
     query.value = ''
-    void reload?.()
   }
   return { keyword, query, visible, search, reset }
 }
@@ -128,22 +122,50 @@ export function useAction() {
   }
   return { busy, error, run }
 }
+const dateTimeFormatters = new Map<string, Intl.DateTimeFormat>()
+const dateFormatters = new Map<string, Intl.DateTimeFormat>()
+const countFormatters = new Map<string, Intl.NumberFormat>()
+const compactFormatters = new Map<string, Intl.NumberFormat>()
+
+function formatter<K, T>(cache: Map<K, T>, key: K, create: () => T) {
+  const cached = cache.get(key)
+  if (cached) return cached
+  const value = create()
+  cache.set(key, value)
+  return value
+}
+
 export function date(value: string | null | undefined) {
   return value
-    ? new Intl.DateTimeFormat(activeLocale.value, {
-        dateStyle: 'medium',
-        timeStyle: 'short',
-        hour12: false,
-      }).format(new Date(value))
+    ? formatter(
+        dateTimeFormatters,
+        activeLocale.value,
+        () =>
+          new Intl.DateTimeFormat(activeLocale.value, {
+            dateStyle: 'medium',
+            timeStyle: 'short',
+            hour12: false,
+          }),
+      ).format(new Date(value))
     : t('common.none')
 }
 export function dateOnly(value: string | null | undefined) {
   return value
-    ? new Intl.DateTimeFormat(activeLocale.value, { dateStyle: 'medium' }).format(new Date(value))
+    ? formatter(
+        dateFormatters,
+        activeLocale.value,
+        () => new Intl.DateTimeFormat(activeLocale.value, { dateStyle: 'medium' }),
+      ).format(new Date(value))
     : t('common.none')
 }
 export function count(value: number | null) {
-  return value === null ? t('common.none') : new Intl.NumberFormat(activeLocale.value).format(value)
+  return value === null
+    ? t('common.none')
+    : formatter(
+        countFormatters,
+        activeLocale.value,
+        () => new Intl.NumberFormat(activeLocale.value),
+      ).format(value)
 }
 export function compactCount(value: number | null) {
   if (value === null) return t('common.none')
@@ -157,7 +179,12 @@ export function compactCount(value: number | null) {
     unitIndex++
     scaled /= 1000
   }
-  return `${new Intl.NumberFormat(activeLocale.value, { maximumFractionDigits: 1 }).format(scaled)}${units[unitIndex]}`
+  const formatted = formatter(
+    compactFormatters,
+    activeLocale.value,
+    () => new Intl.NumberFormat(activeLocale.value, { maximumFractionDigits: 1 }),
+  ).format(scaled)
+  return `${formatted}${units[unitIndex]}`
 }
 export function validText(value: string, bytes: number, required = true) {
   return (
@@ -167,7 +194,4 @@ export function validText(value: string, bytes: number, required = true) {
       !value.includes('\0') &&
       new TextEncoder().encode(value).length <= bytes)
   )
-}
-export function localTime(value: Date) {
-  return new Date(value.getTime() - value.getTimezoneOffset() * 60000).toISOString().slice(0, 19)
 }

@@ -34,7 +34,6 @@ const { keyword, query, visible, search, reset } = useListSearch(
   items,
   (row) =>
     `${row.operatorName} ${row.type} ${operationLabel(row.type)} ${row.targetType} ${targetLabel(row.targetType)} ${row.targetId} ${row.requestId || ''} ${row.result} ${t(`state.${row.result}`)}`,
-  load,
 )
 onMounted(() => load())
 </script>

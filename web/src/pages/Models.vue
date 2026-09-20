@@ -92,7 +92,6 @@ const {
   items,
   (model) =>
     `${model.name} ${model.code} ${model.id} ${model.publisherProviderName ?? ''} ${model.remark ?? ''} ${[...(model.inputModalities ?? []), ...(model.outputModalities ?? [])].map((value) => t(`models.${value}`)).join(' ')}`,
-  load,
 )
 const visible = computed(() =>
   searchVisible.value.filter(

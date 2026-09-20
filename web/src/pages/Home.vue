@@ -35,9 +35,11 @@ const codexUrl = `${gatewayBaseUrl}/v1`
 const claudeUrl = `${gatewayBaseUrl}/anthropic`
 const currentMonth = ref(new Date())
 const monthLabel = computed(() =>
-  new Intl.DateTimeFormat(activeLocale.value, { year: 'numeric', month: 'long' }).format(
-    currentMonth.value,
-  ),
+  new Intl.DateTimeFormat(activeLocale.value, {
+    year: 'numeric',
+    month: 'long',
+    timeZone: 'UTC',
+  }).format(currentMonth.value),
 )
 const maxTokens = computed(() =>
   Math.max(1, ...(summary.value?.tokenRanking.map((item) => item.tokens) ?? [])),
@@ -51,11 +53,18 @@ const maxProviderCalls = computed(() =>
 const enabledHealthProviders = computed(() =>
   healthProviders.value.filter((provider) => provider.status === 'ACTIVE'),
 )
+const healthResourcesByProvider = computed(() => {
+  const grouped = new Map<string, Resource[]>()
+  for (const resource of healthResources.value) {
+    const group = grouped.get(resource.providerId)
+    if (group) group.push(resource)
+    else grouped.set(resource.providerId, [resource])
+  }
+  return grouped
+})
 const providerHealthIssues = computed(() =>
   enabledHealthProviders.value.flatMap((provider) => {
-    const configured = healthResources.value.filter(
-      (resource) => resource.providerId === provider.id,
-    )
+    const configured = healthResourcesByProvider.value.get(provider.id) ?? []
     if (!configured.length)
       return [{ provider, reason: t('providers.runtimeReasons.UNCONFIGURED') }]
 
@@ -133,25 +142,26 @@ const setupScripts = computed<Record<SetupPlatform, string>>(() => {
 
 function monthQuery() {
   const now = new Date()
-  currentMonth.value = now
-  const from = new Date(now.getFullYear(), now.getMonth(), 1)
-  const to = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+  const year = now.getUTCFullYear()
+  const month = now.getUTCMonth()
+  const from = new Date(Date.UTC(year, month, 1))
+  const to = new Date(Date.UTC(year, month + 1, 1))
+  currentMonth.value = from
   return new URLSearchParams({ from: from.toISOString(), to: to.toISOString() }).toString()
 }
 
 function statisticsRoute(dimension: 'member' | 'model' | 'provider') {
   const now = currentMonth.value
-  const dateValue = (value: Date) => {
-    const offset = value.getTimezoneOffset() * 60000
-    return new Date(value.getTime() - offset).toISOString().slice(0, 10)
-  }
+  const year = now.getUTCFullYear()
+  const month = now.getUTCMonth()
+  const dateValue = (value: Date) => value.toISOString().slice(0, 10)
   return {
     name: 'usage',
     query: {
       view: 'statistics',
       dimension,
-      from: dateValue(new Date(now.getFullYear(), now.getMonth(), 1)),
-      to: dateValue(new Date(now.getFullYear(), now.getMonth() + 1, 0)),
+      from: dateValue(new Date(Date.UTC(year, month, 1))),
+      to: dateValue(new Date(Date.UTC(year, month + 1, 0))),
     },
   }
 }
