@@ -61,14 +61,13 @@ func NewDiscoverer(logger *slog.Logger) *Discoverer {
 		},
 		logger: logger,
 		adapters: map[string]adapter{
-			catalog.OpenAIOfficialCode:    openAIAdapter{},
-			catalog.GoogleOfficialCode:    googleAdapter{},
-			catalog.DeepSeekOfficialCode:  deepSeekAdapter{},
-			catalog.ZhipuOfficialCode:     zhipuAdapter{},
-			catalog.KimiOfficialCode:      moonshotAdapter{},
-			catalog.QwenOfficialCode:      qwenAdapter{},
-			catalog.MiniMaxOfficialCode:   miniMaxAdapter{},
-			catalog.ByteDanceOfficialCode: byteDanceAdapter{},
+			catalog.OpenAIOfficialCode:   openAIAdapter{},
+			catalog.GoogleOfficialCode:   googleAdapter{},
+			catalog.DeepSeekOfficialCode: deepSeekAdapter{},
+			catalog.ZhipuOfficialCode:    zhipuAdapter{},
+			catalog.KimiOfficialCode:     moonshotAdapter{},
+			catalog.QwenOfficialCode:     qwenAdapter{},
+			catalog.XAIOfficialCode:      xAIAdapter{},
 		},
 	}
 }

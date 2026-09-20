@@ -21,8 +21,7 @@ const (
 	ZhipuOfficialCode     = "zhipu-official"
 	KimiOfficialCode      = "kimi-official"
 	QwenOfficialCode      = "qwen-official"
-	MiniMaxOfficialCode   = "minimax-official"
-	ByteDanceOfficialCode = "doubao-official"
+	XAIOfficialCode       = "xai-official"
 	SonnetCode            = "claude-sonnet"
 	OpusCode              = "claude-opus"
 )

@@ -331,11 +331,6 @@ async function fixture(page: Page) {
         ['kimi-official', '月之暗面', 'https://www.moonshot.cn'],
         ['qwen-official', '通义千问', 'https://bailian.console.aliyun.com/'],
         ['xai-official', 'xAI', 'https://x.ai'],
-        ['mistral-official', 'Mistral AI', 'https://mistral.ai'],
-        ['minimax-official', 'MiniMax', 'https://www.minimax.io'],
-        ['doubao-official', '字节跳动', 'https://www.volcengine.com/product/ark'],
-        ['baidu-qianfan-official', '百度', 'https://cloud.baidu.com/product-s/qianfan_home'],
-        ['tencent-hunyuan-official', '腾讯', 'https://cloud.tencent.com/product/hunyuan'],
       ]
       return reply(names.map(([code, name, website]) => ({ code, name, website })))
     }
@@ -412,41 +407,6 @@ async function fixture(page: Page) {
           'https://bailian.console.aliyun.com/',
         ],
         ['xai-official', 'xAI', 'xAI', 'https://api.x.ai/v1', 'https://x.ai'],
-        [
-          'mistral-official',
-          'Mistral AI',
-          'Mistral AI',
-          'https://api.mistral.ai/v1',
-          'https://mistral.ai',
-        ],
-        [
-          'minimax-official',
-          'MiniMax',
-          'MiniMax',
-          'https://api.minimax.cn/v1',
-          'https://www.minimax.io',
-        ],
-        [
-          'doubao-official',
-          '字节跳动',
-          'ByteDance',
-          'https://ark.cn-beijing.volces.com/api/v3',
-          'https://www.volcengine.com/product/ark',
-        ],
-        [
-          'baidu-qianfan-official',
-          '百度',
-          'Baidu',
-          'https://qianfan.baidubce.com/v2',
-          'https://cloud.baidu.com/product-s/qianfan_home',
-        ],
-        [
-          'tencent-hunyuan-official',
-          '腾讯',
-          'Tencent',
-          'https://api.hunyuan.cloud.tencent.com/v1',
-          'https://cloud.tencent.com/product/hunyuan',
-        ],
       ]
       let created = 0,
         updated = 0
@@ -473,7 +433,8 @@ async function fixture(page: Page) {
           proxyEnabled: false,
           proxyUrl: null,
           proxyHeaders: [],
-          modelSyncSupported: code === 'deepseek-official' || code === 'qwen-official',
+          modelSyncSupported:
+            code === 'deepseek-official' || code === 'qwen-official' || code === 'xai-official',
           authAdapters: code === 'openai-official' ? ['API_KEY', 'OPENAI_CODEX'] : ['API_KEY'],
           createdAt: stamp,
           updatedAt: stamp,
@@ -2027,7 +1988,16 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await createMenu.getByRole('menuitem', { name: /模型厂商/ }).click()
   const initializeDialog = modal(page)
   await expect(initializeDialog.getByRole('heading', { name: '选择模型厂商' })).toBeVisible()
-  await expect(initializeDialog.getByText('已选择 13 / 13', { exact: true })).toBeVisible()
+  await expect(initializeDialog.getByText('已选择 8 / 8', { exact: true })).toBeVisible()
+  await expect(
+    initializeDialog.getByRole('checkbox', { name: '选择 xAI', exact: true }),
+  ).toBeVisible()
+  await expect(
+    initializeDialog.getByRole('checkbox', { name: '选择 MiniMax', exact: true }),
+  ).toHaveCount(0)
+  await expect(
+    initializeDialog.getByRole('checkbox', { name: '选择 字节跳动', exact: true }),
+  ).toHaveCount(0)
   await initializeDialog.getByRole('button', { name: '清空', exact: true }).click()
   await expect(
     initializeDialog.getByRole('button', { name: '初始化所选厂商', exact: true }),
@@ -2035,7 +2005,7 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await initializeDialog.getByRole('checkbox', { name: '选择 深度求索', exact: true }).check()
   await initializeDialog.getByRole('checkbox', { name: '选择 月之暗面', exact: true }).check()
   await initializeDialog.getByRole('checkbox', { name: '选择 通义千问', exact: true }).check()
-  await expect(initializeDialog.getByText('已选择 3 / 13', { exact: true })).toBeVisible()
+  await expect(initializeDialog.getByText('已选择 3 / 8', { exact: true })).toBeVisible()
   await initializeDialog.getByRole('button', { name: '初始化所选厂商', exact: true }).click()
   await expect(page.locator('.toast-success')).toContainText(
     '已补充 2 个官方服务商，并更新 1 个名称或官网，共 3 个',
