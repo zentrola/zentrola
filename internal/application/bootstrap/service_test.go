@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"bytes"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -81,6 +82,17 @@ func TestOfficialProviderModelsAreLoadedFromCatalogAndCloned(t *testing.T) {
 		!reflect.DeepEqual(openAIModels[4].InputModalities, []string{"TEXT", "IMAGE"}) ||
 		!reflect.DeepEqual(openAIModels[4].OutputModalities, []string{"IMAGE"}) {
 		t.Fatalf("unexpected OpenAI models copied from the curated catalog: %+v", openAIModels)
+	}
+	byteDanceModels := OfficialProviderModels("doubao-official")
+	if len(byteDanceModels) != 7 || byteDanceModels[0].Code != "doubao-seedance-2-5-260628" ||
+		!reflect.DeepEqual(byteDanceModels[0].OutputModalities, []string{"VIDEO", "AUDIO"}) {
+		t.Fatalf("unexpected ByteDance models copied from the curated catalog: %+v", byteDanceModels)
+	}
+	for _, model := range byteDanceModels {
+		if !strings.HasPrefix(model.Code, "doubao-seedance-") &&
+			!strings.HasPrefix(model.Code, "doubao-seedream-") {
+			t.Fatalf("unexpected ByteDance model outside the media allowlist: %+v", model)
+		}
 	}
 }
 

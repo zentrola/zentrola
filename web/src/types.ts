@@ -70,6 +70,11 @@ export interface ProviderMapping {
 export interface ProviderDetail extends Provider {
   mappings: ProviderMapping[]
 }
+export interface ProviderInitializeOption {
+  code: string
+  name: string
+  website: string
+}
 export interface ProviderInitializeResult {
   total: number
   created: number
@@ -209,6 +214,11 @@ export interface ClientModelRank {
   modelName: string
   requests: number
   tokens: number
+}
+export interface ActiveModel {
+  modelName: string
+  modelCode: string
+  providerName: string
 }
 export interface ProviderRank {
   providerId: string

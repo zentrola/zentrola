@@ -448,7 +448,6 @@ onBeforeUnmount(() => {
       >
         <span class="filter-label">{{ t('usage.member') }}</span>
         <div class="member-autocomplete" @keydown.esc="memberSuggestionsOpen = false">
-          <Icon class="member-search-icon" name="search" :size="18" />
           <input
             id="usage-member"
             v-model="memberName"
@@ -589,9 +588,8 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <div class="filter-actions">
-        <button class="button primary" :disabled="loading">
-          <Icon name="search" :size="16" />{{ t('common.searchAction') }}</button
-        ><button type="button" class="button" :disabled="loading" @click="reset">
+        <button class="button primary" :disabled="loading">{{ t('common.searchAction') }}</button>
+        <button type="button" class="button" :disabled="loading" @click="reset">
           {{ t('common.reset') }}
         </button>
       </div>

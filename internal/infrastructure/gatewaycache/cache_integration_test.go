@@ -69,10 +69,25 @@ func TestRedisCacheRoundTripAndGenerationInvalidation(t *testing.T) {
 		t.Fatalf("unexpected initial route cache state: generation=%q hit=%v", routeGeneration, ok)
 	} else {
 		dataKeys = append(dataKeys, routeKey+":"+routeGeneration)
-		cache.SetRoutes(ctx, routeKey, routeGeneration, []gw.Route{{ModelID: 1, ResourceID: 2}})
+		cache.SetRoutes(ctx, routeKey, routeGeneration, []gw.Route{{ModelID: 1, ResourceID: 2, ProviderName: "provider-a"}})
 	}
 	if routes, _, ok := cache.GetRoutes(ctx, routeKey); !ok || len(routes) != 1 || routes[0].ResourceID != 2 {
 		t.Fatal("route cache round trip failed")
+	}
+	if models, err := cache.ActiveModels(ctx); err != nil || len(models) != 0 {
+		t.Fatalf("candidate routes were reported as active: models=%+v err=%v", models, err)
+	}
+	activeRoute := gw.Route{ModelID: 1, ResourceID: 2, ModelName: "Model A", ModelCode: "model-a", ProviderName: "provider-a"}
+	if err := cache.RecordActiveRoute(ctx, activeRoute); err != nil {
+		t.Fatal(err)
+	}
+	dataKeys = append(dataKeys, cache.activeModelKey(activeRoute.ModelCode)+":"+routeGeneration)
+	activeRoute.ProviderName = "provider-b"
+	if err := cache.RecordActiveRoute(ctx, activeRoute); err != nil {
+		t.Fatal(err)
+	}
+	if models, err := cache.ActiveModels(ctx); err != nil || len(models) != 1 || models[0].ModelName != "Model A" || models[0].ModelCode != "model-a" || models[0].ProviderName != "provider-b" {
+		t.Fatalf("active route did not reflect the latest selected provider: models=%+v err=%v", models, err)
 	}
 
 	cache.Clear(ctx, "test")
@@ -82,6 +97,9 @@ func TestRedisCacheRoundTripAndGenerationInvalidation(t *testing.T) {
 	}
 	if _, generation, ok := cache.GetRoutes(ctx, routeKey); ok || generation != clearedGeneration {
 		t.Fatalf("route cache survived invalidation: generation=%q hit=%v", generation, ok)
+	}
+	if models, err := cache.ActiveModels(ctx); err != nil || len(models) != 0 {
+		t.Fatalf("active route survived invalidation: models=%+v err=%v", models, err)
 	}
 
 	if err := cache.client.Del(ctx, cache.generationKey()).Err(); err != nil {

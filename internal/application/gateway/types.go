@@ -39,17 +39,18 @@ var (
 )
 
 type Route struct {
-	ModelID, ProviderID, ProviderModelID, ResourceID       int64
-	ProviderName, UpstreamModel, BaseURL, EndpointProtocol string
-	AuthType, AuthAdapter, SubscriptionType                string
-	ResourcePriority                                       int32
-	QuotaStatus                                            string
-	ExpiresAt                                              *time.Time
-	CredentialRefreshedAt, CredentialExpiresAt             *time.Time
-	Credential                                             catalog.SealedCredential
-	ProxyEnabled                                           bool
-	ProxyURL, ProxyHeaders                                 catalog.SealedCredential
-	Proxy                                                  *catalog.OutboundProxy
+	ModelID, ProviderID, ProviderModelID, ResourceID int64
+	ModelCode, ModelName, ProviderName               string
+	UpstreamModel, BaseURL, EndpointProtocol         string
+	AuthType, AuthAdapter, SubscriptionType          string
+	ResourcePriority                                 int32
+	QuotaStatus                                      string
+	ExpiresAt                                        *time.Time
+	CredentialRefreshedAt, CredentialExpiresAt       *time.Time
+	Credential                                       catalog.SealedCredential
+	ProxyEnabled                                     bool
+	ProxyURL, ProxyHeaders                           catalog.SealedCredential
+	Proxy                                            *catalog.OutboundProxy
 }
 
 const AnthropicProtocol = "ANTHROPIC_MESSAGES"
@@ -74,6 +75,17 @@ type Model struct {
 
 type Provider struct {
 	Name string `json:"name" example:"OpenAI"`
+}
+type ActiveModel struct {
+	ModelName    string `json:"modelName"`
+	ModelCode    string `json:"modelCode"`
+	ProviderName string `json:"providerName"`
+}
+type ActiveModelReader interface {
+	ActiveModels(context.Context) ([]ActiveModel, error)
+}
+type ActiveRouteRecorder interface {
+	RecordActiveRoute(context.Context, Route) error
 }
 type ModelStore interface {
 	Models(context.Context, appsec.PrincipalIdentity) ([]Model, error)
@@ -187,17 +199,21 @@ type Upstream interface {
 	Open(context.Context, Route, Request, []byte) (*Response, error)
 }
 type Service struct {
-	store     Store
-	cipher    Cipher
-	upstream  Upstream
-	state     RouteState
-	refresh   []SubscriptionRefresher
-	refreshMu sync.Mutex
+	store        Store
+	cipher       Cipher
+	upstream     Upstream
+	state        RouteState
+	activeRoutes ActiveRouteRecorder
+	refresh      []SubscriptionRefresher
+	refreshMu    sync.Mutex
 }
 
 type Option func(*Service)
 
 func WithRouteState(state RouteState) Option { return func(service *Service) { service.state = state } }
+func WithActiveRouteRecorder(recorder ActiveRouteRecorder) Option {
+	return func(service *Service) { service.activeRoutes = recorder }
+}
 func WithSubscriptionRefresher(refresh SubscriptionRefresher) Option {
 	return func(service *Service) {
 		if refresh != nil {

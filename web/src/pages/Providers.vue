@@ -11,6 +11,7 @@ import type {
   ModelSyncResult,
   Provider,
   ProviderDetail,
+  ProviderInitializeOption,
   ProviderInitializeResult,
   ProviderProtocol,
   Resource,
@@ -95,6 +96,14 @@ const createMenuRoot = ref<HTMLElement>()
 const createMenuTrigger = ref<HTMLButtonElement>()
 const createMenu = ref<HTMLElement>()
 const createMenuId = useId()
+const providerInitializeOpen = ref(false)
+const providerInitializeOptions = ref<ProviderInitializeOption[]>([])
+const selectedProviderCodes = ref<string[]>([])
+const allProviderOptionsSelected = computed(
+  () =>
+    providerInitializeOptions.value.length > 0 &&
+    selectedProviderCodes.value.length === providerInitializeOptions.value.length,
+)
 const editing = ref(false)
 const editTarget = ref<Provider | null>(null)
 const statusTarget = ref<Provider | null>(null)
@@ -715,11 +724,42 @@ function reload() {
   void loadModels()
 }
 
+function openProviderInitialization() {
+  actionError.value = ''
+  void run(async () => {
+    const locale = i18n.global.locale.value
+    providerInitializeOptions.value = await api<ProviderInitializeOption[]>(
+      `/providers/initialize-options?locale=${encodeURIComponent(locale)}`,
+    )
+    selectedProviderCodes.value = providerInitializeOptions.value.map((option) => option.code)
+    providerInitializeOpen.value = true
+  })
+}
+
+function resetProviderInitialization() {
+  providerInitializeOpen.value = false
+  providerInitializeOptions.value = []
+  selectedProviderCodes.value = []
+}
+
+function closeProviderInitialization() {
+  if (busy.value) return
+  resetProviderInitialization()
+}
+
+function toggleAllProviderOptions() {
+  selectedProviderCodes.value = allProviderOptionsSelected.value
+    ? []
+    : providerInitializeOptions.value.map((option) => option.code)
+}
+
 function initializeProviders() {
+  if (!selectedProviderCodes.value.length) return
   actionError.value = ''
   void run(async () => {
     const result = await api<ProviderInitializeResult>('/providers/initialize', 'POST', {
       locale: i18n.global.locale.value,
+      providerCodes: selectedProviderCodes.value,
     })
     const message = t(
       result.created > 0 || result.updated > 0
@@ -727,6 +767,7 @@ function initializeProviders() {
         : 'providers.initializeUnchanged',
       { created: result.created, updated: result.updated, total: result.total },
     )
+    resetProviderInitialization()
     await load()
     showSuccessToast(message)
   })
@@ -747,7 +788,7 @@ async function showCreateMenu(last = false) {
 function selectCreateAction(action: 'thirdParty' | 'modelVendor') {
   closeCreateMenu(true)
   if (action === 'thirdParty') openEdit()
-  else initializeProviders()
+  else openProviderInitialization()
 }
 
 function onCreateMenuKeydown(event: KeyboardEvent) {
@@ -1567,6 +1608,65 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   </section>
 
   <Modal
+    v-if="providerInitializeOpen"
+    :title="t('providers.initializeTitle')"
+    :busy="busy"
+    medium
+    @close="closeProviderInitialization"
+  >
+    <p class="muted provider-initialize-hint">{{ t('providers.initializeHint') }}</p>
+    <div class="provider-initialize-toolbar">
+      <span>
+        {{
+          t('providers.initializeSelectionCount', {
+            count: selectedProviderCodes.length,
+            total: providerInitializeOptions.length,
+          })
+        }}
+      </span>
+      <button type="button" class="text-button" :disabled="busy" @click="toggleAllProviderOptions">
+        {{ t(allProviderOptionsSelected ? 'providers.clearSelection' : 'providers.selectAll') }}
+      </button>
+    </div>
+    <div
+      class="provider-initialize-options"
+      role="group"
+      :aria-label="t('providers.initializeSelection')"
+    >
+      <label
+        v-for="option in providerInitializeOptions"
+        :key="option.code"
+        class="provider-initialize-option"
+        :class="{ 'is-selected': selectedProviderCodes.includes(option.code) }"
+      >
+        <input
+          v-model="selectedProviderCodes"
+          type="checkbox"
+          :value="option.code"
+          :disabled="busy"
+          :aria-label="t('providers.initializeProviderSelection', { name: option.name })"
+        />
+        <span>
+          <strong>{{ option.name }}</strong>
+          <small>{{ option.website }}</small>
+        </span>
+      </label>
+    </div>
+    <template #footer>
+      <button type="button" class="button" :disabled="busy" @click="closeProviderInitialization">
+        {{ t('common.cancel') }}</button
+      ><button
+        type="button"
+        class="button primary"
+        :disabled="busy || !selectedProviderCodes.length"
+        @click="initializeProviders"
+      >
+        {{ t(busy ? 'common.working' : 'providers.initializeSelected') }}
+      </button>
+    </template>
+  </Modal>
+
+  <Modal
     v-if="editing"
     :title="t(editTarget ? 'providers.editTitle' : 'providers.create')"
     :busy="busy"
@@ -1700,7 +1800,6 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
           </header>
           <div v-if="availableMappingModels.length" class="mapping-toolbar">
             <div class="mapping-search-box">
-              <Icon name="search" :size="16" />
               <input
                 id="provider-mapping-search"
                 v-model="mappingQuery"
@@ -3114,6 +3213,65 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
 .credential-test-selection-hint {
   margin-bottom: 14px;
 }
+.provider-initialize-hint {
+  margin-bottom: 14px;
+}
+.provider-initialize-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.provider-initialize-options {
+  display: grid;
+  max-height: min(52vh, 520px);
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+}
+.provider-initialize-option {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  padding: 12px 14px;
+  cursor: pointer;
+  background: #fff;
+}
+.provider-initialize-option + .provider-initialize-option {
+  border-top: 1px solid #e5ebf1;
+}
+.provider-initialize-option:hover {
+  background: #f8fafc;
+}
+.provider-initialize-option.is-selected {
+  background: var(--color-primary-soft);
+}
+.provider-initialize-option input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--blue);
+}
+.provider-initialize-option > span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+.provider-initialize-option strong,
+.provider-initialize-option small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.provider-initialize-option small {
+  color: var(--muted);
+  font-size: 11px;
+}
 .credential-test-section + .credential-test-section {
   margin-top: 18px;
 }
@@ -3861,15 +4019,9 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   min-width: 0;
   color: #92a0af;
 }
-.mapping-search-box > svg {
-  position: absolute;
-  top: 10px;
-  left: 11px;
-  pointer-events: none;
-}
 .mapping-search-box input[type='search'] {
   min-height: 36px;
-  padding: 7px 36px 7px 35px;
+  padding: 7px 36px 7px 11px;
   font-size: 12px;
   background: #f8fafc;
 }

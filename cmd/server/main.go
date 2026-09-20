@@ -319,6 +319,7 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 	gatewayService := gateway.New(
 		gatewaycache.NewGatewayStore(postgres.NewGatewayStore(pool), gatewayCache, logger), credentials, compatibleUpstream,
 		gateway.WithRouteState(routeState),
+		gateway.WithActiveRouteRecorder(gatewayCache),
 		gateway.WithSubscriptionRefresher(codexSubscription),
 		gateway.WithSubscriptionRefresher(claudeSubscription),
 	)
@@ -365,7 +366,7 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 	var active sync.WaitGroup
 	var admission sync.Mutex
 	stopping := false
-	router := httptransport.NewRouter(logger, readiness, cfg.CORS, cfg.HealthTimeout, cfg.Environment, &httptransport.SecurityHandlers{Admin: adminService, Keys: keyService, Management: managementService, Gateway: gatewayHandler, OpenAI: openaiHandler, Usage: usageapp.NewQuery(usageStore), UsageWriter: usageWriter})
+	router := httptransport.NewRouter(logger, readiness, cfg.CORS, cfg.HealthTimeout, cfg.Environment, &httptransport.SecurityHandlers{Admin: adminService, Keys: keyService, Management: managementService, Gateway: gatewayHandler, OpenAI: openaiHandler, ActiveModels: gatewayCache, Usage: usageapp.NewQuery(usageStore), UsageWriter: usageWriter})
 	server := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -63,7 +63,15 @@ func TestInitializeOfficialProvidersCreatesMissingTemplatesAndSynchronizesLocali
 	service := New(providerInitializationStore{state}, &providerInitIDs{next: 100}, nil, nil)
 	actor := admin.Identity{ID: 1}
 
-	result, err := service.InitializeOfficialProviders(context.Background(), actor, ProviderInitializeInput{Locale: "zh-CN"}, appsec.RequestMeta{})
+	options, err := service.OfficialProviderInitializationOptions("zh-CN")
+	if err != nil || len(options) != 13 || options[0].Code != "openai-official" || options[0].Name != "OpenAI" || options[0].Website != "https://openai.com" {
+		t.Fatalf("unexpected initialization options: %+v err=%v", options, err)
+	}
+	codes := make([]string, 0, len(options))
+	for _, option := range options {
+		codes = append(codes, option.Code)
+	}
+	result, err := service.InitializeOfficialProviders(context.Background(), actor, ProviderInitializeInput{Locale: "zh-CN", ProviderCodes: codes}, appsec.RequestMeta{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,12 +87,12 @@ func TestInitializeOfficialProvidersCreatesMissingTemplatesAndSynchronizesLocali
 		}
 	}
 
-	result, err = service.InitializeOfficialProviders(context.Background(), actor, ProviderInitializeInput{Locale: "zh-CN"}, appsec.RequestMeta{})
+	result, err = service.InitializeOfficialProviders(context.Background(), actor, ProviderInitializeInput{Locale: "zh-CN", ProviderCodes: codes}, appsec.RequestMeta{})
 	if err != nil || result.Created != 0 || result.Updated != 0 || result.Existing != 13 || len(state.providers) != 13 || len(state.audits) != 13 {
 		t.Fatalf("initialization is not idempotent: %+v err=%v", result, err)
 	}
 
-	result, err = service.InitializeOfficialProviders(context.Background(), actor, ProviderInitializeInput{Locale: "en-US"}, appsec.RequestMeta{})
+	result, err = service.InitializeOfficialProviders(context.Background(), actor, ProviderInitializeInput{Locale: "en-US", ProviderCodes: codes}, appsec.RequestMeta{})
 	if err != nil || result.Created != 0 || result.Updated != 7 || result.Existing != 13 || len(state.providers) != 13 || len(state.audits) != 20 {
 		t.Fatalf("localized names were not synchronized: %+v err=%v", result, err)
 	}
@@ -99,10 +107,50 @@ func TestInitializeOfficialProvidersRejectsUnsupportedLocale(t *testing.T) {
 	_, err := service.InitializeOfficialProviders(
 		context.Background(),
 		admin.Identity{ID: 1},
-		ProviderInitializeInput{Locale: "fr-FR"},
+		ProviderInitializeInput{Locale: "fr-FR", ProviderCodes: []string{"openai-official"}},
 		appsec.RequestMeta{},
 	)
 	if !errors.Is(err, appsec.ErrInvalidArgument) || len(state.providers) != 0 {
 		t.Fatalf("unsupported locale was accepted: %v", err)
+	}
+}
+
+func TestInitializeOfficialProvidersOnlyProcessesSelection(t *testing.T) {
+	state := &providerInitializationState{}
+	service := New(providerInitializationStore{state}, &providerInitIDs{}, nil, nil)
+	result, err := service.InitializeOfficialProviders(
+		context.Background(),
+		admin.Identity{ID: 1},
+		ProviderInitializeInput{Locale: "zh-CN", ProviderCodes: []string{"qwen-official", "kimi-official"}},
+		appsec.RequestMeta{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Total != 2 || result.Created != 2 || result.Updated != 0 || result.Existing != 0 || len(state.providers) != 2 {
+		t.Fatalf("unexpected selected initialization result: %+v providers=%+v", result, state.providers)
+	}
+	if state.providers[0].Code != "kimi-official" || state.providers[1].Code != "qwen-official" {
+		t.Fatalf("selected providers did not retain catalog order: %+v", state.providers)
+	}
+}
+
+func TestInitializeOfficialProvidersRejectsInvalidSelection(t *testing.T) {
+	for name, codes := range map[string][]string{
+		"empty":     {},
+		"duplicate": {"openai-official", "openai-official"},
+		"unknown":   {"unknown-official"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			state := &providerInitializationState{}
+			service := New(providerInitializationStore{state}, &providerInitIDs{}, nil, nil)
+			_, err := service.InitializeOfficialProviders(
+				context.Background(), admin.Identity{ID: 1},
+				ProviderInitializeInput{Locale: "zh-CN", ProviderCodes: codes}, appsec.RequestMeta{},
+			)
+			if !errors.Is(err, appsec.ErrInvalidArgument) || len(state.providers) != 0 {
+				t.Fatalf("invalid provider selection was accepted: %v", err)
+			}
+		})
 	}
 }

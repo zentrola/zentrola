@@ -6,7 +6,7 @@ AND NOT k.is_deleted AND k.status='ACTIVE' AND k.revoked_at IS NULL AND (k.expir
 AND NOT p.is_deleted AND p.status='ACTIVE' AND p.principal_type='MEMBER');
 
 -- name: GatewayModel :one
-SELECT id,status FROM model WHERE model_code=$1 AND NOT is_deleted;
+SELECT id,model_code,display_name,status FROM model WHERE model_code=$1 AND NOT is_deleted;
 
 -- name: GatewayCandidates :many
 SELECT pm.id AS provider_model_id,pm.provider_id,p.provider_name,pm.upstream_model_code,pe.base_url,pe.protocol_type,

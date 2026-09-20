@@ -783,6 +783,58 @@
                 }
             }
         },
+        "/api/v1/gateway/active-models": {
+            "get": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "description": "返回当前 generation 中仍处于 TTL 内、最近一次实际选中的模型与服务商；不返回未产生实际上游请求的已配置模型或备用服务商。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "网关"
+                ],
+                "summary": "当前模型服务商",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/gateway.ActiveModel"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/groups": {
             "get": {
                 "security": [
@@ -3700,7 +3752,7 @@
                         "AdminBearer": []
                     }
                 ],
-                "description": "幂等补齐系统内置的官方服务商和协议地址，并按界面语言同步内置名称及官方网站；其他已有配置保持不变，也不会访问外部网络。",
+                "description": "幂等补齐用户选定的内置官方服务商和协议地址，并按界面语言同步其内置名称及官方网站；其他已有配置保持不变，也不会访问外部网络。",
                 "consumes": [
                     "application/json"
                 ],
@@ -3713,7 +3765,7 @@
                 "summary": "初始化官方服务商",
                 "parameters": [
                     {
-                        "description": "界面语言",
+                        "description": "界面语言与厂商编码",
                         "name": "body",
                         "in": "body",
                         "required": true,
@@ -3741,6 +3793,12 @@
                             ]
                         }
                     },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
@@ -3749,6 +3807,77 @@
                     },
                     "409": {
                         "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/providers/initialize-options": {
+            "get": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "description": "返回应用内置的官方服务商选项，不访问外部网络。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "模型与资源"
+                ],
+                "summary": "获取可初始化的官方服务商",
+                "parameters": [
+                    {
+                        "enum": [
+                            "zh-CN",
+                            "en-US"
+                        ],
+                        "type": "string",
+                        "description": "界面语言",
+                        "name": "locale",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/management.ProviderInitializeOption"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
                         }
@@ -6017,6 +6146,20 @@
                 }
             }
         },
+        "gateway.ActiveModel": {
+            "type": "object",
+            "properties": {
+                "modelCode": {
+                    "type": "string"
+                },
+                "modelName": {
+                    "type": "string"
+                },
+                "providerName": {
+                    "type": "string"
+                }
+            }
+        },
         "gateway.Model": {
             "type": "object",
             "properties": {
@@ -7032,7 +7175,8 @@
         "management.ProviderInitializeInput": {
             "type": "object",
             "required": [
-                "locale"
+                "locale",
+                "providerCodes"
             ],
             "properties": {
                 "locale": {
@@ -7041,6 +7185,26 @@
                         "zh-CN",
                         "en-US"
                     ]
+                },
+                "providerCodes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "management.ProviderInitializeOption": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "website": {
+                    "type": "string"
                 }
             }
         },

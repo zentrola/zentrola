@@ -123,13 +123,36 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 		data, err := m.CreateProvider(req.Context(), adminFrom(req), input, requestMeta(req))
 		adminResult(w, req, 201, data, err)
 	})
+	// @Summary 获取可初始化的官方服务商
+	// @Tags 模型与资源
+	// @Description 返回应用内置的官方服务商选项，不访问外部网络。
+	// @Produce json
+	// @Security AdminBearer
+	// @Param locale query string true "界面语言" Enums(zh-CN,en-US)
+	// @Success 200 {object} response{data=[]mgmt.ProviderInitializeOption}
+	// @Failure 400 {object} response
+	// @Failure 401 {object} response
+	// @Failure 503 {object} response
+	// @Router /api/v1/providers/initialize-options [get]
+	r.Get("/providers/initialize-options", func(w http.ResponseWriter, req *http.Request) {
+		locale, err := optionalQueryValue(req, "locale")
+		if err == nil && len(req.URL.Query()) != 1 {
+			err = appsec.ErrInvalidArgument
+		}
+		var data []mgmt.ProviderInitializeOption
+		if err == nil {
+			data, err = m.OfficialProviderInitializationOptions(locale)
+		}
+		adminResult(w, req, 200, data, err)
+	})
 	// @Summary 初始化官方服务商
 	// @Tags 模型与资源
-	// @Description 幂等补齐系统内置的官方服务商和协议地址，并按界面语言同步内置名称及官方网站；其他已有配置保持不变，也不会访问外部网络。
+	// @Description 幂等补齐用户选定的内置官方服务商和协议地址，并按界面语言同步其内置名称及官方网站；其他已有配置保持不变，也不会访问外部网络。
 	// @Accept json
 	// @Produce json
 	// @Security AdminBearer
-	// @Param body body mgmt.ProviderInitializeInput true "界面语言"
+	// @Param body body mgmt.ProviderInitializeInput true "界面语言与厂商编码"
+	// @Failure 400 {object} response
 	// @Success 200 {object} response{data=mgmt.ProviderInitializeResult}
 	// @Failure 401 {object} response
 	// @Failure 409 {object} response

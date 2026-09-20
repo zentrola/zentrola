@@ -170,18 +170,25 @@ func (q *Queries) GatewayIdentityActive(ctx context.Context, arg GatewayIdentity
 }
 
 const gatewayModel = `-- name: GatewayModel :one
-SELECT id,status FROM model WHERE model_code=$1 AND NOT is_deleted
+SELECT id,model_code,display_name,status FROM model WHERE model_code=$1 AND NOT is_deleted
 `
 
 type GatewayModelRow struct {
-	ID     int64
-	Status string
+	ID          int64
+	ModelCode   string
+	DisplayName string
+	Status      string
 }
 
 func (q *Queries) GatewayModel(ctx context.Context, modelCode string) (GatewayModelRow, error) {
 	row := q.db.QueryRow(ctx, gatewayModel, modelCode)
 	var i GatewayModelRow
-	err := row.Scan(&i.ID, &i.Status)
+	err := row.Scan(
+		&i.ID,
+		&i.ModelCode,
+		&i.DisplayName,
+		&i.Status,
+	)
 	return i, err
 }
 
