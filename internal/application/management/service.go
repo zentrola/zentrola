@@ -9,7 +9,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/zentrola/zentrola/internal/application/bootstrap"
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	"github.com/zentrola/zentrola/internal/domain/admin"
 	"github.com/zentrola/zentrola/internal/domain/catalog"
@@ -49,8 +48,7 @@ func New(store Store, ids shared.IDGenerator, cipher Cipher, tester ConnectionTe
 }
 
 func (s *Service) withProviderCapabilities(provider Provider) Provider {
-	provider.ModelSyncSupported = s.discoverer != nil && s.discoverer.Supports(provider.Code) ||
-		len(bootstrap.OfficialProviderModels(provider.Code)) > 0
+	provider.ModelSyncSupported = s.discoverer != nil && s.discoverer.Supports(provider.Code)
 	provider.AuthAdapters = []string{AuthAdapterAPIKey}
 	for _, adapter := range s.subscriptions {
 		if adapter.SupportsProvider(provider) {

@@ -353,11 +353,6 @@ async function fixture(page: Page) {
     }
     if (segments[0] === 'providers' && segments[2] === 'sync-models' && method === 'POST') {
       modelSyncRequests.push(segments[1])
-      const hasAPIKey = resources.some(
-        (resource) =>
-          resource.providerId === segments[1] &&
-          (resource.authType === 'API_KEY' || !resource.authType),
-      )
       return reply({
         ok: !failedTest,
         code: failedTest ? 'UPSTREAM_AUTH_FAILED' : 'OK',
@@ -367,7 +362,7 @@ async function fixture(page: Page) {
         created: failedTest ? 0 : 1,
         updated: 0,
         mapped: failedTest ? 0 : 1,
-        source: hasAPIKey ? 'PROVIDER' : 'BUILTIN',
+        source: 'PROVIDER',
       })
     }
     if (path === '/providers/initialize' && method === 'POST') {
@@ -1781,7 +1776,7 @@ test('服务商同步入口只由后端能力参数控制', async ({ page }) => 
   const dialog = page.getByRole('dialog', { name: 'DeepSeek / 模型同步结果' })
   await expect(dialog).toBeVisible()
   await expect(dialog.getByRole('status')).toContainText('模型目录同步完成')
-  await expect(dialog.getByText('应用内置目录', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('官方接口', { exact: true })).toBeVisible()
 })
 
 test('连接测试允许选择模型并显示实际测试模型', async ({ page }) => {
@@ -2043,10 +2038,14 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await expect(initializeDialog.getByText('已选择 3 / 13', { exact: true })).toBeVisible()
   await initializeDialog.getByRole('button', { name: '初始化所选厂商', exact: true }).click()
   await expect(page.locator('.toast-success')).toContainText(
-    '已补充 2 个官方服务商，并同步 1 个预置名称或官网，共 3 个',
+    '已补充 2 个官方服务商，并更新 1 个名称或官网，共 3 个',
   )
   await expect(page.locator('.provider-initialize-notice')).toHaveCount(0)
-  await expect(page.getByRole('row').filter({ hasText: '月之暗面' })).toBeVisible()
+  const kimiRow = page.getByRole('row').filter({ hasText: '月之暗面' })
+  await expect(kimiRow).toBeVisible()
+  await expect(
+    kimiRow.getByRole('button', { name: '同步 月之暗面 的官方模型', exact: true }),
+  ).toHaveCount(0)
   const qwenRow = page.getByRole('row').filter({ hasText: '通义千问' })
   await expect(
     qwenRow.getByRole('button', { name: '同步 通义千问 的官方模型', exact: true }),

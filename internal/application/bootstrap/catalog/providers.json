@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "catalogVersion": "2026-09-17",
+  "catalogVersion": "2026-09-20",
   "providers": [
     {
       "code": "openai-official",
@@ -8,50 +8,9 @@
       "nameEN": "OpenAI",
       "website": "https://openai.com",
       "endpoints": [
-        { "protocolType": "OPENAI", "baseUrl": "https://api.openai.com/v1" }
-      ],
-      "models": [
         {
-          "code": "gpt-6-astra",
-          "name": "GPT-6 Astra",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "gpt-5.6-sol",
-          "name": "GPT-5.6 Sol",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "gpt-5.6-terra",
-          "name": "GPT-5.6 Terra",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "gpt-5.6-luna",
-          "name": "GPT-5.6 Luna",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "gpt-image-2.5-sunburst",
-          "name": "GPT Image 2.5 Sunburst",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE"],
-          "outputModalities": ["IMAGE"]
-        },
-        {
-          "code": "gpt-image-2.5-flare",
-          "name": "GPT Image 2.5 Flare",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE"],
-          "outputModalities": ["IMAGE"]
+          "protocolType": "OPENAI",
+          "baseUrl": "https://api.openai.com/v1"
         }
       ]
     },
@@ -61,36 +20,9 @@
       "nameEN": "Anthropic",
       "website": "https://www.anthropic.com",
       "endpoints": [
-        { "protocolType": "ANTHROPIC", "baseUrl": "https://api.anthropic.com" }
-      ],
-      "models": [
         {
-          "code": "claude-fable-5-1",
-          "name": "Claude Fable 5.1",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "claude-opus-5",
-          "name": "Claude Opus 5",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "claude-sonnet-5",
-          "name": "Claude Sonnet 5",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "claude-haiku-4-5-20251001",
-          "name": "Claude Haiku 4.5",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE"],
-          "outputModalities": ["TEXT"]
+          "protocolType": "ANTHROPIC",
+          "baseUrl": "https://api.anthropic.com"
         }
       ]
     },
@@ -104,71 +36,6 @@
           "protocolType": "OPENAI",
           "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai"
         }
-      ],
-      "models": [
-        {
-          "code": "gemini-3.6-flash",
-          "name": "Gemini 3.6 Flash",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE", "AUDIO", "VIDEO"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "gemini-3.5-flash",
-          "name": "Gemini 3.5 Flash",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE", "AUDIO", "VIDEO"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "gemini-3.5-flash-lite",
-          "name": "Gemini 3.5 Flash-Lite",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE", "AUDIO", "VIDEO"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "gemini-3.1-pro",
-          "name": "Gemini 3.1 Pro",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE", "AUDIO", "VIDEO"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "gemini-3-flash",
-          "name": "Gemini 3 Flash",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE", "AUDIO", "VIDEO"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "gemini-3.1-flash-lite",
-          "name": "Gemini 3.1 Flash-Lite",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE", "AUDIO", "VIDEO"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "gemini-2.5-pro",
-          "name": "Gemini 2.5 Pro",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE", "AUDIO", "VIDEO"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "gemini-2.5-flash",
-          "name": "Gemini 2.5 Flash",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE", "AUDIO", "VIDEO"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "gemini-2.5-flash-lite",
-          "name": "Gemini 2.5 Flash-Lite",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE", "AUDIO", "VIDEO"],
-          "outputModalities": ["TEXT"]
-        }
       ]
     },
     {
@@ -177,23 +44,13 @@
       "nameEN": "DeepSeek",
       "website": "https://www.deepseek.com",
       "endpoints": [
-        { "protocolType": "OPENAI", "baseUrl": "https://api.deepseek.com" },
-        { "protocolType": "ANTHROPIC", "baseUrl": "https://api.deepseek.com/anthropic" }
-      ],
-      "models": [
         {
-          "code": "deepseek-flash",
-          "name": "DeepSeek V4.1 Flash",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE"],
-          "outputModalities": ["TEXT"]
+          "protocolType": "OPENAI",
+          "baseUrl": "https://api.deepseek.com"
         },
         {
-          "code": "deepseek-v4-pro",
-          "name": "DeepSeek V4 Pro",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT"],
-          "outputModalities": ["TEXT"]
+          "protocolType": "ANTHROPIC",
+          "baseUrl": "https://api.deepseek.com/anthropic"
         }
       ]
     },
@@ -203,37 +60,13 @@
       "nameEN": "Zhipu AI",
       "website": "https://www.zhipuai.cn",
       "endpoints": [
-        { "protocolType": "OPENAI", "baseUrl": "https://open.bigmodel.cn/api/paas/v4" },
-        { "protocolType": "ANTHROPIC", "baseUrl": "https://open.bigmodel.cn/api/anthropic" }
-      ],
-      "models": [
         {
-          "code": "glm-5.3",
-          "name": "GLM-5.3",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT"],
-          "outputModalities": ["TEXT"]
+          "protocolType": "OPENAI",
+          "baseUrl": "https://open.bigmodel.cn/api/paas/v4"
         },
         {
-          "code": "glm-5.3-flash",
-          "name": "GLM-5.3-Flash",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE", "VIDEO"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "glm-5.2",
-          "name": "GLM-5.2",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "glm-image",
-          "name": "GLM-Image",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE"],
-          "outputModalities": ["IMAGE"]
+          "protocolType": "ANTHROPIC",
+          "baseUrl": "https://open.bigmodel.cn/api/anthropic"
         }
       ]
     },
@@ -243,36 +76,9 @@
       "nameEN": "Moonshot AI",
       "website": "https://www.moonshot.cn",
       "endpoints": [
-        { "protocolType": "OPENAI", "baseUrl": "https://api.moonshot.cn/v1" }
-      ],
-      "models": [
         {
-          "code": "kimi-k3",
-          "name": "Kimi K3",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE", "VIDEO"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "kimi-k2.7-code",
-          "name": "Kimi K2.7 Code",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "kimi-k2.7-code-highspeed",
-          "name": "Kimi K2.7 Code Highspeed",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "kimi-k2.6",
-          "name": "Kimi K2.6",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE"],
-          "outputModalities": ["TEXT"]
+          "protocolType": "OPENAI",
+          "baseUrl": "https://api.moonshot.cn/v1"
         }
       ]
     },
@@ -290,50 +96,6 @@
           "protocolType": "ANTHROPIC",
           "baseUrl": "https://dashscope.aliyuncs.com/apps/anthropic"
         }
-      ],
-      "models": [
-        {
-          "code": "qwen3.8-max",
-          "name": "Qwen3.8-Max",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE", "VIDEO"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "qwen3.7-plus",
-          "name": "Qwen3.7-Plus",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE", "VIDEO"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "qwen3.8-flash",
-          "name": "Qwen3.8-Flash",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE", "VIDEO"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "qwen3.5-omni-plus",
-          "name": "Qwen3.5-Omni-Plus",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE", "AUDIO", "VIDEO"],
-          "outputModalities": ["TEXT", "AUDIO"]
-        },
-        {
-          "code": "qwen3.5-omni-plus-realtime",
-          "name": "Qwen3.5-Omni-Plus-Realtime",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE", "AUDIO", "VIDEO"],
-          "outputModalities": ["TEXT", "AUDIO"]
-        },
-        {
-          "code": "qwen-image-3.0-pro",
-          "name": "Qwen-Image 3.0 Pro",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE"],
-          "outputModalities": ["IMAGE"]
-        }
       ]
     },
     {
@@ -342,22 +104,9 @@
       "nameEN": "xAI",
       "website": "https://x.ai",
       "endpoints": [
-        { "protocolType": "OPENAI", "baseUrl": "https://api.x.ai/v1" }
-      ],
-      "models": [
         {
-          "code": "grok-4.6",
-          "name": "Grok 4.6",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "grok-imagine-image-2.0",
-          "name": "Grok Imagine Image 2.0",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE"],
-          "outputModalities": ["IMAGE"]
+          "protocolType": "OPENAI",
+          "baseUrl": "https://api.x.ai/v1"
         }
       ]
     },
@@ -367,57 +116,9 @@
       "nameEN": "Mistral AI",
       "website": "https://mistral.ai",
       "endpoints": [
-        { "protocolType": "OPENAI", "baseUrl": "https://api.mistral.ai/v1" }
-      ],
-      "models": [
         {
-          "code": "mistral-medium-3-5",
-          "name": "Mistral Medium 3.5",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "mistral-small-2603",
-          "name": "Mistral Small 4",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "mistral-large-2512",
-          "name": "Mistral Large 3",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "ministral-14b-2512",
-          "name": "Ministral 3 14B",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "ministral-8b-2512",
-          "name": "Ministral 3 8B",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "ministral-3b-2512",
-          "name": "Ministral 3 3B",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "codestral-2508",
-          "name": "Codestral",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT"],
-          "outputModalities": ["TEXT"]
+          "protocolType": "OPENAI",
+          "baseUrl": "https://api.mistral.ai/v1"
         }
       ]
     },
@@ -427,44 +128,13 @@
       "nameEN": "MiniMax",
       "website": "https://www.minimax.io",
       "endpoints": [
-        { "protocolType": "OPENAI", "baseUrl": "https://api.minimax.cn/v1" },
-        { "protocolType": "ANTHROPIC", "baseUrl": "https://api.minimax.cn/anthropic" }
-      ],
-      "models": [
         {
-          "code": "MiniMax-M3",
-          "name": "MiniMax M3",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE", "VIDEO"],
-          "outputModalities": ["TEXT"]
+          "protocolType": "OPENAI",
+          "baseUrl": "https://api.minimax.cn/v1"
         },
         {
-          "code": "MiniMax-M2.7",
-          "name": "MiniMax M2.7",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "MiniMax-M2.7-highspeed",
-          "name": "MiniMax M2.7 Highspeed",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "image-01",
-          "name": "MiniMax Image 01",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE"],
-          "outputModalities": ["IMAGE"]
-        },
-        {
-          "code": "image-01-live",
-          "name": "MiniMax Image 01 Live",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT"],
-          "outputModalities": ["IMAGE"]
+          "protocolType": "ANTHROPIC",
+          "baseUrl": "https://api.minimax.cn/anthropic"
         }
       ]
     },
@@ -478,57 +148,6 @@
           "protocolType": "OPENAI",
           "baseUrl": "https://ark.cn-beijing.volces.com/api/v3"
         }
-      ],
-      "models": [
-        {
-          "code": "doubao-seedance-2-5-260628",
-          "name": "Doubao Seedance 2.5",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE", "AUDIO", "VIDEO"],
-          "outputModalities": ["VIDEO", "AUDIO"]
-        },
-        {
-          "code": "doubao-seedance-2-0-mini-260615",
-          "name": "Doubao Seedance 2.0 Mini",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE", "AUDIO", "VIDEO"],
-          "outputModalities": ["VIDEO", "AUDIO"]
-        },
-        {
-          "code": "doubao-seedream-5-0-pro-260628",
-          "name": "Doubao Seedream 5.0 Pro",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE"],
-          "outputModalities": ["IMAGE"]
-        },
-        {
-          "code": "doubao-seedream-5-0-260128",
-          "name": "Doubao Seedream 5.0",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE"],
-          "outputModalities": ["IMAGE"]
-        },
-        {
-          "code": "doubao-seedream-5-0-lite-260128",
-          "name": "Doubao Seedream 5.0 Lite",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE"],
-          "outputModalities": ["IMAGE"]
-        },
-        {
-          "code": "doubao-seedream-4-5-251128",
-          "name": "Doubao Seedream 4.5",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE"],
-          "outputModalities": ["IMAGE"]
-        },
-        {
-          "code": "doubao-seedream-4-0-250828",
-          "name": "Doubao Seedream 4.0",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE"],
-          "outputModalities": ["IMAGE"]
-        }
       ]
     },
     {
@@ -537,50 +156,9 @@
       "nameEN": "Baidu",
       "website": "https://cloud.baidu.com/product-s/qianfan_home",
       "endpoints": [
-        { "protocolType": "OPENAI", "baseUrl": "https://qianfan.baidubce.com/v2" }
-      ],
-      "models": [
         {
-          "code": "ERNIE-5.1",
-          "name": "ERNIE 5.1",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "ERNIE-5.0",
-          "name": "ERNIE 5.0",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE", "AUDIO", "VIDEO"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "ERNIE-4.5-Turbo-32K",
-          "name": "ERNIE 4.5 Turbo 32K",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "ERNIE-4.5-Turbo-128K-Preview",
-          "name": "ERNIE 4.5 Turbo 128K Preview",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "ERNIE-4.5-Turbo-VL",
-          "name": "ERNIE 4.5 Turbo VL",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "musesteamer-air-image",
-          "name": "MuseSteamer Air Image",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT"],
-          "outputModalities": ["IMAGE"]
+          "protocolType": "OPENAI",
+          "baseUrl": "https://qianfan.baidubce.com/v2"
         }
       ]
     },
@@ -593,57 +171,6 @@
         {
           "protocolType": "OPENAI",
           "baseUrl": "https://api.hunyuan.cloud.tencent.com/v1"
-        }
-      ],
-      "models": [
-        {
-          "code": "hunyuan-a13b",
-          "name": "Hunyuan A13B",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "hunyuan-vision-1.5-instruct",
-          "name": "Tencent HY Vision 1.5 Instruct",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "hunyuan-t1-vision-20250916",
-          "name": "Hunyuan T1 Vision 2025-09-16",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "IMAGE"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "hunyuan-turbos-vision-video",
-          "name": "Hunyuan TurboS Vision Video",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT", "VIDEO"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "hunyuan-translation",
-          "name": "Hunyuan Translation",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "hunyuan-translation-lite",
-          "name": "Hunyuan Translation Lite",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT"],
-          "outputModalities": ["TEXT"]
-        },
-        {
-          "code": "hunyuan-role-latest",
-          "name": "Hunyuan Role Latest",
-          "modelType": "CHAT",
-          "inputModalities": ["TEXT"],
-          "outputModalities": ["TEXT"]
         }
       ]
     }

@@ -1,4 +1,4 @@
-// Package bootstrap 保存管理员可显式安装的官方服务商和模型目录。
+// Package bootstrap 保存管理员可显式安装的官方服务商元数据。
 package bootstrap
 
 import (
@@ -16,7 +16,6 @@ type Provider struct {
 	NameEN    string     `json:"nameEN"`
 	Website   string     `json:"website"`
 	Endpoints []Endpoint `json:"endpoints"`
-	Models    []Model    `json:"models"`
 }
 
 func (p Provider) LocalizedName(locale string) string {
@@ -29,14 +28,6 @@ func (p Provider) LocalizedName(locale string) string {
 type Endpoint struct {
 	ProtocolType string `json:"protocolType"`
 	BaseURL      string `json:"baseUrl"`
-}
-
-type Model struct {
-	Code             string   `json:"code"`
-	Name             string   `json:"name"`
-	ModelType        string   `json:"modelType"`
-	InputModalities  []string `json:"inputModalities"`
-	OutputModalities []string `json:"outputModalities"`
 }
 
 type providerCatalog struct {
@@ -81,57 +72,11 @@ func mustLoadProviderCatalog(data []byte) (string, []Provider) {
 				panic(fmt.Sprintf("invalid endpoint for built-in provider %q", provider.Code))
 			}
 		}
-		modelCodes := make(map[string]struct{}, len(provider.Models))
-		for _, model := range provider.Models {
-			if model.Code == "" || model.Name == "" || model.ModelType != "CHAT" ||
-				!validCatalogModalities(model.InputModalities) || !validCatalogModalities(model.OutputModalities) {
-				panic(fmt.Sprintf("invalid model for built-in provider %q", provider.Code))
-			}
-			if _, duplicate := modelCodes[model.Code]; duplicate {
-				panic(fmt.Sprintf("duplicate model %q for built-in provider %q", model.Code, provider.Code))
-			}
-			modelCodes[model.Code] = struct{}{}
-		}
 	}
 	return catalog.CatalogVersion, catalog.Providers
 }
 
-func validCatalogModalities(values []string) bool {
-	if len(values) == 0 || len(values) > 4 {
-		return false
-	}
-	seen := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		switch value {
-		case "TEXT", "IMAGE", "AUDIO", "VIDEO":
-		default:
-			return false
-		}
-		if _, duplicate := seen[value]; duplicate {
-			return false
-		}
-		seen[value] = struct{}{}
-	}
-	return true
-}
-
-// OfficialProviderModels 返回厂商内置模型目录的独立副本。
-func OfficialProviderModels(providerCode string) []Model {
-	for _, provider := range providerTemplates {
-		if provider.Code != providerCode {
-			continue
-		}
-		result := append([]Model(nil), provider.Models...)
-		for index := range result {
-			result[index].InputModalities = append([]string(nil), provider.Models[index].InputModalities...)
-			result[index].OutputModalities = append([]string(nil), provider.Models[index].OutputModalities...)
-		}
-		return result
-	}
-	return nil
-}
-
-// OfficialProviderCatalogVersion 返回应用内置厂商和模型目录的内容版本。
+// OfficialProviderCatalogVersion 返回应用内置厂商目录的内容版本。
 func OfficialProviderCatalogVersion() string {
 	return providerCatalogVersion
 }
@@ -142,11 +87,6 @@ func OfficialProviderTemplates() []Provider {
 	for index, template := range providerTemplates {
 		result[index] = template
 		result[index].Endpoints = append([]Endpoint(nil), template.Endpoints...)
-		result[index].Models = append([]Model(nil), template.Models...)
-		for modelIndex := range result[index].Models {
-			result[index].Models[modelIndex].InputModalities = append([]string(nil), template.Models[modelIndex].InputModalities...)
-			result[index].Models[modelIndex].OutputModalities = append([]string(nil), template.Models[modelIndex].OutputModalities...)
-		}
 	}
 	return result
 }
