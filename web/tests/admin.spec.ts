@@ -1870,6 +1870,71 @@ test('服务商没有可用模型映射时隐藏连接测试入口', async ({ pa
   ).toHaveCount(0)
 })
 
+test('服务商启用开关分别提示缺少模型映射和认证凭据', async ({ page }) => {
+  const state = await fixture(page)
+  const disabledProvider = (id: string, name: string) => ({
+    ...structuredClone(state.providers[0]),
+    id,
+    name,
+    code: `provider-${id}`,
+    status: 'DISABLED',
+  })
+  state.providers.push(
+    disabledProvider('82', '模型凭据均未配置'),
+    disabledProvider('83', '仅配置凭据'),
+    disabledProvider('84', '仅配置模型'),
+  )
+  state.providerMappings.set('82', [])
+  state.providerMappings.set('83', [])
+  state.providerMappings.set('84', [
+    {
+      id: '94',
+      providerId: '84',
+      modelId: '71',
+      upstreamModelCode: 'deepseek-v4-flash',
+      priority: 100,
+      createdAt: stamp,
+      updatedAt: stamp,
+    },
+  ])
+  state.resources.push({
+    id: '89',
+    name: '仅凭据 API Key',
+    providerId: '83',
+    authType: 'API_KEY',
+    priority: 100,
+    status: 'ACTIVE',
+    runtimeStatus: 'HEALTHY',
+    quotaStatus: 'UNKNOWN',
+    blockedReason: null,
+    blockedAt: null,
+    lastErrorAt: null,
+    lastHttpStatus: null,
+    lastErrorCode: null,
+    credentialConfigured: true,
+    createdAt: stamp,
+    updatedAt: stamp,
+  })
+
+  await signIn(page, 'home')
+  await page.getByRole('link', { name: '服务商', exact: true }).click()
+
+  const switchFor = (name: string) =>
+    page
+      .getByRole('row')
+      .filter({ hasText: name })
+      .getByRole('switch', { name: `${name}的启用状态` })
+  await expect(switchFor('模型凭据均未配置')).toBeDisabled()
+  await expect(switchFor('模型凭据均未配置')).toHaveAttribute(
+    'title',
+    '请先配置模型和凭证。',
+  )
+  await expect(switchFor('仅配置凭据')).toBeDisabled()
+  await expect(switchFor('仅配置凭据')).toHaveAttribute('title', '请先配置模型。')
+  await expect(switchFor('仅配置模型')).toBeDisabled()
+  await expect(switchFor('仅配置模型')).toHaveAttribute('title', '请先配置凭证。')
+})
+
 test('服务商操作引导依次高亮配置入口', async ({ page }) => {
   const state = await fixture(page)
   state.providers[0].website = 'https://www.deepseek.com'
@@ -2406,7 +2471,7 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   const createdStatus = row.getByRole('switch', { name: '自定义百炼的启用状态' })
   await expect(createdStatus).toHaveText('')
   await expect(createdStatus).toBeDisabled()
-  await expect(createdStatus).toHaveAttribute('title', '请先配置服务商认证凭据，再启用服务商。')
+  await expect(createdStatus).toHaveAttribute('title', '请先配置凭证。')
   const missingCredential = row.getByRole('button', {
     name: '管理 自定义百炼 的认证凭据',
     exact: true,

@@ -24,6 +24,7 @@ type providerStatusWriter struct {
 	Writer
 	provider             Provider
 	mappings             []ProviderMapping
+	models               []Model
 	credentialConfigured bool
 	statusChanges        []string
 	audits               []Audit
@@ -37,6 +38,9 @@ func (w *providerStatusWriter) ProviderCredentialConfigured(context.Context, int
 }
 func (w *providerStatusWriter) ProviderMappings(context.Context, int64) ([]ProviderMapping, error) {
 	return append([]ProviderMapping(nil), w.mappings...), nil
+}
+func (w *providerStatusWriter) Models(context.Context, Page, string) ([]Model, error) {
+	return append([]Model(nil), w.models...), nil
 }
 func (w *providerStatusWriter) SetProviderStatus(_ context.Context, _ int64, status string) error {
 	w.statusChanges = append(w.statusChanges, status)
@@ -198,6 +202,7 @@ func TestSetProviderStatusRequiresConfiguredCredentialWhenEnabling(t *testing.T)
 	writer := &providerStatusWriter{
 		provider: Provider{ID: 8, Name: "待配置服务商", Status: "DISABLED"},
 		mappings: []ProviderMapping{{ID: 10, ProviderID: 8, ModelID: 1}},
+		models:   []Model{{ID: 1, Status: "ACTIVE"}},
 	}
 	service := New(providerStatusStore{writer: writer}, nil, nil, nil)
 
@@ -218,19 +223,37 @@ func TestSetProviderStatusRequiresConfiguredCredentialWhenEnabling(t *testing.T)
 	}
 }
 
-func TestSetProviderStatusRequiresModelMappingWhenEnabling(t *testing.T) {
-	writer := &providerStatusWriter{
-		provider:             Provider{ID: 8, Name: "待配置服务商", Status: "DISABLED"},
-		credentialConfigured: true,
+func TestSetProviderStatusRequiresActiveModelMappingWhenEnabling(t *testing.T) {
+	tests := []struct {
+		name     string
+		mappings []ProviderMapping
+		models   []Model
+	}{
+		{name: "没有映射"},
+		{
+			name:     "映射模型已停用",
+			mappings: []ProviderMapping{{ID: 10, ProviderID: 8, ModelID: 1}},
+			models:   []Model{{ID: 1, Status: "DISABLED"}},
+		},
 	}
-	service := New(providerStatusStore{writer: writer}, nil, nil, nil)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			writer := &providerStatusWriter{
+				provider:             Provider{ID: 8, Name: "待配置服务商", Status: "DISABLED"},
+				mappings:             test.mappings,
+				models:               test.models,
+				credentialConfigured: true,
+			}
+			service := New(providerStatusStore{writer: writer}, nil, nil, nil)
 
-	err := service.SetProviderStatus(context.Background(), admin.Identity{}, 8, "ACTIVE", appsec.RequestMeta{})
-	if !errors.Is(err, ErrProviderModelMappingRequired) {
-		t.Fatalf("error=%v; want provider model mapping required", err)
-	}
-	if len(writer.statusChanges) != 0 || len(writer.audits) != 0 {
-		t.Fatalf("rejected enable changed state: statuses=%v audits=%v", writer.statusChanges, writer.audits)
+			err := service.SetProviderStatus(context.Background(), admin.Identity{}, 8, "ACTIVE", appsec.RequestMeta{})
+			if !errors.Is(err, ErrProviderModelMappingRequired) {
+				t.Fatalf("error=%v; want provider model mapping required", err)
+			}
+			if len(writer.statusChanges) != 0 || len(writer.audits) != 0 {
+				t.Fatalf("rejected enable changed state: statuses=%v audits=%v", writer.statusChanges, writer.audits)
+			}
+		})
 	}
 }
 

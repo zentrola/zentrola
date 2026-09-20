@@ -488,7 +488,9 @@ export default {
     editCredentialFor: 'Manage credentials for {name}',
     credentialHint:
       'Add an API key or supported subscription authentication for “{name}”. Complete credentials are never shown after saving.',
-    credentialRequiredBeforeEnable: 'Configure provider credentials before enabling the provider.',
+    credentialRequiredBeforeEnable: 'Configure credentials first.',
+    modelRequiredBeforeEnable: 'Configure a model first.',
+    configurationRequiredBeforeEnable: 'Configure a model and credentials first.',
     testConnectionFor: 'Test connection for {name}',
     syncModelsFor: 'Sync official models for {name}',
     connectionTitle: 'Basic settings',
@@ -862,6 +864,6 @@ export default {
     REQUEST_CANCELLED: 'The request was cancelled.',
     RESOURCE_CHANGED: 'The provider credential changed during testing. Test it again.',
     PROVIDER_MODEL_MAPPING_REQUIRED:
-      'Configure at least one model mapping for this provider first.',
+      'Configure at least one active model mapping for this provider first.',
   },
 }
