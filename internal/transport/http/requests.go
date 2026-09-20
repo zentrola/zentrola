@@ -7,6 +7,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/zentrola/zentrola/internal/domain/admin"
 )
 
 type missingRequiredParameterError struct {
@@ -109,10 +111,6 @@ func validRequestText(value string, maxBytes int, required bool) bool {
 		!strings.ContainsRune(value, 0) && strings.IndexFunc(value, unicode.IsControl) < 0
 }
 
-func validPassword(value string, minCharacters int) bool {
-	return utf8.RuneCountInString(value) >= minCharacters && len(value) <= 72 && utf8.ValidString(value) && !strings.ContainsRune(value, 0)
-}
-
 func validRequestIDs(values []string) bool {
 	seen := make(map[int64]struct{}, len(values))
 	for _, value := range values {
@@ -142,13 +140,13 @@ func validCredential(value string) bool {
 
 type ChangePasswordRequest struct {
 	CurrentPassword string `json:"currentPassword" binding:"required"`
-	// NewPassword 至少 6 个字符且不超过 72 个 UTF-8 字节，不能包含空字符，也不能与当前密码相同。
+	// NewPassword 为 6～30 个字符，只允许可见的 ASCII 数字、英文字母和特殊符号，且不能与当前密码相同。
 	NewPassword string `json:"newPassword" binding:"required"`
 }
 
 func (*ChangePasswordRequest) Normalize() {}
 func (r ChangePasswordRequest) Valid() bool {
-	return validPassword(r.CurrentPassword, 1) && r.CurrentPassword != r.NewPassword && validPassword(r.NewPassword, 6)
+	return admin.ValidPasswordInput(r.CurrentPassword) && r.CurrentPassword != r.NewPassword && admin.ValidNewPassword(r.NewPassword)
 }
 
 type LoginRequest struct {
@@ -158,7 +156,7 @@ type LoginRequest struct {
 
 func (r *LoginRequest) Normalize() { r.Username = strings.TrimSpace(r.Username) }
 func (r LoginRequest) Valid() bool {
-	return validRequestText(r.Username, 64, true) && validPassword(r.Password, 1)
+	return validRequestText(r.Username, 64, true) && admin.ValidPasswordInput(r.Password)
 }
 
 type CreateKeyRequest struct {

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"time"
 
@@ -51,6 +52,7 @@ type Adapter struct {
 func New() *Adapter {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil
+	transport.DialContext = provider.PublicDialContext(&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second})
 	return &Adapter{
 		client:        &http.Client{Transport: transport, Timeout: 20 * time.Second},
 		usageEndpoint: defaultUsageEndpoint,

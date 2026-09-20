@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -182,7 +183,8 @@ func TestConnectionTimeoutCancellationAndRedirect(t *testing.T) {
 	defer slow.Close()
 	targetURL, _ := url.Parse(slow.URL)
 	tester := NewConnectionTester()
-	original := tester.client.Transport
+	original := tester.client.Transport.(*http.Transport).Clone()
+	original.DialContext = (&net.Dialer{Timeout: 5 * time.Second}).DialContext
 	slowMode := false
 	tester.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		copy := r.Clone(r.Context())

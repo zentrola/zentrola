@@ -4,10 +4,10 @@ import "testing"
 
 func TestGetProviderCapabilities(t *testing.T) {
 	tests := []struct {
-		name            string
-		baseURL         string
-		wantAdvisor     bool
-		description     string
+		name        string
+		baseURL     string
+		wantAdvisor bool
+		description string
 	}{
 		{
 			name:        "anthropic_official",

@@ -28,7 +28,7 @@ func NewGatewayClient(headerTimeout time.Duration, loggers ...*slog.Logger) *Gat
 	t := http.DefaultTransport.(*http.Transport).Clone()
 	t.Proxy = nil
 	t.DisableCompression = true
-	t.DialContext = (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext
+	t.DialContext = provider.PublicDialContext(&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second})
 	t.TLSHandshakeTimeout = 10 * time.Second
 	t.ResponseHeaderTimeout = headerTimeout
 	logger := slog.Default()

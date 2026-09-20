@@ -721,7 +721,7 @@
                 }
             },
             "post": {
-                "description": "仅未初始化时可用；账号 1～64 bytes，密码至少 6 个字符且不超过 72 bytes；创建成功后使用登录接口。已有管理员时返回 ALREADY_INITIALIZED。",
+                "description": "仅未初始化时可用；账号 1～64 bytes，密码为 6～30 个字符且只允许数字、英文字母和特殊符号；创建成功后使用登录接口。已有管理员时返回 ALREADY_INITIALIZED。",
                 "consumes": [
                     "application/json"
                 ],
@@ -6248,7 +6248,7 @@
                     "type": "string"
                 },
                 "newPassword": {
-                    "description": "NewPassword 至少 6 个字符且不超过 72 个 UTF-8 字节，不能包含空字符，也不能与当前密码相同。",
+                    "description": "NewPassword 为 6～30 个字符，只允许可见的 ASCII 数字、英文字母和特殊符号，且不能与当前密码相同。",
                     "type": "string"
                 }
             }

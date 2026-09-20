@@ -47,7 +47,7 @@ test('修改成功后清除会话并提示使用新密码登录', async ({ page 
   await expect(page.getByLabel('密码', { exact: true })).toHaveValue('')
 })
 
-test('校验必填、字符与字节长度、相同密码与两次输入一致', async ({ page }) => {
+test('校验必填、密码字符数和字符集、相同密码与两次输入一致', async ({ page }) => {
   const state = await fixture(page)
   const submit = page.getByRole('button', { name: '确认修改', exact: true })
   await submit.click()
@@ -55,7 +55,8 @@ test('校验必填、字符与字节长度、相同密码与两次输入一致',
   await page.getByLabel('当前密码', { exact: true }).fill('original-password')
   for (const [value, message] of [
     ['short', '密码过短'],
-    ['密'.repeat(25), '密码过长'],
+    ['a'.repeat(31), '密码过长'],
+    ['密码123456', '只能使用数字、英文字母和特殊符号'],
     ['original-password', '新密码不能与当前密码相同'],
   ]) {
     await page.getByLabel('新密码', { exact: true }).fill(value!)
