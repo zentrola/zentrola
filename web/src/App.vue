@@ -111,7 +111,6 @@ const touched = ref<Record<SetupField, boolean>>({
 })
 const setupErrors = computed(() => {
   const usernameBytes = new TextEncoder().encode(username.value).length
-  const passwordBytes = new TextEncoder().encode(password.value).length
   const passwordCharacters = Array.from(password.value).length
   return {
     username: !username.value
@@ -125,12 +124,12 @@ const setupErrors = computed(() => {
             : '',
     password: !password.value
       ? t('setup.passwordRequired')
-      : password.value.includes('\0')
-        ? t('setup.passwordControl')
-        : passwordCharacters < 6
-          ? t('setup.passwordShort')
-          : passwordBytes > 72
-            ? t('setup.passwordLong')
+      : passwordCharacters < 6
+        ? t('setup.passwordShort')
+        : passwordCharacters > 30
+          ? t('setup.passwordLong')
+          : !/^[\x21-\x7e]+$/.test(password.value)
+            ? t('setup.passwordCharacters')
             : '',
     confirmPassword: !confirmPassword.value
       ? t('setup.confirmRequired')

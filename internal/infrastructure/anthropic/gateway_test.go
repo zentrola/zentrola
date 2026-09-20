@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -103,7 +104,8 @@ func TestGatewayClientTimeoutAndRedirect(t *testing.T) {
 	target, _ := url.Parse(server.URL)
 	client := NewGatewayClient(30 * time.Millisecond)
 	defer client.CloseIdleConnections()
-	transport := client.client.Transport
+	transport := client.client.Transport.(*http.Transport).Clone()
+	transport.DialContext = (&net.Dialer{Timeout: time.Second}).DialContext
 	client.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		copy := r.Clone(r.Context())
 		copy.URL.Scheme = target.Scheme

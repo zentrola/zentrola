@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,6 +14,21 @@ import (
 	"github.com/zentrola/zentrola/internal/domain/catalog"
 	"github.com/zentrola/zentrola/internal/domain/usage"
 )
+
+type blockingReadCloser struct {
+	closed chan struct{}
+	once   sync.Once
+}
+
+func (b *blockingReadCloser) Read([]byte) (int, error) {
+	<-b.closed
+	return 0, io.ErrClosedPipe
+}
+
+func (b *blockingReadCloser) Close() error {
+	b.once.Do(func() { close(b.closed) })
+	return nil
+}
 
 type failoverStore struct {
 	routes        []Route
@@ -358,6 +375,37 @@ func TestForwardDoesNotSwitchOnClientRequestError(t *testing.T) {
 		t.Fatalf("status=%v calls=%d err=%v", got, calls, err)
 	}
 	got.Body.Close()
+}
+
+func TestReadResponsePrefixTimesOutAndClosesStalledBody(t *testing.T) {
+	body := &blockingReadCloser{closed: make(chan struct{})}
+	started := time.Now()
+	prefix, replay, err := readResponsePrefix(body, 64<<10, 20*time.Millisecond)
+	if !errors.Is(err, errResponseInspectionTimeout) || len(prefix) != 0 || replay != http.NoBody {
+		t.Fatalf("prefix=%q body=%T err=%v", prefix, replay, err)
+	}
+	if time.Since(started) > time.Second {
+		t.Fatal("stalled response inspection did not stop promptly")
+	}
+	select {
+	case <-body.closed:
+	default:
+		t.Fatal("stalled response body was not closed")
+	}
+}
+
+func TestRetryAfterAcceptsDeltaSecondsAndHTTPDate(t *testing.T) {
+	now := time.Date(2026, time.September, 20, 3, 4, 5, 0, time.UTC)
+	if got := retryAfterAt(map[string][]string{"Retry-After": {"12"}}, now); got != 12*time.Second {
+		t.Fatalf("delta-seconds=%v", got)
+	}
+	date := now.Add(45 * time.Second).Format(http.TimeFormat)
+	if got := retryAfterAt(map[string][]string{"Retry-After": {date}}, now); got != 45*time.Second {
+		t.Fatalf("http-date=%v", got)
+	}
+	if got := retryAfterAt(map[string][]string{"Retry-After": {now.Add(2 * time.Hour).Format(http.TimeFormat)}}, now); got != defaultRouteCooldown {
+		t.Fatalf("unbounded retry-after=%v", got)
+	}
 }
 
 func TestForwardBlocksUnrecoverableCredentialAndUsesNextProvider(t *testing.T) {

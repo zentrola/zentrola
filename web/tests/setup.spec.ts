@@ -52,7 +52,7 @@ test('空系统创建首位管理员，校验确认密码后切换为登录', as
   await expect(page.getByRole('button', { name: '创建管理员', exact: true })).toHaveCount(0)
 })
 
-test('初始化按字段校验，错误修正后消失，并按字符与 UTF-8 字节限制提交', async ({ page }) => {
+test('初始化按字段校验，错误修正后消失，并限制密码字符数和字符集', async ({ page }) => {
   let setupCalls = 0
   await page.route('**/api/v1/auth/setup', async (route) => {
     if (route.request().method() === 'GET')
@@ -60,7 +60,7 @@ test('初始化按字段校验，错误修正后消失，并按字符与 UTF-8 �
     setupCalls++
     expect(route.request().postDataJSON()).toEqual({
       username: '中'.repeat(21) + 'a',
-      password: '密'.repeat(24),
+      password: 'A1!'.repeat(10),
     })
     return route.fulfill({ status: 201, json: { code: 'OK', data: { initialized: true } } })
   })
@@ -87,20 +87,22 @@ test('初始化按字段校验，错误修正后消失，并按字符与 UTF-8 �
   await username.fill('中'.repeat(21) + 'a')
   await expect(username).toHaveAttribute('aria-invalid', 'false')
 
-  await password.fill('密'.repeat(5))
+  await password.fill('abc12')
   await expect(password).toHaveAccessibleDescription(/密码过短/)
-  await password.fill('密'.repeat(6))
+  await password.fill('abc123')
   await expect(password).toHaveAttribute('aria-invalid', 'false')
-  await confirm.fill('密'.repeat(6))
+  await confirm.fill('abc123')
   await expect(confirm).toHaveAttribute('aria-invalid', 'false')
-  await password.fill('密'.repeat(25))
+  await password.fill('a'.repeat(31))
   await expect(password).toHaveAccessibleDescription(/密码过长/)
   await expect(confirm).toHaveAccessibleDescription('两次输入的密码不一致。')
   await submit.click()
   await expect(password).toBeFocused()
   expect(setupCalls).toBe(0)
-  await password.fill('密'.repeat(24))
-  await confirm.fill('密'.repeat(24))
+  await password.fill('密码123456')
+  await expect(password).toHaveAccessibleDescription(/只能使用数字、英文字母和特殊符号/)
+  await password.fill('A1!'.repeat(10))
+  await confirm.fill('A1!'.repeat(10))
   await expect(page.getByRole('alert')).toHaveCount(0)
   await submit.click()
   await expect(page.getByRole('heading', { name: '欢迎回来' })).toBeVisible()

@@ -15,7 +15,12 @@ import (
 	"github.com/zentrola/zentrola/internal/domain/usage"
 )
 
-const defaultRouteCooldown = time.Minute
+const (
+	defaultRouteCooldown      = time.Minute
+	responseInspectionTimeout = 2 * time.Second
+)
+
+var errResponseInspectionTimeout = errors.New("upstream error response inspection timed out")
 
 func (s *Service) routes(ctx context.Context, identity appsec.PrincipalIdentity, model, protocol string) ([]Route, error) {
 	if store, ok := s.store.(CandidateStore); ok {
@@ -307,8 +312,11 @@ func inspectResponse(response *Response) responseDecision {
 	if status < 400 {
 		return responseDecision{}
 	}
-	prefix, body := readResponsePrefix(response.Body, 64<<10)
+	prefix, body, readErr := readResponsePrefix(response.Body, 64<<10, responseInspectionTimeout)
 	response.Body = body
+	if readErr != nil {
+		return responseDecision{retry: true, cooldown: defaultRouteCooldown}
+	}
 	lower := strings.ToLower(string(prefix))
 	block := func(reason, code string) responseDecision {
 		return responseDecision{retry: true, permanent: &ResourceBlock{Reason: reason, ErrorCode: code, HTTPStatus: int32(status)}, errorCode: code}
@@ -342,10 +350,20 @@ func responseErrorType(response *Response) string {
 }
 
 func retryAfter(headers map[string][]string) time.Duration {
+	return retryAfterAt(headers, time.Now().UTC())
+}
+
+func retryAfterAt(headers map[string][]string, now time.Time) time.Duration {
 	raw := strings.TrimSpace(http.Header(headers).Get("Retry-After"))
 	seconds, err := strconv.Atoi(raw)
 	if err == nil && seconds > 0 && seconds <= 3600 {
 		return time.Duration(seconds) * time.Second
+	}
+	if retryAt, parseErr := http.ParseTime(raw); parseErr == nil {
+		delay := retryAt.Sub(now)
+		if delay > 0 && delay <= time.Hour {
+			return delay
+		}
 	}
 	return defaultRouteCooldown
 }
@@ -366,10 +384,24 @@ type prefixedBody struct {
 
 func (body *prefixedBody) Close() error { return body.closer.Close() }
 
-func readResponsePrefix(source io.ReadCloser, limit int64) ([]byte, io.ReadCloser) {
-	prefix, err := io.ReadAll(io.LimitReader(source, limit))
-	if err != nil {
-		return nil, source
+type prefixReadResult struct {
+	prefix []byte
+	err    error
+}
+
+func readResponsePrefix(source io.ReadCloser, limit int64, timeout time.Duration) ([]byte, io.ReadCloser, error) {
+	result := make(chan prefixReadResult, 1)
+	go func() {
+		prefix, err := io.ReadAll(io.LimitReader(source, limit))
+		result <- prefixReadResult{prefix: prefix, err: err}
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case read := <-result:
+		return read.prefix, &prefixedBody{Reader: io.MultiReader(bytes.NewReader(read.prefix), source), closer: source}, read.err
+	case <-timer.C:
+		_ = source.Close()
+		return nil, http.NoBody, errResponseInspectionTimeout
 	}
-	return prefix, &prefixedBody{Reader: io.MultiReader(bytes.NewReader(prefix), source), closer: source}
 }

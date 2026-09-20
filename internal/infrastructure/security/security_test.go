@@ -11,6 +11,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/zentrola/zentrola/internal/domain/admin"
 	"github.com/zentrola/zentrola/internal/domain/catalog"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func TestLoadMasterKey(t *testing.T) {
@@ -183,17 +184,27 @@ func TestPasswordHash(t *testing.T) {
 	if hash == second {
 		t.Fatal("password salt was reused")
 	}
-	if _, err := p.Hash(strings.Repeat("a", 73)); err == nil {
-		t.Fatal("bcrypt length limit ignored")
+	if _, err := p.Hash(strings.Repeat("a", 31)); err == nil {
+		t.Fatal("password character limit ignored")
 	}
-	for _, password := range []string{"12345", "密码五位啊"} {
+	for _, password := range []string{"12345", "密码长度六位", "abc 123"} {
 		if _, err := p.Hash(password); err == nil {
 			t.Fatalf("short password accepted: %q", password)
 		}
 	}
-	for _, password := range []string{"123456", "密码长度六位"} {
+	for _, password := range []string{"123456", "Abc123!"} {
 		if _, err := p.Hash(password); err != nil {
 			t.Fatalf("six-character password rejected: %q: %v", password, err)
 		}
+	}
+	maximum := strings.Repeat("a", 30)
+	maximumHash, err := p.Hash(maximum)
+	if err != nil || !p.Verify(maximumHash, maximum) {
+		t.Fatal("30-character password did not round trip", err)
+	}
+	legacyPassword := "旧密码仍然可以登录"
+	legacyHash, err := bcrypt.GenerateFromPassword([]byte(legacyPassword), 4)
+	if err != nil || !p.Verify(string(legacyHash), legacyPassword) {
+		t.Fatal("legacy password hash compatibility failed", err)
 	}
 }

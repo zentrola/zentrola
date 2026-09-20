@@ -28,7 +28,7 @@ func TestClientWithProxyIsolatedTransport(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer cleanup()
-	transport := client.Transport.(*http.Transport)
+	transport := client.Transport.(*publicTargetTransport).transport
 	request, _ := http.NewRequest(http.MethodGet, "https://api.example.com", nil)
 	proxyURL, err := transport.Proxy(request)
 	if err != nil || proxyURL.String() != "http://user:password@proxy.example.com:8080" {
@@ -53,6 +53,14 @@ func TestClientWithProxyIsolatedTransport(t *testing.T) {
 	headers, ok := entry["proxy_headers"].(map[string]any)
 	if !ok || len(headers) != 1 || headers["X-Proxy-Token"] != "secret" {
 		t.Fatalf("unexpected proxy headers in log: %v", entry["proxy_headers"])
+	}
+}
+
+func TestProxyTransportRejectsPrivateProviderTarget(t *testing.T) {
+	transport := &publicTargetTransport{transport: http.DefaultTransport.(*http.Transport).Clone()}
+	request, _ := http.NewRequest(http.MethodGet, "https://127.0.0.1/private", nil)
+	if _, err := transport.RoundTrip(request); err == nil {
+		t.Fatal("private provider target was accepted through proxy transport")
 	}
 }
 

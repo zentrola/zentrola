@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -168,7 +169,8 @@ func TestRedirectAndTimeout(t *testing.T) {
 	target, _ := url.Parse(server.URL)
 	c := NewGatewayClient(30 * time.Millisecond)
 	defer c.CloseIdleConnections()
-	transport := c.client.Transport
+	transport := c.client.Transport.(*http.Transport).Clone()
+	transport.DialContext = (&net.Dialer{Timeout: time.Second}).DialContext
 	c.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		copy := r.Clone(r.Context())
 		copy.URL.Scheme = target.Scheme

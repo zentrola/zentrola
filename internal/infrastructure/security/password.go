@@ -5,8 +5,9 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+
+	"github.com/zentrola/zentrola/internal/domain/admin"
 	"golang.org/x/crypto/bcrypt"
-	"unicode/utf8"
 )
 
 type Passwords struct {
@@ -27,8 +28,8 @@ func NewPasswords(cost int) (*Passwords, error) {
 	return &Passwords{cost: cost, dummy: string(dummy)}, nil
 }
 func (p *Passwords) Hash(password string) (string, error) {
-	if !utf8.ValidString(password) || utf8.RuneCountInString(password) < 6 || len(password) > 72 {
-		return "", errors.New("password must contain at least 6 characters and at most 72 bytes")
+	if !admin.ValidNewPassword(password) {
+		return "", errors.New("password must contain 6 to 30 visible ASCII characters")
 	}
 	value, err := bcrypt.GenerateFromPassword([]byte(password), p.cost)
 	if err != nil {
@@ -40,8 +41,5 @@ func (p *Passwords) Verify(hash, password string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
 }
 func (p *Passwords) DummyVerify(password string) {
-	if len(password) > 72 {
-		password = "invalid input"
-	}
 	_ = p.Verify(p.dummy, password)
 }

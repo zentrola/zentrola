@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/zentrola/zentrola/internal/domain/catalog"
 )
@@ -23,6 +25,22 @@ type ProxyRequestLog struct {
 }
 
 var redactProviderLogSecrets atomic.Bool
+
+type publicTargetTransport struct {
+	transport *http.Transport
+}
+
+func (t *publicTargetTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	if request.URL == nil || request.URL.Hostname() == "" {
+		return nil, errors.New("invalid provider endpoint")
+	}
+	if _, err := resolvePublicAddresses(request.Context(), net.DefaultResolver, request.URL.Hostname()); err != nil {
+		return nil, err
+	}
+	return t.transport.RoundTrip(request)
+}
+
+func (t *publicTargetTransport) CloseIdleConnections() { t.transport.CloseIdleConnections() }
 
 func init() {
 	// 未显式配置运行环境时采用生产环境策略，避免测试工具或独立调用意外输出凭据。
@@ -120,12 +138,15 @@ func ClientWithProxy(ctx context.Context, base *http.Client, proxy *catalog.Outb
 	}
 	transport := baseTransport.Clone()
 	transport.Proxy = http.ProxyURL(proxyURL)
+	// 代理地址是管理员显式配置的网络出口，允许使用内网代理；实际 Provider
+	// 目标仍由 publicTargetTransport 在每次请求前完成公网 DNS 校验。
+	transport.DialContext = (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext
 	transport.ProxyConnectHeader = make(http.Header, len(proxy.Headers))
 	for key, value := range proxy.Headers {
 		transport.ProxyConnectHeader.Set(key, value)
 	}
 	client := *base
-	client.Transport = transport
+	client.Transport = &publicTargetTransport{transport: transport}
 	logProxyRequest(ctx, proxyURL, proxy.Headers, details)
 	return &client, transport.CloseIdleConnections, nil
 }

@@ -69,7 +69,7 @@ type ConnectionTester struct {
 func NewConnectionTester() *ConnectionTester {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil
-	transport.DialContext = (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}).DialContext
+	transport.DialContext = provider.PublicDialContext(&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second})
 	transport.TLSHandshakeTimeout = 5 * time.Second
 	transport.ResponseHeaderTimeout = 10 * time.Second
 	standardAdapter := standardConnectionProbeAdapter{}
