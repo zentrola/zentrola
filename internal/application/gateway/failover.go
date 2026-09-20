@@ -143,9 +143,20 @@ func (s *Service) forwardCandidates(ctx context.Context, identity appsec.Princip
 		}
 		selectedRoute := route
 		response.route = &selectedRoute
+		s.recordActiveRoute(ctx, selectedRoute)
 		return response, nil
 	}
 	return nil, ErrUpstream
+}
+
+func (s *Service) recordActiveRoute(ctx context.Context, route Route) {
+	if s.activeRoutes == nil {
+		return
+	}
+	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+	defer cancel()
+	// 仪表盘状态属于旁路观测数据，Redis 写入失败不能影响网关请求。
+	_ = s.activeRoutes.RecordActiveRoute(recordCtx, route)
 }
 
 func (s *Service) refreshCredential(ctx context.Context, route Route, credential []byte) ([]byte, bool, error) {

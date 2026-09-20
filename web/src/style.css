@@ -763,16 +763,10 @@ label textarea {
 }
 .search-box input[type='search'] {
   min-height: 40px;
-  padding: 9px 12px 9px 38px;
+  padding: 9px 12px;
   font-size: 12px;
   background: var(--color-surface);
   border-color: var(--color-border);
-}
-.search-box > svg {
-  position: absolute;
-  top: 11px;
-  left: 11px;
-  pointer-events: none;
 }
 .table-scroll {
   position: relative;
@@ -1378,16 +1372,8 @@ tbody tr:hover {
   position: relative;
   min-width: 0;
 }
-.member-search-icon {
-  position: absolute;
-  z-index: 1;
-  top: 12px;
-  left: 12px;
-  color: #8192a3;
-  pointer-events: none;
-}
 .member-autocomplete input {
-  padding-left: 39px;
+  padding-left: 12px;
   background: var(--color-surface);
   border-color: var(--color-border);
 }
@@ -2688,13 +2674,6 @@ tbody tr:hover {
 }
 .provider-ranking .rank-track i {
   background: var(--color-primary);
-}
-.model-ranking .rank-content > small,
-.provider-ranking .rank-content > small {
-  display: block;
-  margin-top: 4px;
-  color: #96a4b1;
-  text-align: right;
 }
 .ranking-empty {
   display: flex;

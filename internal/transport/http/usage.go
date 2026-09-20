@@ -234,6 +234,25 @@ func (s *SecurityHandlers) mountUsage(r chi.Router) {
 	}
 }
 
+func (s *SecurityHandlers) mountActiveModels(r chi.Router) {
+	// @Summary 当前模型服务商
+	// @Tags 网关
+	// @Description 返回当前 generation 中仍处于 TTL 内、最近一次实际选中的模型与服务商；不返回未产生实际上游请求的已配置模型或备用服务商。
+	// @Produce json
+	// @Security AdminBearer
+	// @Success 200 {object} response{data=[]gateway.ActiveModel}
+	// @Failure 401,503 {object} response
+	// @Router /api/v1/gateway/active-models [get]
+	r.Get("/gateway/active-models", func(w http.ResponseWriter, req *http.Request) {
+		if len(req.URL.Query()) != 0 {
+			securityError(w, req, appsec.ErrInvalidArgument)
+			return
+		}
+		models, err := s.ActiveModels.ActiveModels(req.Context())
+		adminResult(w, req, http.StatusOK, models, err)
+	})
+}
+
 func parseUTCQueryTime(value string) (time.Time, error) {
 	value = strings.TrimSpace(value)
 	if !strings.HasSuffix(value, "Z") {

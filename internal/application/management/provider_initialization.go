@@ -16,19 +16,65 @@ const providerInitializationReadLimit = 10000
 
 func (input *ProviderInitializeInput) Normalize() {
 	input.Locale = strings.TrimSpace(input.Locale)
+	for index := range input.ProviderCodes {
+		input.ProviderCodes[index] = strings.TrimSpace(input.ProviderCodes[index])
+	}
 }
 
 func (input ProviderInitializeInput) Valid() bool {
-	return input.Locale == "zh-CN" || input.Locale == "en-US"
+	if (input.Locale != "zh-CN" && input.Locale != "en-US") || len(input.ProviderCodes) == 0 {
+		return false
+	}
+	seen := make(map[string]struct{}, len(input.ProviderCodes))
+	for _, code := range input.ProviderCodes {
+		if code == "" {
+			return false
+		}
+		if _, duplicate := seen[code]; duplicate {
+			return false
+		}
+		seen[code] = struct{}{}
+	}
+	return true
 }
 
-// InitializeOfficialProviders 创建缺失的内置厂商，并同步已有内置厂商的本地化名称和官方网站。
+// OfficialProviderInitializationOptions 返回可供管理员选择的内置厂商。
+func (s *Service) OfficialProviderInitializationOptions(locale string) ([]ProviderInitializeOption, error) {
+	locale = strings.TrimSpace(locale)
+	if locale != "zh-CN" && locale != "en-US" {
+		return nil, appsec.ErrInvalidArgument
+	}
+	templates := bootstrap.OfficialProviderTemplates()
+	options := make([]ProviderInitializeOption, 0, len(templates))
+	for _, template := range templates {
+		options = append(options, ProviderInitializeOption{
+			Code: template.Code, Name: template.LocalizedName(locale), Website: template.Website,
+		})
+	}
+	return options, nil
+}
+
+// InitializeOfficialProviders 创建选定且缺失的内置厂商，并同步已有内置厂商的本地化名称和官方网站。
 func (s *Service) InitializeOfficialProviders(ctx context.Context, actor admin.Identity, input ProviderInitializeInput, meta appsec.RequestMeta) (ProviderInitializeResult, error) {
 	input.Normalize()
 	if !input.Valid() {
 		return ProviderInitializeResult{}, appsec.ErrInvalidArgument
 	}
-	templates := bootstrap.OfficialProviderTemplates()
+	selected := make(map[string]struct{}, len(input.ProviderCodes))
+	for _, code := range input.ProviderCodes {
+		selected[code] = struct{}{}
+	}
+	templates := make([]bootstrap.Provider, 0, len(selected))
+	for _, template := range bootstrap.OfficialProviderTemplates() {
+		if _, ok := selected[template.Code]; !ok {
+			continue
+		}
+		delete(selected, template.Code)
+		templates = append(templates, template)
+	}
+	if len(selected) != 0 {
+		return ProviderInitializeResult{}, appsec.ErrInvalidArgument
+	}
 	result := ProviderInitializeResult{Total: len(templates)}
 	err := s.store.Write(ctx, actor, func(writer Writer) error {
 		providers, err := readAllProviders(ctx, writer)

@@ -142,7 +142,13 @@ type ProviderDetail struct {
 	Mappings []ProviderMapping `json:"mappings"`
 }
 type ProviderInitializeInput struct {
-	Locale string `json:"locale" binding:"required" enums:"zh-CN,en-US"`
+	Locale        string   `json:"locale" binding:"required" enums:"zh-CN,en-US"`
+	ProviderCodes []string `json:"providerCodes" binding:"required"`
+}
+type ProviderInitializeOption struct {
+	Code    string `json:"code"`
+	Name    string `json:"name"`
+	Website string `json:"website"`
 }
 type ProviderInitializeResult struct {
 	Total    int `json:"total"`

@@ -4,7 +4,7 @@ import { all, api, errorText, gatewayBaseUrl } from '../api'
 import { compactCount, count } from '../composables'
 import { activeLocale, i18n, t } from '../i18n'
 import { showErrorToast, showSuccessToast } from '../toast'
-import type { Dashboard, Provider, Resource } from '../types'
+import type { ActiveModel, Dashboard, Provider, Resource } from '../types'
 import Icon from '../components/Icon.vue'
 import InitializationGuide from '../components/InitializationGuide.vue'
 import Modal from '../components/Modal.vue'
@@ -17,8 +17,11 @@ type SetupPlatform = 'unix' | 'windows'
 const summary = ref<Dashboard | null>(null)
 const healthProviders = ref<Provider[]>([])
 const healthResources = ref<Resource[]>([])
+const activeModels = ref<ActiveModel[]>([])
 const loading = ref(false)
 const error = ref('')
+const activeModelsLoading = ref(false)
+const activeModelsError = ref('')
 const providerHealthLoading = ref(false)
 const providerHealthError = ref('')
 const copied = ref('')
@@ -174,6 +177,22 @@ async function loadDashboard(current: number) {
   }
 }
 
+async function loadActiveModels(current: number) {
+  activeModelsLoading.value = true
+  activeModelsError.value = ''
+  try {
+    const result = await api<ActiveModel[]>('/gateway/active-models')
+    if (current === revision) activeModels.value = Array.isArray(result) ? result : []
+  } catch (e) {
+    if (current === revision) {
+      activeModels.value = []
+      activeModelsError.value = errorText(e)
+    }
+  } finally {
+    if (current === revision) activeModelsLoading.value = false
+  }
+}
+
 async function loadProviderHealth(current: number) {
   providerHealthLoading.value = true
   providerHealthError.value = ''
@@ -196,7 +215,11 @@ async function loadProviderHealth(current: number) {
 async function load() {
   const current = ++revision
   loading.value = true
-  await Promise.all([loadDashboard(current), loadProviderHealth(current)])
+  await Promise.all([
+    loadDashboard(current),
+    loadProviderHealth(current),
+    loadActiveModels(current),
+  ])
   if (current === revision) loading.value = false
 }
 
@@ -392,6 +415,62 @@ onMounted(load)
     </section>
   </div>
 
+  <section class="active-models-panel" :aria-label="t('home.activeModels')">
+    <div class="active-models-head">
+      <h2>{{ t('home.activeModels') }}</h2>
+      <span v-if="activeModels.length">
+        {{ t('home.activeModelsCount', { count: count(activeModels.length) }) }}
+      </span>
+    </div>
+    <div
+      v-if="activeModels.length"
+      class="active-models-table-wrap"
+      tabindex="0"
+      :aria-label="t('home.activeModelsList')"
+    >
+      <table class="active-models-table">
+        <thead>
+          <tr>
+            <th scope="col">{{ t('home.modelIdentity') }}</th>
+            <th scope="col">{{ t('home.currentProvider') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="model in activeModels" :key="model.modelCode" class="active-model-row">
+            <td>
+              <div class="active-model-identity">
+                <strong :title="model.modelName || '-'">{{ model.modelName || '-' }}</strong>
+                <code class="active-model-code" :title="model.modelCode || '-'">
+                  {{ model.modelCode || '-' }}
+                </code>
+              </div>
+            </td>
+            <td>
+              <span class="active-provider-name" :title="model.providerName || '-'">
+                {{ model.providerName || '-' }}
+              </span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div v-else class="active-models-empty" :aria-busy="activeModelsLoading">
+      <p>
+        {{
+          activeModelsLoading ? t('common.loading') : activeModelsError || t('home.noActiveModels')
+        }}
+      </p>
+      <button
+        v-if="activeModelsError && !activeModelsLoading"
+        type="button"
+        class="text-button"
+        @click="loadActiveModels(revision)"
+      >
+        {{ t('common.retry') }}
+      </button>
+    </div>
+  </section>
+
   <div class="ranking-grid">
     <section class="ranking-panel">
       <div class="ranking-head">
@@ -446,17 +525,25 @@ onMounted(load)
           <div class="rank-content">
             <div class="rank-label">
               <strong :title="item.modelName">{{ item.modelName }}</strong>
-              <span>{{ t('home.requestCount', { count: count(item.requests) }) }}</span>
+              <span
+                :title="
+                  t('home.modelRankingUsage', {
+                    requests: count(item.requests),
+                    tokens: count(item.tokens),
+                  })
+                "
+              >
+                {{
+                  t('home.modelRankingUsage', {
+                    requests: count(item.requests),
+                    tokens: compactCount(item.tokens),
+                  })
+                }}
+              </span>
             </div>
             <div class="rank-track">
               <i :style="{ width: `${(item.requests / maxClientRequests) * 100}%` }"></i>
             </div>
-            <small
-              :title="`${count(item.tokens)} Token`"
-              :aria-label="`${count(item.tokens)} Token`"
-            >
-              {{ item.modelCode }} · {{ compactCount(item.tokens) }} Token
-            </small>
           </div>
         </li>
       </ol>
@@ -483,17 +570,25 @@ onMounted(load)
           <div class="rank-content">
             <div class="rank-label">
               <strong :title="item.providerName">{{ item.providerName }}</strong>
-              <span>{{ t('home.callCount', { count: count(item.calls) }) }}</span>
+              <span
+                :title="
+                  t('home.providerRankingUsage', {
+                    calls: count(item.calls),
+                    tokens: count(item.tokens),
+                  })
+                "
+              >
+                {{
+                  t('home.providerRankingUsage', {
+                    calls: count(item.calls),
+                    tokens: compactCount(item.tokens),
+                  })
+                }}
+              </span>
             </div>
             <div class="rank-track">
               <i :style="{ width: `${(item.calls / maxProviderCalls) * 100}%` }"></i>
             </div>
-            <small
-              :title="`${count(item.tokens)} Token`"
-              :aria-label="`${count(item.tokens)} Token`"
-            >
-              {{ compactCount(item.tokens) }} Token
-            </small>
           </div>
         </li>
       </ol>
@@ -693,6 +788,128 @@ onMounted(load)
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.active-models-panel {
+  margin-bottom: 18px;
+  padding: 22px 24px;
+  border: 1px solid rgb(226 232 240 / 80%);
+  border-radius: 12px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.active-models-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.active-models-head > span {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.active-models-table-wrap {
+  max-height: 280px;
+  margin-top: 14px;
+  overflow: auto;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  scrollbar-color: #cbd5e1 transparent;
+  scrollbar-width: thin;
+}
+
+.active-models-table-wrap:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 3px;
+}
+
+.active-models-table {
+  width: 100%;
+  min-width: 480px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.active-models-table th,
+.active-models-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #edf1f5;
+  text-align: left;
+}
+
+.active-models-table th {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  background: var(--color-surface);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.active-models-table th:first-child {
+  width: 62%;
+}
+
+.active-models-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.active-model-identity strong,
+.active-model-code,
+.active-provider-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.active-model-identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.active-model-identity strong {
+  min-width: 0;
+  flex: 0 1 auto;
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.active-model-code {
+  min-width: 0;
+  flex: 0 1 auto;
+  padding: 2px 7px;
+  border: 1px solid #d9e2ec;
+  border-radius: 5px;
+  background: #f5f7fa;
+  color: #60758a;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.active-provider-name {
+  max-width: 100%;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.active-models-empty {
+  display: flex;
+  min-height: 72px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 @media (max-width: 560px) {

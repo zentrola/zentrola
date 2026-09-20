@@ -316,7 +316,6 @@ function deleteGroup() {
           >
             <div v-if="createModelsReady" class="group-model-toolbar">
               <div class="model-search-box">
-                <Icon name="search" :size="16" />
                 <input
                   id="create-model-search"
                   v-model="createModelQuery"
@@ -491,7 +490,6 @@ function deleteGroup() {
           <section class="group-form-control group-model-field" aria-labelledby="edit-models-title">
             <div v-if="relationReady" class="group-model-toolbar">
               <div class="model-search-box">
-                <Icon name="search" :size="16" />
                 <input
                   id="edit-model-search"
                   v-model="editModelQuery"
@@ -712,15 +710,9 @@ function deleteGroup() {
   min-width: 0;
   color: #92a0af;
 }
-.model-search-box > svg {
-  position: absolute;
-  top: 10px;
-  left: 11px;
-  pointer-events: none;
-}
 .model-search-box input[type='search'] {
   min-height: 36px;
-  padding: 7px 36px 7px 35px;
+  padding: 7px 36px 7px 11px;
   font-size: 12px;
   background: #f8fafc;
 }

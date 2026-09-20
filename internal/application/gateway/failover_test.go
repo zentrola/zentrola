@@ -78,6 +78,16 @@ func (f upstreamFunc) Open(ctx context.Context, route Route, request Request, cr
 	return f(ctx, route, request, credential)
 }
 
+type activeRouteRecorderStub struct {
+	routes []Route
+	err    error
+}
+
+func (s *activeRouteRecorderStub) RecordActiveRoute(_ context.Context, route Route) error {
+	s.routes = append(s.routes, route)
+	return s.err
+}
+
 type failoverState struct {
 	blocked   map[int64]bool
 	cooldowns []int64
@@ -100,8 +110,8 @@ func (s *failoverState) Healthy(_ context.Context, route Route) error {
 
 func testRoutes() []Route {
 	return []Route{
-		{ModelID: 1, ProviderID: 10, ProviderModelID: 100, ResourceID: 1000, UpstreamModel: "provider-a-model"},
-		{ModelID: 1, ProviderID: 20, ProviderModelID: 200, ResourceID: 2000, UpstreamModel: "provider-b-model"},
+		{ModelID: 1, ProviderID: 10, ProviderModelID: 100, ResourceID: 1000, ModelName: "Claude Opus 5", ModelCode: "claude-opus-5", ProviderName: "Provider A", UpstreamModel: "provider-a-model"},
+		{ModelID: 1, ProviderID: 20, ProviderModelID: 200, ResourceID: 2000, ModelName: "Claude Opus 5", ModelCode: "claude-opus-5", ProviderName: "Provider B", UpstreamModel: "provider-b-model"},
 	}
 }
 
@@ -181,6 +191,26 @@ func TestForwardFailsOverAndRecordsEveryAttempt(t *testing.T) {
 	}
 	if len(trace.Attempts) != 1 || trace.Attempts[0].AttemptNo != 1 || trace.Attempts[0].Status != usage.Failed || trace.Attempt == nil || trace.Attempt.AttemptNo != 2 || trace.Attempt.ResourceID != 2000 {
 		t.Fatalf("trace=%+v attempts=%+v", trace.Attempt, trace.Attempts)
+	}
+}
+
+func TestForwardRecordsOnlyActuallySelectedRouteAndFailsOpen(t *testing.T) {
+	store := &failoverStore{routes: testRoutes()}
+	recorder := &activeRouteRecorderStub{err: errors.New("redis unavailable")}
+	service := New(store, failoverCipher{}, upstreamFunc(func(_ context.Context, route Route, _ Request, _ []byte) (*Response, error) {
+		if route.ResourceID == 1000 {
+			return response(503, `{}`), nil
+		}
+		return response(200, `{}`), nil
+	}), WithRouteState(&failoverState{blocked: map[int64]bool{}}), WithActiveRouteRecorder(recorder))
+
+	got, err := testForward(t, service, nil)
+	if err != nil || got == nil || got.Status != 200 {
+		t.Fatalf("response=%v err=%v", got, err)
+	}
+	got.Body.Close()
+	if len(recorder.routes) != 1 || recorder.routes[0].ResourceID != 2000 || recorder.routes[0].ProviderName != "Provider B" {
+		t.Fatalf("recorded routes=%+v", recorder.routes)
 	}
 }
 

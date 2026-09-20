@@ -39,7 +39,7 @@ func (byteDanceAdapter) Decode(data []byte, _ int) ([]mgmt.DiscoveredModel, stri
 	seen := make(map[string]struct{}, len(payload.Data))
 	for _, item := range payload.Data {
 		if item.Object != "model" || !validModelCode(item.ID) ||
-			item.OwnedBy == "" || item.OwnedBy != strings.TrimSpace(item.OwnedBy) {
+			item.OwnedBy != strings.TrimSpace(item.OwnedBy) {
 			return nil, "", errInvalidByteDanceCatalog
 		}
 		if !isByteDanceStableModel(item.ID, item.OwnedBy) {
@@ -59,16 +59,24 @@ func (byteDanceAdapter) Decode(data []byte, _ int) ([]mgmt.DiscoveredModel, stri
 }
 
 func isByteDanceStableModel(code, owner string) bool {
-	if !validModelCode(code) || !strings.HasPrefix(strings.ToLower(code), "doubao-") {
+	lowerCode := strings.ToLower(code)
+	if !validModelCode(code) ||
+		(!strings.HasPrefix(lowerCode, "doubao-seedance-") &&
+			!strings.HasPrefix(lowerCode, "doubao-seedream-")) {
 		return false
 	}
-	switch strings.ToLower(owner) {
-	case "bytedance", "byte-dance", "byte_dance", "doubao", "volcengine", "volc_engine":
-	default:
-		return false
+	// 火山方舟当前的模型目录响应不返回 owned_by。模型编码的
+	// doubao-seedance- / doubao-seedream- 前缀用于将同步范围限定为字节跳动的
+	// 视频和图片生成模型；如果上游返回了归属字段，则继续按白名单校验。
+	if owner != "" {
+		switch strings.ToLower(owner) {
+		case "bytedance", "byte-dance", "byte_dance", "doubao", "volcengine", "volc_engine":
+		default:
+			return false
+		}
 	}
 
-	parts := strings.FieldsFunc(strings.ToLower(code), func(character rune) bool {
+	parts := strings.FieldsFunc(lowerCode, func(character rune) bool {
 		return !unicode.IsLetter(character) && !unicode.IsDigit(character)
 	})
 	for _, part := range parts {

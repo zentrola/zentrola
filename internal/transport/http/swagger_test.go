@@ -81,7 +81,7 @@ func TestSwaggerCoversRoutesAndResolvesSchemas(t *testing.T) {
 		}
 	}
 	router := NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), health.New(), config.CORS{}, time.Second, "prod",
-		&SecurityHandlers{Management: &management.Service{}, Usage: &usage.QueryService{}, UsageWriter: &usage.Writer{}})
+		&SecurityHandlers{Management: &management.Service{}, ActiveModels: &activeModelReaderStub{}, Usage: &usage.QueryService{}, UsageWriter: &usage.Writer{}})
 	expected := map[string]bool{}
 	err := chi.Walk(router.(chi.Routes), func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
 		// 页面和构建资产不是 API，不加入 Swagger 接口覆盖清单。

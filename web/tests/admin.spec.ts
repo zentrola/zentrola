@@ -142,7 +142,13 @@ async function fixture(page: Page) {
     memberSuggestionQueries: URLSearchParams[] = [],
     usageQueries: URLSearchParams[] = [],
     statisticQueries: URLSearchParams[] = [],
-    modelSyncRequests: string[] = []
+    modelSyncRequests: string[] = [],
+    providerInitializeRequests: any[] = [],
+    activeModelRows: any[] = [
+      { modelName: 'GPT 6', modelCode: 'gpt-6', providerName: 'OpenAI' },
+      { modelName: 'Claude Sonnet 5', modelCode: 'claude-sonnet-5', providerName: 'CC Vibe' },
+      { modelName: 'DeepSeek V4 Flash', modelCode: 'deepseek-v4-flash', providerName: '深度求索' },
+    ]
   const providerInputs: any[] = []
   const safeProviderProxy = (input: any) => {
     if (!input.proxyEnabled) return { proxyEnabled: false, proxyUrl: null, proxyHeaders: [] }
@@ -184,6 +190,7 @@ async function fixture(page: Page) {
     if (unauthorized) return reply(null, 401, 'UNAUTHENTICATED')
     if (path === '/me') return reply({ id: '1', username: 'admin', displayName: '管理员' })
     if (path === '/auth/logout') return reply({ clearToken: true })
+    if (path === '/gateway/active-models') return reply(activeModelRows)
     if (path === '/usage/dashboard')
       return reply({
         activeMemberCount: 2,
@@ -314,6 +321,24 @@ async function fixture(page: Page) {
       }
     }
     if (path === '/usage/writer') return reply({ pending: 0, failed: 0 })
+    if (path === '/providers/initialize-options' && method === 'GET') {
+      const names = [
+        ['openai-official', 'OpenAI', 'https://openai.com'],
+        ['anthropic-official', 'Anthropic', 'https://www.anthropic.com'],
+        ['google-gemini-official', 'Google', 'https://ai.google.dev/gemini-api'],
+        ['deepseek-official', '深度求索', 'https://www.deepseek.com'],
+        ['zhipu-official', '智谱 AI', 'https://www.zhipuai.cn'],
+        ['kimi-official', '月之暗面', 'https://www.moonshot.cn'],
+        ['qwen-official', '通义千问', 'https://bailian.console.aliyun.com/'],
+        ['xai-official', 'xAI', 'https://x.ai'],
+        ['mistral-official', 'Mistral AI', 'https://mistral.ai'],
+        ['minimax-official', 'MiniMax', 'https://www.minimax.io'],
+        ['doubao-official', '字节跳动', 'https://www.volcengine.com/product/ark'],
+        ['baidu-qianfan-official', '百度', 'https://cloud.baidu.com/product-s/qianfan_home'],
+        ['tencent-hunyuan-official', '腾讯', 'https://cloud.tencent.com/product/hunyuan'],
+      ]
+      return reply(names.map(([code, name, website]) => ({ code, name, website })))
+    }
     if (segments[0] === 'providers' && segments.length === 2 && method === 'GET') {
       const row = providers.find((provider) => provider.id === segments[1])
       if (!row) return reply(null, 404, 'NOT_FOUND')
@@ -346,6 +371,7 @@ async function fixture(page: Page) {
       })
     }
     if (path === '/providers/initialize' && method === 'POST') {
+      providerInitializeRequests.push(body)
       const templates = [
         ['openai-official', 'OpenAI', 'OpenAI', 'https://api.openai.com/v1', 'https://openai.com'],
         [
@@ -429,7 +455,8 @@ async function fixture(page: Page) {
       ]
       let created = 0,
         updated = 0
-      for (const [code, nameZH, nameEN, baseUrl, website] of templates) {
+      const selectedTemplates = templates.filter(([code]) => body.providerCodes.includes(code))
+      for (const [code, nameZH, nameEN, baseUrl, website] of selectedTemplates) {
         const name = body.locale === 'zh-CN' ? nameZH : nameEN
         const existing = providers.find((provider) => provider.code === code)
         if (existing) {
@@ -459,10 +486,10 @@ async function fixture(page: Page) {
         created++
       }
       return reply({
-        total: templates.length,
+        total: selectedTemplates.length,
         created,
         updated,
-        existing: templates.length - created,
+        existing: selectedTemplates.length - created,
       })
     }
     if (method === 'POST' && segments.length === 1) {
@@ -873,6 +900,8 @@ async function fixture(page: Page) {
     usageQueries,
     statisticQueries,
     modelSyncRequests,
+    providerInitializeRequests,
+    activeModelRows,
     expire: () => {
       unauthorized = true
     },
@@ -1025,19 +1054,33 @@ test('首页展示本月指标、应用接入、配置脚本和分项排行榜',
   await expect(page.getByText('用户 Token 消耗排行')).toBeVisible()
   await expect(page.getByText('模型请求排行')).toBeVisible()
   await expect(page.getByText('服务商调用排行')).toBeVisible()
-  await expect(page.getByText('OpenAI', { exact: true })).toBeVisible()
+  const activeModels = page.getByRole('region', { name: '当前模型服务商' })
+  await expect(activeModels.getByText('3 个模型', { exact: true })).toBeVisible()
+  await expect(activeModels.locator('.active-model-row')).toHaveCount(3)
+  await expect(activeModels.getByText('Claude Sonnet 5', { exact: true })).toBeVisible()
+  await expect(activeModels.getByText('claude-sonnet-5', { exact: true })).toBeVisible()
+  await expect(activeModels.getByText('CC Vibe', { exact: true })).toBeVisible()
+  await expect(activeModels.getByText('LingkeAI', { exact: true })).toHaveCount(0)
+  await expect(activeModels.locator('.active-model-identity').first()).toHaveCSS('display', 'flex')
+  await expect(activeModels.locator('.active-model-code')).toHaveCount(3)
+  await expect(activeModels.locator('.active-provider-name')).toHaveCount(3)
+  await expect(activeModels.locator('.active-provider-tag')).toHaveCount(0)
+  await expect(page.locator('.access-panel').getByText('OpenAI', { exact: true })).toBeVisible()
   await expect(page.locator('.access-panel').getByText('Anthropic', { exact: true })).toBeVisible()
   await expect(page.getByText('适用于 Codex 等 OpenAI 兼容客户端')).toBeVisible()
   await expect(page.getByText('适用于 Claude Code 等 Anthropic 兼容客户端')).toBeVisible()
   await expect(page.getByText('林知远', { exact: true })).toBeVisible()
-  await expect(page.getByText('DeepSeek V4 Flash', { exact: true })).toBeVisible()
   await expect(
-    page.locator('.provider-ranking').getByText('20 次调用', { exact: true }),
+    page.locator('.model-ranking').getByText('DeepSeek V4 Flash', { exact: true }),
   ).toBeVisible()
   await expect(page.locator('.token-ranking [title="8,200 Token"]')).toHaveText('8.2K Token')
-  await expect(page.locator('.model-ranking small').first()).toContainText('9.1K Token')
-  await expect(page.locator('.model-ranking small').first()).toHaveAttribute('title', '9,100 Token')
-  await expect(page.locator('.provider-ranking small').first()).toHaveText('9.2K Token')
+  const firstModelUsage = page.locator('.model-ranking .rank-label span').first()
+  await expect(firstModelUsage).toHaveText('18 次 / 9.1K Token')
+  await expect(firstModelUsage).toHaveAttribute('title', '18 次 / 9,100 Token')
+  await expect(page.locator('.model-ranking')).not.toContainText('deepseek-v4-flash')
+  const firstProviderUsage = page.locator('.provider-ranking .rank-label span').first()
+  await expect(firstProviderUsage).toHaveText('20 次 / 9.2K Token')
+  await expect(firstProviderUsage).toHaveAttribute('title', '20 次 / 9,200 Token')
   for (const [name, dimension] of [
     ['用户 Token 消耗排行', 'member'],
     ['模型请求排行', 'model'],
@@ -1128,6 +1171,40 @@ test('首页展示本月指标、应用接入、配置脚本和分项排行榜',
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
     .toBe(true)
   await page.screenshot({ path: '../.cache/web-visual/home-setup-mobile.png', fullPage: true })
+})
+
+test('当前模型服务商在大量记录时限制卡片高度并内部滚动', async ({ page }) => {
+  const state = await fixture(page)
+  state.activeModelRows.splice(
+    0,
+    state.activeModelRows.length,
+    ...Array.from({ length: 100 }, (_, index) => ({
+      modelName: `Model ${index + 1}`,
+      modelCode: `model-${String(index + 1).padStart(3, '0')}`,
+      providerName: `Provider ${index + 1}`,
+    })),
+  )
+  await signIn(page, 'home')
+
+  const activeModels = page.getByRole('region', { name: '当前模型服务商' })
+  await expect(activeModels.getByText('100 个模型', { exact: true })).toBeVisible()
+  await expect(activeModels.locator('.active-model-row')).toHaveCount(100)
+  const dimensions = await activeModels.locator('.active-models-table-wrap').evaluate((element) => {
+    const style = getComputedStyle(element)
+    return {
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+      maxHeight: style.maxHeight,
+      overflowY: style.overflowY,
+      headerPosition: getComputedStyle(element.querySelector('th')!).position,
+    }
+  })
+  expect(dimensions.maxHeight).toBe('280px')
+  expect(dimensions.overflowY).toBe('auto')
+  expect(dimensions.headerPosition).toBe('sticky')
+  expect(dimensions.clientHeight).toBeLessThanOrEqual(280)
+  expect(dimensions.scrollHeight).toBeGreaterThan(dimensions.clientHeight)
+  await page.screenshot({ path: '../.cache/web-visual/home-active-models-100.png', fullPage: true })
 })
 
 test('首页在启用服务商不可用时提醒管理员', async ({ page }) => {
@@ -1937,7 +2014,11 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await expect(providerSearchInput).toHaveAttribute('placeholder', '请输入服务商名称')
   await expect
     .poll(() => providerSearchInput.evaluate((input) => getComputedStyle(input).paddingLeft))
-    .toBe('38px')
+    .toBe('12px')
+  await expect(providerSearch.locator('.search-box > svg')).toHaveCount(0)
+  await expect(
+    providerSearch.getByRole('button', { name: '搜索', exact: true }).locator('svg'),
+  ).toHaveCount(0)
   await expect(
     page.locator('.page-heading').getByRole('button', { name: '添加服务商', exact: true }),
   ).toHaveCount(0)
@@ -1949,8 +2030,20 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await expect(createMenu.getByRole('menuitem', { name: /三方服务商/ })).toBeVisible()
   await expect(createMenu.getByRole('menuitem', { name: /模型厂商/ })).toBeVisible()
   await createMenu.getByRole('menuitem', { name: /模型厂商/ }).click()
+  const initializeDialog = modal(page)
+  await expect(initializeDialog.getByRole('heading', { name: '选择模型厂商' })).toBeVisible()
+  await expect(initializeDialog.getByText('已选择 13 / 13', { exact: true })).toBeVisible()
+  await initializeDialog.getByRole('button', { name: '清空', exact: true }).click()
+  await expect(
+    initializeDialog.getByRole('button', { name: '初始化所选厂商', exact: true }),
+  ).toBeDisabled()
+  await initializeDialog.getByRole('checkbox', { name: '选择 深度求索', exact: true }).check()
+  await initializeDialog.getByRole('checkbox', { name: '选择 月之暗面', exact: true }).check()
+  await initializeDialog.getByRole('checkbox', { name: '选择 通义千问', exact: true }).check()
+  await expect(initializeDialog.getByText('已选择 3 / 13', { exact: true })).toBeVisible()
+  await initializeDialog.getByRole('button', { name: '初始化所选厂商', exact: true }).click()
   await expect(page.locator('.toast-success')).toContainText(
-    '已补充 12 个官方服务商，并同步 1 个预置名称或官网，共 13 个',
+    '已补充 2 个官方服务商，并同步 1 个预置名称或官网，共 3 个',
   )
   await expect(page.locator('.provider-initialize-notice')).toHaveCount(0)
   await expect(page.getByRole('row').filter({ hasText: '月之暗面' })).toBeVisible()
@@ -1966,10 +2059,26 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
     .getByRole('menu', { name: '创建服务商' })
     .getByRole('menuitem', { name: /模型厂商/ })
     .click()
+  const repeatInitializeDialog = modal(page)
+  await repeatInitializeDialog.getByRole('button', { name: '清空', exact: true }).click()
+  await repeatInitializeDialog.getByRole('checkbox', { name: '选择 深度求索', exact: true }).check()
+  await repeatInitializeDialog.getByRole('checkbox', { name: '选择 月之暗面', exact: true }).check()
+  await repeatInitializeDialog.getByRole('checkbox', { name: '选择 通义千问', exact: true }).check()
+  await repeatInitializeDialog.getByRole('button', { name: '初始化所选厂商', exact: true }).click()
   await expect(page.locator('.toast-success')).toContainText(
-    '官方服务商的当前语言名称和官网已是最新，共 13 个',
+    '官方服务商的当前语言名称和官网已是最新，共 3 个',
   )
-  expect(state.providers).toHaveLength(13)
+  expect(state.providers).toHaveLength(3)
+  expect(state.providerInitializeRequests).toEqual([
+    {
+      locale: 'zh-CN',
+      providerCodes: ['deepseek-official', 'kimi-official', 'qwen-official'],
+    },
+    {
+      locale: 'zh-CN',
+      providerCodes: ['deepseek-official', 'kimi-official', 'qwen-official'],
+    },
+  ])
 
   const deepSeekRow = page.getByRole('row').filter({ hasText: '深度求索' })
   await expect(page.getByRole('columnheader', { name: '启用状态', exact: true })).toBeVisible()
@@ -2085,6 +2194,7 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
     'placeholder',
     '搜索系统模型名称、编码或服务商模型编码',
   )
+  await expect(dialog.locator('.mapping-search-box > svg')).toHaveCount(0)
   await mappingSearch.fill('Claude')
   await expect(mappingCheckbox).toHaveCount(0)
   await expect(claudeMappingCheckbox).toBeVisible()
@@ -3003,6 +3113,7 @@ test('分组编辑表单与创建一致、失败恢复及停用授权限制', as
   await expect(createDialog.getByText('已选择 0 / 共 1 个模型')).toBeVisible()
   const createModelSearch = createDialog.getByRole('searchbox', { name: '搜索模型' })
   await expect(createModelSearch).toHaveAttribute('placeholder', '搜索模型名称、编码或厂商')
+  await expect(createDialog.locator('.model-search-box > svg')).toHaveCount(0)
   await createModelSearch.fill('deepseek-v4-flash')
   await expect(createDialog.getByText('显示 1 个', { exact: true })).toBeVisible()
   await expect(createDialog.getByText('DeepSeek V4 Flash', { exact: true })).toBeVisible()
@@ -3530,6 +3641,7 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
   await expect(dateRangeDialog).toHaveCount(0)
   const memberInput = page.getByRole('combobox', { name: '用户', exact: true })
   await expect(memberInput).toHaveAttribute('placeholder', '请输入用户名')
+  await expect(page.locator('.member-autocomplete > svg')).toHaveCount(0)
   expect(state.memberListQueries).toHaveLength(memberListRequestCount)
   await memberInput.fill('林知')
   await page.getByRole('option', { name: '林知远', exact: true }).click()

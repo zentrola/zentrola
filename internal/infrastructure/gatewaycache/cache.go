@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -51,6 +52,19 @@ if generation ~= ARGV[1] then
 end
 redis.call('SET', ARGV[2] .. ':' .. generation, ARGV[3], 'PX', ARGV[4])
 return 1
+`)
+
+var recordActiveRouteScript = redis.NewScript(`
+local generation = redis.call('GET', KEYS[1])
+if not generation then
+  redis.call('SET', KEYS[1], ARGV[1], 'NX')
+  generation = redis.call('GET', KEYS[1])
+elseif generation == '' then
+  redis.call('SET', KEYS[1], ARGV[1])
+  generation = ARGV[1]
+end
+redis.call('SET', ARGV[2] .. ':' .. generation, ARGV[3], 'PX', ARGV[4])
+return generation
 `)
 
 type Config struct {
@@ -208,6 +222,129 @@ func (c *Cache) GetModels(ctx context.Context, key string) ([]gw.Model, string, 
 
 func (c *Cache) SetModels(ctx context.Context, key, generation string, value []gw.Model) bool {
 	return c.set(ctx, key, generation, value, c.routeTTL, "models")
+}
+
+// RecordActiveRoute 记录当前模型最近一次真正转发到的服务商。
+func (c *Cache) RecordActiveRoute(ctx context.Context, route gw.Route) error {
+	active := gw.ActiveModel{
+		ModelName:    strings.TrimSpace(route.ModelName),
+		ModelCode:    strings.TrimSpace(route.ModelCode),
+		ProviderName: strings.TrimSpace(route.ProviderName),
+	}
+	if active.ModelName == "" || active.ModelCode == "" || active.ProviderName == "" {
+		return gw.ErrInvalid
+	}
+	if !c.available(ctx) {
+		return gw.ErrUnavailable
+	}
+	ttl := c.routesTTL([]gw.Route{route})
+	if ttl <= 0 {
+		return gw.ErrUnavailable
+	}
+	seed, err := newGeneration()
+	if err != nil {
+		return gw.ErrUnavailable
+	}
+	encoded, err := json.Marshal(active)
+	if err != nil {
+		return gw.ErrUnavailable
+	}
+	ttlMillis := ttl.Milliseconds()
+	if ttlMillis <= 0 {
+		return gw.ErrUnavailable
+	}
+	_, err = recordActiveRouteScript.Run(ctx, c.client, []string{c.generationKey()},
+		seed, c.activeModelKey(active.ModelCode), encoded, ttlMillis).Result()
+	_ = c.record(err)
+	if err != nil {
+		c.logger.WarnContext(ctx, "active gateway route cache write failed",
+			"cache_type", "active_model", "error_code", "REDIS_UNAVAILABLE")
+		return gw.ErrUnavailable
+	}
+	return nil
+}
+
+// ActiveModels 返回当前 generation 中仍处于 TTL 内的实际路由结果。
+// 只有真正发起过上游请求的模型才会被记录，每个模型仅保留最近一次服务商。
+func (c *Cache) ActiveModels(ctx context.Context) ([]gw.ActiveModel, error) {
+	if !c.available(ctx) {
+		return nil, gw.ErrUnavailable
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		generation, err := c.client.Get(ctx, c.generationKey()).Result()
+		if err == redis.Nil {
+			return []gw.ActiveModel{}, nil
+		}
+		if err != nil {
+			_ = c.record(err)
+			return nil, gw.ErrUnavailable
+		}
+		models, err := c.activeModelsForGeneration(ctx, generation)
+		if err != nil {
+			_ = c.record(err)
+			return nil, gw.ErrUnavailable
+		}
+		current, err := c.client.Get(ctx, c.generationKey()).Result()
+		if err == nil && current == generation {
+			_ = c.record(nil)
+			return models, nil
+		}
+		if err != nil && err != redis.Nil {
+			_ = c.record(err)
+			return nil, gw.ErrUnavailable
+		}
+	}
+	return []gw.ActiveModel{}, nil
+}
+
+func (c *Cache) activeModelsForGeneration(ctx context.Context, generation string) ([]gw.ActiveModel, error) {
+	modelsByCode := make(map[string]gw.ActiveModel)
+	pattern := c.namespace + ":active-models:*:" + generation
+	var cursor uint64
+	for {
+		keys, next, err := c.client.Scan(ctx, cursor, pattern, 100).Result()
+		if err != nil {
+			return nil, err
+		}
+		if len(keys) > 0 {
+			values, err := c.client.MGet(ctx, keys...).Result()
+			if err != nil {
+				return nil, err
+			}
+			for _, value := range values {
+				encoded, ok := value.(string)
+				if !ok {
+					continue
+				}
+				var model gw.ActiveModel
+				if json.Unmarshal([]byte(encoded), &model) != nil {
+					continue
+				}
+				model.ModelName = strings.TrimSpace(model.ModelName)
+				model.ModelCode = strings.TrimSpace(model.ModelCode)
+				model.ProviderName = strings.TrimSpace(model.ProviderName)
+				if model.ModelName == "" || model.ModelCode == "" || model.ProviderName == "" {
+					continue
+				}
+				modelsByCode[model.ModelCode] = model
+			}
+		}
+		cursor = next
+		if cursor == 0 {
+			break
+		}
+	}
+	models := make([]gw.ActiveModel, 0, len(modelsByCode))
+	for _, model := range modelsByCode {
+		models = append(models, model)
+	}
+	sort.Slice(models, func(i, j int) bool { return models[i].ModelCode < models[j].ModelCode })
+	return models, nil
+}
+
+func (c *Cache) activeModelKey(modelCode string) string {
+	encodedModel := base64.RawURLEncoding.EncodeToString([]byte(modelCode))
+	return c.namespace + ":active-models:" + encodedModel
 }
 
 // Clear 在数据库写事务提交后替换 generation，使所有实例的旧缓存立即不可见。

@@ -23,14 +23,15 @@ import (
 )
 
 type SecurityHandlers struct {
-	Admin       *appsec.AdminService
-	Keys        *appsec.Keys
-	Management  *mgmt.Service
-	Gateway     *GatewayHandler
-	OpenAI      *GatewayHandler
-	Usage       *usageapp.QueryService
-	UsageWriter *usageapp.Writer
-	logger      *slog.Logger
+	Admin        *appsec.AdminService
+	Keys         *appsec.Keys
+	Management   *mgmt.Service
+	Gateway      *GatewayHandler
+	OpenAI       *GatewayHandler
+	ActiveModels gw.ActiveModelReader
+	Usage        *usageapp.QueryService
+	UsageWriter  *usageapp.Writer
+	logger       *slog.Logger
 }
 type adminIdentityKey struct{}
 type principalIdentityKey struct{}
@@ -142,6 +143,9 @@ func (s *SecurityHandlers) mount(r chi.Router) {
 			}
 			if s.Usage != nil {
 				s.mountUsage(protected)
+			}
+			if s.ActiveModels != nil {
+				s.mountActiveModels(protected)
 			}
 		})
 		api.Group(func(member chi.Router) {
