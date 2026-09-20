@@ -430,7 +430,7 @@ export const i18n = createI18n({
         guideSteps: {
           create: {
             title: '添加服务商',
-            description: '可以添加三方服务商，或初始化模型厂商及其预置配置。',
+            description: '可以添加三方服务商，或初始化官方模型厂商信息。',
           },
           website: {
             title: '前往官网获取凭证',
@@ -458,10 +458,10 @@ export const i18n = createI18n({
         thirdPartyProvider: '三方服务商',
         thirdPartyProviderHint: '手动配置接口地址与模型映射',
         modelVendor: '模型厂商',
-        modelVendorHint: '初始化官方厂商与预置配置',
+        modelVendorHint: '初始化官方厂商信息',
         initialize: '初始化',
         initializeTitle: '选择模型厂商',
-        initializeHint: '请选择需要初始化或同步预置信息的模型厂商。',
+        initializeHint: '请选择需要初始化或更新官方信息的模型厂商。',
         initializeSelection: '可初始化的模型厂商',
         initializeSelectionCount: '已选择 {count} / {total}',
         initializeProviderSelection: '选择 {name}',
@@ -469,7 +469,7 @@ export const i18n = createI18n({
         selectAll: '全选',
         clearSelection: '清空',
         initializeCompleted:
-          '已补充 {created} 个官方服务商，并同步 {updated} 个预置名称或官网，共 {total} 个。',
+          '已补充 {created} 个官方服务商，并更新 {updated} 个名称或官网，共 {total} 个。',
         initializeUnchanged: '官方服务商的当前语言名称和官网已是最新，共 {total} 个。',
         edit: '编辑',
         editTitle: '编辑服务商',
@@ -666,12 +666,11 @@ export const i18n = createI18n({
         syncingModels: '正在读取模型目录…',
         syncPassed: '模型目录同步完成',
         syncHint:
-          '已配置 API Key 时优先读取官方接口，否则使用应用内置目录；创建缺失模型和服务商映射，同编码模型更新名称，新模型默认启用，其他既有配置保持不变。',
+          '使用已配置的 API Key 读取官方接口；创建缺失模型和服务商映射，同编码模型更新名称，新模型默认启用，其他既有配置保持不变。',
         syncResult: '模型同步结果',
         modelSyncSource: '同步来源',
         modelSyncSources: {
           PROVIDER: '官方接口',
-          BUILTIN: '应用内置目录',
         },
         discoveredModels: '发现模型',
         createdModels: '新增模型',

@@ -8,7 +8,6 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/zentrola/zentrola/internal/application/bootstrap"
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	"github.com/zentrola/zentrola/internal/domain/admin"
 	"github.com/zentrola/zentrola/internal/domain/catalog"
@@ -50,12 +49,8 @@ func (s *Service) SyncProviderModels(ctx context.Context, actor admin.Identity, 
 		if err != nil {
 			return err
 		}
-		apiSupported := s.discoverer != nil && s.discoverer.Supports(provider.Code)
-		if !apiSupported && len(bootstrap.OfficialProviderModels(provider.Code)) == 0 {
+		if s.discoverer == nil || !s.discoverer.Supports(provider.Code) {
 			return ErrProvider
-		}
-		if !apiSupported {
-			return nil
 		}
 
 		var after int64
@@ -92,16 +87,7 @@ func (s *Service) SyncProviderModels(ctx context.Context, actor admin.Identity, 
 	if resourceID != 0 {
 		return s.SyncResourceModels(ctx, actor, resourceID, meta)
 	}
-	discovered := bundledDiscoveredModels(provider.Code)
-	if len(discovered) == 0 {
-		return ModelSyncResult{}, ErrModelSyncCredentialRequired
-	}
-	result := ModelSyncResult{
-		ConnectionResult: ConnectionResult{OK: true, Code: "OK"},
-		Discovered:       len(discovered),
-		Source:           "BUILTIN",
-	}
-	return s.persistDiscoveredModels(ctx, actor, provider, nil, discovered, result, meta)
+	return ModelSyncResult{}, ErrModelSyncCredentialRequired
 }
 
 func (s *Service) SyncResourceModels(ctx context.Context, actor admin.Identity, id int64, meta appsec.RequestMeta) (ModelSyncResult, error) {
@@ -126,6 +112,9 @@ func (s *Service) SyncResourceModels(ctx context.Context, actor admin.Identity, 
 	if err != nil {
 		return ModelSyncResult{}, err
 	}
+	if !s.discoverer.Supports(provider.Code) {
+		return ModelSyncResult{}, ErrProvider
+	}
 
 	plain, err := s.cipher.Decrypt(resource.Sealed, owner(actor, resource.Resource))
 	if err != nil {
@@ -141,7 +130,6 @@ func (s *Service) SyncResourceModels(ctx context.Context, actor admin.Identity, 
 		ProviderCode: provider.Code,
 		Endpoints:    slices.Clone(provider.Endpoints),
 	}, plain, proxy)
-	discovered = enrichDiscoveredModels(provider.Code, discovered)
 	result := ModelSyncResult{ConnectionResult: connection, Discovered: len(discovered), Source: "PROVIDER"}
 	if len(discovered) > modelSyncLimit {
 		result.OK = false
@@ -256,35 +244,6 @@ func (s *Service) persistDiscoveredModels(ctx context.Context, actor admin.Ident
 		}, meta)
 	})
 	return result, err
-}
-
-func bundledDiscoveredModels(providerCode string) []DiscoveredModel {
-	models := bootstrap.OfficialProviderModels(providerCode)
-	result := make([]DiscoveredModel, len(models))
-	for index, model := range models {
-		result[index] = DiscoveredModel{
-			Code: model.Code, Name: model.Name,
-			InputModalities: slices.Clone(model.InputModalities), OutputModalities: slices.Clone(model.OutputModalities),
-		}
-	}
-	return result
-}
-
-func enrichDiscoveredModels(providerCode string, discovered []DiscoveredModel) []DiscoveredModel {
-	metadata := make(map[string]DiscoveredModel)
-	for _, model := range bundledDiscoveredModels(providerCode) {
-		metadata[model.Code] = model
-	}
-	result := make([]DiscoveredModel, len(discovered))
-	for index, model := range discovered {
-		result[index] = model
-		if builtIn, ok := metadata[model.Code]; ok {
-			result[index].Name = builtIn.Name
-			result[index].InputModalities = slices.Clone(builtIn.InputModalities)
-			result[index].OutputModalities = slices.Clone(builtIn.OutputModalities)
-		}
-	}
-	return result
 }
 
 func discoveredModalities(model DiscoveredModel) ([]string, []string) {

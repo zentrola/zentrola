@@ -168,7 +168,7 @@ export interface ModelSyncResult extends ConnectionResult {
   created: number
   updated: number
   mapped: number
-  source: 'PROVIDER' | 'BUILTIN'
+  source: 'PROVIDER'
 }
 export interface Usage {
   id: string

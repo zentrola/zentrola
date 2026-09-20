@@ -2,13 +2,11 @@ package bootstrap
 
 import (
 	"bytes"
-	"reflect"
-	"strings"
 	"testing"
 )
 
 func TestOfficialProviderTemplatesRemainAvailableForExplicitInitialization(t *testing.T) {
-	if version := OfficialProviderCatalogVersion(); version != "2026-09-17" {
+	if version := OfficialProviderCatalogVersion(); version != "2026-09-20" {
 		t.Fatalf("unexpected provider catalog version: %q", version)
 	}
 	providers := OfficialProviderTemplates()
@@ -48,7 +46,7 @@ func TestOfficialProviderTemplatesRemainAvailableForExplicitInitialization(t *te
 	for _, provider := range providers {
 		protocols, ok := want[provider.Code]
 		names := wantNames[provider.Code]
-		if !ok || provider.LocalizedName("zh-CN") != names[0] || provider.LocalizedName("en-US") != names[1] || provider.Website == "" || len(provider.Endpoints) != len(protocols) || len(provider.Models) == 0 {
+		if !ok || provider.LocalizedName("zh-CN") != names[0] || provider.LocalizedName("en-US") != names[1] || provider.Website == "" || len(provider.Endpoints) != len(protocols) {
 			t.Fatalf("unexpected provider: %+v", provider)
 		}
 		for index, endpoint := range protocols {
@@ -59,47 +57,10 @@ func TestOfficialProviderTemplatesRemainAvailableForExplicitInitialization(t *te
 	}
 }
 
-func TestOfficialProviderModelsAreLoadedFromCatalogAndCloned(t *testing.T) {
-	models := OfficialProviderModels("deepseek-official")
-	if len(models) != 2 || models[0].Code != "deepseek-flash" || models[0].ModelType != "CHAT" ||
-		!reflect.DeepEqual(models[0].InputModalities, []string{"TEXT", "IMAGE"}) {
-		t.Fatalf("unexpected built-in models: %+v", models)
-	}
-	models[0].InputModalities[0] = "AUDIO"
-	models[0].Code = "changed"
-	again := OfficialProviderModels("deepseek-official")
-	if again[0].Code != "deepseek-flash" || again[0].InputModalities[0] != "TEXT" {
-		t.Fatalf("built-in model catalog was mutated: %+v", again)
-	}
-	if models := OfficialProviderModels("missing-provider"); models != nil {
-		t.Fatalf("unknown provider returned models: %+v", models)
-	}
-	openAIModels := OfficialProviderModels("openai-official")
-	if len(openAIModels) != 6 || openAIModels[0].Code != "gpt-6-astra" ||
-		!reflect.DeepEqual(openAIModels[0].InputModalities, []string{"TEXT", "IMAGE"}) ||
-		!reflect.DeepEqual(openAIModels[0].OutputModalities, []string{"TEXT"}) ||
-		openAIModels[4].Code != "gpt-image-2.5-sunburst" ||
-		!reflect.DeepEqual(openAIModels[4].InputModalities, []string{"TEXT", "IMAGE"}) ||
-		!reflect.DeepEqual(openAIModels[4].OutputModalities, []string{"IMAGE"}) {
-		t.Fatalf("unexpected OpenAI models copied from the curated catalog: %+v", openAIModels)
-	}
-	byteDanceModels := OfficialProviderModels("doubao-official")
-	if len(byteDanceModels) != 7 || byteDanceModels[0].Code != "doubao-seedance-2-5-260628" ||
-		!reflect.DeepEqual(byteDanceModels[0].OutputModalities, []string{"VIDEO", "AUDIO"}) {
-		t.Fatalf("unexpected ByteDance models copied from the curated catalog: %+v", byteDanceModels)
-	}
-	for _, model := range byteDanceModels {
-		if !strings.HasPrefix(model.Code, "doubao-seedance-") &&
-			!strings.HasPrefix(model.Code, "doubao-seedream-") {
-			t.Fatalf("unexpected ByteDance model outside the media allowlist: %+v", model)
-		}
-	}
-}
-
 func TestProviderCatalogRejectsInvalidContentVersion(t *testing.T) {
 	invalid := bytes.Replace(
 		providerCatalogJSON,
-		[]byte(`"catalogVersion": "2026-09-17"`),
+		[]byte(`"catalogVersion": "2026-09-20"`),
 		[]byte(`"catalogVersion": "2026-02-30"`),
 		1,
 	)

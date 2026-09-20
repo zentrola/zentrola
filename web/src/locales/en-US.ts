@@ -405,7 +405,7 @@ export default {
     guideSteps: {
       create: {
         title: 'Add a provider',
-        description: 'Add a third-party provider, or initialize a model vendor and its presets.',
+        description: 'Add a third-party provider or initialize official model-vendor metadata.',
       },
       website: {
         title: 'Get credentials from the official website',
@@ -436,10 +436,11 @@ export default {
     thirdPartyProvider: 'Third-party provider',
     thirdPartyProviderHint: 'Configure endpoints and model mappings manually',
     modelVendor: 'Model vendor',
-    modelVendorHint: 'Initialize official vendors and presets',
+    modelVendorHint: 'Initialize official vendor metadata',
     initialize: 'Initialize',
     initializeTitle: 'Select model vendors',
-    initializeHint: 'Select the model vendors whose presets you want to initialize or synchronize.',
+    initializeHint:
+      'Select the model vendors whose official metadata you want to initialize or update.',
     initializeSelection: 'Available model vendors',
     initializeSelectionCount: '{count} of {total} selected',
     initializeProviderSelection: 'Select {name}',
@@ -447,7 +448,7 @@ export default {
     selectAll: 'Select all',
     clearSelection: 'Clear',
     initializeCompleted:
-      'Added {created} official providers and synchronized {updated} preset names or websites; {total} are now available.',
+      'Added {created} official providers and updated {updated} names or websites; {total} are now available.',
     initializeUnchanged:
       'All {total} official providers, names for the current language, and websites are up to date.',
     edit: 'Edit',
@@ -654,12 +655,11 @@ export default {
     syncingModels: 'Reading the model catalog…',
     syncPassed: 'Model catalog synchronized',
     syncHint:
-      'The official API is preferred when an API key is configured; otherwise the built-in catalog is used. Missing models and provider mappings are created, matching names are refreshed, new models are enabled, and other existing configuration is preserved.',
+      'Uses a configured API key to read the official API. Missing models and provider mappings are created, matching names are refreshed, new models are enabled, and other existing configuration is preserved.',
     syncResult: 'Model sync result',
     modelSyncSource: 'Sync source',
     modelSyncSources: {
       PROVIDER: 'Official API',
-      BUILTIN: 'Built-in catalog',
     },
     discoveredModels: 'Discovered models',
     createdModels: 'Created models',
