@@ -447,6 +447,17 @@ function resourcesFor(provider: Provider) {
   return resources.value.filter((resource) => resource.providerId === provider.id)
 }
 
+function providerEnableBlockReason(provider: Provider) {
+  if (provider.status === 'ACTIVE') return undefined
+  const credentialConfigured = Boolean(resourceFor(provider))
+  const modelConfigured = provider.modelCount > 0
+  if (!credentialConfigured && !modelConfigured)
+    return t('providers.configurationRequiredBeforeEnable')
+  if (!modelConfigured) return t('providers.modelRequiredBeforeEnable')
+  if (!credentialConfigured) return t('providers.credentialRequiredBeforeEnable')
+  return undefined
+}
+
 function apiKeyResourceFor(provider: Provider) {
   return resourcesFor(provider).find(
     (resource) => resource.authType === 'API_KEY' || !resource.authType,
@@ -1455,15 +1466,9 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
               <StatusSwitch
                 :value="provider.status"
                 :name="provider.name"
-                :disabled="
-                  busy || loading || (provider.status !== 'ACTIVE' && !resourceFor(provider))
-                "
+                :disabled="busy || loading || Boolean(providerEnableBlockReason(provider))"
                 :busy="busy && statusTarget?.id === provider.id"
-                :title="
-                  provider.status !== 'ACTIVE' && !resourceFor(provider)
-                    ? t('providers.credentialRequiredBeforeEnable')
-                    : undefined
-                "
+                :title="providerEnableBlockReason(provider)"
                 @change="changeStatus(provider)"
               />
             </td>

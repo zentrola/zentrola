@@ -458,7 +458,11 @@ func (s *Service) SetProviderStatus(ctx context.Context, actor admin.Identity, i
 			if err != nil {
 				return err
 			}
-			if len(mappings) == 0 {
+			models, err := readAllModels(ctx, w)
+			if err != nil {
+				return err
+			}
+			if activeProviderMappingCount(mappings, models) == 0 {
 				return ErrProviderModelMappingRequired
 			}
 			configured, err := w.ProviderCredentialConfigured(ctx, id)

@@ -475,7 +475,7 @@ func securityError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, mgmt.ErrProviderCredentialRequired):
 		status, code, message = http.StatusConflict, "PROVIDER_CREDENTIAL_REQUIRED", "Configure a provider credential before enabling the provider."
 	case errors.Is(err, mgmt.ErrProviderModelMappingRequired):
-		status, code, message = http.StatusConflict, "PROVIDER_MODEL_MAPPING_REQUIRED", "Configure a provider model mapping before enabling the provider."
+		status, code, message = http.StatusConflict, "PROVIDER_MODEL_MAPPING_REQUIRED", "Configure a mapping to an active model before enabling the provider."
 	case errors.Is(err, mgmt.ErrModelSyncCredentialRequired):
 		status, code, message = http.StatusConflict, "MODEL_SYNC_CREDENTIAL_REQUIRED", "Configure a provider credential before synchronizing models."
 	case errors.Is(err, mgmt.ErrCredentialExportUnsupported):

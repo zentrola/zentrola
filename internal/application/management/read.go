@@ -171,23 +171,38 @@ func (s *Service) Provider(ctx context.Context, a admin.Identity, id int64) (Pro
 		if err != nil {
 			return ProviderDetail{}, err
 		}
-		liveModelIDs := make(map[int64]struct{}, len(models))
-		activeModelIDs := make(map[int64]struct{}, len(models))
-		for _, model := range models {
-			liveModelIDs[model.ID] = struct{}{}
-			if model.Status == "ACTIVE" {
-				activeModelIDs[model.ID] = struct{}{}
-			}
-		}
-		liveMappings := make([]ProviderMapping, 0, len(mappings))
-		for _, mapping := range mappings {
-			if _, exists := liveModelIDs[mapping.ModelID]; exists {
-				liveMappings = append(liveMappings, mapping)
-				if _, active := activeModelIDs[mapping.ModelID]; active {
-					provider.ModelCount++
-				}
-			}
-		}
+		liveMappings := liveProviderMappings(mappings, models)
+		provider.ModelCount = activeProviderMappingCount(liveMappings, models)
 		return ProviderDetail{Provider: s.withProviderCapabilities(provider), Mappings: liveMappings}, nil
 	})
+}
+
+func liveProviderMappings(mappings []ProviderMapping, models []Model) []ProviderMapping {
+	liveModelIDs := make(map[int64]struct{}, len(models))
+	for _, model := range models {
+		liveModelIDs[model.ID] = struct{}{}
+	}
+	liveMappings := make([]ProviderMapping, 0, len(mappings))
+	for _, mapping := range mappings {
+		if _, exists := liveModelIDs[mapping.ModelID]; exists {
+			liveMappings = append(liveMappings, mapping)
+		}
+	}
+	return liveMappings
+}
+
+func activeProviderMappingCount(mappings []ProviderMapping, models []Model) int64 {
+	activeModelIDs := make(map[int64]struct{}, len(models))
+	for _, model := range models {
+		if model.Status == "ACTIVE" {
+			activeModelIDs[model.ID] = struct{}{}
+		}
+	}
+	var count int64
+	for _, mapping := range mappings {
+		if _, active := activeModelIDs[mapping.ModelID]; active {
+			count++
+		}
+	}
+	return count
 }
