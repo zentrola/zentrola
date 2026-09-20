@@ -62,5 +62,6 @@ func deepSeekDisplayName(code string) string {
 }
 
 func validModelCode(code string) bool {
-	return code != "" && code == strings.TrimSpace(code) && len(code) <= 128 && utf8.ValidString(code) && !strings.ContainsRune(code, 0)
+	return code != "" && code == strings.TrimSpace(code) && len(code) <= 128 && utf8.ValidString(code) &&
+		!strings.ContainsFunc(code, unicode.IsControl)
 }

@@ -64,7 +64,7 @@ func TestInitializeOfficialProvidersCreatesMissingTemplatesAndSynchronizesLocali
 	actor := admin.Identity{ID: 1}
 
 	options, err := service.OfficialProviderInitializationOptions("zh-CN")
-	if err != nil || len(options) != 13 || options[0].Code != "openai-official" || options[0].Name != "OpenAI" || options[0].Website != "https://openai.com" {
+	if err != nil || len(options) != 8 || options[0].Code != "openai-official" || options[0].Name != "OpenAI" || options[0].Website != "https://openai.com" || options[7].Code != "xai-official" {
 		t.Fatalf("unexpected initialization options: %+v err=%v", options, err)
 	}
 	codes := make([]string, 0, len(options))
@@ -75,7 +75,7 @@ func TestInitializeOfficialProvidersCreatesMissingTemplatesAndSynchronizesLocali
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Total != 13 || result.Created != 12 || result.Updated != 1 || result.Existing != 1 || len(state.providers) != 13 || len(state.audits) != 13 {
+	if result.Total != 8 || result.Created != 7 || result.Updated != 1 || result.Existing != 1 || len(state.providers) != 8 || len(state.audits) != 8 {
 		t.Fatalf("unexpected initialization result: %+v providers=%d audits=%d", result, len(state.providers), len(state.audits))
 	}
 	if state.providers[0].Name != "OpenAI" || state.providers[0].Website == nil || *state.providers[0].Website != "https://openai.com" || state.providers[0].Endpoints[0].BaseURL != existing.Endpoints[0].BaseURL || state.providers[0].Status != existing.Status {
@@ -88,12 +88,12 @@ func TestInitializeOfficialProvidersCreatesMissingTemplatesAndSynchronizesLocali
 	}
 
 	result, err = service.InitializeOfficialProviders(context.Background(), actor, ProviderInitializeInput{Locale: "zh-CN", ProviderCodes: codes}, appsec.RequestMeta{})
-	if err != nil || result.Created != 0 || result.Updated != 0 || result.Existing != 13 || len(state.providers) != 13 || len(state.audits) != 13 {
+	if err != nil || result.Created != 0 || result.Updated != 0 || result.Existing != 8 || len(state.providers) != 8 || len(state.audits) != 8 {
 		t.Fatalf("initialization is not idempotent: %+v err=%v", result, err)
 	}
 
 	result, err = service.InitializeOfficialProviders(context.Background(), actor, ProviderInitializeInput{Locale: "en-US", ProviderCodes: codes}, appsec.RequestMeta{})
-	if err != nil || result.Created != 0 || result.Updated != 7 || result.Existing != 13 || len(state.providers) != 13 || len(state.audits) != 20 {
+	if err != nil || result.Created != 0 || result.Updated != 4 || result.Existing != 8 || len(state.providers) != 8 || len(state.audits) != 12 {
 		t.Fatalf("localized names were not synchronized: %+v err=%v", result, err)
 	}
 	if state.providers[0].Name != "OpenAI" {
