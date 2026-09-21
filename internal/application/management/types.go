@@ -105,6 +105,7 @@ type Provider struct {
 type ProviderEndpoint struct {
 	ProtocolType string `json:"protocolType" binding:"required" enums:"OPENAI,ANTHROPIC"`
 	BaseURL      string `json:"baseUrl" binding:"required"`
+	NetworkScope string `json:"networkScope" enums:"PUBLIC,PRIVATE"`
 }
 type ProviderProxyHeader struct {
 	Key        string `json:"key"`
@@ -388,6 +389,7 @@ type ConnectionTarget struct {
 	ProviderCode      string
 	Protocol          string
 	BaseURL           string
+	NetworkScope      string
 	UpstreamModelCode string
 	AuthType          string
 	AuthAdapter       string

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	gw "github.com/zentrola/zentrola/internal/application/gateway"
+	"github.com/zentrola/zentrola/internal/domain/catalog"
 	"github.com/zentrola/zentrola/internal/infrastructure/openaicodex"
 	"github.com/zentrola/zentrola/internal/infrastructure/provider"
 )
@@ -20,24 +21,31 @@ import (
 const codexSubscriptionBaseURL = "https://chatgpt.com/backend-api/codex"
 
 type GatewayClient struct {
-	client *http.Client
-	logger *slog.Logger
+	client        *http.Client
+	privateClient *http.Client
+	logger        *slog.Logger
 }
 
 func NewGatewayClient(headerTimeout time.Duration, loggers ...*slog.Logger) *GatewayClient {
-	t := http.DefaultTransport.(*http.Transport).Clone()
-	t.Proxy = nil
-	t.DisableCompression = true
-	t.DialContext = provider.PublicDialContext(&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second})
-	t.TLSHandshakeTimeout = 10 * time.Second
-	t.ResponseHeaderTimeout = headerTimeout
+	newClient := func(networkScope string) *http.Client {
+		t := http.DefaultTransport.(*http.Transport).Clone()
+		t.Proxy = nil
+		t.DisableCompression = true
+		t.DialContext = provider.EndpointDialContext(&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}, networkScope)
+		t.TLSHandshakeTimeout = 10 * time.Second
+		t.ResponseHeaderTimeout = headerTimeout
+		return &http.Client{Transport: t, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	}
 	logger := slog.Default()
 	if len(loggers) > 0 && loggers[0] != nil {
 		logger = loggers[0]
 	}
-	return &GatewayClient{client: &http.Client{Transport: t, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, logger: logger}
+	return &GatewayClient{client: newClient(catalog.NetworkScopePublic), privateClient: newClient(catalog.NetworkScopePrivate), logger: logger}
 }
-func (c *GatewayClient) CloseIdleConnections() { c.client.CloseIdleConnections() }
+func (c *GatewayClient) CloseIdleConnections() {
+	c.client.CloseIdleConnections()
+	c.privateClient.CloseIdleConnections()
+}
 func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Request, credential []byte) (*gw.Response, error) {
 	base := route.BaseURL
 	upstreamPath := "/chat/completions"
@@ -53,8 +61,9 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 		}
 		requestCredential, accountID = accessToken, account
 		base, upstreamPath = codexSubscriptionBaseURL, "/responses"
+		route.NetworkScope = catalog.NetworkScopePublic
 	}
-	baseURL, allowed := provider.BaseURL(base)
+	baseURL, allowed := provider.BaseURLForScope(base, route.NetworkScope)
 	if !allowed {
 		return nil, gw.ErrRoute
 	}
@@ -92,7 +101,11 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 		req.Header.Set("X-Request-ID", input.RequestID)
 	}
 	// 客户端 Authorization / Cookie / Anthropic / SDK Header 均不复制到上游。
-	client, cleanup, err := provider.ClientWithProxy(ctx, c.client, route.Proxy, provider.ProxyRequestLog{
+	baseClient := c.client
+	if route.NetworkScope == catalog.NetworkScopePrivate {
+		baseClient = c.privateClient
+	}
+	client, cleanup, err := provider.ClientWithProxyForScope(ctx, baseClient, route.Proxy, route.NetworkScope, provider.ProxyRequestLog{
 		Logger: c.logger, Operation: "gateway_inference", ProviderID: route.ProviderID, ResourceID: route.ResourceID, Protocol: gw.OpenAIEndpoint,
 	})
 	if err != nil {

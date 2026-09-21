@@ -4,12 +4,42 @@ import (
 	"context"
 	"net"
 	"testing"
+
+	"github.com/zentrola/zentrola/internal/domain/catalog"
 )
 
 type staticResolver []net.IPAddr
 
 func (r staticResolver) LookupIPAddr(context.Context, string) ([]net.IPAddr, error) {
 	return r, nil
+}
+
+func TestPrivateBaseURLAllowsExplicitLocalTargets(t *testing.T) {
+	for _, raw := range []string{
+		"http://192.168.1.20:8080/v1",
+		"https://10.0.0.5:8443",
+		"http://127.0.0.1:11434/v1",
+		"http://models.internal:8080",
+	} {
+		if _, ok := BaseURLForScope(raw, catalog.NetworkScopePrivate); !ok {
+			t.Fatalf("private endpoint rejected: %q", raw)
+		}
+	}
+	for _, raw := range []string{
+		"http://169.254.169.254/latest/meta-data",
+		"http://[fe80::1]:8080",
+		"ftp://192.168.1.20/models",
+	} {
+		if _, ok := BaseURLForScope(raw, catalog.NetworkScopePrivate); ok {
+			t.Fatalf("unsafe private endpoint accepted: %q", raw)
+		}
+	}
+}
+
+func TestBaseURLRejectsUnknownNetworkScope(t *testing.T) {
+	if _, ok := BaseURLForScope("https://api.example.com", "INVALID"); ok {
+		t.Fatal("unknown network scope accepted")
+	}
 }
 
 func TestBaseURL(t *testing.T) {
@@ -58,5 +88,16 @@ func TestResolvePublicAddressesRejectsAnyPrivateDNSResult(t *testing.T) {
 				t.Fatal("non-public DNS result accepted")
 			}
 		})
+	}
+}
+
+func TestResolvePrivateAddressesAllowsPrivateButRejectsLinkLocal(t *testing.T) {
+	private := staticResolver{{IP: net.ParseIP("192.168.1.20")}}
+	if _, err := resolveEndpointAddresses(context.Background(), private, "models.internal", catalog.NetworkScopePrivate); err != nil {
+		t.Fatalf("private DNS result rejected: %v", err)
+	}
+	metadata := staticResolver{{IP: net.ParseIP("169.254.169.254")}}
+	if _, err := resolveEndpointAddresses(context.Background(), metadata, "metadata.internal", catalog.NetworkScopePrivate); err == nil {
+		t.Fatal("link-local metadata address accepted")
 	}
 }

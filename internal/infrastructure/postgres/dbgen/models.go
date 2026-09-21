@@ -394,6 +394,8 @@ type ProviderEndpoint struct {
 	CreatedAt pgtype.Timestamptz
 	// 更新时间，UTC
 	UpdatedAt pgtype.Timestamptz
+	// 上游网络范围：PUBLIC=仅公网地址；PRIVATE=管理员显式允许私网地址
+	NetworkScope string
 }
 
 // 供应方与逻辑模型的多对多映射

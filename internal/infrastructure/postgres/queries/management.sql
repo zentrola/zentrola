@@ -147,10 +147,10 @@ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$16,$17,$17);
 UPDATE provider SET provider_name=$2,official_website=$3,proxy_enabled=$4,proxy_url_display=$5,proxy_url_ciphertext=$6,proxy_url_nonce=$7,proxy_url_key_version=$8,proxy_header_names=$9,proxy_headers_ciphertext=$10,proxy_headers_nonce=$11,proxy_headers_key_version=$12,updated_by=$13,updated_at=$14
 WHERE id=$1 AND is_deleted=false;
 -- name: ManageUpsertProviderEndpoint :exec
-INSERT INTO provider_endpoint(provider_id,protocol_type,base_url,created_by,updated_by,created_at,updated_at)
-VALUES($1,$2,$3,$4,$4,$5,$5)
+INSERT INTO provider_endpoint(provider_id,protocol_type,base_url,network_scope,created_by,updated_by,created_at,updated_at)
+VALUES($1,$2,$3,$4,$5,$5,$6,$6)
 ON CONFLICT(provider_id,protocol_type) DO UPDATE
-SET base_url=excluded.base_url,updated_by=excluded.updated_by,updated_at=excluded.updated_at;
+SET base_url=excluded.base_url,network_scope=excluded.network_scope,updated_by=excluded.updated_by,updated_at=excluded.updated_at;
 -- name: ManageDeleteProviderEndpoint :exec
 DELETE FROM provider_endpoint WHERE provider_id=$1 AND protocol_type=$2;
 -- name: ManageDeleteProvider :exec

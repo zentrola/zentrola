@@ -17,6 +17,7 @@ import (
 	"time"
 
 	gw "github.com/zentrola/zentrola/internal/application/gateway"
+	"github.com/zentrola/zentrola/internal/domain/catalog"
 	"github.com/zentrola/zentrola/internal/infrastructure/provider"
 )
 
@@ -59,6 +60,26 @@ func TestNativeOpenAIForwarding(t *testing.T) {
 	if calls != 1 {
 		t.Fatal("rejected URL reached transport")
 	}
+}
+
+func TestPrivateEndpointForwarding(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/chat/completions" || request.Header.Get("Authorization") != "Bearer private-key" {
+			t.Errorf("unexpected private endpoint request: path=%s headers=%v", request.URL.Path, request.Header)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-private"}`))
+	}))
+	defer server.Close()
+
+	client := NewGatewayClient(time.Second)
+	response, err := client.Open(context.Background(), gw.Route{
+		BaseURL: server.URL + "/v1", NetworkScope: catalog.NetworkScopePrivate,
+	}, gw.Request{Protocol: gw.OpenAIProtocol, Path: "/v1/chat/completions", Body: []byte(`{"model":"private-model"}`)}, []byte("private-key"))
+	if err != nil || response.Status != http.StatusOK {
+		t.Fatalf("private endpoint forwarding failed: response=%+v err=%v", response, err)
+	}
+	_ = response.Body.Close()
 }
 
 func TestResponsesForwarding(t *testing.T) {

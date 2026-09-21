@@ -177,7 +177,7 @@ func providerMappingView(r dbgen.ProviderModel) mgmt.ProviderMapping {
 }
 
 func endpointView(r dbgen.ProviderEndpoint) mgmt.ProviderEndpoint {
-	return mgmt.ProviderEndpoint{ProtocolType: r.ProtocolType, BaseURL: r.BaseUrl}
+	return mgmt.ProviderEndpoint{ProtocolType: r.ProtocolType, BaseURL: r.BaseUrl, NetworkScope: r.NetworkScope}
 }
 
 func (s *managementSession) providerEndpoints(ctx context.Context, providerID int64) ([]mgmt.ProviderEndpoint, error) {
@@ -583,7 +583,7 @@ func (s *managementSession) syncProviderEndpoints(ctx context.Context, p mgmt.Pr
 	for _, endpoint := range p.Endpoints {
 		desired[endpoint.ProtocolType] = struct{}{}
 		if err := s.q.ManageUpsertProviderEndpoint(ctx, dbgen.ManageUpsertProviderEndpointParams{
-			ProviderID: p.ID, ProtocolType: endpoint.ProtocolType, BaseUrl: endpoint.BaseURL,
+			ProviderID: p.ID, ProtocolType: endpoint.ProtocolType, BaseUrl: endpoint.BaseURL, NetworkScope: endpoint.NetworkScope,
 			CreatedBy: actorRef(s.actor.ID), CreatedAt: pgTime(p.UpdatedAt),
 		}); err != nil {
 			return err

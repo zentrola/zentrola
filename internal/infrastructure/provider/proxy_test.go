@@ -64,6 +64,22 @@ func TestProxyTransportRejectsPrivateProviderTarget(t *testing.T) {
 	}
 }
 
+func TestPrivateProxyTransportAllowsPrivateButRejectsMetadataTarget(t *testing.T) {
+	if err := endpointLiteralError("192.168.1.20", catalog.NetworkScopePrivate); err != nil {
+		t.Fatalf("private provider target rejected: %v", err)
+	}
+	if err := endpointLiteralError("169.254.169.254", catalog.NetworkScopePrivate); err == nil || !strings.Contains(err.Error(), "disallowed address") {
+		t.Fatalf("metadata target was not rejected: %v", err)
+	}
+}
+
+func TestClientWithProxyRejectsInvalidNetworkScopeWithoutProxy(t *testing.T) {
+	base := &http.Client{Transport: http.DefaultTransport.(*http.Transport).Clone()}
+	if _, _, err := ClientWithProxyForScope(context.Background(), base, nil, "INVALID", ProxyRequestLog{}); err == nil {
+		t.Fatal("invalid network scope accepted without proxy")
+	}
+}
+
 func TestNonPublicLiteralError(t *testing.T) {
 	for _, host := range []string{"127.0.0.1", "10.0.0.1", "192.168.1.5", "169.254.169.254", "::1"} {
 		if err := nonPublicLiteralError(host); err == nil {

@@ -62,19 +62,24 @@ func (standardConnectionProbeAdapter) ValidResponse(data []byte, probe connectio
 
 type ConnectionTester struct {
 	client           *http.Client
+	privateClient    *http.Client
 	standardAdapter  connectionProbeAdapter
 	providerAdapters map[string]connectionProbeAdapter
 }
 
 func NewConnectionTester() *ConnectionTester {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.Proxy = nil
-	transport.DialContext = provider.PublicDialContext(&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second})
-	transport.TLSHandshakeTimeout = 5 * time.Second
-	transport.ResponseHeaderTimeout = 10 * time.Second
+	newClient := func(networkScope string) *http.Client {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.Proxy = nil
+		transport.DialContext = provider.EndpointDialContext(&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}, networkScope)
+		transport.TLSHandshakeTimeout = 5 * time.Second
+		transport.ResponseHeaderTimeout = 10 * time.Second
+		return &http.Client{Transport: transport, Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	}
 	standardAdapter := standardConnectionProbeAdapter{}
 	return &ConnectionTester{
-		client:          &http.Client{Transport: transport, Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
+		client:          newClient(catalog.NetworkScopePublic),
+		privateClient:   newClient(catalog.NetworkScopePrivate),
 		standardAdapter: standardAdapter,
 		providerAdapters: map[string]connectionProbeAdapter{
 			catalog.DeepSeekOfficialCode: deepSeekConnectionProbeAdapter{standard: standardAdapter},
@@ -97,7 +102,7 @@ func (t *ConnectionTester) Test(ctx context.Context, target mgmt.ConnectionTarge
 		result.Code = "PROVIDER_MODEL_MAPPING_REQUIRED"
 		return
 	}
-	base, allowed := allowedBaseURL(target.BaseURL)
+	base, allowed := provider.BaseURLForScope(target.BaseURL, target.NetworkScope)
 	if !allowed {
 		result.Code = "UPSTREAM_URL_REJECTED"
 		return
@@ -126,6 +131,7 @@ func (t *ConnectionTester) Test(ctx context.Context, target mgmt.ConnectionTarge
 				return
 			}
 			requestCredential, accountID = accessToken, account
+			target.NetworkScope = catalog.NetworkScopePublic
 			probeAdapter = t.standardAdapter
 			probe = connectionProbe{
 				URL:            "https://chatgpt.com/backend-api/codex/responses",
@@ -188,7 +194,11 @@ func (t *ConnectionTester) Test(ctx context.Context, target mgmt.ConnectionTarge
 		}
 	}()
 
-	client, cleanup, err := provider.ClientWithProxy(ctx, t.client, proxy, provider.ProxyRequestLog{
+	baseClient := t.client
+	if target.NetworkScope == catalog.NetworkScopePrivate {
+		baseClient = t.privateClient
+	}
+	client, cleanup, err := provider.ClientWithProxyForScope(ctx, baseClient, proxy, target.NetworkScope, provider.ProxyRequestLog{
 		Operation: "provider_connection_test", Protocol: target.Protocol,
 	})
 	if err != nil {

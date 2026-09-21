@@ -39,18 +39,18 @@ var (
 )
 
 type Route struct {
-	ModelID, ProviderID, ProviderModelID, ResourceID int64
-	ModelCode, ModelName, ProviderName               string
-	UpstreamModel, BaseURL, EndpointProtocol         string
-	AuthType, AuthAdapter, SubscriptionType          string
-	ResourcePriority                                 int32
-	QuotaStatus                                      string
-	ExpiresAt                                        *time.Time
-	CredentialRefreshedAt, CredentialExpiresAt       *time.Time
-	Credential                                       catalog.SealedCredential
-	ProxyEnabled                                     bool
-	ProxyURL, ProxyHeaders                           catalog.SealedCredential
-	Proxy                                            *catalog.OutboundProxy
+	ModelID, ProviderID, ProviderModelID, ResourceID       int64
+	ModelCode, ModelName, ProviderName                     string
+	UpstreamModel, BaseURL, EndpointProtocol, NetworkScope string
+	AuthType, AuthAdapter, SubscriptionType                string
+	ResourcePriority                                       int32
+	QuotaStatus                                            string
+	ExpiresAt                                              *time.Time
+	CredentialRefreshedAt, CredentialExpiresAt             *time.Time
+	Credential                                             catalog.SealedCredential
+	ProxyEnabled                                           bool
+	ProxyURL, ProxyHeaders                                 catalog.SealedCredential
+	Proxy                                                  *catalog.OutboundProxy
 }
 
 const AnthropicProtocol = "ANTHROPIC_MESSAGES"

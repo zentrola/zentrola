@@ -50,9 +50,11 @@ export interface Provider {
   updatedAt: string
 }
 export type ProviderProtocol = 'OPENAI' | 'ANTHROPIC'
+export type ProviderNetworkScope = 'PUBLIC' | 'PRIVATE'
 export interface ProviderEndpoint {
   protocolType: ProviderProtocol
   baseUrl: string
+  networkScope: ProviderNetworkScope
 }
 export interface ProviderProxyHeader {
   key: string

@@ -20,6 +20,7 @@ type catalogRequest struct {
 	URL          string
 	Bearer       bool
 	APIKeyHeader string
+	NetworkScope string
 }
 
 const (
@@ -37,29 +38,34 @@ type adapter interface {
 }
 
 type Discoverer struct {
-	client   *http.Client
-	logger   *slog.Logger
-	adapters map[string]adapter
+	client        *http.Client
+	privateClient *http.Client
+	logger        *slog.Logger
+	adapters      map[string]adapter
 }
 
 func NewDiscoverer(logger *slog.Logger) *Discoverer {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.Proxy = nil
-	transport.DialContext = provider.PublicDialContext(&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second})
-	transport.TLSHandshakeTimeout = 5 * time.Second
-	transport.ResponseHeaderTimeout = 10 * time.Second
-	if logger == nil {
-		logger = slog.Default()
-	}
-	return &Discoverer{
-		client: &http.Client{
+	newClient := func(networkScope string) *http.Client {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.Proxy = nil
+		transport.DialContext = provider.EndpointDialContext(&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}, networkScope)
+		transport.TLSHandshakeTimeout = 5 * time.Second
+		transport.ResponseHeaderTimeout = 10 * time.Second
+		return &http.Client{
 			Transport: transport,
 			Timeout:   15 * time.Second,
 			CheckRedirect: func(*http.Request, []*http.Request) error {
 				return http.ErrUseLastResponse
 			},
-		},
-		logger: logger,
+		}
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &Discoverer{
+		client:        newClient(catalog.NetworkScopePublic),
+		privateClient: newClient(catalog.NetworkScopePrivate),
+		logger:        logger,
 		adapters: map[string]adapter{
 			catalog.OpenAIOfficialCode:   openAIAdapter{},
 			catalog.GoogleOfficialCode:   googleAdapter{},
@@ -91,15 +97,6 @@ func (d *Discoverer) Discover(ctx context.Context, source mgmt.ModelDiscoverySou
 		return
 	}
 
-	client, cleanup, err := provider.ClientWithProxy(ctx, d.client, proxy, provider.ProxyRequestLog{
-		Logger: d.logger, Operation: "model_catalog_sync", ProviderCode: source.ProviderCode,
-	})
-	if err != nil {
-		result.Code = "PROXY_CONFIGURATION_UNRECOVERABLE"
-		return
-	}
-	defer cleanup()
-
 	seen := make(map[string]struct{})
 	seenCursors := make(map[string]struct{})
 	var cursor string
@@ -109,8 +106,20 @@ func (d *Discoverer) Discover(ctx context.Context, source mgmt.ModelDiscoverySou
 			result.Code = "UPSTREAM_URL_REJECTED"
 			return nil, result
 		}
+		baseClient := d.client
+		if requestSpec.NetworkScope == catalog.NetworkScopePrivate {
+			baseClient = d.privateClient
+		}
+		client, cleanup, proxyErr := provider.ClientWithProxyForScope(ctx, baseClient, proxy, requestSpec.NetworkScope, provider.ProxyRequestLog{
+			Logger: d.logger, Operation: "model_catalog_sync", ProviderCode: source.ProviderCode,
+		})
+		if proxyErr != nil {
+			result.Code = "PROXY_CONFIGURATION_UNRECOVERABLE"
+			return nil, result
+		}
 		req, requestErr := http.NewRequestWithContext(ctx, http.MethodGet, requestSpec.URL, nil)
 		if requestErr != nil {
+			cleanup()
 			result.Code = "UPSTREAM_URL_REJECTED"
 			return nil, result
 		}
@@ -128,12 +137,14 @@ func (d *Discoverer) Discover(ctx context.Context, source mgmt.ModelDiscoverySou
 			req.Header.Del(requestSpec.APIKeyHeader)
 		}
 		if requestErr != nil {
+			cleanup()
 			result.Code = connectionErrorCode(ctx, requestErr)
 			return nil, result
 		}
 		result.HTTPStatus = resp.StatusCode
 		data, readErr := io.ReadAll(io.LimitReader(resp.Body, maxCatalogResponseBytes+1))
 		_ = resp.Body.Close()
+		cleanup()
 		d.logger.InfoContext(ctx, "official model catalog response",
 			"provider_code", source.ProviderCode,
 			"catalog_adapter", adapter.Name(),

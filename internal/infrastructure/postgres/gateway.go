@@ -115,7 +115,7 @@ func (s *GatewayStore) ResolveCandidates(ctx context.Context, identity appsec.Pr
 		route := gw.Route{
 			ModelID: m.ID, ProviderID: row.ProviderID, ProviderModelID: row.ProviderModelID, ResourceID: row.ResourceID,
 			ModelCode: m.ModelCode, ModelName: m.DisplayName, ProviderName: row.ProviderName,
-			UpstreamModel: upstreamModel, BaseURL: row.BaseUrl, EndpointProtocol: row.ProtocolType,
+			UpstreamModel: upstreamModel, BaseURL: row.BaseUrl, EndpointProtocol: row.ProtocolType, NetworkScope: row.NetworkScope,
 			AuthType: row.AuthType, AuthAdapter: row.AuthAdapter, ResourcePriority: row.ResourcePriority,
 			QuotaStatus: row.QuotaStatus, ExpiresAt: timePointer(row.ExpiresAt),
 			CredentialRefreshedAt: timePointer(row.CredentialRefreshedAt), CredentialExpiresAt: timePointer(row.CredentialExpiresAt),

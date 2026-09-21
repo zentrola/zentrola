@@ -16,24 +16,24 @@ import (
 
 const modelSyncLimit = 1000
 
-func preferredProviderEndpoint(provider Provider) (string, string) {
+func preferredProviderEndpoint(provider Provider) (string, string, string) {
 	for _, preferred := range [...]string{"ANTHROPIC", "OPENAI"} {
 		for _, endpoint := range provider.Endpoints {
 			if endpoint.ProtocolType == preferred {
-				return endpoint.ProtocolType, endpoint.BaseURL
+				return endpoint.ProtocolType, endpoint.BaseURL, endpoint.NetworkScope
 			}
 		}
 	}
-	return "", ""
+	return "", "", ""
 }
 
-func providerEndpoint(provider Provider, protocol string) (string, string) {
+func providerEndpoint(provider Provider, protocol string) (string, string, string) {
 	for _, endpoint := range provider.Endpoints {
 		if endpoint.ProtocolType == protocol {
-			return endpoint.ProtocolType, endpoint.BaseURL
+			return endpoint.ProtocolType, endpoint.BaseURL, endpoint.NetworkScope
 		}
 	}
-	return "", ""
+	return "", "", ""
 }
 
 func (s *Service) SyncProviderModels(ctx context.Context, actor admin.Identity, id int64, meta appsec.RequestMeta) (ModelSyncResult, error) {

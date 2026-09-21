@@ -1002,15 +1002,15 @@ func (s *Service) TestResourceSelection(ctx context.Context, actor admin.Identit
 		result.Code = "PROVIDER_MODEL_MAPPING_REQUIRED"
 	} else {
 		defer clear(plain)
-		selectedProtocol, baseURL := preferredProviderEndpoint(provider)
+		selectedProtocol, baseURL, networkScope := preferredProviderEndpoint(provider)
 		if protocol != "" {
-			selectedProtocol, baseURL = providerEndpoint(provider, protocol)
+			selectedProtocol, baseURL, networkScope = providerEndpoint(provider, protocol)
 			if baseURL == "" {
 				return ConnectionResult{}, appsec.ErrInvalidArgument
 			}
 		}
 		target := ConnectionTarget{
-			ProviderCode: provider.Code, Protocol: selectedProtocol, BaseURL: baseURL,
+			ProviderCode: provider.Code, Protocol: selectedProtocol, BaseURL: baseURL, NetworkScope: networkScope,
 			UpstreamModelCode: upstreamModelCode,
 			AuthType:          resource.AuthType, AuthAdapter: resource.AuthAdapter,
 		}
