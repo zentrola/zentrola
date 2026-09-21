@@ -50,7 +50,12 @@ func (input ProviderInput) Valid() bool {
 	if !input.ProxyEnabled {
 		return true
 	}
-	if _, _, ok := normalizeProxyURL(input.ProxyURL); !ok || len(input.ProxyHeaders) > 32 {
+	normalizedProxyURL, _, ok := normalizeProxyURL(input.ProxyURL)
+	if !ok || len(input.ProxyHeaders) > 32 {
+		return false
+	}
+	parsedProxyURL, _ := url.Parse(normalizedProxyURL)
+	if catalog.SOCKSProxyScheme(parsedProxyURL.Scheme) && len(input.ProxyHeaders) > 0 {
 		return false
 	}
 	seen := make(map[string]struct{}, len(input.ProxyHeaders))
@@ -174,7 +179,7 @@ func normalizeProxyURL(raw string) (string, string, bool) {
 		return "", "", false
 	}
 	u, err := url.Parse(raw)
-	if err != nil || u.Hostname() == "" || (u.Scheme != "http" && u.Scheme != "https") ||
+	if err != nil || u.Hostname() == "" || !catalog.ValidProxyScheme(u.Scheme) ||
 		u.RawQuery != "" || u.Fragment != "" || (u.EscapedPath() != "" && u.EscapedPath() != "/") {
 		return "", "", false
 	}
@@ -190,7 +195,10 @@ func normalizeProxyURL(raw string) (string, string, bool) {
 			displayURL.User = url.User("******")
 		}
 	}
-	return normalized, displayURL.String(), true
+	// net/url 会把 Userinfo 中的星号转义为 %2A；管理端展示需要保留直观掩码，
+	// 同时确保后续原样回传时能与数据库中的展示值稳定匹配。
+	display := strings.ReplaceAll(displayURL.String(), "%2A", "*")
+	return normalized, display, true
 }
 
 func proxyOwner(providerID int64, field string) catalog.ProviderProxyOwner {
@@ -221,16 +229,17 @@ func (s *Service) applyProviderProxy(current Provider, input ProviderInput) (Pro
 	}
 
 	proxyURL := strings.TrimSpace(input.ProxyURL)
-	if len(input.ProxyHeaders) > 32 {
+	normalized, display, ok := normalizeProxyURL(proxyURL)
+	if !ok || len(input.ProxyHeaders) > 32 {
+		return Provider{}, errInvalidProviderProxy
+	}
+	parsedProxyURL, _ := url.Parse(normalized)
+	if catalog.SOCKSProxyScheme(parsedProxyURL.Scheme) && len(input.ProxyHeaders) > 0 {
 		return Provider{}, errInvalidProviderProxy
 	}
 	if current.ProxyEnabled && current.ProxyURL != nil && proxyURL == *current.ProxyURL && current.ProxyURLSealed.KeyVersion > 0 {
 		// 管理端回传脱敏展示值表示 URL 未修改，保留原密文。
 	} else {
-		normalized, display, ok := normalizeProxyURL(proxyURL)
-		if !ok {
-			return Provider{}, errInvalidProviderProxy
-		}
 		plain := []byte(normalized)
 		sealed, err := s.cipher.EncryptProviderProxy(plain, proxyOwner(current.ID, "url"))
 		clear(plain)

@@ -512,9 +512,11 @@ export default {
     proxyUrl: 'Proxy server URL',
     proxyUrlCredentialHint: 'Usernames and passwords are stored encrypted',
     proxyUrlInvalid:
-      'Enter a valid HTTP or HTTPS proxy URL without a path, query string, or fragment.',
+      'Enter a valid HTTP, HTTPS, or SOCKS5 proxy URL without a path, query string, or fragment.',
     proxyHeaders: 'Proxy headers',
     proxyHeadersHint: 'Header values are encrypted and sent only to the proxy server.',
+    socksProxyHint:
+      'SOCKS5 uses the username and password in the URL and does not support custom HTTP headers.',
     addProxyHeader: 'Add header',
     proxyHeaderKey: 'KEY',
     proxyHeaderValue: 'VALUE',

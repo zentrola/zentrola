@@ -1767,6 +1767,44 @@ test('服务商协议地址可显式选择私有网络', async ({ page }) => {
   await expect(row.getByText('私有网络', { exact: true })).toBeVisible()
 })
 
+test('服务商代理支持 SOCKS5 并忽略 HTTP Header', async ({ page }) => {
+  const state = await fixture(page)
+  state.providers[0].proxyEnabled = true
+  state.providers[0].proxyUrl = 'http://proxy.example.com:8080'
+  state.providers[0].proxyHeaders = [{ key: 'X-Proxy-Token', configured: true }]
+  await signIn(page, 'home')
+  await page.getByRole('link', { name: '服务商', exact: true }).click()
+
+  const row = page.getByRole('row').filter({ hasText: 'DeepSeek' })
+  await row.getByRole('button', { name: '编辑', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '编辑服务商' })
+  await dialog.getByRole('tab', { name: '代理配置', exact: true }).click()
+  await dialog.getByRole('switch', { name: '启用代理', exact: true }).check()
+  await expect(dialog.getByLabel('KEY', { exact: true })).toHaveValue('X-Proxy-Token')
+  const proxyURL = dialog.getByLabel('代理服务器地址', { exact: true })
+  await proxyURL.fill('ftp://proxy.example.com:21')
+  await dialog.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(page.locator('.toast')).toContainText('请输入有效的 HTTP、HTTPS 或 SOCKS5 代理地址')
+
+  await proxyURL.fill('socks5://proxy-user:proxy-password@proxy.example.com:1080')
+  await expect(
+    dialog.getByText('SOCKS5 使用地址中的用户名和密码认证，不支持自定义 HTTP Header。', {
+      exact: true,
+    }),
+  ).toBeVisible()
+  await expect(dialog.getByRole('button', { name: '添加 Header', exact: true })).toHaveCount(0)
+  await dialog.getByRole('button', { name: '保存', exact: true }).click()
+
+  expect(state.providerInputs.at(-1)).toEqual(
+    expect.objectContaining({
+      proxyEnabled: true,
+      proxyUrl: 'socks5://proxy-user:proxy-password@proxy.example.com:1080',
+      proxyHeaders: [],
+    }),
+  )
+  expect(state.providers[0].proxyUrl).not.toContain('proxy-password')
+})
+
 test('连接测试允许选择模型并显示实际测试模型', async ({ page }) => {
   const state = await fixture(page)
   state.providers[0].name = 'Google'

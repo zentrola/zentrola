@@ -530,9 +530,11 @@ export const i18n = createI18n({
         proxyHint: '仅该服务商的连接测试和模型调用使用此代理，默认直连。',
         proxyUrl: '代理服务器地址',
         proxyUrlCredentialHint: '用户名和密码将加密保存',
-        proxyUrlInvalid: '请输入有效的 HTTP 或 HTTPS 代理地址，地址不能包含路径、查询参数或片段。',
+        proxyUrlInvalid:
+          '请输入有效的 HTTP、HTTPS 或 SOCKS5 代理地址，地址不能包含路径、查询参数或片段。',
         proxyHeaders: '代理 Header',
         proxyHeadersHint: 'Header Value 加密保存，且只发送给代理服务器。',
+        socksProxyHint: 'SOCKS5 使用地址中的用户名和密码认证，不支持自定义 HTTP Header。',
         addProxyHeader: '添加 Header',
         proxyHeaderKey: 'KEY',
         proxyHeaderValue: 'VALUE',
