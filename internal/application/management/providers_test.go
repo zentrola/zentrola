@@ -103,10 +103,20 @@ func TestProviderFromInput(t *testing.T) {
 	if !ok || got.Website == nil || *got.Website != "https://www.deepseek.com" || len(got.Endpoints) != 1 || got.Endpoints[0].BaseURL != "https://dashscope.aliyuncs.com/compatible-mode/v1" {
 		t.Fatalf("unexpected provider: %+v", got)
 	}
+	private, ok := providerFromInput(current, ProviderInput{
+		Name: "内网服务", Endpoints: []ProviderEndpoint{{
+			ProtocolType: "OPENAI", BaseURL: "http://192.168.1.20:8080/v1", NetworkScope: catalog.NetworkScopePrivate,
+		}},
+	})
+	if !ok || private.Endpoints[0].NetworkScope != catalog.NetworkScopePrivate {
+		t.Fatalf("private endpoint rejected: %+v", private)
+	}
 
 	for _, input := range []ProviderInput{
 		{Name: "没有接口"},
 		{Name: "不安全协议", Endpoints: []ProviderEndpoint{{ProtocolType: "OPENAI", BaseURL: "http://api.example.com"}}},
+		{Name: "未知网络范围", Endpoints: []ProviderEndpoint{{ProtocolType: "OPENAI", BaseURL: "https://api.example.com", NetworkScope: "INTERNAL"}}},
+		{Name: "元数据地址", Endpoints: []ProviderEndpoint{{ProtocolType: "OPENAI", BaseURL: "http://169.254.169.254/latest/meta-data", NetworkScope: catalog.NetworkScopePrivate}}},
 		{Name: "包含凭证", Endpoints: []ProviderEndpoint{{ProtocolType: "OPENAI", BaseURL: "https://key@api.example.com"}}},
 		{Name: "包含查询参数", Endpoints: []ProviderEndpoint{{ProtocolType: "OPENAI", BaseURL: "https://api.example.com/v1?token=secret"}}},
 		{Name: "未知协议", Endpoints: []ProviderEndpoint{{ProtocolType: "GEMINI_NATIVE", BaseURL: "https://api.example.com"}}},

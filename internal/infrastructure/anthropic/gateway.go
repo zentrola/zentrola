@@ -19,26 +19,33 @@ import (
 )
 
 type GatewayClient struct {
-	client *http.Client
-	logger *slog.Logger
+	client        *http.Client
+	privateClient *http.Client
+	logger        *slog.Logger
 }
 
 func NewGatewayClient(headerTimeout time.Duration, loggers ...*slog.Logger) *GatewayClient {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.Proxy = nil
-	transport.DisableCompression = true
-	transport.DialContext = provider.PublicDialContext(&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second})
-	transport.TLSHandshakeTimeout = 10 * time.Second
-	transport.ResponseHeaderTimeout = headerTimeout
+	newClient := func(networkScope string) *http.Client {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.Proxy = nil
+		transport.DisableCompression = true
+		transport.DialContext = provider.EndpointDialContext(&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}, networkScope)
+		transport.TLSHandshakeTimeout = 10 * time.Second
+		transport.ResponseHeaderTimeout = headerTimeout
+		return &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	}
 	logger := slog.Default()
 	if len(loggers) > 0 && loggers[0] != nil {
 		logger = loggers[0]
 	}
-	return &GatewayClient{client: &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, logger: logger}
+	return &GatewayClient{client: newClient(catalog.NetworkScopePublic), privateClient: newClient(catalog.NetworkScopePrivate), logger: logger}
 }
-func (c *GatewayClient) CloseIdleConnections() { c.client.CloseIdleConnections() }
+func (c *GatewayClient) CloseIdleConnections() {
+	c.client.CloseIdleConnections()
+	c.privateClient.CloseIdleConnections()
+}
 func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Request, credential []byte) (*gw.Response, error) {
-	baseURL, allowed := allowedBaseURL(route.BaseURL)
+	baseURL, allowed := provider.BaseURLForScope(route.BaseURL, route.NetworkScope)
 	if !allowed {
 		return nil, gw.ErrRoute
 	}
@@ -125,7 +132,11 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 	if input.RequestID != "" {
 		req.Header.Set("X-Request-ID", input.RequestID)
 	}
-	client, cleanup, err := provider.ClientWithProxy(ctx, c.client, route.Proxy, provider.ProxyRequestLog{
+	baseClient := c.client
+	if route.NetworkScope == catalog.NetworkScopePrivate {
+		baseClient = c.privateClient
+	}
+	client, cleanup, err := provider.ClientWithProxyForScope(ctx, baseClient, route.Proxy, route.NetworkScope, provider.ProxyRequestLog{
 		Logger: c.logger, Operation: "gateway_inference", ProviderID: route.ProviderID, ResourceID: route.ResourceID, Protocol: gw.AnthropicEndpoint,
 	})
 	if err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/url"
 	"sort"
@@ -71,7 +72,7 @@ func (input ProviderInput) Valid() bool {
 	return true
 }
 
-func optionalURL(raw string, website bool) (*string, bool) {
+func optionalURL(raw string, website bool, networkScope ...string) (*string, bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil, true
@@ -87,8 +88,18 @@ func optionalURL(raw string, website bool) (*string, bool) {
 		if u.Scheme != "https" && u.Scheme != "http" {
 			return nil, false
 		}
-	} else if u.Scheme != "https" {
-		return nil, false
+	} else {
+		scope := catalog.NetworkScopePublic
+		if len(networkScope) > 0 {
+			scope = networkScope[0]
+		}
+		if !catalog.ValidNetworkScope(scope) || scope == catalog.NetworkScopePublic && u.Scheme != "https" ||
+			scope == catalog.NetworkScopePrivate && u.Scheme != "https" && u.Scheme != "http" {
+			return nil, false
+		}
+		if ip := net.ParseIP(u.Hostname()); ip != nil && !catalog.EndpointIPAllowed(ip, scope) {
+			return nil, false
+		}
 	}
 	normalized := strings.TrimSuffix(raw, "/")
 	return &normalized, true
@@ -105,15 +116,19 @@ func providerFromInput(current Provider, input ProviderInput) (Provider, bool) {
 	seen := make(map[string]struct{}, len(input.Endpoints))
 	endpoints := make([]ProviderEndpoint, 0, len(input.Endpoints))
 	for _, endpoint := range input.Endpoints {
-		baseURL, ok := optionalURL(endpoint.BaseURL, false)
-		if !ok || baseURL == nil || !validProviderProtocol(endpoint.ProtocolType) {
+		networkScope := endpoint.NetworkScope
+		if networkScope == "" {
+			networkScope = catalog.NetworkScopePublic
+		}
+		baseURL, ok := optionalURL(endpoint.BaseURL, false, networkScope)
+		if !ok || baseURL == nil || !validProviderProtocol(endpoint.ProtocolType) || !catalog.ValidNetworkScope(networkScope) {
 			return Provider{}, false
 		}
 		if _, duplicate := seen[endpoint.ProtocolType]; duplicate {
 			return Provider{}, false
 		}
 		seen[endpoint.ProtocolType] = struct{}{}
-		endpoints = append(endpoints, ProviderEndpoint{ProtocolType: endpoint.ProtocolType, BaseURL: *baseURL})
+		endpoints = append(endpoints, ProviderEndpoint{ProtocolType: endpoint.ProtocolType, BaseURL: *baseURL, NetworkScope: networkScope})
 	}
 	sort.Slice(endpoints, func(i, j int) bool { return endpoints[i].ProtocolType < endpoints[j].ProtocolType })
 	current.Name = input.Name

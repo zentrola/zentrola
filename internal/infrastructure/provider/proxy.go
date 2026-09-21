@@ -53,6 +53,30 @@ func nonPublicLiteralError(host string) error {
 	return nil
 }
 
+type scopedTargetTransport struct {
+	transport    *http.Transport
+	networkScope string
+}
+
+func (t *scopedTargetTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	if request.URL == nil || request.URL.Hostname() == "" {
+		return nil, errors.New("invalid provider endpoint")
+	}
+	if err := endpointLiteralError(request.URL.Hostname(), t.networkScope); err != nil {
+		return nil, err
+	}
+	return t.transport.RoundTrip(request)
+}
+
+func endpointLiteralError(host, networkScope string) error {
+	if ip := net.ParseIP(host); ip != nil && !endpointIPAllowed(ip, networkScope) {
+		return errors.New("provider endpoint is a disallowed address")
+	}
+	return nil
+}
+
+func (t *scopedTargetTransport) CloseIdleConnections() { t.transport.CloseIdleConnections() }
+
 func init() {
 	// 未显式配置运行环境时采用生产环境策略，避免测试工具或独立调用意外输出凭据。
 	redactProviderLogSecrets.Store(true)
@@ -136,6 +160,16 @@ func logProxyRequest(ctx context.Context, proxyURL *url.URL, headers map[string]
 // ClientWithProxy 为单次代理调用克隆 Transport，避免不同服务商之间串用代理配置。
 // 返回的 cleanup 必须在响应体关闭时调用。
 func ClientWithProxy(ctx context.Context, base *http.Client, proxy *catalog.OutboundProxy, details ProxyRequestLog) (*http.Client, func(), error) {
+	return ClientWithProxyForScope(ctx, base, proxy, catalog.NetworkScopePublic, details)
+}
+
+// ClientWithProxyForScope 为使用代理的请求保留 Endpoint 网络范围约束。代理负责
+// 解析域名，因此这里只校验 URL 中的字面量 IP；域名目标由代理端网络策略约束。
+func ClientWithProxyForScope(ctx context.Context, base *http.Client, proxy *catalog.OutboundProxy, networkScope string, details ProxyRequestLog) (*http.Client, func(), error) {
+	networkScope = normalizedNetworkScope(networkScope)
+	if !catalog.ValidNetworkScope(networkScope) {
+		return nil, nil, errors.New("invalid endpoint network scope")
+	}
 	if proxy == nil {
 		return base, func() {}, nil
 	}
@@ -149,15 +183,19 @@ func ClientWithProxy(ctx context.Context, base *http.Client, proxy *catalog.Outb
 	}
 	transport := baseTransport.Clone()
 	transport.Proxy = http.ProxyURL(proxyURL)
-	// 代理地址是管理员显式配置的网络出口，允许使用内网代理；字面量内网
-	// 目标仍由 publicTargetTransport 拦截，域名目标交由代理端解析。
+	// 代理地址是管理员显式配置的网络出口，允许使用内网代理；字面量目标
+	// 仍按 Endpoint 网络范围校验，域名目标交由代理端解析。
 	transport.DialContext = (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext
 	transport.ProxyConnectHeader = make(http.Header, len(proxy.Headers))
 	for key, value := range proxy.Headers {
 		transport.ProxyConnectHeader.Set(key, value)
 	}
 	client := *base
-	client.Transport = &publicTargetTransport{transport: transport}
+	if networkScope == catalog.NetworkScopePublic {
+		client.Transport = &publicTargetTransport{transport: transport}
+	} else {
+		client.Transport = &scopedTargetTransport{transport: transport, networkScope: networkScope}
+	}
 	logProxyRequest(ctx, proxyURL, proxy.Headers, details)
 	return &client, transport.CloseIdleConnections, nil
 }

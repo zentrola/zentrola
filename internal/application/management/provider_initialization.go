@@ -9,6 +9,7 @@ import (
 	"github.com/zentrola/zentrola/internal/application/bootstrap"
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	"github.com/zentrola/zentrola/internal/domain/admin"
+	"github.com/zentrola/zentrola/internal/domain/catalog"
 	"github.com/zentrola/zentrola/internal/domain/operation"
 )
 
@@ -120,7 +121,7 @@ func (s *Service) InitializeOfficialProviders(ctx context.Context, actor admin.I
 				CreatedAt: now, UpdatedAt: now,
 			}
 			for _, endpoint := range template.Endpoints {
-				provider.Endpoints = append(provider.Endpoints, ProviderEndpoint{ProtocolType: endpoint.ProtocolType, BaseURL: endpoint.BaseURL})
+				provider.Endpoints = append(provider.Endpoints, ProviderEndpoint{ProtocolType: endpoint.ProtocolType, BaseURL: endpoint.BaseURL, NetworkScope: catalog.NetworkScopePublic})
 			}
 			if err := writer.CreateProvider(ctx, provider); err != nil {
 				return err

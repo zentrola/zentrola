@@ -1436,7 +1436,7 @@ func (q *Queries) ManageProviderCredentialConfigured(ctx context.Context, provid
 }
 
 const manageProviderEndpoints = `-- name: ManageProviderEndpoints :many
-SELECT provider_id, protocol_type, base_url, created_by, updated_by, created_at, updated_at FROM provider_endpoint WHERE provider_id=$1 ORDER BY protocol_type
+SELECT provider_id, protocol_type, base_url, created_by, updated_by, created_at, updated_at, network_scope FROM provider_endpoint WHERE provider_id=$1 ORDER BY protocol_type
 `
 
 func (q *Queries) ManageProviderEndpoints(ctx context.Context, providerID int64) ([]ProviderEndpoint, error) {
@@ -1456,6 +1456,7 @@ func (q *Queries) ManageProviderEndpoints(ctx context.Context, providerID int64)
 			&i.UpdatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.NetworkScope,
 		); err != nil {
 			return nil, err
 		}
@@ -2081,16 +2082,17 @@ func (q *Queries) ManageUpdateResource(ctx context.Context, arg ManageUpdateReso
 }
 
 const manageUpsertProviderEndpoint = `-- name: ManageUpsertProviderEndpoint :exec
-INSERT INTO provider_endpoint(provider_id,protocol_type,base_url,created_by,updated_by,created_at,updated_at)
-VALUES($1,$2,$3,$4,$4,$5,$5)
+INSERT INTO provider_endpoint(provider_id,protocol_type,base_url,network_scope,created_by,updated_by,created_at,updated_at)
+VALUES($1,$2,$3,$4,$5,$5,$6,$6)
 ON CONFLICT(provider_id,protocol_type) DO UPDATE
-SET base_url=excluded.base_url,updated_by=excluded.updated_by,updated_at=excluded.updated_at
+SET base_url=excluded.base_url,network_scope=excluded.network_scope,updated_by=excluded.updated_by,updated_at=excluded.updated_at
 `
 
 type ManageUpsertProviderEndpointParams struct {
 	ProviderID   int64
 	ProtocolType string
 	BaseUrl      string
+	NetworkScope string
 	CreatedBy    string
 	CreatedAt    pgtype.Timestamptz
 }
@@ -2100,6 +2102,7 @@ func (q *Queries) ManageUpsertProviderEndpoint(ctx context.Context, arg ManageUp
 		arg.ProviderID,
 		arg.ProtocolType,
 		arg.BaseUrl,
+		arg.NetworkScope,
 		arg.CreatedBy,
 		arg.CreatedAt,
 	)

@@ -23,8 +23,8 @@ type qwenAdapter struct{}
 func (qwenAdapter) Name() string { return "qwen" }
 
 func (qwenAdapter) Request(source mgmt.ModelDiscoverySource, page int, _ string) (catalogRequest, error) {
-	baseURL := qwenCatalogBaseURL(source.Endpoints)
-	baseURL, ok := provider.BaseURL(baseURL)
+	configuredEndpoint := qwenCatalogEndpoint(source.Endpoints)
+	baseURL, ok := provider.BaseURLForScope(configuredEndpoint.BaseURL, configuredEndpoint.NetworkScope)
 	if !ok || page <= 0 || page > maxCatalogPages {
 		return catalogRequest{}, errInvalidQwenCatalog
 	}
@@ -43,7 +43,7 @@ func (qwenAdapter) Request(source mgmt.ModelDiscoverySource, page int, _ string)
 	query.Set("providers", "qwen")
 	query.Set("supports", "inference")
 	endpoint.RawQuery = query.Encode()
-	return catalogRequest{URL: endpoint.String(), Bearer: true}, nil
+	return catalogRequest{URL: endpoint.String(), Bearer: true, NetworkScope: configuredEndpoint.NetworkScope}, nil
 }
 
 func (qwenAdapter) Decode(data []byte, requestedPage int) ([]mgmt.DiscoveredModel, string, error) {
@@ -100,22 +100,22 @@ func (qwenAdapter) Decode(data []byte, requestedPage int) ([]mgmt.DiscoveredMode
 	return models, "", nil
 }
 
-func qwenCatalogBaseURL(endpoints []mgmt.ProviderEndpoint) string {
+func qwenCatalogEndpoint(endpoints []mgmt.ProviderEndpoint) mgmt.ProviderEndpoint {
 	for _, endpoint := range endpoints {
 		parsed, err := url.Parse(endpoint.BaseURL)
 		if err == nil && strings.HasSuffix(strings.ToLower(parsed.Hostname()), ".maas.aliyuncs.com") {
-			return endpoint.BaseURL
+			return endpoint
 		}
 	}
 	for _, endpoint := range endpoints {
 		if endpoint.ProtocolType == "OPENAI" {
-			return endpoint.BaseURL
+			return endpoint
 		}
 	}
 	if len(endpoints) > 0 {
-		return endpoints[0].BaseURL
+		return endpoints[0]
 	}
-	return ""
+	return mgmt.ProviderEndpoint{}
 }
 
 func isQwenModelCode(code string) bool {

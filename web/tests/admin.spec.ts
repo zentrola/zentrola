@@ -1746,6 +1746,27 @@ test('服务商同步入口只由后端能力参数控制', async ({ page }) => 
   await expect(dialog.getByText('官方接口', { exact: true })).toBeVisible()
 })
 
+test('服务商协议地址可显式选择私有网络', async ({ page }) => {
+  const state = await fixture(page)
+  await signIn(page, 'home')
+  await page.getByRole('link', { name: '服务商', exact: true }).click()
+
+  const row = page.getByRole('row').filter({ hasText: 'DeepSeek' })
+  await row.getByRole('button', { name: '编辑', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '编辑服务商' })
+  await dialog.getByLabel('OpenAI 网络位置', { exact: true }).selectOption('PRIVATE')
+  await dialog.getByLabel('OpenAI 协议地址', { exact: true }).fill('http://192.168.1.20:8080/v1')
+  await expect(dialog.getByText(/私有网络地址可以访问 Zentrola 所在网络/)).toBeVisible()
+  await dialog.getByRole('button', { name: '保存', exact: true }).click()
+
+  expect(state.providerInputs.at(-1)?.endpoints).toContainEqual({
+    protocolType: 'OPENAI',
+    baseUrl: 'http://192.168.1.20:8080/v1',
+    networkScope: 'PRIVATE',
+  })
+  await expect(row.getByText('私有网络', { exact: true })).toBeVisible()
+})
+
 test('连接测试允许选择模型并显示实际测试模型', async ({ page }) => {
   const state = await fixture(page)
   state.providers[0].name = 'Google'
@@ -2208,7 +2229,10 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   ])
   await expect(dialog.getByText('基础配置', { exact: true })).toHaveCount(0)
   await expect(
-    dialog.getByText('请至少填写一个协议地址：OpenAI 或 Anthropic。', { exact: true }),
+    dialog.getByText(
+      '请至少填写一个协议地址：OpenAI 或 Anthropic。公网服务必须使用 HTTPS，私有网络服务可以使用 HTTP 或 HTTPS。',
+      { exact: true },
+    ),
   ).toBeVisible()
   await expect(dialog.locator('.connection-fields')).toHaveCSS('grid-template-columns', /^\S+$/)
   await expect(providerFieldRows.first()).toHaveCSS('grid-template-columns', /\S+ \S+/)
@@ -2295,8 +2319,16 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
     .getByLabel('OpenAI 协议地址')
     .fill('http://dashscope.aliyuncs.com/compatible-mode/v1')
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
-  await expect(page.locator('.toast')).toContainText('有效的网站或 HTTPS 接口地址')
+  await expect(page.locator('.toast')).toContainText('公网接口必须使用 HTTPS')
   await expect(dialog.locator('.alert.error')).toHaveCount(0)
+  const openAINetworkScope = dialog.getByLabel('OpenAI 网络位置', { exact: true })
+  await openAINetworkScope.selectOption('PRIVATE')
+  await expect(dialog.getByText(/私有网络地址可以访问 Zentrola 所在网络/)).toBeVisible()
+  await expect(dialog.getByLabel('OpenAI 协议地址')).toHaveAttribute(
+    'placeholder',
+    'http://192.168.1.20:8080/v1',
+  )
+  await openAINetworkScope.selectOption('PUBLIC')
   await dialog
     .getByLabel('OpenAI 协议地址')
     .fill('https://dashscope.aliyuncs.com/compatible-mode/v1')
@@ -2412,6 +2444,7 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
         {
           protocolType: 'OPENAI',
           baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+          networkScope: 'PUBLIC',
         },
       ],
       proxyEnabled: true,

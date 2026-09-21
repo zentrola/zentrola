@@ -7163,6 +7163,13 @@
                 "baseUrl": {
                     "type": "string"
                 },
+                "networkScope": {
+                    "type": "string",
+                    "enum": [
+                        "PUBLIC",
+                        "PRIVATE"
+                    ]
+                },
                 "protocolType": {
                     "type": "string",
                     "enum": [

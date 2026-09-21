@@ -13,6 +13,7 @@ import type {
   ProviderDetail,
   ProviderInitializeOption,
   ProviderInitializeResult,
+  ProviderNetworkScope,
   ProviderProtocol,
   Resource,
   ResourceQuota,
@@ -221,7 +222,9 @@ const form = reactive({
   name: '',
   website: '',
   anthropicBaseUrl: '',
+  anthropicNetworkScope: 'PUBLIC' as ProviderNetworkScope,
   openaiBaseUrl: '',
+  openaiNetworkScope: 'PUBLIC' as ProviderNetworkScope,
   proxyEnabled: false,
   proxyUrl: '',
   proxyHeaders: [] as ProxyHeaderDraft[],
@@ -292,7 +295,7 @@ const {
     `${provider.name} ${provider.code} ${provider.website ?? ''} ${provider.endpoints.map((endpoint) => endpoint.baseUrl).join(' ')}`,
 )
 
-function validURL(value: string, endpoint = false) {
+function validURL(value: string, endpoint = false, networkScope: ProviderNetworkScope = 'PUBLIC') {
   if (!value) return true
   try {
     const parsed = new URL(value)
@@ -301,7 +304,11 @@ function validURL(value: string, endpoint = false) {
       parsed.password === '' &&
       parsed.search === '' &&
       parsed.hash === '' &&
-      (endpoint ? parsed.protocol === 'https:' : ['http:', 'https:'].includes(parsed.protocol))
+      (endpoint
+        ? networkScope === 'PRIVATE'
+          ? ['http:', 'https:'].includes(parsed.protocol)
+          : parsed.protocol === 'https:'
+        : ['http:', 'https:'].includes(parsed.protocol))
     )
   } catch {
     return false
@@ -320,8 +327,14 @@ function assignForm(provider: Provider | null, mappings: MappingDraft[] = []) {
     website: provider?.website ?? '',
     anthropicBaseUrl:
       provider?.endpoints.find((endpoint) => endpoint.protocolType === 'ANTHROPIC')?.baseUrl ?? '',
+    anthropicNetworkScope:
+      provider?.endpoints.find((endpoint) => endpoint.protocolType === 'ANTHROPIC')?.networkScope ??
+      'PUBLIC',
     openaiBaseUrl:
       provider?.endpoints.find((endpoint) => endpoint.protocolType === 'OPENAI')?.baseUrl ?? '',
+    openaiNetworkScope:
+      provider?.endpoints.find((endpoint) => endpoint.protocolType === 'OPENAI')?.networkScope ??
+      'PUBLIC',
     proxyEnabled: provider?.proxyEnabled ?? false,
     proxyUrl: provider?.proxyUrl ?? '',
     proxyHeaders: (provider?.proxyHeaders ?? []).map((header) => ({
@@ -464,6 +477,13 @@ function updateUpstreamModelCode(modelId: string, event: Event) {
 function endpointURL(provider: Provider, protocolType: ProviderProtocol) {
   return (
     provider.endpoints.find((endpoint) => endpoint.protocolType === protocolType)?.baseUrl ?? ''
+  )
+}
+
+function endpointNetworkScope(provider: Provider, protocolType: ProviderProtocol) {
+  return (
+    provider.endpoints.find((endpoint) => endpoint.protocolType === protocolType)?.networkScope ??
+    'PUBLIC'
   )
 }
 
@@ -1236,9 +1256,21 @@ function resultMessage(result: ConnectionResult, resource?: Resource) {
 
 function save() {
   let validation = ''
-  const endpointDrafts: Array<{ protocolType: ProviderProtocol; baseUrl: string }> = [
-    { protocolType: 'OPENAI', baseUrl: normalizeURL(form.openaiBaseUrl) },
-    { protocolType: 'ANTHROPIC', baseUrl: normalizeURL(form.anthropicBaseUrl) },
+  const endpointDrafts: Array<{
+    protocolType: ProviderProtocol
+    baseUrl: string
+    networkScope: ProviderNetworkScope
+  }> = [
+    {
+      protocolType: 'OPENAI',
+      baseUrl: normalizeURL(form.openaiBaseUrl),
+      networkScope: form.openaiNetworkScope,
+    },
+    {
+      protocolType: 'ANTHROPIC',
+      baseUrl: normalizeURL(form.anthropicBaseUrl),
+      networkScope: form.anthropicNetworkScope,
+    },
   ]
   const input = {
     name: form.name.trim(),
@@ -1257,7 +1289,7 @@ function save() {
   if (!validText(input.name, 128)) validation = t('common.byteLimit')
   else if (
     !validURL(input.website) ||
-    input.endpoints.some((endpoint) => !validURL(endpoint.baseUrl, true))
+    input.endpoints.some((endpoint) => !validURL(endpoint.baseUrl, true, endpoint.networkScope))
   )
     validation = t('providers.urlInvalid')
   else if (!input.endpoints.length) validation = t('providers.endpointRequired')
@@ -1549,13 +1581,22 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
               >
                 <span v-if="endpointURL(provider, 'OPENAI')"
                   ><span class="endpoint-protocol">OpenAI</span
-                  ><TechnicalValue
-                    class="endpoint"
-                    :value="endpointURL(provider, 'OPENAI')" /></span
+                  ><TechnicalValue class="endpoint" :value="endpointURL(provider, 'OPENAI')" /><span
+                    v-if="endpointNetworkScope(provider, 'OPENAI') === 'PRIVATE'"
+                    class="endpoint-private-badge"
+                    >{{ t('providers.networkPrivate') }}</span
+                  ></span
                 ><span v-if="endpointURL(provider, 'ANTHROPIC')"
                   ><span class="endpoint-protocol">Anthropic</span
-                  ><TechnicalValue class="endpoint" :value="endpointURL(provider, 'ANTHROPIC')"
-                /></span>
+                  ><TechnicalValue
+                    class="endpoint"
+                    :value="endpointURL(provider, 'ANTHROPIC')"
+                  /><span
+                    v-if="endpointNetworkScope(provider, 'ANTHROPIC') === 'PRIVATE'"
+                    class="endpoint-private-badge"
+                    >{{ t('providers.networkPrivate') }}</span
+                  ></span
+                >
               </div>
             </td>
             <td class="align-right">
@@ -1749,14 +1790,28 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
               t('providers.openaiEndpoint')
             }}</label>
             <div class="provider-field-control">
-              <input
-                id="provider-openai-endpoint-input"
-                v-model="form.openaiBaseUrl"
-                type="url"
-                placeholder="https://api.example.com/v1"
-                spellcheck="false"
-                :disabled="busy"
-              />
+              <div class="endpoint-editor">
+                <input
+                  id="provider-openai-endpoint-input"
+                  v-model="form.openaiBaseUrl"
+                  type="url"
+                  :placeholder="
+                    form.openaiNetworkScope === 'PRIVATE'
+                      ? 'http://192.168.1.20:8080/v1'
+                      : 'https://api.example.com/v1'
+                  "
+                  spellcheck="false"
+                  :disabled="busy"
+                />
+                <select
+                  v-model="form.openaiNetworkScope"
+                  :aria-label="t('providers.networkScopeFor', { protocol: 'OpenAI' })"
+                  :disabled="busy"
+                >
+                  <option value="PUBLIC">{{ t('providers.networkPublic') }}</option>
+                  <option value="PRIVATE">{{ t('providers.networkPrivate') }}</option>
+                </select>
+              </div>
             </div>
           </div>
           <div class="provider-field-row">
@@ -1764,16 +1819,37 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
               t('providers.anthropicEndpoint')
             }}</label>
             <div class="provider-field-control">
-              <input
-                id="provider-anthropic-endpoint-input"
-                v-model="form.anthropicBaseUrl"
-                type="url"
-                placeholder="https://api.example.com/anthropic"
-                spellcheck="false"
-                :disabled="busy"
-              />
+              <div class="endpoint-editor">
+                <input
+                  id="provider-anthropic-endpoint-input"
+                  v-model="form.anthropicBaseUrl"
+                  type="url"
+                  :placeholder="
+                    form.anthropicNetworkScope === 'PRIVATE'
+                      ? 'http://192.168.1.20:8080/anthropic'
+                      : 'https://api.example.com/anthropic'
+                  "
+                  spellcheck="false"
+                  :disabled="busy"
+                />
+                <select
+                  v-model="form.anthropicNetworkScope"
+                  :aria-label="t('providers.networkScopeFor', { protocol: 'Anthropic' })"
+                  :disabled="busy"
+                >
+                  <option value="PUBLIC">{{ t('providers.networkPublic') }}</option>
+                  <option value="PRIVATE">{{ t('providers.networkPrivate') }}</option>
+                </select>
+              </div>
             </div>
           </div>
+          <p
+            v-if="form.openaiNetworkScope === 'PRIVATE' || form.anthropicNetworkScope === 'PRIVATE'"
+            class="private-network-warning"
+            role="note"
+          >
+            {{ t('providers.privateNetworkWarning') }}
+          </p>
         </div>
       </section>
       <section class="config-editor">
@@ -2237,6 +2313,9 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
           <dd>
             <span v-for="endpoint in credentialTarget.endpoints" :key="endpoint.protocolType">
               <b>{{ endpoint.protocolType === 'OPENAI' ? 'OpenAI' : 'Anthropic' }}</b>
+              <span v-if="endpoint.networkScope === 'PRIVATE'" class="endpoint-private-badge">{{
+                t('providers.networkPrivate')
+              }}</span>
               <TechnicalValue :value="endpoint.baseUrl" />
             </span>
             <span v-if="!credentialTarget.endpoints.length">{{ t('common.none') }}</span>
@@ -2996,10 +3075,24 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
 }
 .endpoint-stack > span {
   display: grid;
-  grid-template-columns: 56px minmax(0, 1fr);
+  grid-template-columns: 56px minmax(0, 1fr) auto;
   align-items: center;
   gap: 6px;
   min-height: 20px;
+}
+.endpoint-private-badge {
+  display: inline-flex;
+  align-items: center;
+  width: max-content;
+  padding: 2px 5px;
+  border: 1px solid var(--color-warning-border);
+  border-radius: 999px;
+  color: var(--color-warning-text);
+  background: var(--color-warning-bg);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 .endpoint-protocol {
   display: inline-flex;
@@ -3762,6 +3855,21 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
 .provider-field-control {
   min-width: 0;
 }
+.endpoint-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 132px;
+  gap: 8px;
+}
+.private-network-warning {
+  margin: 0 0 0 calc(var(--provider-field-label-width) + 12px);
+  padding: 8px 10px;
+  border: 1px solid var(--color-warning-border);
+  border-radius: 7px;
+  color: var(--color-text-secondary);
+  background: var(--color-warning-bg);
+  font-size: 12px;
+  line-height: 1.55;
+}
 .required-label::after {
   margin-left: 4px;
   color: var(--danger);
@@ -4370,6 +4478,12 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   .provider-field-label {
     padding-top: 0;
     text-align: left;
+  }
+  .endpoint-editor {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .private-network-warning {
+    margin-left: 0;
   }
   .proxy-editor,
   .proxy-fields,
