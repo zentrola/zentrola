@@ -366,12 +366,20 @@ function validProxyURL(value: string) {
   try {
     const parsed = new URL(value.trim())
     return (
-      ['http:', 'https:'].includes(parsed.protocol) &&
+      ['http:', 'https:', 'socks5:', 'socks5h:'].includes(parsed.protocol) &&
       Boolean(parsed.hostname) &&
       parsed.search === '' &&
       parsed.hash === '' &&
       (parsed.pathname === '' || parsed.pathname === '/')
     )
+  } catch {
+    return false
+  }
+}
+
+function isSocksProxyURL(value: string) {
+  try {
+    return ['socks5:', 'socks5h:'].includes(new URL(value.trim()).protocol)
   } catch {
     return false
   }
@@ -1272,13 +1280,14 @@ function save() {
       networkScope: form.anthropicNetworkScope,
     },
   ]
+  const socksProxy = form.proxyEnabled && isSocksProxyURL(form.proxyUrl)
   const input = {
     name: form.name.trim(),
     website: normalizeURL(form.website),
     endpoints: endpointDrafts.filter((endpoint) => endpoint.baseUrl),
     proxyEnabled: form.proxyEnabled,
     proxyUrl: form.proxyEnabled ? form.proxyUrl.trim() : '',
-    proxyHeaders: form.proxyEnabled
+    proxyHeaders: form.proxyEnabled && !socksProxy
       ? form.proxyHeaders.map((header) => ({ key: header.key.trim(), value: header.value }))
       : [],
     mappings: form.mappings.map((mapping) => ({
@@ -1295,7 +1304,7 @@ function save() {
   else if (!input.endpoints.length) validation = t('providers.endpointRequired')
   else if (input.proxyEnabled && !validProxyURL(input.proxyUrl))
     validation = t('providers.proxyUrlInvalid')
-  else if (input.proxyEnabled && !validProxyHeaders())
+  else if (input.proxyEnabled && !socksProxy && !validProxyHeaders())
     validation = t('providers.proxyHeadersInvalid')
   else if (
     form.mappings.some(
@@ -1309,7 +1318,10 @@ function save() {
   else if (new Set(form.mappings.map((mapping) => mapping.modelId)).size !== form.mappings.length)
     validation = t('providers.mappingDuplicate')
   if (validation) {
-    if (input.proxyEnabled && (!validProxyURL(input.proxyUrl) || !validProxyHeaders()))
+    if (
+      input.proxyEnabled &&
+      (!validProxyURL(input.proxyUrl) || (!socksProxy && !validProxyHeaders()))
+    )
       activeConfigTab.value = 'proxy'
     else if (
       form.mappings.some(
@@ -2057,70 +2069,75 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
                   id="provider-proxy-url"
                   v-model="form.proxyUrl"
                   type="text"
-                  placeholder="http://username:password@proxy.example.com:8080"
+                  placeholder="socks5://username:password@proxy.example.com:1080"
                   autocomplete="off"
                   spellcheck="false"
                   :disabled="busy"
                 />
               </div>
             </div>
-            <div class="proxy-headers-head">
-              <div>
-                <strong>{{ t('providers.proxyHeaders') }}</strong>
-                <span>{{ t('providers.proxyHeadersHint') }}</span>
-              </div>
-              <button
-                type="button"
-                class="button compact"
-                :disabled="busy || form.proxyHeaders.length >= 32"
-                @click="addProxyHeader"
-              >
-                <Icon name="plus" :size="15" />{{ t('providers.addProxyHeader') }}
-              </button>
-            </div>
-            <div v-if="form.proxyHeaders.length" class="proxy-header-list">
-              <div
-                v-for="(header, index) in form.proxyHeaders"
-                :key="index"
-                class="proxy-header-row"
-              >
-                <label class="proxy-header-field">
-                  <span>{{ t('providers.proxyHeaderKey') }}</span>
-                  <input
-                    v-model="header.key"
-                    spellcheck="false"
-                    maxlength="128"
-                    :disabled="busy"
-                    placeholder="Proxy-Authorization"
-                  />
-                </label>
-                <label class="proxy-header-field">
-                  <span>{{ t('providers.proxyHeaderValue') }}</span>
-                  <input
-                    v-model="header.value"
-                    type="text"
-                    autocomplete="off"
-                    spellcheck="false"
-                    :disabled="busy"
-                    :placeholder="
-                      header.configured
-                        ? t('providers.proxyHeaderValueConfigured')
-                        : t('providers.proxyHeaderValuePlaceholder')
-                    "
-                  />
-                </label>
+            <p v-if="isSocksProxyURL(form.proxyUrl)" class="proxy-socks-hint">
+              {{ t('providers.socksProxyHint') }}
+            </p>
+            <template v-else>
+              <div class="proxy-headers-head">
+                <div>
+                  <strong>{{ t('providers.proxyHeaders') }}</strong>
+                  <span>{{ t('providers.proxyHeadersHint') }}</span>
+                </div>
                 <button
                   type="button"
-                  class="icon-button proxy-header-remove"
-                  :disabled="busy"
-                  :aria-label="t('providers.removeProxyHeader', { index: index + 1 })"
-                  :title="t('common.remove')"
-                  @click="removeProxyHeader(index)"
+                  class="button compact"
+                  :disabled="busy || form.proxyHeaders.length >= 32"
+                  @click="addProxyHeader"
                 >
-                  <Icon name="trash" :size="17" />
+                  <Icon name="plus" :size="15" />{{ t('providers.addProxyHeader') }}
                 </button>
               </div>
-            </div>
+              <div v-if="form.proxyHeaders.length" class="proxy-header-list">
+                <div
+                  v-for="(header, index) in form.proxyHeaders"
+                  :key="index"
+                  class="proxy-header-row"
+                >
+                  <label class="proxy-header-field">
+                    <span>{{ t('providers.proxyHeaderKey') }}</span>
+                    <input
+                      v-model="header.key"
+                      spellcheck="false"
+                      maxlength="128"
+                      :disabled="busy"
+                      placeholder="Proxy-Authorization"
+                    />
+                  </label>
+                  <label class="proxy-header-field">
+                    <span>{{ t('providers.proxyHeaderValue') }}</span>
+                    <input
+                      v-model="header.value"
+                      type="text"
+                      autocomplete="off"
+                      spellcheck="false"
+                      :disabled="busy"
+                      :placeholder="
+                        header.configured
+                          ? t('providers.proxyHeaderValueConfigured')
+                          : t('providers.proxyHeaderValuePlaceholder')
+                      "
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    class="icon-button proxy-header-remove"
+                    :disabled="busy"
+                    :aria-label="t('providers.removeProxyHeader', { index: index + 1 })"
+                    :title="t('common.remove')"
+                    @click="removeProxyHeader(index)"
+                  >
+                    <Icon name="trash" :size="17" />
+                  </button>
+                </div>
+              </div>
+            </template>
           </div>
         </section>
       </section>
@@ -4082,6 +4099,13 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   justify-content: space-between;
   gap: 16px;
 }
+.proxy-socks-hint {
+  grid-column: 2;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
 .proxy-headers-head > div {
   display: flex;
   align-items: baseline;
@@ -4503,6 +4527,9 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
     align-items: stretch;
     flex-direction: column;
     gap: 8px;
+  }
+  .proxy-socks-hint {
+    grid-column: 1;
   }
   .proxy-headers-head > div {
     flex-wrap: wrap;

@@ -94,7 +94,7 @@ func parseProxyURL(proxy *catalog.OutboundProxy) (*url.URL, error) {
 		return nil, nil
 	}
 	proxyURL, err := url.Parse(proxy.URL)
-	if err != nil || proxyURL.Hostname() == "" || (proxyURL.Scheme != "http" && proxyURL.Scheme != "https") ||
+	if err != nil || proxyURL.Hostname() == "" || !catalog.ValidProxyScheme(proxyURL.Scheme) ||
 		proxyURL.RawQuery != "" || proxyURL.Fragment != "" || (proxyURL.EscapedPath() != "" && proxyURL.EscapedPath() != "/") {
 		return nil, errors.New("invalid proxy URL")
 	}
@@ -210,7 +210,7 @@ func EnvironmentWithProxy(ctx context.Context, environment []string, proxy *cata
 	if err != nil {
 		return nil, err
 	}
-	result := make([]string, 0, len(environment)+2)
+	result := make([]string, 0, len(environment)+3)
 	for _, item := range environment {
 		key, _, _ := strings.Cut(item, "=")
 		switch strings.ToUpper(key) {
@@ -221,6 +221,9 @@ func EnvironmentWithProxy(ctx context.Context, environment []string, proxy *cata
 		}
 	}
 	result = append(result, "HTTP_PROXY="+proxyURL.String(), "HTTPS_PROXY="+proxyURL.String())
+	if catalog.SOCKSProxyScheme(proxyURL.Scheme) {
+		result = append(result, "ALL_PROXY="+proxyURL.String())
+	}
 	logProxyRequest(ctx, proxyURL, proxy.Headers, details)
 	return result, nil
 }

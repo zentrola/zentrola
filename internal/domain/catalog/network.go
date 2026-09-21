@@ -15,6 +15,21 @@ func ValidNetworkScope(scope string) bool {
 	return scope == NetworkScopePublic || scope == NetworkScopePrivate
 }
 
+// ValidProxyScheme 判断服务商出站代理协议是否受支持。
+func ValidProxyScheme(scheme string) bool {
+	switch scheme {
+	case "http", "https":
+		return true
+	default:
+		return SOCKSProxyScheme(scheme)
+	}
+}
+
+// SOCKSProxyScheme 判断代理协议是否为 SOCKS5 或其远端 DNS 别名。
+func SOCKSProxyScheme(scheme string) bool {
+	return scheme == "socks5" || scheme == "socks5h"
+}
+
 var nonPublicPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("0.0.0.0/8"),
 	netip.MustParsePrefix("100.64.0.0/10"),

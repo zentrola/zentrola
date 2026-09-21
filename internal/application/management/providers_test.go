@@ -280,20 +280,55 @@ func TestSetProviderStatusAllowsDisablingWithoutCredential(t *testing.T) {
 }
 
 func TestNormalizeProxyURLMasksPassword(t *testing.T) {
-	raw, display, ok := normalizeProxyURL(" http://user:password@proxy.example.com:8080/ ")
-	if !ok || raw != "http://user:password@proxy.example.com:8080" {
-		t.Fatalf("unexpected normalized proxy URL: %q", raw)
-	}
-	if strings.Contains(display, "password") || strings.Contains(display, "user") || !strings.Contains(display, "proxy.example.com:8080") {
-		t.Fatalf("proxy display was not masked: %q", display)
+	for _, test := range []struct {
+		input       string
+		want        string
+		wantDisplay string
+	}{
+		{
+			input:       " http://user:password@proxy.example.com:8080/ ",
+			want:        "http://user:password@proxy.example.com:8080",
+			wantDisplay: "http://******:******@proxy.example.com:8080",
+		},
+		{
+			input:       " socks5://user:password@proxy.example.com:1080/ ",
+			want:        "socks5://user:password@proxy.example.com:1080",
+			wantDisplay: "socks5://******:******@proxy.example.com:1080",
+		},
+		{
+			input:       "socks5h://user@proxy.example.com:1080",
+			want:        "socks5h://user@proxy.example.com:1080",
+			wantDisplay: "socks5h://******@proxy.example.com:1080",
+		},
+	} {
+		raw, display, ok := normalizeProxyURL(test.input)
+		if !ok || raw != test.want {
+			t.Fatalf("unexpected normalized proxy URL: %q", raw)
+		}
+		if display != test.wantDisplay {
+			t.Fatalf("unexpected proxy display: got %q, want %q", display, test.wantDisplay)
+		}
 	}
 	for _, invalid := range []string{
-		"socks5://proxy.example.com:1080",
+		"ftp://proxy.example.com:21",
 		"http://proxy.example.com:8080/path",
 		"http://proxy.example.com:8080?token=secret",
 	} {
 		if _, _, ok := normalizeProxyURL(invalid); ok {
 			t.Fatalf("invalid proxy URL accepted: %s", invalid)
+		}
+	}
+}
+
+func TestApplyProviderProxyRejectsSOCKS5Headers(t *testing.T) {
+	service := &Service{cipher: providerTestCipher{}}
+	for _, scheme := range []string{"socks5", "socks5h"} {
+		if _, err := service.applyProviderProxy(Provider{ID: 81}, ProviderInput{
+			ProxyEnabled: true,
+			ProxyURL:     scheme + "://proxy.example.com:1080",
+			ProxyHeaders: []ProviderProxyHeaderInput{{Key: "X-Proxy-Token", Value: "secret"}},
+		}); !errors.Is(err, errInvalidProviderProxy) {
+			t.Fatalf("%s proxy header was accepted: %v", scheme, err)
 		}
 	}
 }

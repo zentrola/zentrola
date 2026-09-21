@@ -56,6 +56,25 @@ func TestClientWithProxyIsolatedTransport(t *testing.T) {
 	}
 }
 
+func TestClientWithSOCKS5Proxy(t *testing.T) {
+	baseTransport := http.DefaultTransport.(*http.Transport).Clone()
+	baseTransport.Proxy = nil
+	base := &http.Client{Transport: baseTransport}
+	client, cleanup, err := ClientWithProxy(context.Background(), base, &catalog.OutboundProxy{
+		URL: "socks5h://user:password@proxy.example.com:1080",
+	}, ProxyRequestLog{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	transport := client.Transport.(*publicTargetTransport).transport
+	request, _ := http.NewRequest(http.MethodGet, "https://api.example.com", nil)
+	proxyURL, err := transport.Proxy(request)
+	if err != nil || proxyURL.String() != "socks5h://user:password@proxy.example.com:1080" {
+		t.Fatalf("unexpected SOCKS5 proxy URL: %v, %v", proxyURL, err)
+	}
+}
+
 func TestProxyTransportRejectsPrivateProviderTarget(t *testing.T) {
 	transport := &publicTargetTransport{transport: http.DefaultTransport.(*http.Transport).Clone()}
 	request, _ := http.NewRequest(http.MethodGet, "https://127.0.0.1/private", nil)
@@ -115,6 +134,20 @@ func TestEnvironmentWithProxyOverridesInheritedProxyVariables(t *testing.T) {
 		!strings.Contains(output, `"proxy_auth":true`) || !strings.Contains(output, `"proxy_headers":{}`) || !strings.Contains(output, `"proxy_redacted":true`) ||
 		strings.Contains(output, "password") || strings.Contains(output, "user") {
 		t.Fatalf("unexpected proxy log: %s", output)
+	}
+}
+
+func TestEnvironmentWithSOCKS5ProxySetsAllProxyVariables(t *testing.T) {
+	got, err := EnvironmentWithProxy(context.Background(), []string{
+		"PATH=test", "HTTP_PROXY=http://old.example", "HTTPS_PROXY=http://old.example", "ALL_PROXY=socks5://old.example", "NO_PROXY=localhost",
+	}, &catalog.OutboundProxy{URL: "socks5://user:password@proxy.example.com:1080"}, ProxyRequestLog{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(got, "\n")
+	if !strings.Contains(joined, "PATH=test") || strings.Count(joined, "socks5://user:password@proxy.example.com:1080") != 3 ||
+		strings.Contains(joined, "old.example") || strings.Contains(strings.ToUpper(joined), "NO_PROXY=") {
+		t.Fatalf("unexpected SOCKS5 proxy environment: %q", got)
 	}
 }
 
