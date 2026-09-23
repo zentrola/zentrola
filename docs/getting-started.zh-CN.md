@@ -99,8 +99,8 @@ Windows PowerShell：
 ## 6. 配置第一条治理链路
 
 1. 打开“服务商”，初始化内置服务商元数据或手动创建服务商。
-2. 添加 API Key，或添加受支持的 ChatGPT 个人订阅凭据。
-3. 测试凭据；同步受支持的模型目录，或手动添加 Provider Model 映射。
+2. 添加 API Key、受支持的 ChatGPT/Codex 个人订阅凭据，或为 Anthropic 添加 Claude Code 订阅凭据。
+3. 测试凭据；同步受支持的模型目录，或手动添加 Provider Model 映射。当上游无法被 Backend 直接访问时，可配置 Provider 出站代理，并为 Endpoint 选择 `PUBLIC` 或 `PRIVATE` 网络范围。
 4. 启用逻辑模型及其服务商映射。
 5. 创建成员和 Group。
 6. 将成员加入 Group，并向 Group 授权逻辑模型。

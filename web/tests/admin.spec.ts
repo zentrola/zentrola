@@ -98,6 +98,7 @@ async function fixture(page: Page) {
       type: 'RESOURCE_CONNECTION_TEST',
       targetType: 'RESOURCE',
       targetId: '88',
+      targetName: '测试服务商凭证',
       requestId: 'req_connection_test',
       result: 'SUCCESS',
       errorCode: null,
@@ -111,6 +112,7 @@ async function fixture(page: Page) {
       type: 'LOGIN_FAILED',
       targetType: 'ADMIN_USER',
       targetId: '1',
+      targetName: 'admin',
       requestId: 'req_login_failed',
       result: 'FAILED',
       errorCode: 'UNAUTHENTICATED',
@@ -124,6 +126,7 @@ async function fixture(page: Page) {
       type: 'PROVIDER_STATUS_CHANGE',
       targetType: 'PROVIDER',
       targetId: '81',
+      targetName: '测试服务商',
       requestId: 'req_provider_status',
       result: 'SUCCESS',
       errorCode: null,
@@ -1285,7 +1288,8 @@ test('操作日志详情展示原始 JSON、差异高亮和追踪信息', async 
 
   const operationRow = page.getByRole('row').filter({ hasText: '服务商状态变更' })
   await expect(operationRow.locator('td').nth(3)).toContainText('服务商')
-  await expect(operationRow.locator('.operation-target-id')).toHaveText('81')
+  await expect(operationRow.locator('.operation-target-name')).toHaveText('测试服务商')
+  await expect(operationRow.locator('.operation-target-id')).toHaveText('服务商 · ID 81')
   await operationRow.getByRole('button', { name: '详情', exact: true }).click()
 
   const dialog = modal(page)
@@ -1296,17 +1300,10 @@ test('操作日志详情展示原始 JSON、差异高亮和追踪信息', async 
   await expect(after.locator('code')).toContainText('"status": "DISABLED"')
   await expect(before.locator('.json-line.changed')).toContainText('"status": "ACTIVE"')
   await expect(after.locator('.json-line.changed')).toContainText('"status": "DISABLED"')
-  const copyBefore = before.getByRole('button', { name: '复制修改前', exact: true })
-  await expect(copyBefore).toBeVisible()
-  await expect(after.getByRole('button', { name: '复制修改后', exact: true })).toBeVisible()
-  await copyBefore.click()
-  await expect(page.locator('.toast-success')).toContainText('已复制')
-  const requestID = dialog.locator('.operation-trace .technical-value')
+  await expect(before.getByRole('button', { name: /复制/ })).toHaveCount(0)
+  await expect(after.getByRole('button', { name: /复制/ })).toHaveCount(0)
+  const requestID = dialog.locator('.operation-trace dd').last()
   await expect(requestID).toHaveText('req_provider_status')
-  await requestID.getByRole('button', { name: '复制', exact: true }).click()
-  await expect
-    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
-    .toBe('req_provider_status')
   await expect(dialog.getByText('PROVIDER_STATUS_CHANGE', { exact: true })).toHaveCount(0)
   await expect(dialog.getByText('admin', { exact: true })).toHaveCount(0)
   await mkdir('../.cache/web-visual', { recursive: true })
@@ -1331,7 +1328,7 @@ test('操作日志单侧快照显示为日志内容且登录失败隐藏内部�
   await connectionRow.getByRole('button', { name: '详情', exact: true }).click()
   await expect(modal(page).locator('section[aria-label="日志内容"]')).toBeVisible()
   await expect(modal(page).getByRole('heading', { name: '修改后', exact: true })).toHaveCount(0)
-  await expect(modal(page).getByRole('button', { name: '复制日志内容', exact: true })).toBeVisible()
+  await expect(modal(page).getByRole('button', { name: /复制/ })).toHaveCount(0)
   await mkdir('../.cache/web-visual', { recursive: true })
   await page.screenshot({ path: '../.cache/web-visual/operation-log-content.png', fullPage: true })
   await modal(page).getByRole('button', { name: '关闭', exact: true }).click()

@@ -54,6 +54,8 @@ type Model struct {
 	ModelCode string
 	// 官方模型名称
 	DisplayName string
+	// 模型发布厂商对应的服务商 ID；手工创建且尚未由官方目录同步时为空
+	PublisherProviderID *int64
 	// 输入类型 JSON 数组：TEXT、IMAGE、AUDIO、VIDEO，非空且无重复
 	InputModalities []byte
 	// 输出类型 JSON 数组：TEXT、IMAGE、AUDIO、VIDEO，非空且无重复
@@ -68,8 +70,6 @@ type Model struct {
 	CreatedAt pgtype.Timestamptz
 	// 更新时间，UTC
 	UpdatedAt pgtype.Timestamptz
-	// 模型发布厂商对应的服务商 ID；手工创建且尚未由官方目录同步时为空
-	PublisherProviderID *int64
 }
 
 // 管理员与系统操作日志；Append Only，普通操作禁止更新和删除
@@ -294,16 +294,6 @@ type ProviderCredential struct {
 	CredentialCiphertext []byte
 	// 认证材料 AES-GCM 随机 Nonce，12 bytes；每次加密重新生成
 	CredentialNonce []byte
-	// 认证材料密文格式版本，不含 Master Key 本身
-	KeyVersion int32
-	// 创建者引用：system、admin:<id> 或 principal:<id>
-	CreatedBy string
-	// 更新者引用：system、admin:<id> 或 principal:<id>
-	UpdatedBy string
-	// 创建时间，UTC
-	CreatedAt pgtype.Timestamptz
-	// 更新时间，UTC
-	UpdatedAt pgtype.Timestamptz
 	// 系统检测的运行状态：HEALTHY=可参与路由；BLOCKED=长期故障，等待管理员恢复
 	RuntimeStatus string
 	// 长期阻断原因；NULL=未阻断
@@ -342,6 +332,16 @@ type ProviderCredential struct {
 	CredentialRefreshedAt pgtype.Timestamptz
 	// 订阅短期访问凭据到期时间；OpenAI Codex 取自 access token exp，用于 SQL 筛选待刷新凭据
 	CredentialExpiresAt pgtype.Timestamptz
+	// 认证材料密文格式版本，不含 Master Key 本身
+	KeyVersion int32
+	// 创建者引用：system、admin:<id> 或 principal:<id>
+	CreatedBy string
+	// 更新者引用：system、admin:<id> 或 principal:<id>
+	UpdatedBy string
+	// 创建时间，UTC
+	CreatedAt pgtype.Timestamptz
+	// 更新时间，UTC
+	UpdatedAt pgtype.Timestamptz
 }
 
 // Provider 认证资源最近观测到的额度窗口；只保存当前状态，不作为 Usage 事实
@@ -410,6 +410,8 @@ type ProviderModel struct {
 	ModelID int64
 	// 服务商模型编码覆盖；空字符串表示调用时使用系统模型编码
 	UpstreamModelCode string
+	// 路由优先级，数值越小越优先
+	Priority int32
 	// 创建者引用：system、admin:<id> 或 principal:<id>
 	CreatedBy string
 	// 更新者引用：system、admin:<id> 或 principal:<id>
@@ -418,8 +420,6 @@ type ProviderModel struct {
 	CreatedAt pgtype.Timestamptz
 	// 更新时间，UTC
 	UpdatedAt pgtype.Timestamptz
-	// 路由优先级，数值越小越优先
-	Priority int32
 }
 
 // 一次真实上游调用 Attempt 的原始用量事实；不保存价格与成本，无逻辑删除

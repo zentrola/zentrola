@@ -38,7 +38,7 @@ web/src/components/                      Vue 共享组件
 web/tests/                               Playwright 测试
 scripts/                                 运维和发布脚本
 docs/                                    公开用户文档
-development-docs/                        本地实现资料，由 Git 忽略
+dev-docs/                                 本地实现资料，由 Git 忽略
 ```
 
 依赖应保持向内：transport 调用 application 服务，domain 不得依赖 infrastructure。不要手动修改 `dbgen`。

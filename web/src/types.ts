@@ -243,6 +243,7 @@ export interface Operation {
   type: string
   targetType: string
   targetId: string | null
+  targetName: string | null
   requestId: string | null
   result: string
   errorCode: string | null

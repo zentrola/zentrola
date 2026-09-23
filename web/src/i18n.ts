@@ -779,9 +779,6 @@ export const i18n = createI18n({
         before: '修改前',
         after: '修改后',
         logContent: '日志内容',
-        copyBefore: '复制修改前',
-        copyAfter: '复制修改后',
-        copyContent: '复制日志内容',
         noSnapshot: '该操作未记录数据快照。',
         changes: {
           added: '新增',

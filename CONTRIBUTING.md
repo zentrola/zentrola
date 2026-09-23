@@ -38,7 +38,7 @@ web/src/components/                      Shared Vue components
 web/tests/                               Playwright tests
 scripts/                                 Operational and release scripts
 docs/                                    Published user documentation
-development-docs/                        Local implementation notes, ignored by Git
+dev-docs/                                 Local implementation notes, ignored by Git
 ```
 
 Dependencies should point inward: transport calls application services, and domain code must not depend on infrastructure. Do not edit `dbgen` manually.

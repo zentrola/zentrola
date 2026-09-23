@@ -39,19 +39,20 @@ Codex / Claude Code / OpenAI 兼容客户端
              PostgreSQL / Redis
 ```
 
-管理面与调用面相互隔离：
+管理面与调用面使用相互独立的认证域：
 
 - 管理员使用 Admin Web 和 Admin API，通过 Admin JWT 登录。
 - 普通成员使用 Virtual Key 调用 Gateway API。
-- Admin JWT 不能调用 Gateway，Virtual Key 不能访问 Admin API。
+- Admin JWT 不能调用 Gateway。Virtual Key 不能访问管理员管理接口，但可以访问 `/api/v1/me` 下的成员自助接口。
 
 ## 当前能力
 
-- 首位管理员初始化、登录、退出、修改密码和密码恢复
+- 首位管理员初始化、登录、退出、修改密码和管理员密码重置
 - MEMBER 创建、状态管理和删除
 - Group 成员管理和 Group Model Allowlist
 - 服务商初始化，以及 OpenAI/Anthropic 兼容端点维护
-- API Key 加密存储和受支持的 ChatGPT 个人订阅认证
+- API Key 加密存储，以及受支持的 ChatGPT/Codex 和 Claude Code 个人订阅认证
+- Provider 出站代理配置和 Endpoint 公网/私网范围
 - Provider Credential 连接测试和模型目录手动同步
 - 逻辑模型与带优先级的 Provider Model 映射
 - Virtual Key 签发、有效期管理和撤销
@@ -61,7 +62,7 @@ Codex / Claude Code / OpenAI 兼容客户端
 - Usage 仪表盘和 Operation Log
 - Admin Web 中英文界面
 
-模型目录同步目前为 OpenAI、DeepSeek、智谱 AI 和月之暗面提供专用适配器。其他 OpenAI 或 Anthropic 兼容服务商可以手动配置。
+模型目录同步目前为 OpenAI、Google、DeepSeek、智谱 AI、月之暗面、通义千问和 xAI 提供专用适配器。其他 OpenAI 或 Anthropic 兼容服务商可以手动配置。
 
 ## 快速开始
 

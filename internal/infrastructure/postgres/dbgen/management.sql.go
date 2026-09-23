@@ -1318,7 +1318,7 @@ func (q *Queries) ManageModels(ctx context.Context, arg ManageModelsParams) ([]M
 }
 
 const manageOperations = `-- name: ManageOperations :many
-SELECT id,operator_name,operation_type,target_type,target_id,request_id,result,error_code,before_data,after_data,created_at
+SELECT id,operator_name,operation_type,target_type,target_id,target_name,request_id,result,error_code,before_data,after_data,created_at
 FROM operation_log WHERE (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2
 `
 
@@ -1333,6 +1333,7 @@ type ManageOperationsRow struct {
 	OperationType string
 	TargetType    string
 	TargetID      *int64
+	TargetName    *string
 	RequestID     *string
 	Result        string
 	ErrorCode     *string
@@ -1356,6 +1357,7 @@ func (q *Queries) ManageOperations(ctx context.Context, arg ManageOperationsPara
 			&i.OperationType,
 			&i.TargetType,
 			&i.TargetID,
+			&i.TargetName,
 			&i.RequestID,
 			&i.Result,
 			&i.ErrorCode,
