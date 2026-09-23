@@ -99,8 +99,9 @@ Open `http://127.0.0.1:9528` and create the first administrator. There is no def
 ## 6. Configure the first governance path
 
 1. Open **Providers** and initialize the built-in provider metadata or create a provider manually.
-2. Add an API-key credential or a supported ChatGPT subscription credential.
+2. Add an API-key credential, a supported ChatGPT/Codex personal-subscription credential, or a Claude Code subscription credential for Anthropic.
 3. Test the credential, synchronize supported model catalogs, or add provider-model mappings manually.
+   Configure an optional provider proxy and select the endpoint network scope (`PUBLIC` or `PRIVATE`) when the upstream is not directly reachable from the Backend.
 4. Enable the logical model and its provider mapping.
 5. Create a member and a Group.
 6. Add the member to the Group and grant the logical model to the Group.

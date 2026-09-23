@@ -117,7 +117,7 @@ func (q *Queries) GetProvider(ctx context.Context, id int64) (Provider, error) {
 }
 
 const getProviderModel = `-- name: GetProviderModel :one
-SELECT id, is_deleted, provider_id, model_id, upstream_model_code, created_by, updated_by, created_at, updated_at, priority FROM provider_model WHERE id = $1 AND is_deleted = false
+SELECT id, is_deleted, provider_id, model_id, upstream_model_code, priority, created_by, updated_by, created_at, updated_at FROM provider_model WHERE id = $1 AND is_deleted = false
 `
 
 func (q *Queries) GetProviderModel(ctx context.Context, id int64) (ProviderModel, error) {
@@ -129,17 +129,17 @@ func (q *Queries) GetProviderModel(ctx context.Context, id int64) (ProviderModel
 		&i.ProviderID,
 		&i.ModelID,
 		&i.UpstreamModelCode,
+		&i.Priority,
 		&i.CreatedBy,
 		&i.UpdatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.Priority,
 	)
 	return i, err
 }
 
 const getResource = `-- name: GetResource :one
-SELECT id, is_deleted, provider_id, resource_name, credential_ciphertext, credential_nonce, key_version, created_by, updated_by, created_at, updated_at, runtime_status, blocked_reason, blocked_at, last_error_at, last_http_status, last_error_code, auth_type, auth_adapter, subscription_type, plan_code, external_account_ref, priority, effective_at, expires_at, quota_status, quota_checked_at, quota_resets_at, credential_refreshed_at, credential_expires_at FROM provider_credential WHERE id = $1 AND is_deleted = false
+SELECT id, is_deleted, provider_id, resource_name, credential_ciphertext, credential_nonce, runtime_status, blocked_reason, blocked_at, last_error_at, last_http_status, last_error_code, auth_type, auth_adapter, subscription_type, plan_code, external_account_ref, priority, effective_at, expires_at, quota_status, quota_checked_at, quota_resets_at, credential_refreshed_at, credential_expires_at, key_version, created_by, updated_by, created_at, updated_at FROM provider_credential WHERE id = $1 AND is_deleted = false
 `
 
 // 包含加密凭证，仅供内部 Repository 使用，禁止直接序列化为 API 响应。
@@ -153,11 +153,6 @@ func (q *Queries) GetResource(ctx context.Context, id int64) (ProviderCredential
 		&i.ResourceName,
 		&i.CredentialCiphertext,
 		&i.CredentialNonce,
-		&i.KeyVersion,
-		&i.CreatedBy,
-		&i.UpdatedBy,
-		&i.CreatedAt,
-		&i.UpdatedAt,
 		&i.RuntimeStatus,
 		&i.BlockedReason,
 		&i.BlockedAt,
@@ -177,6 +172,11 @@ func (q *Queries) GetResource(ctx context.Context, id int64) (ProviderCredential
 		&i.QuotaResetsAt,
 		&i.CredentialRefreshedAt,
 		&i.CredentialExpiresAt,
+		&i.KeyVersion,
+		&i.CreatedBy,
+		&i.UpdatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -248,7 +248,7 @@ func (q *Queries) ListGroupsForPrincipal(ctx context.Context, principalID int64)
 }
 
 const listModels = `-- name: ListModels :many
-SELECT id, is_deleted, status, model_code, display_name, input_modalities, output_modalities, remark, created_by, updated_by, created_at, updated_at, publisher_provider_id FROM model WHERE is_deleted = false ORDER BY id
+SELECT id, is_deleted, status, model_code, display_name, publisher_provider_id, input_modalities, output_modalities, remark, created_by, updated_by, created_at, updated_at FROM model WHERE is_deleted = false ORDER BY id
 `
 
 func (q *Queries) ListModels(ctx context.Context) ([]Model, error) {
@@ -266,6 +266,7 @@ func (q *Queries) ListModels(ctx context.Context) ([]Model, error) {
 			&i.Status,
 			&i.ModelCode,
 			&i.DisplayName,
+			&i.PublisherProviderID,
 			&i.InputModalities,
 			&i.OutputModalities,
 			&i.Remark,
@@ -273,7 +274,6 @@ func (q *Queries) ListModels(ctx context.Context) ([]Model, error) {
 			&i.UpdatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.PublisherProviderID,
 		); err != nil {
 			return nil, err
 		}

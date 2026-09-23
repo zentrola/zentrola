@@ -39,19 +39,20 @@ Codex / Claude Code / OpenAI-compatible clients
                   PostgreSQL / Redis
 ```
 
-The management plane and gateway plane are isolated:
+The management plane and gateway plane use separate authentication domains:
 
 - Administrators use the Admin Web and Admin API with an Admin JWT.
 - Members use a Virtual Key with the gateway APIs.
-- An Admin JWT cannot call the gateway, and a Virtual Key cannot call the Admin API.
+- An Admin JWT cannot call the gateway. A Virtual Key cannot call administrator management endpoints, but can call the member self-service endpoints under `/api/v1/me`.
 
 ## Current capabilities
 
-- First-administrator setup, sign-in, sign-out, password changes, and password recovery
+- First-administrator setup, sign-in, sign-out, password changes, and administrator password reset
 - Member lifecycle management
 - Group membership and per-Group logical-model allowlists
 - Provider initialization and editable OpenAI/Anthropic-compatible endpoints
-- Encrypted API-key credentials and supported ChatGPT personal-subscription authentication
+- Encrypted API-key credentials and supported ChatGPT/Codex and Claude Code personal-subscription authentication
+- Provider proxy settings and public/private endpoint network scopes
 - Provider credential connection tests and manual model-catalog synchronization
 - Logical models and prioritized provider-model mappings
 - Member Virtual Key issuance, expiration, and revocation
@@ -61,7 +62,7 @@ The management plane and gateway plane are isolated:
 - Usage dashboards and operation logs
 - Chinese and English Admin Web localization
 
-Model-catalog synchronization currently has dedicated adapters for OpenAI, DeepSeek, Zhipu AI, and Moonshot AI. Other OpenAI- or Anthropic-compatible providers can be configured manually.
+Model-catalog synchronization currently has dedicated adapters for OpenAI, Google, DeepSeek, Zhipu AI, Moonshot AI, Qwen, and xAI. Other OpenAI- or Anthropic-compatible providers can be configured manually.
 
 ## Quick start
 

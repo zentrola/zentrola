@@ -1,8 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import Icon from './Icon.vue'
+import { computed } from 'vue'
 import { t } from '../i18n'
-import { showErrorToast, showSuccessToast } from '../toast'
 
 const props = defineProps<{ before: unknown; after: unknown }>()
 
@@ -11,10 +9,6 @@ type ChangeKind = 'added' | 'removed' | 'changed'
 type JsonLine = { text: string; kind?: ChangeKind }
 
 const missing = Symbol('missing')
-const copyState = ref<Record<Side, 'idle' | 'copied'>>({
-  before: 'idle',
-  after: 'idle',
-})
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -126,29 +120,6 @@ const beforeTitle = computed(() =>
 )
 const afterTitle = computed(() => t(hasBefore.value ? 'operations.after' : 'operations.logContent'))
 
-function formatted(value: unknown) {
-  return JSON.stringify(value, null, 2) ?? 'null'
-}
-
-async function copy(side: Side) {
-  const value = side === 'before' ? props.before : props.after
-  try {
-    await navigator.clipboard.writeText(formatted(value))
-    copyState.value[side] = 'copied'
-    showSuccessToast(t('common.copied'))
-  } catch {
-    copyState.value[side] = 'idle'
-    showErrorToast(t('common.copyFailed'))
-  }
-}
-
-function copyLabel(side: Side) {
-  if (copyState.value[side] === 'copied') return t('common.copied')
-  if (side === 'before')
-    return t(hasAfter.value ? 'operations.copyBefore' : 'operations.copyContent')
-  return t(hasBefore.value ? 'operations.copyAfter' : 'operations.copyContent')
-}
-
 function lineLabel(line: JsonLine) {
   return line.kind ? `${t(`operations.changes.${line.kind}`)}：${line.text}` : undefined
 }
@@ -163,10 +134,6 @@ function lineLabel(line: JsonLine) {
     <section v-if="hasBefore" class="json-snapshot" :aria-label="beforeTitle">
       <header class="json-snapshot-head">
         <h3>{{ beforeTitle }}</h3>
-        <button class="json-copy" type="button" @click="copy('before')">
-          <Icon name="copy" :size="14" />
-          {{ copyLabel('before') }}
-        </button>
       </header>
       <pre class="json-code"><code><span
         v-for="(line, index) in beforeLines"
@@ -181,10 +148,6 @@ function lineLabel(line: JsonLine) {
     <section v-if="hasAfter" class="json-snapshot" :aria-label="afterTitle">
       <header class="json-snapshot-head">
         <h3>{{ afterTitle }}</h3>
-        <button class="json-copy" type="button" @click="copy('after')">
-          <Icon name="copy" :size="14" />
-          {{ copyLabel('after') }}
-        </button>
       </header>
       <pre class="json-code"><code><span
         v-for="(line, index) in afterLines"
@@ -229,24 +192,6 @@ function lineLabel(line: JsonLine) {
   color: var(--color-text);
   font-size: 13px;
   font-weight: 600;
-}
-.json-copy {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 7px;
-  border: 0;
-  border-radius: 5px;
-  color: var(--blue);
-  background: transparent;
-  font-size: 12px;
-}
-.json-copy:hover {
-  background: var(--color-primary-soft);
-}
-.json-copy:focus-visible {
-  outline: 2px solid #bfdbfe;
-  outline-offset: 1px;
 }
 .json-code {
   max-height: 470px;

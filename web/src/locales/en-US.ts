@@ -773,9 +773,6 @@ export default {
     before: 'Before',
     after: 'After',
     logContent: 'Log content',
-    copyBefore: 'Copy before',
-    copyAfter: 'Copy after',
-    copyContent: 'Copy log content',
     noSnapshot: 'No data snapshot was recorded for this operation.',
     changes: {
       added: 'Added',

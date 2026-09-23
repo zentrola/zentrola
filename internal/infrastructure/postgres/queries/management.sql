@@ -256,7 +256,7 @@ WHERE id=$1 AND is_deleted=false;
 SELECT id,name,masked_key,status,expires_at,revoked_at,created_at FROM principal_access_key
 WHERE principal_id=$1 AND is_deleted=false AND (id<$2 OR $2=0) ORDER BY id DESC LIMIT $3;
 -- name: ManageOperations :many
-SELECT id,operator_name,operation_type,target_type,target_id,request_id,result,error_code,before_data,after_data,created_at
+SELECT id,operator_name,operation_type,target_type,target_id,target_name,request_id,result,error_code,before_data,after_data,created_at
 FROM operation_log WHERE (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2;
 
 -- 分页总数不受 after cursor 影响；过滤口径必须与对应列表查询保持一致。

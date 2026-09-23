@@ -82,7 +82,7 @@ Important settings:
 
 ```dotenv
 LOG_LEVEL=info
-LOG_FILE_PATH=
+LOG_FILE_PATH=./runtime/logs
 LOG_FILE_MAX_SIZE_MB=100
 LOG_FILE_MAX_BACKUPS=10
 LOG_FILE_RETENTION_DAYS=7
@@ -90,7 +90,7 @@ LOG_FILE_RETENTION_DAYS=7
 
 - Console logs always use the automatically colored `pretty` format, including ANSI-capable IDE run consoles such as GoLand. Set the standard `NO_COLOR` environment variable to disable colors.
 - Containers and Kubernetes: let the container runtime or logging agent rotate and ship stdout.
-- A single host without a logging agent: set `LOG_FILE_PATH` to enable application-managed log rotation. Files use uncolored `pretty` format and write one record per line.
+- A single host without a logging agent: set `LOG_FILE_PATH` to enable application-managed log rotation. The release `.env.example` enables it with `./runtime/logs`; leave it empty to disable file logging. Files use uncolored `pretty` format and write one record per line.
 - `LOG_FILE_PATH` is the log root directory. Logs use UTC date directories; for example, `./runtime/logs` writes `./runtime/logs/2026-09-17/app-1.log` and `error-1.log`.
 - `app-*.log` contains the complete timeline at or above `LOG_LEVEL`; `error-*.log` is an additional copy of its `ERROR` and higher records. Each stream rotates independently at `LOG_FILE_MAX_SIZE_MB` and retains up to `LOG_FILE_MAX_BACKUPS` historical segments in addition to its active file.
 - `LOG_FILE_RETENTION_DAYS` defaults to `7`, retaining the latest seven UTC calendar dates including today. Set it to `0` to disable age-based cleanup. Cleanup runs at startup and UTC date rollover, alongside the segment-count limit.

@@ -281,6 +281,7 @@ type Operation struct {
 	Type         string          `json:"type"`
 	TargetType   string          `json:"targetType"`
 	TargetID     *int64          `json:"targetId,string"`
+	TargetName   *string         `json:"targetName"`
 	RequestID    *string         `json:"requestId"`
 	Result       string          `json:"result"`
 	ErrorCode    *string         `json:"errorCode"`

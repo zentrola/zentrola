@@ -15,10 +15,43 @@ import (
 //go:embed migrations/*.sql
 var migrations embed.FS
 
+//go:embed baseline/*.sql
+var baselineMigrations embed.FS
+
 // Migrate 使用独立 Provider 避免全局注册状态，迁移随二进制交付。
 func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	db := stdlib.OpenDBFromPool(pool)
 	defer db.Close()
+	// 首发版本的新数据库直接使用当前结构基线，并把 Goose 版本记为 41；
+	// 已经存在迁移记录的数据库继续使用历史迁移链，保证升级兼容。
+	var hasMigrationTable bool
+	if err := pool.QueryRow(ctx, `
+SELECT EXISTS (
+    SELECT 1
+    FROM information_schema.tables
+    WHERE table_schema = current_schema() AND table_name = 'goose_db_version'
+)`).Scan(&hasMigrationTable); err != nil {
+		return errors.New("cannot inspect migration state")
+	}
+	if !hasMigrationTable {
+		source, err := fs.Sub(baselineMigrations, "baseline")
+		if err != nil {
+			return err
+		}
+		locker, err := lock.NewPostgresSessionLocker()
+		if err != nil {
+			return err
+		}
+		provider, err := goose.NewProvider(goose.DialectPostgres, db, source,
+			goose.WithSessionLocker(locker), goose.WithDisableGlobalRegistry(true))
+		if err != nil {
+			return errors.New("cannot initialize migrations")
+		}
+		if _, err := provider.Up(ctx); err != nil {
+			return errors.New("PostgreSQL migration failed")
+		}
+		return nil
+	}
 	source, err := fs.Sub(migrations, "migrations")
 	if err != nil {
 		return err

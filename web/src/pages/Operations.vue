@@ -11,7 +11,6 @@ import ListFooter from '../components/ListFooter.vue'
 import ListSearch from '../components/ListSearch.vue'
 import OperationDiff from '../components/OperationDiff.vue'
 import TableScroll from '../components/TableScroll.vue'
-import TechnicalValue from '../components/TechnicalValue.vue'
 const { items, cursor, page, pageSize, total, loading, error, load, previous, retry, setPageSize } =
   useCollection<Operation>(() => '/operation-logs')
 const selected = ref<Operation | null>(null)
@@ -33,7 +32,7 @@ function showSnapshot(row: Operation) {
 const { keyword, query, visible, search, reset } = useListSearch(
   items,
   (row) =>
-    `${row.operatorName} ${row.type} ${operationLabel(row.type)} ${row.targetType} ${targetLabel(row.targetType)} ${row.targetId} ${row.requestId || ''} ${row.result} ${t(`state.${row.result}`)}`,
+    `${row.operatorName} ${row.type} ${operationLabel(row.type)} ${row.targetType} ${targetLabel(row.targetType)} ${row.targetName || ''} ${row.targetId} ${row.requestId || ''} ${row.result} ${t(`state.${row.result}`)}`,
 )
 onMounted(() => load())
 </script>
@@ -77,13 +76,12 @@ onMounted(() => load())
             <td>{{ operationLabel(row.type) }}</td>
             <td>
               <div class="operation-target">
-                <span class="operation-target-name">{{ targetLabel(row.targetType) }}</span>
-                <TechnicalValue
-                  class="operation-target-id"
-                  :value="row.targetId ?? t('operations.emptyValue')"
-                  :copyable="!!row.targetId"
-                  muted
-                />
+                <span class="operation-target-name">{{
+                  row.targetName || targetLabel(row.targetType)
+                }}</span>
+                <span v-if="row.targetId" class="operation-target-id">
+                  {{ targetLabel(row.targetType) }} · ID {{ row.targetId }}
+                </span>
               </div>
             </td>
             <td><Status :value="row.result" /></td>
@@ -137,15 +135,14 @@ onMounted(() => load())
       <template v-if="selected.errorCode">
         <dt>{{ t('usage.errorType') }}</dt>
         <dd>
-          <TechnicalValue
-            :value="errorLabel(selected.errorCode)"
-            :copy-value="selected.errorCode"
-          />
+          <code>{{ errorLabel(selected.errorCode) }}</code>
         </dd>
       </template>
       <template v-if="selected.requestId">
         <dt>{{ t('common.requestId') }}</dt>
-        <dd><TechnicalValue :value="selected.requestId" /></dd>
+        <dd>
+          <code>{{ selected.requestId }}</code>
+        </dd>
       </template>
     </dl>
   </Modal>
@@ -181,7 +178,23 @@ onMounted(() => load())
   text-overflow: ellipsis;
 }
 .operation-target-name {
-  flex: none;
+  overflow: hidden;
+  color: var(--color-text);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.operation-target {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.operation-target-id {
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-family: Consolas, 'SFMono-Regular', monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .operation-trace {
