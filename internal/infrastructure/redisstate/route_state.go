@@ -1,4 +1,5 @@
 // Package redisstate 保存路由的短期冷却状态；Redis 不可用时由应用层按 fail-open 继续路由。
+// 冷却 key 的 TTL 表示实际冷却时长，探测 key 在冷却结束后提供短暂的恢复租约。
 package redisstate
 
 import (
@@ -13,21 +14,33 @@ import (
 )
 
 const (
-	probeLease = 5 * time.Second
-	stateTTL   = 24 * time.Hour
-	retryRedis = 5 * time.Second
+	probeLease           = 5 * time.Second
+	probeMarkerRetention = 24 * time.Hour
+	retryRedis           = 5 * time.Second
 )
 
 var acquireScript = redis.NewScript(`
-local retry_at = redis.call('GET', KEYS[1])
-if not retry_at then
-  return 1
+-- KEYS[1] is the cooldown marker; KEYS[2] is the recovery probe marker/lease.
+if redis.call('GET', KEYS[1]) then
+	return 0
+end
+local probe = redis.call('GET', KEYS[2])
+if not probe then
+	return 1
 end
 local now = tonumber(ARGV[1])
-if tonumber(retry_at) > now then
-  return 0
+if probe == 'ready' or tonumber(probe) + tonumber(ARGV[2]) <= now then
+	redis.call('SET', KEYS[2], ARGV[1], 'PX', ARGV[2])
+	return 1
 end
-redis.call('SET', KEYS[1], now + tonumber(ARGV[2]), 'PX', ARGV[3])
+return 0
+`)
+
+var cooldownScript = redis.NewScript(`
+-- Keep the cooldown TTL equal to the requested delay. Retain the probe marker
+-- after cooldown so the first later request can still acquire a short lease.
+redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
+redis.call('SET', KEYS[2], 'ready', 'PX', ARGV[3])
 return 1
 `)
 
@@ -61,8 +74,9 @@ func (s *State) Acquire(ctx context.Context, route gateway.Route) (bool, error) 
 		return true, nil
 	}
 	now := time.Now().UnixMilli()
-	result, err := acquireScript.Run(ctx, s.client, []string{routeKey(route.ResourceID)},
-		now, probeLease.Milliseconds(), stateTTL.Milliseconds()).Int64()
+	result, err := acquireScript.Run(ctx, s.client,
+		[]string{cooldownKey(route.ResourceID), probeKey(route.ResourceID)},
+		now, probeLease.Milliseconds()).Int64()
 	return result == 1, s.record(err)
 }
 
@@ -73,15 +87,26 @@ func (s *State) Cooldown(ctx context.Context, route gateway.Route, duration time
 	if duration <= 0 {
 		duration = time.Minute
 	}
+	if duration < time.Millisecond {
+		duration = time.Millisecond
+	}
+	// The probe marker needs to outlive cooldown for quiet routes. Keep the
+	// addition within time.Duration's range for callers that provide a custom delay.
+	if duration > time.Duration(1<<63-1)-probeMarkerRetention {
+		duration = time.Duration(1<<63-1) - probeMarkerRetention
+	}
 	retryAt := time.Now().Add(duration).UnixMilli()
-	return s.record(s.client.Set(ctx, routeKey(route.ResourceID), retryAt, stateTTL).Err())
+	_, err := cooldownScript.Run(ctx, s.client,
+		[]string{cooldownKey(route.ResourceID), probeKey(route.ResourceID)},
+		retryAt, duration.Milliseconds(), (duration + probeMarkerRetention).Milliseconds()).Int64()
+	return s.record(err)
 }
 
 func (s *State) Healthy(ctx context.Context, route gateway.Route) error {
 	if s.redisUnavailable() {
 		return nil
 	}
-	return s.record(s.client.Del(ctx, routeKey(route.ResourceID)).Err())
+	return s.record(s.client.Del(ctx, cooldownKey(route.ResourceID), probeKey(route.ResourceID)).Err())
 }
 
 func (s *State) redisUnavailable() bool {
@@ -97,6 +122,10 @@ func (s *State) record(err error) error {
 	return nil
 }
 
-func routeKey(resourceID int64) string {
-	return "zentrola:route:cooldown:v2:" + strconv.FormatInt(resourceID, 10)
+func cooldownKey(resourceID int64) string {
+	return "zentrola:route:cooldown:v3:" + strconv.FormatInt(resourceID, 10)
+}
+
+func probeKey(resourceID int64) string {
+	return "zentrola:route:probe:v1:" + strconv.FormatInt(resourceID, 10)
 }
