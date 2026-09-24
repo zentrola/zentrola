@@ -321,6 +321,7 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 		gateway.WithRouteState(routeState),
 		gateway.WithActiveRouteRecorder(gatewayCache),
 		gateway.WithSubscriptionRefreshCoordinator(routeState),
+		gateway.WithCredentialRefreshTimeout(cfg.Gateway.SubscriptionRefreshCredentialTimeout),
 		gateway.WithSubscriptionRefresher(codexSubscription),
 		gateway.WithSubscriptionRefresher(claudeSubscription),
 	)

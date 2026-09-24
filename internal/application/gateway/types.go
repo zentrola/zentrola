@@ -235,6 +235,7 @@ type Service struct {
 	activeRoutes       ActiveRouteRecorder
 	refresh            []SubscriptionRefresher
 	refreshCoordinator SubscriptionRefreshCoordinator
+	refreshTimeout     time.Duration
 }
 
 type Option func(*Service)
@@ -245,6 +246,13 @@ func WithActiveRouteRecorder(recorder ActiveRouteRecorder) Option {
 }
 func WithSubscriptionRefreshCoordinator(coordinator SubscriptionRefreshCoordinator) Option {
 	return func(service *Service) { service.refreshCoordinator = coordinator }
+}
+func WithCredentialRefreshTimeout(timeout time.Duration) Option {
+	return func(service *Service) {
+		if timeout > 0 {
+			service.refreshTimeout = timeout
+		}
+	}
 }
 func WithSubscriptionRefresher(refresh SubscriptionRefresher) Option {
 	return func(service *Service) {
@@ -268,6 +276,17 @@ func New(store Store, cipher Cipher, upstream Upstream, options ...Option) *Serv
 		option(service)
 	}
 	return service
+}
+
+type subscriptionRefreshLeaseKey struct{}
+
+func withSubscriptionRefreshLease(ctx context.Context) context.Context {
+	return context.WithValue(ctx, subscriptionRefreshLeaseKey{}, true)
+}
+
+func hasSubscriptionRefreshLease(ctx context.Context) bool {
+	value, _ := ctx.Value(subscriptionRefreshLeaseKey{}).(bool)
+	return value
 }
 
 func (s *Service) Forward(ctx context.Context, identity appsec.PrincipalIdentity, request Request) (*Response, error) {

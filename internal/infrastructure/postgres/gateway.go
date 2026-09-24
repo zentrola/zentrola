@@ -221,7 +221,7 @@ func (s *GatewayStore) UpdateResourceCredentialRefreshMetadata(ctx context.Conte
 		CredentialRefreshedAt: nullableTime(route.CredentialRefreshedAt), CredentialExpiresAt: nullableTime(route.CredentialExpiresAt),
 		UpdatedAt: pgtype.Timestamptz{Time: time.Now().UTC().Truncate(time.Microsecond), Valid: true},
 	})
-	if err != nil || updated > 1 {
+	if err != nil || updated != 1 {
 		return gw.ErrUnavailable
 	}
 	return nil

@@ -163,6 +163,7 @@ func (s *Service) refreshSubscriptionCandidate(parent context.Context, candidate
 			return result
 		}
 		defer release()
+		ctx = withSubscriptionRefreshLease(ctx)
 	}
 	route := Route{
 		ProviderID: candidate.ProviderID, ResourceID: candidate.ResourceID,

@@ -227,12 +227,15 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 		}
 		return value
 	}
-	integer := func(key, fallback string, max int) int {
+	integerRange := func(key, fallback string, min, max int) int {
 		value, err := strconv.Atoi(get(key, fallback))
-		if err != nil || value < 1 || value > max {
-			problems = append(problems, fmt.Errorf("%s must be between 1 and %d", key, max))
+		if err != nil || value < min || value > max {
+			problems = append(problems, fmt.Errorf("%s must be between %d and %d", key, min, max))
 		}
 		return value
+	}
+	integer := func(key, fallback string, max int) int {
+		return integerRange(key, fallback, 1, max)
 	}
 	nonNegativeInteger := func(key, fallback string, max int) int {
 		value, err := strconv.Atoi(get(key, fallback))
@@ -261,7 +264,7 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 			User:     get("POSTGRES_USER", "postgres"),
 			Password: get("POSTGRES_PASSWORD", ""),
 			SSLMode:  get("POSTGRES_SSLMODE", "disable"),
-			MaxConns: int32(integer("POSTGRES_MAX_CONNS", "10", 1000)),
+			MaxConns: int32(integerRange("POSTGRES_MAX_CONNS", "10", 2, 1000)),
 		},
 		Redis: Redis{
 			Host:     get("REDIS_HOST", "127.0.0.1"),
