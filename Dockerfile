@@ -7,6 +7,11 @@ FROM ${BASE_IMAGE}
 
 ARG TARGETARCH
 
+LABEL org.opencontainers.image.title="Zentrola" \
+      org.opencontainers.image.authors="Longjianghu <215241062@qq.com>" \
+      org.opencontainers.image.vendor="Longjianghu" \
+      maintainer="Longjianghu <215241062@qq.com>"
+
 WORKDIR /app
 
 COPY --chown=zentrola:zentrola dist/linux/${TARGETARCH}/ /app/
