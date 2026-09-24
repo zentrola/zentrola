@@ -39,6 +39,9 @@ ARG CODEX_VERSION
 
 LABEL org.opencontainers.image.title="codex-runtime" \
       org.opencontainers.image.description="Codex native runtime on Alpine (no Node.js)" \
+      org.opencontainers.image.authors="Longjianghu <215241062@qq.com>" \
+      org.opencontainers.image.vendor="Longjianghu" \
+      maintainer="Longjianghu <215241062@qq.com>" \
       codex.version="${CODEX_VERSION}"
 
 # 家目录直接设为 /app/data，这样 ~/.codex 有可写位置。
