@@ -107,10 +107,11 @@ func (s *keyStoreStub) Authenticate(context.Context, []byte, time.Time) (appsec.
 }
 
 type gatewayStoreStub struct {
-	resolutions int
-	blocks      int
-	updates     int
-	routes      []gw.Route
+	resolutions    int
+	blocks         int
+	updates        int
+	refreshUpdates int
+	routes         []gw.Route
 }
 
 func (s *gatewayStoreStub) Resolve(context.Context, appsec.PrincipalIdentity, string, ...string) (gw.Route, error) {
@@ -130,6 +131,10 @@ func (s *gatewayStoreStub) BlockResource(context.Context, appsec.PrincipalIdenti
 }
 func (s *gatewayStoreStub) UpdateResourceCredential(context.Context, gw.Route, catalog.SealedCredential) error {
 	s.updates++
+	return nil
+}
+func (s *gatewayStoreStub) UpdateResourceCredentialRefreshMetadata(context.Context, gw.Route) error {
+	s.refreshUpdates++
 	return nil
 }
 
@@ -213,6 +218,9 @@ func TestGatewayStoreCachesRoutesAndInvalidatesRuntimeChanges(t *testing.T) {
 	cache.routesReady = true
 	if err := store.UpdateResourceCredential(context.Background(), next.routes[0], catalog.SealedCredential{KeyVersion: 1}); err != nil || cache.clears != 2 {
 		t.Fatal("credential update did not invalidate cache", err)
+	}
+	if err := store.UpdateResourceCredentialRefreshMetadata(context.Background(), next.routes[0]); err != nil || next.refreshUpdates != 1 || cache.clears != 3 {
+		t.Fatal("credential refresh metadata update did not invalidate cache", err)
 	}
 }
 

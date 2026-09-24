@@ -319,7 +319,14 @@ func (s *GatewayStore) UpdateResourceCredentialRefreshMetadata(ctx context.Conte
 	if !ok {
 		return gw.ErrUnavailable
 	}
-	return next.UpdateResourceCredentialRefreshMetadata(ctx, route)
+	if err := next.UpdateResourceCredentialRefreshMetadata(ctx, route); err != nil {
+		return err
+	}
+	s.logger.InfoContext(ctx, "gateway resource credential refresh metadata updated; invalidating cache",
+		"change_type", "resource_credential_refresh_metadata_updated", "resource_id", route.ResourceID,
+		"provider_id", route.ProviderID)
+	s.cache.Clear(ctx, "resource_credential_refresh_metadata_updated")
+	return nil
 }
 
 func (s *GatewayStore) LoadResourceCredential(ctx context.Context, route gw.Route) (catalog.SealedCredential, error) {

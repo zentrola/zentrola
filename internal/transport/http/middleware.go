@@ -44,6 +44,20 @@ func requestID(next http.Handler) http.Handler {
 
 const accessLogHeaderValueLimit = 256
 
+const accessLogBodyLimit = 64 << 10
+
+var sensitiveAccessLogHeaders = map[string]struct{}{
+	"authorization":       {},
+	"cookie":              {},
+	"proxy-authorization": {},
+	"set-cookie":          {},
+	"x-api-key":           {},
+	"x-auth-token":        {},
+	"x-access-token":      {},
+	"x-goog-api-key":      {},
+	"api-key":             {},
+}
+
 var requestHeaderAllowlist = []string{
 	"Accept",
 	"Accept-Encoding",
@@ -95,14 +109,7 @@ func accessLogHeadersForEnvironment(headers http.Header, allowlist []string, ful
 	if full {
 		result := make(map[string]string, len(headers))
 		for name, values := range headers {
-			value := strings.TrimSpace(strings.Join(values, ","))
-			value = strings.Map(func(character rune) rune {
-				if character < 32 || character == 127 {
-					return -1
-				}
-				return character
-			}, value)
-			result[strings.ToLower(name)] = value
+			result[strings.ToLower(name)] = accessLogHeaderValue(name, values)
 		}
 		return result
 	}
@@ -114,6 +121,24 @@ func accessLogHeadersForEnvironment(headers http.Header, allowlist []string, ful
 		}
 	}
 	return result
+}
+
+func accessLogHeaderValue(name string, values []string) string {
+	if _, sensitive := sensitiveAccessLogHeaders[strings.ToLower(name)]; sensitive {
+		return "******"
+	}
+	value := strings.TrimSpace(strings.Join(values, ","))
+	value = strings.Map(func(character rune) rune {
+		if character < 32 || character == 127 {
+			return -1
+		}
+		return character
+	}, value)
+	characters := []rune(value)
+	if len(characters) > accessLogHeaderValueLimit {
+		value = string(characters[:accessLogHeaderValueLimit]) + "..."
+	}
+	return value
 }
 
 func accessLogURL(requestURL *url.URL, redact bool) string {
@@ -186,14 +211,25 @@ func accessLogExtraFields(ctx context.Context) []any {
 }
 
 type bodyCapture struct {
-	data  bytes.Buffer
-	total int64
+	data      bytes.Buffer
+	total     int64
+	truncated bool
 }
 
 func (c *bodyCapture) Write(p []byte) (int, error) {
+	originalLength := len(p)
 	c.total += int64(len(p))
+	remaining := accessLogBodyLimit - c.data.Len()
+	if remaining <= 0 {
+		c.truncated = true
+		return originalLength, nil
+	}
+	if len(p) > remaining {
+		p = p[:remaining]
+		c.truncated = true
+	}
 	_, _ = c.data.Write(p)
-	return len(p), nil
+	return originalLength, nil
 }
 
 type captureReadCloser struct {
@@ -215,24 +251,65 @@ func bodyLogValue(capture *bodyCapture) any {
 	}
 	data := capture.data.Bytes()
 	if json.Valid(data) {
+		var value any
+		decoder := json.NewDecoder(bytes.NewReader(data))
+		decoder.UseNumber()
+		if err := decoder.Decode(&value); err == nil {
+			if redacted, changed := redactAccessLogJSON(value); changed {
+				if encoded, err := json.Marshal(redacted); err == nil {
+					return json.RawMessage(encoded)
+				}
+			}
+		}
 		return json.RawMessage(append([]byte(nil), data...))
 	}
 	return capture.data.String()
 }
 
+func redactAccessLogJSON(value any) (any, bool) {
+	switch value := value.(type) {
+	case []any:
+		changed := false
+		for index, item := range value {
+			redacted, itemChanged := redactAccessLogJSON(item)
+			value[index], changed = redacted, changed || itemChanged
+		}
+		return value, changed
+	case map[string]any:
+		changed := false
+		for key, item := range value {
+			keyName := strings.ToLower(key)
+			if strings.Contains(keyName, "password") || strings.Contains(keyName, "credential") ||
+				strings.Contains(keyName, "token") || keyName == "proxyheaders" ||
+				keyName == "proxy_headers" || keyName == "proxy-headers" {
+				value[key] = "******"
+				changed = true
+				continue
+			}
+			redacted, itemChanged := redactAccessLogJSON(item)
+			value[key], changed = redacted, changed || itemChanged
+		}
+		return value, changed
+	default:
+		return value, false
+	}
+}
+
 type accessLogRequest struct {
-	Method  string            `json:"method"`
-	URL     string            `json:"url"`
-	Headers map[string]string `json:"headers"`
-	Body    any               `json:"body,omitempty"`
-	Bytes   int64             `json:"bytes"`
+	Method        string            `json:"method"`
+	URL           string            `json:"url"`
+	Headers       map[string]string `json:"headers"`
+	Body          any               `json:"body,omitempty"`
+	BodyTruncated bool              `json:"body_truncated,omitempty"`
+	Bytes         int64             `json:"bytes"`
 }
 
 type accessLogResponse struct {
-	Status  int               `json:"status"`
-	Headers map[string]string `json:"headers"`
-	Body    any               `json:"body,omitempty"`
-	Bytes   int               `json:"bytes"`
+	Status        int               `json:"status"`
+	Headers       map[string]string `json:"headers"`
+	Body          any               `json:"body,omitempty"`
+	BodyTruncated bool              `json:"body_truncated,omitempty"`
+	Bytes         int               `json:"bytes"`
 }
 
 func accessLog(logger *slog.Logger, environments ...string) func(http.Handler) http.Handler {
@@ -273,7 +350,9 @@ func accessLog(logger *slog.Logger, environments ...string) func(http.Handler) h
 				}
 				if logDetails {
 					request.Body = bodyLogValue(requestBody)
+					request.BodyTruncated = requestBody.truncated
 					response.Body = bodyLogValue(responseBody)
+					response.BodyTruncated = responseBody.truncated
 				} else {
 					if request.Bytes != 0 {
 						request.Body = "******"

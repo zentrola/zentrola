@@ -58,6 +58,16 @@ func TestAnthropicFallsBackToOpenAIAndReturnsAnthropic(t *testing.T) {
 	}
 }
 
+func TestCompatibilityDecodersRejectTrailingJSON(t *testing.T) {
+	if _, err := decodeJSONObject([]byte(`{"a":1}{"b":2}`)); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("decodeJSONObject accepted trailing JSON: %v", err)
+	}
+	var value any
+	if err := decodeJSONValue([]byte(`{"a":1}garbage`), &value); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("decodeJSONValue accepted trailing data: %v", err)
+	}
+}
+
 func TestOpenAIChatFallsBackToAnthropicAndReturnsOpenAI(t *testing.T) {
 	anthropic := compatibilityUpstreamFunc(func(_ context.Context, _ Route, request Request, _ []byte) (*Response, error) {
 		if request.Protocol != AnthropicProtocol || request.Path != "/v1/messages" {

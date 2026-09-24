@@ -307,6 +307,10 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 		cfg.Environment = environment
 		cfg.Gateway.Development = environment == "dev"
 	}
+	// 资源级 Redis 刷新锁固定为 60s；凭据刷新必须在锁过期前完成，避免多实例重复刷新。
+	if cfg.Gateway.SubscriptionRefreshCredentialTimeout >= 60*time.Second {
+		problems = append(problems, errors.New("CODEX_SUBSCRIPTION_REFRESH_CREDENTIAL_TIMEOUT must be less than 60s"))
+	}
 	_, port, err := net.SplitHostPort(cfg.HTTPAddr)
 	if err != nil {
 		problems = append(problems, errors.New("HTTP_ADDR must be host:port"))
