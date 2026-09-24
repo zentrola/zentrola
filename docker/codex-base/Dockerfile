@@ -8,7 +8,7 @@ FROM --platform=$BUILDPLATFORM alpine:${ALPINE_VERSION} AS codex-builder
 ARG TARGETARCH
 ARG CODEX_VERSION
 
-RUN apk add --no-cache nodejs npm tzdata
+RUN apk add --no-cache ca-certificates nodejs npm tzdata
 
 WORKDIR /tmp/codex
 
@@ -41,9 +41,6 @@ FROM alpine:${ALPINE_VERSION}
 
 ARG CODEX_VERSION
 
-# Go、Codex app-server 及 Provider 客户端都需要系统根证书访问 HTTPS 上游。
-RUN apk add --no-cache ca-certificates
-
 LABEL org.opencontainers.image.title="codex-runtime" \
       org.opencontainers.image.description="Codex native runtime on Alpine (no Node.js)" \
       org.opencontainers.image.authors="Longjianghu <215241062@qq.com>" \
@@ -52,6 +49,7 @@ LABEL org.opencontainers.image.title="codex-runtime" \
       codex.version="${CODEX_VERSION}"
 
 COPY --from=codex-builder /out/rootfs/ /
+COPY --from=codex-builder /etc/ssl /etc/ssl
 COPY --from=codex-builder --chown=10001:10001 /out/app /app
 
 ENV HOME=/app/data \

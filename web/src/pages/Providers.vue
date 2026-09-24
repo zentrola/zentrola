@@ -1287,9 +1287,10 @@ function save() {
     endpoints: endpointDrafts.filter((endpoint) => endpoint.baseUrl),
     proxyEnabled: form.proxyEnabled,
     proxyUrl: form.proxyEnabled ? form.proxyUrl.trim() : '',
-    proxyHeaders: form.proxyEnabled && !socksProxy
-      ? form.proxyHeaders.map((header) => ({ key: header.key.trim(), value: header.value }))
-      : [],
+    proxyHeaders:
+      form.proxyEnabled && !socksProxy
+        ? form.proxyHeaders.map((header) => ({ key: header.key.trim(), value: header.value }))
+        : [],
     mappings: form.mappings.map((mapping) => ({
       modelId: mapping.modelId,
       upstreamModelCode: mapping.upstreamModelCode.trim(),
@@ -2762,7 +2763,14 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
     </p>
     <template v-if="testResult">
       <div class="alert" :class="testResult.ok ? 'success' : 'error'" role="status">
-        {{ resultMessage(testResult, testTarget.resource) }}
+        <i18n-t
+          v-if="testResult.code === 'CODEX_APP_SERVER_UNAVAILABLE'"
+          keypath="errors.CODEX_APP_SERVER_UNAVAILABLE"
+          tag="span"
+        >
+          <template #executable><code>CODEX_EXECUTABLE</code></template>
+        </i18n-t>
+        <span v-else>{{ resultMessage(testResult, testTarget.resource) }}</span>
       </div>
       <dl class="detail-grid">
         <template v-if="testTarget.protocol">
