@@ -96,7 +96,7 @@ func (s *subscriptionRefreshStore) ListSubscriptionCredentials(_ context.Context
 }
 
 func (s *subscriptionRefreshStore) LoadResourceCredential(ctx context.Context, route Route) (catalog.SealedCredential, error) {
-	if lockedResource, _ := ctx.Value(subscriptionRefreshLockContextKey{}).(int64); lockedResource != route.ResourceID {
+	if lockedResource, _ := ctx.Value(subscriptionRefreshLockContextKey{}).(int64); lockedResource != route.ResourceID && !hasSubscriptionRefreshLease(ctx) {
 		return catalog.SealedCredential{}, errors.New("credential load did not use the lock context")
 	}
 	s.mu.Lock()
@@ -126,7 +126,7 @@ func (s *subscriptionRefreshStore) LockSubscriptionRefresh(ctx context.Context, 
 }
 
 func (s *subscriptionRefreshStore) UpdateResourceCredential(ctx context.Context, route Route, sealed catalog.SealedCredential) error {
-	if lockedResource, _ := ctx.Value(subscriptionRefreshLockContextKey{}).(int64); lockedResource != route.ResourceID {
+	if lockedResource, _ := ctx.Value(subscriptionRefreshLockContextKey{}).(int64); lockedResource != route.ResourceID && !hasSubscriptionRefreshLease(ctx) {
 		return errors.New("credential update did not use the lock context")
 	}
 	s.mu.Lock()
@@ -274,8 +274,8 @@ func TestRefreshSubscriptionsReleasesSchedulerBeforeResourceWork(t *testing.T) {
 	}
 	coordinator.mu.Lock()
 	defer coordinator.mu.Unlock()
-	if coordinator.releases != 1 || coordinator.resourceBeforeRelease || !slices.Equal(coordinator.resourceCalls, []int64{1}) {
-		t.Fatalf("releases=%d resource_before_release=%v resources=%v", coordinator.releases, coordinator.resourceBeforeRelease, coordinator.resourceCalls)
+	if coordinator.releases != 1 || coordinator.resourceBeforeRelease || !slices.Equal(coordinator.resourceCalls, []int64{1}) || len(store.lockCalls) != 0 {
+		t.Fatalf("releases=%d resource_before_release=%v resources=%v postgres_locks=%v", coordinator.releases, coordinator.resourceBeforeRelease, coordinator.resourceCalls, store.lockCalls)
 	}
 }
 

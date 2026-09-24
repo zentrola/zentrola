@@ -185,16 +185,34 @@ func (s *Service) refreshCredential(ctx context.Context, route Route, credential
 			return credential, false, nil
 		}
 	}
-	if locker, ok := s.store.(SubscriptionRefreshLocker); ok {
-		lockedCtx, unlock, err := locker.LockSubscriptionRefresh(ctx, route.ResourceID)
-		if err != nil || unlock == nil {
+	refreshCtx := ctx
+	var cancel context.CancelFunc
+	if s.refreshTimeout > 0 {
+		refreshCtx, cancel = context.WithTimeout(ctx, s.refreshTimeout)
+		defer cancel()
+	}
+	if s.refreshCoordinator != nil && !hasSubscriptionRefreshLease(refreshCtx) {
+		release, acquired, err := s.refreshCoordinator.AcquireSubscriptionRefreshResource(refreshCtx, route.ResourceID)
+		if err != nil || !acquired || release == nil {
 			return credential, false, ErrSubscription
 		}
-		defer unlock()
-		ctx = lockedCtx
+		defer release()
+		refreshCtx = withSubscriptionRefreshLease(refreshCtx)
+	}
+	// 保留无 Redis 协调器时的兼容回退；生产服务始终注入 Redis
+	// SubscriptionRefreshCoordinator，因此不会在外部刷新期间持有 PostgreSQL 连接。
+	if s.refreshCoordinator == nil {
+		if locker, ok := s.store.(SubscriptionRefreshLocker); ok {
+			lockedCtx, unlock, err := locker.LockSubscriptionRefresh(refreshCtx, route.ResourceID)
+			if err != nil || unlock == nil {
+				return credential, false, ErrSubscription
+			}
+			defer unlock()
+			refreshCtx = lockedCtx
+		}
 	}
 	if loader, ok := s.store.(CredentialLoader); ok {
-		sealed, err := loader.LoadResourceCredential(ctx, route)
+		sealed, err := loader.LoadResourceCredential(refreshCtx, route)
 		if err != nil {
 			return credential, false, ErrSubscription
 		}
@@ -207,7 +225,7 @@ func (s *Service) refreshCredential(ctx context.Context, route Route, credential
 		clear(credential)
 		credential = latest
 	}
-	updated, changed, err := refresh.RefreshIfNeeded(ctx, credential, route.Proxy)
+	updated, changed, err := refresh.RefreshIfNeeded(refreshCtx, credential, route.Proxy)
 	if err != nil {
 		clear(updated)
 		return credential, false, classifySubscriptionRefreshError(refresh, err)
@@ -234,7 +252,7 @@ func (s *Service) refreshCredential(ctx context.Context, route Route, credential
 		return credential, false, ErrSubscription
 	}
 	sealed, err := encryptor.Encrypt(updated, catalog.CredentialOwner{ProviderID: route.ProviderID, ResourceID: route.ResourceID})
-	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(refreshCtx), 3*time.Second)
 	defer cancel()
 	if err != nil || updater.UpdateResourceCredential(persistCtx, route, sealed) != nil {
 		clear(updated)
@@ -282,13 +300,17 @@ func (s *Service) cooldown(ctx context.Context, route Route, duration time.Durat
 
 func (s *Service) block(ctx context.Context, identity appsec.PrincipalIdentity, route Route, block ResourceBlock) {
 	if blocker, ok := s.store.(ResourceBlocker); ok {
-		_ = blocker.BlockResource(context.WithoutCancel(ctx), identity, route.ResourceID, block)
+		persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+		defer cancel()
+		_ = blocker.BlockResource(persistCtx, identity, route.ResourceID, block)
 	}
 }
 
 func (s *Service) blockSystemResource(ctx context.Context, resourceID int64, block ResourceBlock) {
 	if blocker, ok := s.store.(SystemResourceBlocker); ok {
-		_ = blocker.BlockResourceSystem(context.WithoutCancel(ctx), resourceID, block)
+		persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+		defer cancel()
+		_ = blocker.BlockResourceSystem(persistCtx, resourceID, block)
 	}
 }
 
