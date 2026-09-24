@@ -302,6 +302,15 @@ label textarea {
 .alert .text-button {
   margin-left: 12px;
 }
+.alert code {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #fee2e2;
+  color: #991b1b;
+  font-size: 0.95em;
+  line-height: 1.35;
+}
 .toast-host {
   position: fixed;
   inset: 20px 24px auto auto;

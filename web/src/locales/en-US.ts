@@ -859,7 +859,7 @@ export default {
     UPSTREAM_TIMEOUT: 'The upstream connection timed out.',
     UPSTREAM_UNAVAILABLE: 'The upstream service is unavailable.',
     CODEX_APP_SERVER_UNAVAILABLE:
-      'Codex App Server could not start. Check CODEX_EXECUTABLE and restart the backend.',
+      'Codex App Server could not start. Check the Codex executable configuration ({executable}) and restart the backend.',
     SUBSCRIPTION_UNAVAILABLE:
       'The personal subscription quota could not be read. Check the network or proxy.',
     SUBSCRIPTION_REFRESH_FAILED:
