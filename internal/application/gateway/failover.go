@@ -116,7 +116,7 @@ func (s *Service) forwardCandidates(ctx context.Context, identity appsec.Princip
 				s.failAttempt(request.Trace, attempt, failureCode(openErr))
 			}
 			if retryableOpenError(openErr) {
-				if !errors.Is(openErr, ErrRoute) && !errors.Is(openErr, ErrCredential) {
+				if !errors.Is(openErr, ErrRoute) && !errors.Is(openErr, ErrCredential) && !errors.Is(openErr, ErrProxyServer) {
 					s.cooldown(ctx, route, defaultRouteCooldown)
 				}
 				next := s.nextRoute(ctx, routes, index+1)
@@ -282,7 +282,7 @@ func (s *Service) block(ctx context.Context, identity appsec.PrincipalIdentity, 
 }
 
 func retryableOpenError(err error) bool {
-	return errors.Is(err, ErrRoute) || errors.Is(err, ErrCredential) || errors.Is(err, ErrSubscription) || errors.Is(err, ErrProxy) || errors.Is(err, ErrUpstream) || errors.Is(err, ErrTimeout)
+	return errors.Is(err, ErrRoute) || errors.Is(err, ErrCredential) || errors.Is(err, ErrSubscription) || errors.Is(err, ErrProxy) || errors.Is(err, ErrProxyServer) || errors.Is(err, ErrUpstream) || errors.Is(err, ErrTimeout)
 }
 
 func localOpenError(err error) bool {

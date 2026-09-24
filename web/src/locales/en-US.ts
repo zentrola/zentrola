@@ -842,6 +842,8 @@ export default {
     MODEL_SYNC_CREDENTIAL_REQUIRED: 'Configure a provider key before synchronizing models.',
     PROXY_CONFIGURATION_UNRECOVERABLE:
       'The proxy configuration cannot be decrypted. Save the provider proxy configuration again.',
+    PROXY_SERVER_UNAVAILABLE:
+      'The provider proxy server is unavailable. Check the proxy server or configuration and try again.',
     SERVICE_UNAVAILABLE: 'The service is temporarily unavailable. Try again later.',
     NETWORK:
       'Cannot reach the service. Check that the backend is running, then refresh before retrying a write.',

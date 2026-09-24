@@ -211,6 +211,21 @@ func TestForwardFailsOverAndRecordsEveryAttempt(t *testing.T) {
 	}
 }
 
+func TestForwardDoesNotCooldownProxyServerFailure(t *testing.T) {
+	state := &failoverState{blocked: map[int64]bool{}}
+	service := New(&failoverStore{routes: testRoutes()[:1]}, failoverCipher{}, upstreamFunc(func(context.Context, Route, Request, []byte) (*Response, error) {
+		return nil, ErrProxyServer
+	}), WithRouteState(state))
+
+	got, err := testForward(t, service, nil)
+	if got != nil || !errors.Is(err, ErrProxyServer) {
+		t.Fatalf("response=%v err=%v", got, err)
+	}
+	if len(state.cooldowns) != 0 {
+		t.Fatalf("proxy server failure unexpectedly cooled down route: %v", state.cooldowns)
+	}
+}
+
 func TestForwardRecordsOnlyActuallySelectedRouteAndFailsOpen(t *testing.T) {
 	store := &failoverStore{routes: testRoutes()}
 	recorder := &activeRouteRecorderStub{err: errors.New("redis unavailable")}
