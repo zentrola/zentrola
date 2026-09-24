@@ -30,6 +30,7 @@ func TestAnthropicGatewayErrorIncludesActionableReasonAndStableCode(t *testing.T
 		{gw.ErrResource, "Configure or enable the provider API key"},
 		{gw.ErrCredential, "Reconfigure the provider API key"},
 		{gw.ErrProxy, "Reconfigure the provider proxy"},
+		{gw.ErrProxyServer, "proxy server"},
 	} {
 		t.Run(test.failure.Code, func(t *testing.T) {
 			recorder := httptest.NewRecorder()

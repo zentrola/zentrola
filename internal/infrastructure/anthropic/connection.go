@@ -208,14 +208,14 @@ func (t *ConnectionTester) Test(ctx context.Context, target mgmt.ConnectionTarge
 	defer cleanup()
 	resp, err := client.Do(req)
 	if err != nil {
-		result.Code = connectionErrorCode(ctx, err)
+		result.Code = connectionErrorCode(ctx, err, proxy)
 		return
 	}
 	defer resp.Body.Close()
 	result.HTTPStatus = resp.StatusCode
 	data, readErr := io.ReadAll(io.LimitReader(resp.Body, (64<<10)+1))
 	if readErr != nil {
-		result.Code = connectionErrorCode(ctx, readErr)
+		result.Code = connectionErrorCode(ctx, readErr, proxy)
 		return
 	}
 	if len(data) > 64<<10 {
@@ -385,9 +385,12 @@ func containsProbeText(value string, candidates ...string) bool {
 	return false
 }
 
-func connectionErrorCode(ctx context.Context, err error) string {
+func connectionErrorCode(ctx context.Context, err error, proxy *catalog.OutboundProxy) string {
 	if errors.Is(ctx.Err(), context.Canceled) {
 		return "REQUEST_CANCELLED"
+	}
+	if proxy != nil {
+		return "PROXY_SERVER_UNAVAILABLE"
 	}
 	var netErr net.Error
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {

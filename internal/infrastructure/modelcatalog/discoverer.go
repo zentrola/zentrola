@@ -138,7 +138,7 @@ func (d *Discoverer) Discover(ctx context.Context, source mgmt.ModelDiscoverySou
 		}
 		if requestErr != nil {
 			cleanup()
-			result.Code = connectionErrorCode(ctx, requestErr)
+			result.Code = connectionErrorCode(ctx, requestErr, proxy)
 			return nil, result
 		}
 		result.HTTPStatus = resp.StatusCode
@@ -159,7 +159,7 @@ func (d *Discoverer) Discover(ctx context.Context, source mgmt.ModelDiscoverySou
 			return nil, result
 		}
 		if readErr != nil {
-			result.Code = connectionErrorCode(ctx, readErr)
+			result.Code = connectionErrorCode(ctx, readErr, proxy)
 			return nil, result
 		}
 		if len(data) > maxCatalogResponseBytes {
@@ -222,9 +222,12 @@ func connectionStatusCode(status int) string {
 	}
 }
 
-func connectionErrorCode(ctx context.Context, err error) string {
+func connectionErrorCode(ctx context.Context, err error, proxy *catalog.OutboundProxy) string {
 	if errors.Is(ctx.Err(), context.Canceled) {
 		return "REQUEST_CANCELLED"
+	}
+	if proxy != nil {
+		return "PROXY_SERVER_UNAVAILABLE"
 	}
 	var netErr net.Error
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {

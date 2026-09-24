@@ -32,6 +32,7 @@ var (
 	ErrCredential     = &Failure{"CREDENTIAL_UNRECOVERABLE", "api_error", "The provider API key cannot be decrypted. Reconfigure the provider API key.", 503}
 	ErrSubscription   = &Failure{"SUBSCRIPTION_REFRESH_FAILED", "api_error", "The provider subscription could not be refreshed. Retry later or reconfigure the subscription.", 503}
 	ErrProxy          = &Failure{"PROXY_CONFIGURATION_UNRECOVERABLE", "api_error", "The provider proxy configuration cannot be decrypted or parsed. Reconfigure the provider proxy.", 503}
+	ErrProxyServer    = &Failure{"PROXY_SERVER_UNAVAILABLE", "api_error", "The provider proxy server is unavailable. Check the proxy server and retry later.", 502}
 	ErrUnavailable    = &Failure{"DEPENDENCY_UNAVAILABLE", "api_error", "An internal dependency is unavailable. Retry later or contact the administrator.", 503}
 	ErrUpstream       = &Failure{"UPSTREAM_UNAVAILABLE", "api_error", "The upstream model provider is unavailable. Retry later.", 502}
 	ErrTimeout        = &Failure{"UPSTREAM_TIMEOUT", "api_error", "The upstream model provider timed out. Retry later.", 504}

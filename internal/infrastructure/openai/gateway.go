@@ -122,8 +122,13 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 			return nil, gw.ErrCancelled
 		}
 		failure := gw.ErrUpstream
+		// 网络请求经过服务商代理时，传输层故障无法归因于上游响应；将其
+		// 明确标记为代理服务器故障，避免用户误以为服务商本身不可用。
+		if route.Proxy != nil {
+			failure = gw.ErrProxyServer
+		}
 		var ne net.Error
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) || (errors.As(err, &ne) && ne.Timeout()) {
+		if route.Proxy == nil && (errors.Is(ctx.Err(), context.DeadlineExceeded) || (errors.As(err, &ne) && ne.Timeout())) {
 			failure = gw.ErrTimeout
 		}
 		diagnostic := provider.DiagnoseNetworkError(err)
