@@ -89,6 +89,20 @@ func (f subscriptionRefreshFunc) RefreshIfNeeded(ctx context.Context, credential
 	return f(ctx, credential, proxy)
 }
 
+type classifiedSubscriptionRefresher struct {
+	err       error
+	code      string
+	permanent bool
+}
+
+func (classifiedSubscriptionRefresher) Supports(code string) bool { return code == "OPENAI_CODEX" }
+func (r classifiedSubscriptionRefresher) RefreshIfNeeded(context.Context, []byte, *catalog.OutboundProxy) ([]byte, bool, error) {
+	return nil, false, r.err
+}
+func (r classifiedSubscriptionRefresher) ClassifyRefreshError(error) (string, bool) {
+	return r.code, r.permanent
+}
+
 type upstreamFunc func(context.Context, Route, Request, []byte) (*Response, error)
 
 func (f upstreamFunc) Open(ctx context.Context, route Route, request Request, credential []byte) (*Response, error) {
@@ -517,5 +531,34 @@ func TestForwardFallsBackToAPIKeyWhenSubscriptionRefreshFails(t *testing.T) {
 	got.Body.Close()
 	if len(called) != 1 || called[0] != routes[1].ResourceID || len(state.cooldowns) != 1 || len(store.blocks) != 0 {
 		t.Fatalf("calls=%v cooldowns=%v blocks=%v", called, state.cooldowns, store.blocks)
+	}
+}
+
+func TestForwardBlocksPermanentSubscriptionRefreshFailure(t *testing.T) {
+	routes := testRoutes()
+	routes[0].AuthType = "SUBSCRIPTION"
+	routes[0].AuthAdapter = "OPENAI_CODEX"
+	routes[1].AuthType = "API_KEY"
+	store := &failoverStore{routes: routes}
+	state := &failoverState{blocked: map[int64]bool{}}
+	var called []int64
+	service := New(store, failoverCipher{}, upstreamFunc(func(_ context.Context, route Route, _ Request, _ []byte) (*Response, error) {
+		called = append(called, route.ResourceID)
+		return response(200, `{}`), nil
+	}), WithRouteState(state), WithSubscriptionRefresher(classifiedSubscriptionRefresher{
+		err: errors.New("refresh token revoked"), code: "CREDENTIAL_REVOKED", permanent: true,
+	}))
+
+	got, err := service.Forward(context.Background(), appsec.PrincipalIdentity{ID: 1, AccessKeyID: 3}, Request{
+		Path: "/v1/responses", Protocol: OpenAIResponsesProtocol, Body: []byte(`{"model":"model"}`),
+	})
+	if err != nil || got.Status != 200 {
+		t.Fatalf("status=%v err=%v", got, err)
+	}
+	got.Body.Close()
+	if len(called) != 1 || called[0] != routes[1].ResourceID || len(state.cooldowns) != 0 ||
+		len(store.blocks) != 1 || store.blocks[0].Reason != "CREDENTIAL_REVOKED" ||
+		store.blocks[0].ErrorCode != "CREDENTIAL_REVOKED" {
+		t.Fatalf("calls=%v cooldowns=%v blocks=%+v", called, state.cooldowns, store.blocks)
 	}
 }

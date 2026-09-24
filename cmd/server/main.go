@@ -320,11 +320,14 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 		gatewaycache.NewGatewayStore(postgres.NewGatewayStore(pool), gatewayCache, logger), credentials, compatibleUpstream,
 		gateway.WithRouteState(routeState),
 		gateway.WithActiveRouteRecorder(gatewayCache),
+		gateway.WithSubscriptionRefreshCoordinator(routeState),
 		gateway.WithSubscriptionRefresher(codexSubscription),
 		gateway.WithSubscriptionRefresher(claudeSubscription),
 	)
 	subscriptionWorker, err := gateway.NewSubscriptionRefreshWorker(
 		gatewayService, logger, cfg.Gateway.SubscriptionRefreshInterval, cfg.Gateway.SubscriptionRunTimeout,
+		gateway.WithSubscriptionRefreshConcurrency(cfg.Gateway.SubscriptionRefreshConcurrency),
+		gateway.WithSubscriptionRefreshCredentialTimeout(cfg.Gateway.SubscriptionRefreshCredentialTimeout),
 	)
 	if err != nil {
 		return err
@@ -332,7 +335,9 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 	logger.Info("subscription refresh worker started",
 		"refresh_ahead", cfg.Gateway.SubscriptionRefreshAhead,
 		"interval", cfg.Gateway.SubscriptionRefreshInterval,
-		"run_timeout", cfg.Gateway.SubscriptionRunTimeout)
+		"run_timeout", cfg.Gateway.SubscriptionRunTimeout,
+		"concurrency", cfg.Gateway.SubscriptionRefreshConcurrency,
+		"credential_timeout", cfg.Gateway.SubscriptionRefreshCredentialTimeout)
 	defer func() {
 		workerShutdown, workerCancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 		defer workerCancel()

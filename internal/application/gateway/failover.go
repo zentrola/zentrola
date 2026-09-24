@@ -93,7 +93,14 @@ func (s *Service) forwardCandidates(ctx context.Context, identity appsec.Princip
 			credential, _, err = s.refreshCredential(ctx, route, credential)
 			if err != nil {
 				clear(credential)
-				s.cooldown(ctx, route, defaultRouteCooldown)
+				var refreshFailure *SubscriptionRefreshError
+				if errors.As(err, &refreshFailure) && refreshFailure.Permanent {
+					s.block(ctx, identity, route, ResourceBlock{
+						Reason: subscriptionRefreshBlockReason(refreshFailure.Code), ErrorCode: refreshFailure.Code,
+					})
+				} else {
+					s.cooldown(ctx, route, defaultRouteCooldown)
+				}
 				next := s.nextRoute(ctx, routes, index+1)
 				if next < 0 {
 					return nil, err
@@ -172,14 +179,12 @@ func (s *Service) refreshCredential(ctx context.Context, route Route, credential
 	if inspector, ok := refresh.(SubscriptionRefreshInspector); ok {
 		needed, err := inspector.NeedsRefresh(credential)
 		if err != nil {
-			return credential, false, ErrSubscription
+			return credential, false, classifySubscriptionRefreshError(refresh, err)
 		}
 		if !needed {
 			return credential, false, nil
 		}
 	}
-	s.refreshMu.Lock()
-	defer s.refreshMu.Unlock()
 	if locker, ok := s.store.(SubscriptionRefreshLocker); ok {
 		lockedCtx, unlock, err := locker.LockSubscriptionRefresh(ctx, route.ResourceID)
 		if err != nil || unlock == nil {
@@ -197,7 +202,7 @@ func (s *Service) refreshCredential(ctx context.Context, route Route, credential
 			ProviderID: route.ProviderID, ResourceID: route.ResourceID,
 		})
 		if err != nil {
-			return credential, false, ErrSubscription
+			return credential, false, &SubscriptionRefreshError{Code: ErrCredential.Code, Permanent: true}
 		}
 		clear(credential)
 		credential = latest
@@ -205,7 +210,7 @@ func (s *Service) refreshCredential(ctx context.Context, route Route, credential
 	updated, changed, err := refresh.RefreshIfNeeded(ctx, credential, route.Proxy)
 	if err != nil {
 		clear(updated)
-		return credential, false, ErrSubscription
+		return credential, false, classifySubscriptionRefreshError(refresh, err)
 	}
 	if !changed {
 		clear(updated)
@@ -218,7 +223,7 @@ func (s *Service) refreshCredential(ctx context.Context, route Route, credential
 		refreshedAt, expiresAt, inspectErr := inspector.CredentialRefreshMetadata(updated)
 		if inspectErr != nil {
 			clear(updated)
-			return credential, false, ErrSubscription
+			return credential, false, classifySubscriptionRefreshError(refresh, inspectErr)
 		}
 		route.CredentialRefreshedAt, route.CredentialExpiresAt = refreshedAt, expiresAt
 	}
@@ -281,8 +286,45 @@ func (s *Service) block(ctx context.Context, identity appsec.PrincipalIdentity, 
 	}
 }
 
+func (s *Service) blockSystemResource(ctx context.Context, resourceID int64, block ResourceBlock) {
+	if blocker, ok := s.store.(SystemResourceBlocker); ok {
+		_ = blocker.BlockResourceSystem(context.WithoutCancel(ctx), resourceID, block)
+	}
+}
+
 func retryableOpenError(err error) bool {
 	return errors.Is(err, ErrRoute) || errors.Is(err, ErrCredential) || errors.Is(err, ErrSubscription) || errors.Is(err, ErrProxy) || errors.Is(err, ErrProxyServer) || errors.Is(err, ErrUpstream) || errors.Is(err, ErrTimeout)
+}
+
+func classifySubscriptionRefreshError(refresh SubscriptionRefresher, err error) error {
+	if err == nil {
+		return ErrSubscription
+	}
+	if classifier, ok := refresh.(SubscriptionRefreshErrorClassifier); ok {
+		code, permanent := classifier.ClassifyRefreshError(err)
+		if code != "" {
+			return &SubscriptionRefreshError{Code: code, Permanent: permanent}
+		}
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return &SubscriptionRefreshError{Code: "UPSTREAM_TIMEOUT"}
+	}
+	return &SubscriptionRefreshError{Code: ErrSubscription.Code}
+}
+
+func subscriptionRefreshBlockReason(code string) string {
+	switch code {
+	case "UPSTREAM_AUTH_FAILED":
+		return "AUTHENTICATION"
+	case "UPSTREAM_BILLING_BLOCKED", "SUBSCRIPTION_EXPIRED":
+		return "BILLING"
+	case "ACCOUNT_SUSPENDED", "UPSTREAM_ACCOUNT_SUSPENDED":
+		return "ACCOUNT_SUSPENDED"
+	case "CREDENTIAL_REVOKED":
+		return "CREDENTIAL_REVOKED"
+	default:
+		return "CREDENTIAL_UNRECOVERABLE"
+	}
 }
 
 func localOpenError(err error) bool {

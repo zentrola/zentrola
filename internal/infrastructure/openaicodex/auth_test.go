@@ -28,6 +28,17 @@ func TestRefreshKeepsFreshAccessToken(t *testing.T) {
 	}
 }
 
+func TestRefreshRejectsInvalidCredentialAsPermanent(t *testing.T) {
+	_, _, err := New("").RefreshIfNeeded(context.Background(), []byte("invalid"), nil)
+	var connectionError mgmt.SubscriptionConnectionError
+	if !errors.As(err, &connectionError) || connectionError.ConnectionCode() != "CREDENTIAL_INVALID" {
+		t.Fatalf("unexpected error classification: %v", err)
+	}
+	if code, permanent := New("").ClassifyRefreshError(err); code != "CREDENTIAL_INVALID" || !permanent {
+		t.Fatalf("code=%q permanent=%v", code, permanent)
+	}
+}
+
 func TestNeedsRefreshUsesConfiguredAheadWindow(t *testing.T) {
 	adapter := New("", WithRefreshAhead(30*time.Minute))
 	tests := []struct {

@@ -4,6 +4,9 @@ package redisstate
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"net"
 	"strconv"
 	"sync/atomic"
@@ -14,10 +17,19 @@ import (
 )
 
 const (
-	probeLease           = 5 * time.Second
-	probeMarkerRetention = 24 * time.Hour
-	retryRedis           = 5 * time.Second
+	probeLease                   = 5 * time.Second
+	probeMarkerRetention         = 24 * time.Hour
+	retryRedis                   = 5 * time.Second
+	subscriptionSchedulerLockTTL = 20 * time.Second
+	subscriptionResourceLockTTL  = 60 * time.Second
 )
+
+var releaseLockScript = redis.NewScript(`
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+end
+return 0
+`)
 
 var acquireScript = redis.NewScript(`
 -- KEYS[1] is the cooldown marker; KEYS[2] is the recovery probe marker/lease.
@@ -107,6 +119,48 @@ func (s *State) Healthy(ctx context.Context, route gateway.Route) error {
 		return nil
 	}
 	return s.record(s.client.Del(ctx, cooldownKey(route.ResourceID), probeKey(route.ResourceID)).Err())
+}
+
+// AcquireSubscriptionRefreshScheduler takes a short-lived lease used only
+// while one instance scans the subscription table. It deliberately fails
+// closed when Redis is unavailable so multiple instances do not refresh the
+// same batch concurrently.
+func (s *State) AcquireSubscriptionRefreshScheduler(ctx context.Context) (func(), bool, error) {
+	return s.acquireSubscriptionLock(ctx, "zentrola:subscription:refresh:scheduler:v1", subscriptionSchedulerLockTTL)
+}
+
+// AcquireSubscriptionRefreshResource serializes refreshes for one resource
+// across all application instances.
+func (s *State) AcquireSubscriptionRefreshResource(ctx context.Context, resourceID int64) (func(), bool, error) {
+	key := "zentrola:subscription:refresh:resource:v1:" + strconv.FormatInt(resourceID, 10)
+	return s.acquireSubscriptionLock(ctx, key, subscriptionResourceLockTTL)
+}
+
+func (s *State) acquireSubscriptionLock(ctx context.Context, key string, ttl time.Duration) (func(), bool, error) {
+	if s == nil || s.client == nil || s.redisUnavailable() {
+		return nil, false, errors.New("redis unavailable")
+	}
+	ownerBytes := make([]byte, 16)
+	if _, err := rand.Read(ownerBytes); err != nil {
+		return nil, false, err
+	}
+	owner := hex.EncodeToString(ownerBytes)
+	result, err := s.client.SetArgs(ctx, key, owner, redis.SetArgs{Mode: "NX", TTL: ttl}).Result()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return nil, false, nil
+		}
+		s.record(err)
+		return nil, false, err
+	}
+	if result != "OK" {
+		return nil, false, nil
+	}
+	return func() {
+		releaseCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = releaseLockScript.Run(releaseCtx, s.client, []string{key}, owner).Err()
+	}, true, nil
 }
 
 func (s *State) redisUnavailable() bool {

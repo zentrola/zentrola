@@ -48,6 +48,8 @@ type Gateway struct {
 	IdentityCacheTTL, RouteCacheTTL                                               time.Duration
 	CodexExecutable                                                               string
 	SubscriptionRefreshAhead, SubscriptionRefreshInterval, SubscriptionRunTimeout time.Duration
+	SubscriptionRefreshCredentialTimeout                                          time.Duration
+	SubscriptionRefreshConcurrency                                                int
 	Development                                                                   bool
 }
 
@@ -273,17 +275,19 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 			FlushInterval: duration("USAGE_FLUSH_INTERVAL", "500ms"), WriteTimeout: duration("USAGE_WRITE_TIMEOUT", "3s"), ShutdownTimeout: duration("USAGE_SHUTDOWN_TIMEOUT", "5s"),
 		},
 		Gateway: Gateway{
-			MaxBodyBytes:                int64(integer("GATEWAY_MAX_BODY_BYTES", "33554432", 128<<20)),
-			RequestTimeout:              duration("GATEWAY_REQUEST_TIMEOUT", "15m"),
-			HeaderTimeout:               duration("GATEWAY_HEADER_TIMEOUT", "120s"),
-			BodyReadTimeout:             duration("GATEWAY_BODY_READ_TIMEOUT", "30s"),
-			WriteTimeout:                duration("GATEWAY_WRITE_TIMEOUT", "30s"),
-			IdentityCacheTTL:            duration("GATEWAY_IDENTITY_CACHE_TTL", "10m"),
-			RouteCacheTTL:               duration("GATEWAY_ROUTE_CACHE_TTL", "1m"),
-			CodexExecutable:             strings.TrimSpace(get("CODEX_EXECUTABLE", "codex")),
-			SubscriptionRefreshAhead:    duration("CODEX_SUBSCRIPTION_REFRESH_AHEAD", "30m"),
-			SubscriptionRefreshInterval: duration("CODEX_SUBSCRIPTION_REFRESH_INTERVAL", "1m"),
-			SubscriptionRunTimeout:      duration("CODEX_SUBSCRIPTION_REFRESH_RUN_TIMEOUT", "4m"),
+			MaxBodyBytes:                         int64(integer("GATEWAY_MAX_BODY_BYTES", "33554432", 128<<20)),
+			RequestTimeout:                       duration("GATEWAY_REQUEST_TIMEOUT", "15m"),
+			HeaderTimeout:                        duration("GATEWAY_HEADER_TIMEOUT", "120s"),
+			BodyReadTimeout:                      duration("GATEWAY_BODY_READ_TIMEOUT", "30s"),
+			WriteTimeout:                         duration("GATEWAY_WRITE_TIMEOUT", "30s"),
+			IdentityCacheTTL:                     duration("GATEWAY_IDENTITY_CACHE_TTL", "10m"),
+			RouteCacheTTL:                        duration("GATEWAY_ROUTE_CACHE_TTL", "1m"),
+			CodexExecutable:                      strings.TrimSpace(get("CODEX_EXECUTABLE", "codex")),
+			SubscriptionRefreshAhead:             duration("CODEX_SUBSCRIPTION_REFRESH_AHEAD", "30m"),
+			SubscriptionRefreshInterval:          duration("CODEX_SUBSCRIPTION_REFRESH_INTERVAL", "1m"),
+			SubscriptionRunTimeout:               duration("CODEX_SUBSCRIPTION_REFRESH_RUN_TIMEOUT", "4m"),
+			SubscriptionRefreshCredentialTimeout: duration("CODEX_SUBSCRIPTION_REFRESH_CREDENTIAL_TIMEOUT", "45s"),
+			SubscriptionRefreshConcurrency:       integer("CODEX_SUBSCRIPTION_REFRESH_CONCURRENCY", "4", 128),
 		},
 		Security: Security{
 			MasterKey:        get("MASTER_KEY", ""),

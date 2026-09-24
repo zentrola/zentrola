@@ -285,6 +285,20 @@ func (s *GatewayStore) BlockResource(ctx context.Context, identity appsec.Princi
 	return nil
 }
 
+func (s *GatewayStore) BlockResourceSystem(ctx context.Context, resourceID int64, block gw.ResourceBlock) error {
+	next, ok := s.next.(gw.SystemResourceBlocker)
+	if !ok {
+		return gw.ErrUnavailable
+	}
+	if err := next.BlockResourceSystem(ctx, resourceID, block); err != nil {
+		return err
+	}
+	s.logger.InfoContext(ctx, "gateway resource state updated; invalidating cache",
+		"change_type", "resource_blocked", "resource_id", resourceID)
+	s.cache.Clear(ctx, "resource_blocked")
+	return nil
+}
+
 func (s *GatewayStore) UpdateResourceCredential(ctx context.Context, route gw.Route, sealed catalog.SealedCredential) error {
 	next, ok := s.next.(gw.CredentialUpdater)
 	if !ok {

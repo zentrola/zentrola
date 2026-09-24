@@ -82,6 +82,40 @@ func (a *Adapter) SupportsProvider(provider mgmt.Provider) bool {
 	return provider.Code == "openai-official"
 }
 
+func (a *Adapter) ClassifyRefreshError(err error) (string, bool) {
+	if err == nil {
+		return "SUBSCRIPTION_REFRESH_FAILED", false
+	}
+	var failure *connectionFailure
+	if errors.As(err, &failure) && failure.code != "" {
+		return failure.code, permanentRefreshCode(failure.code)
+	}
+	if errors.Is(err, errInvalidCredential) {
+		return "CREDENTIAL_INVALID", true
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "UPSTREAM_TIMEOUT", false
+	}
+	if errors.Is(err, errAppServerUnavailable) {
+		return "CODEX_APP_SERVER_UNAVAILABLE", false
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "authentication failed") {
+		return "UPSTREAM_AUTH_FAILED", true
+	}
+	return "SUBSCRIPTION_REFRESH_FAILED", false
+}
+
+func permanentRefreshCode(code string) bool {
+	switch code {
+	case "CREDENTIAL_INVALID", "CREDENTIAL_REVOKED", "CREDENTIAL_UNRECOVERABLE",
+		"UPSTREAM_AUTH_FAILED", "UPSTREAM_BILLING_BLOCKED", "SUBSCRIPTION_EXPIRED",
+		"UPSTREAM_ACCOUNT_SUSPENDED":
+		return true
+	default:
+		return false
+	}
+}
+
 type authCache struct {
 	AuthMode    string `json:"auth_mode"`
 	LastRefresh string `json:"last_refresh"`
@@ -256,7 +290,10 @@ func (a *Adapter) refreshCredential(ctx context.Context, raw []byte, proxy *cata
 		return client.call(ctx, 2, "account/read", map[string]bool{"refreshToken": true}, &account)
 	})
 	if err != nil {
-		return nil, mgmt.SubscriptionInspection{}, fmt.Errorf("Codex ChatGPT authentication failed: %w", err)
+		code, _ := a.ClassifyRefreshError(err)
+		return nil, mgmt.SubscriptionInspection{}, &connectionFailure{
+			code: code, cause: fmt.Errorf("Codex ChatGPT authentication failed: %w", err),
+		}
 	}
 	if account.Account == nil || account.Account.Type != "chatgpt" {
 		clear(updated)
@@ -356,7 +393,8 @@ func (a *Adapter) ConsumeResetCredit(ctx context.Context, raw []byte, proxy *cat
 func (a *Adapter) RefreshIfNeeded(ctx context.Context, raw []byte, proxy *catalog.OutboundProxy) ([]byte, bool, error) {
 	needed, err := a.NeedsRefresh(raw)
 	if err != nil {
-		return nil, false, err
+		code, _ := a.ClassifyRefreshError(err)
+		return nil, false, &connectionFailure{code: code, cause: err}
 	}
 	if !needed {
 		return nil, false, nil

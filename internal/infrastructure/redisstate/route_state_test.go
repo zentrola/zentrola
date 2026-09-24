@@ -1,6 +1,7 @@
 package redisstate
 
 import (
+	"context"
 	"errors"
 	"testing"
 )
@@ -22,5 +23,13 @@ func TestRedisFailureTemporarilySuppressesCalls(t *testing.T) {
 	}
 	if err := state.record(nil); err != nil || state.redisUnavailable() {
 		t.Fatal("successful Redis call did not restore availability")
+	}
+}
+
+func TestSubscriptionLockFailsClosedWithoutRedisClient(t *testing.T) {
+	state := &State{}
+	_, acquired, err := state.AcquireSubscriptionRefreshScheduler(context.Background())
+	if err == nil || acquired {
+		t.Fatalf("acquired=%v err=%v", acquired, err)
 	}
 }
