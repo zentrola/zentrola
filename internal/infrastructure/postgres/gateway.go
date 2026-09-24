@@ -100,7 +100,7 @@ func (s *GatewayStore) ResolveCandidates(ctx context.Context, identity appsec.Pr
 		if protocol == gw.OpenAIImagesProtocol && row.ProtocolType != gw.OpenAIEndpoint {
 			continue
 		}
-		if row.AuthType == mgmt.AuthTypeSubscription && protocol != gw.OpenAIResponsesProtocol {
+		if row.AuthType == mgmt.AuthTypeSubscription && !subscriptionSupportsProtocol(row.AuthAdapter, protocol) {
 			continue
 		}
 		key := candidateKey{providerModelID: row.ProviderModelID, resourceID: row.ResourceID}
@@ -152,10 +152,32 @@ func gatewayEndpointProtocols(protocol string) []string {
 	return []string{gw.OpenAIEndpoint, gw.AnthropicEndpoint}
 }
 
+func subscriptionSupportsProtocol(adapter, protocol string) bool {
+	switch adapter {
+	case mgmt.AuthAdapterOpenAICodex:
+		return protocol == gw.OpenAIResponsesProtocol
+	case mgmt.AuthAdapterClaudeCode:
+		return protocol == gw.AnthropicProtocol
+	default:
+		return false
+	}
+}
+
 func (s *GatewayStore) BlockResource(ctx context.Context, identity appsec.PrincipalIdentity, resourceID int64, block gw.ResourceBlock) error {
 	if identity.ID <= 0 || resourceID <= 0 || block.Reason == "" || block.ErrorCode == "" {
 		return gw.ErrInvalid
 	}
+	return s.blockResource(ctx, resourceID, block)
+}
+
+func (s *GatewayStore) BlockResourceSystem(ctx context.Context, resourceID int64, block gw.ResourceBlock) error {
+	if resourceID <= 0 || block.Reason == "" || block.ErrorCode == "" {
+		return gw.ErrInvalid
+	}
+	return s.blockResource(ctx, resourceID, block)
+}
+
+func (s *GatewayStore) blockResource(ctx context.Context, resourceID int64, block gw.ResourceBlock) error {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	status := block.HTTPStatus
 	var httpStatus *int32

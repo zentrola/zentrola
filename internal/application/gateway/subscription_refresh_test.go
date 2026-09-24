@@ -21,11 +21,49 @@ type subscriptionRefreshStore struct {
 	credentials          map[int64]SubscriptionCredential
 	listCalls, lockCalls []int64
 	updated, unlockCalls []int64
+	blocked              []int64
+	blocks               []ResourceBlock
 	listed               chan struct{}
 	listedOnce           sync.Once
 }
 
 type subscriptionRefreshLockContextKey struct{}
+
+type testSubscriptionRefreshCoordinator struct {
+	mu                    sync.Mutex
+	schedulerAcquired     bool
+	schedulerCalls        int
+	resourceCalls         []int64
+	releases              int
+	schedulerReleased     bool
+	resourceBeforeRelease bool
+}
+
+func (c *testSubscriptionRefreshCoordinator) AcquireSubscriptionRefreshScheduler(context.Context) (func(), bool, error) {
+	c.mu.Lock()
+	c.schedulerCalls++
+	acquired := c.schedulerAcquired
+	c.mu.Unlock()
+	if !acquired {
+		return nil, false, nil
+	}
+	return func() {
+		c.mu.Lock()
+		c.releases++
+		c.schedulerReleased = true
+		c.mu.Unlock()
+	}, true, nil
+}
+
+func (c *testSubscriptionRefreshCoordinator) AcquireSubscriptionRefreshResource(_ context.Context, resourceID int64) (func(), bool, error) {
+	c.mu.Lock()
+	c.resourceCalls = append(c.resourceCalls, resourceID)
+	if !c.schedulerReleased {
+		c.resourceBeforeRelease = true
+	}
+	c.mu.Unlock()
+	return func() {}, true, nil
+}
 
 func (s *subscriptionRefreshStore) Resolve(context.Context, appsec.PrincipalIdentity, string, ...string) (Route, error) {
 	return Route{}, ErrRoute
@@ -118,6 +156,14 @@ func (s *subscriptionRefreshStore) UpdateResourceCredentialRefreshMetadata(_ con
 	return nil
 }
 
+func (s *subscriptionRefreshStore) BlockResourceSystem(_ context.Context, resourceID int64, block ResourceBlock) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.blocked = append(s.blocked, resourceID)
+	s.blocks = append(s.blocks, block)
+	return nil
+}
+
 func cloneSealedCredential(value catalog.SealedCredential) catalog.SealedCredential {
 	return catalog.SealedCredential{
 		Ciphertext: append([]byte(nil), value.Ciphertext...),
@@ -192,6 +238,63 @@ func TestRefreshSubscriptionsContinuesAfterCredentialFailure(t *testing.T) {
 	}
 	if got := string(store.credentials[2].Credential.Ciphertext); got != "fresh-expiring-token" {
 		t.Fatalf("persisted credential=%q", got)
+	}
+}
+
+func TestRefreshSubscriptionsSkipsWhenSchedulerLockIsUnavailable(t *testing.T) {
+	store := &subscriptionRefreshStore{credentials: map[int64]SubscriptionCredential{1: subscriptionCredential(1, "fresh-token")}}
+	coordinator := &testSubscriptionRefreshCoordinator{}
+	service := New(store, subscriptionRefreshCipher{}, nil,
+		WithSubscriptionRefresher(scheduledSubscriptionRefresher{}),
+		WithSubscriptionRefreshCoordinator(coordinator),
+	)
+
+	summary, err := service.RefreshSubscriptions(context.Background())
+	if err != nil || !summary.Skipped || summary.Checked != 0 {
+		t.Fatalf("summary=%+v err=%v", summary, err)
+	}
+	if coordinator.schedulerCalls != 1 || len(store.listCalls) != 0 {
+		t.Fatalf("scheduler_calls=%d list_calls=%v", coordinator.schedulerCalls, store.listCalls)
+	}
+}
+
+func TestRefreshSubscriptionsReleasesSchedulerBeforeResourceWork(t *testing.T) {
+	store := &subscriptionRefreshStore{credentials: map[int64]SubscriptionCredential{
+		1: subscriptionCredential(1, "expiring-token"),
+	}}
+	coordinator := &testSubscriptionRefreshCoordinator{schedulerAcquired: true}
+	service := New(store, subscriptionRefreshCipher{}, nil,
+		WithSubscriptionRefresher(scheduledSubscriptionRefresher{}),
+		WithSubscriptionRefreshCoordinator(coordinator),
+	)
+
+	summary, err := service.RefreshSubscriptions(context.Background())
+	if err != nil || summary.Refreshed != 1 {
+		t.Fatalf("summary=%+v err=%v", summary, err)
+	}
+	coordinator.mu.Lock()
+	defer coordinator.mu.Unlock()
+	if coordinator.releases != 1 || coordinator.resourceBeforeRelease || !slices.Equal(coordinator.resourceCalls, []int64{1}) {
+		t.Fatalf("releases=%d resource_before_release=%v resources=%v", coordinator.releases, coordinator.resourceBeforeRelease, coordinator.resourceCalls)
+	}
+}
+
+func TestRefreshSubscriptionsBlocksPermanentCredentialFailure(t *testing.T) {
+	store := &subscriptionRefreshStore{credentials: map[int64]SubscriptionCredential{
+		1: subscriptionCredential(1, "revoked-token"),
+	}}
+	service := New(store, subscriptionRefreshCipher{}, nil, WithSubscriptionRefresher(classifiedSubscriptionRefresher{
+		err: errors.New("refresh token revoked"), code: "CREDENTIAL_REVOKED", permanent: true,
+	}))
+
+	summary, err := service.RefreshSubscriptions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Checked != 1 || summary.Refreshed != 0 || len(summary.Failures) != 1 ||
+		summary.Failures[0].ErrorCode != "CREDENTIAL_REVOKED" || !slices.Equal(store.blocked, []int64{1}) ||
+		len(store.blocks) != 1 || store.blocks[0].Reason != "CREDENTIAL_REVOKED" {
+		t.Fatalf("summary=%+v blocked=%v blocks=%+v", summary, store.blocked, store.blocks)
 	}
 }
 

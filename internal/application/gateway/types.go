@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"sync"
 	"time"
 
 	appsec "github.com/zentrola/zentrola/internal/application/security"
@@ -19,6 +18,21 @@ type Failure struct {
 }
 
 func (f *Failure) Error() string { return f.Code }
+
+// SubscriptionRefreshError 记录订阅刷新失败是否可重试，或必须等待管理员处理。
+type SubscriptionRefreshError struct {
+	Code      string
+	Permanent bool
+}
+
+func (e *SubscriptionRefreshError) Error() string {
+	if e == nil || e.Code == "" {
+		return ErrSubscription.Code
+	}
+	return e.Code
+}
+
+func (e *SubscriptionRefreshError) Unwrap() error { return ErrSubscription }
 
 var (
 	ErrAuthentication = &Failure{"UNAUTHENTICATED", "authentication_error", "Authentication failed. Check the API key.", 401}
@@ -104,6 +118,9 @@ type ResourceBlock struct {
 type ResourceBlocker interface {
 	BlockResource(context.Context, appsec.PrincipalIdentity, int64, ResourceBlock) error
 }
+type SystemResourceBlocker interface {
+	BlockResourceSystem(context.Context, int64, ResourceBlock) error
+}
 type CredentialUpdater interface {
 	UpdateResourceCredential(context.Context, Route, catalog.SealedCredential) error
 }
@@ -115,6 +132,14 @@ type CredentialLoader interface {
 }
 type SubscriptionRefreshLocker interface {
 	LockSubscriptionRefresh(context.Context, int64) (context.Context, func(), error)
+}
+
+// SubscriptionRefreshCoordinator coordinates background subscription refreshes
+// across multiple application instances. The scheduler lock only protects the
+// scan; the resource lock protects one resource refresh.
+type SubscriptionRefreshCoordinator interface {
+	AcquireSubscriptionRefreshScheduler(context.Context) (func(), bool, error)
+	AcquireSubscriptionRefreshResource(context.Context, int64) (func(), bool, error)
 }
 type SubscriptionCredential struct {
 	ProviderID, ResourceID int64
@@ -132,6 +157,9 @@ type SubscriptionCredentialLister interface {
 type SubscriptionRefresher interface {
 	Supports(string) bool
 	RefreshIfNeeded(context.Context, []byte, *catalog.OutboundProxy) ([]byte, bool, error)
+}
+type SubscriptionRefreshErrorClassifier interface {
+	ClassifyRefreshError(error) (code string, permanent bool)
 }
 type SubscriptionRefreshInspector interface {
 	NeedsRefresh([]byte) (bool, error)
@@ -200,13 +228,13 @@ type Upstream interface {
 	Open(context.Context, Route, Request, []byte) (*Response, error)
 }
 type Service struct {
-	store        Store
-	cipher       Cipher
-	upstream     Upstream
-	state        RouteState
-	activeRoutes ActiveRouteRecorder
-	refresh      []SubscriptionRefresher
-	refreshMu    sync.Mutex
+	store              Store
+	cipher             Cipher
+	upstream           Upstream
+	state              RouteState
+	activeRoutes       ActiveRouteRecorder
+	refresh            []SubscriptionRefresher
+	refreshCoordinator SubscriptionRefreshCoordinator
 }
 
 type Option func(*Service)
@@ -214,6 +242,9 @@ type Option func(*Service)
 func WithRouteState(state RouteState) Option { return func(service *Service) { service.state = state } }
 func WithActiveRouteRecorder(recorder ActiveRouteRecorder) Option {
 	return func(service *Service) { service.activeRoutes = recorder }
+}
+func WithSubscriptionRefreshCoordinator(coordinator SubscriptionRefreshCoordinator) Option {
+	return func(service *Service) { service.refreshCoordinator = coordinator }
 }
 func WithSubscriptionRefresher(refresh SubscriptionRefresher) Option {
 	return func(service *Service) {

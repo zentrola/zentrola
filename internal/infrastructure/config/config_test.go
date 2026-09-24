@@ -29,6 +29,8 @@ func TestConfigValidation(t *testing.T) {
 		{"invalid subscription refresh ahead", "CODEX_SUBSCRIPTION_REFRESH_AHEAD", "0s", "CODEX_SUBSCRIPTION_REFRESH_AHEAD"},
 		{"invalid subscription refresh interval", "CODEX_SUBSCRIPTION_REFRESH_INTERVAL", "0s", "CODEX_SUBSCRIPTION_REFRESH_INTERVAL"},
 		{"invalid subscription refresh timeout", "CODEX_SUBSCRIPTION_REFRESH_RUN_TIMEOUT", "0s", "CODEX_SUBSCRIPTION_REFRESH_RUN_TIMEOUT"},
+		{"invalid subscription credential timeout", "CODEX_SUBSCRIPTION_REFRESH_CREDENTIAL_TIMEOUT", "0s", "CODEX_SUBSCRIPTION_REFRESH_CREDENTIAL_TIMEOUT"},
+		{"invalid subscription concurrency", "CODEX_SUBSCRIPTION_REFRESH_CONCURRENCY", "0", "CODEX_SUBSCRIPTION_REFRESH_CONCURRENCY"},
 		{"oversized body limit", "GATEWAY_MAX_BODY_BYTES", "2147483647", "GATEWAY_MAX_BODY_BYTES"},
 		{"empty usage queue", "USAGE_QUEUE_SIZE", "0", "USAGE_QUEUE_SIZE"},
 		{"oversized usage batch", "USAGE_BATCH_SIZE", "10001", "USAGE_BATCH_SIZE"},
@@ -59,7 +61,9 @@ func TestSubscriptionRefreshDefaults(t *testing.T) {
 	}
 	if cfg.Gateway.SubscriptionRefreshAhead != 30*time.Minute ||
 		cfg.Gateway.SubscriptionRefreshInterval != time.Minute ||
-		cfg.Gateway.SubscriptionRunTimeout != 4*time.Minute {
+		cfg.Gateway.SubscriptionRunTimeout != 4*time.Minute ||
+		cfg.Gateway.SubscriptionRefreshCredentialTimeout != 45*time.Second ||
+		cfg.Gateway.SubscriptionRefreshConcurrency != 4 {
 		t.Fatalf("unexpected subscription refresh defaults: %+v", cfg.Gateway)
 	}
 }
