@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"strings"
 )
 
@@ -51,6 +52,10 @@ func decodeJSONObject(body []byte) (map[string]any, error) {
 	decoder.UseNumber()
 	var value map[string]any
 	if err := decoder.Decode(&value); err != nil || value == nil {
+		return nil, ErrInvalid
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
 		return nil, ErrInvalid
 	}
 	return value, nil
@@ -483,7 +488,14 @@ func convertOpenAITools(target, source map[string]any) {
 func decodeJSONValue(body []byte, target *any) error {
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()
-	return decoder.Decode(target)
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return ErrInvalid
+	}
+	return nil
 }
 
 func copyFields(target, source map[string]any, keys ...string) {

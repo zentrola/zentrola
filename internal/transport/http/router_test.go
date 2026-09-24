@@ -231,7 +231,7 @@ func TestMiddlewarePreservesStreamingAndCancellation(t *testing.T) {
 	}
 }
 
-func TestNonProductionAccessLogCapturesBodiesWithoutRedaction(t *testing.T) {
+func TestNonProductionAccessLogCapturesBodiesWithSensitiveDataRedacted(t *testing.T) {
 	provider := telemetry.Setup()
 	t.Cleanup(func() { _ = telemetry.Shutdown(context.Background(), provider) })
 	for _, environment := range []string{"dev", "test"} {
@@ -256,12 +256,17 @@ func TestNonProductionAccessLogCapturesBodiesWithoutRedaction(t *testing.T) {
 			for _, required := range []string{
 				"time", "trace_id", "span_id", "duration_ms", "request", "response", "method", "url", "status",
 				"headers", "body", "bytes", "claude-sonnet",
-				"MODEL_PERMISSION_DENIED", "private-prompt", "request-secret", "response-secret",
-				"future-schema-secret", "unknown-content-secret", "query-secret", "development-access-key",
+				"MODEL_PERMISSION_DENIED", "private-prompt", "future-schema-secret", "unknown-content-secret", "query-secret",
 				"request-header-value", "response-header-value",
+				"******",
 			} {
 				if !strings.Contains(output, required) {
 					t.Fatalf("non-production access log missing %s: %s", required, output)
+				}
+			}
+			for _, secret := range []string{"request-secret", "response-secret", "development-access-key"} {
+				if strings.Contains(output, secret) {
+					t.Fatalf("non-production access log leaked %s: %s", secret, output)
 				}
 			}
 			if strings.Count(output, `"trace_id"`) != 1 || strings.Count(output, `"span_id"`) != 1 {
@@ -274,7 +279,7 @@ func TestNonProductionAccessLogCapturesBodiesWithoutRedaction(t *testing.T) {
 	}
 }
 
-func TestNonProductionAccessLogCapturesLargeAndNonJSONBodiesInFull(t *testing.T) {
+func TestNonProductionAccessLogBoundsLargeBodies(t *testing.T) {
 	requestBody := `{"prompt":"` + strings.Repeat("large-private-prompt-", 10_000) + `"}`
 	responseBody := "event: response.completed\ndata: private-stream-response\n\n"
 	for _, environment := range []string{"dev", "test"} {
@@ -296,9 +301,9 @@ func TestNonProductionAccessLogCapturesLargeAndNonJSONBodiesInFull(t *testing.T)
 			}
 			request, requestOK := record["request"].(map[string]any)
 			response, responseOK := record["response"].(map[string]any)
-			body, bodyOK := request["body"].(map[string]any)
-			if !requestOK || !responseOK || !bodyOK || body["prompt"] != strings.Repeat("large-private-prompt-", 10_000) || response["body"] != responseBody {
-				t.Fatalf("%s access log did not contain the complete bodies", environment)
+			body, bodyOK := request["body"].(string)
+			if !requestOK || !responseOK || !bodyOK || len(body) > accessLogBodyLimit || request["body_truncated"] != true || response["body"] != responseBody || response["body_truncated"] == true {
+				t.Fatalf("%s access log body capture was not bounded correctly", environment)
 			}
 		})
 	}

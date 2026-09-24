@@ -31,6 +31,7 @@ func TestConfigValidation(t *testing.T) {
 		{"invalid subscription refresh interval", "CODEX_SUBSCRIPTION_REFRESH_INTERVAL", "0s", "CODEX_SUBSCRIPTION_REFRESH_INTERVAL"},
 		{"invalid subscription refresh timeout", "CODEX_SUBSCRIPTION_REFRESH_RUN_TIMEOUT", "0s", "CODEX_SUBSCRIPTION_REFRESH_RUN_TIMEOUT"},
 		{"invalid subscription credential timeout", "CODEX_SUBSCRIPTION_REFRESH_CREDENTIAL_TIMEOUT", "0s", "CODEX_SUBSCRIPTION_REFRESH_CREDENTIAL_TIMEOUT"},
+		{"subscription credential timeout exceeds lock TTL", "CODEX_SUBSCRIPTION_REFRESH_CREDENTIAL_TIMEOUT", "60s", "CODEX_SUBSCRIPTION_REFRESH_CREDENTIAL_TIMEOUT"},
 		{"invalid subscription concurrency", "CODEX_SUBSCRIPTION_REFRESH_CONCURRENCY", "0", "CODEX_SUBSCRIPTION_REFRESH_CONCURRENCY"},
 		{"oversized body limit", "GATEWAY_MAX_BODY_BYTES", "2147483647", "GATEWAY_MAX_BODY_BYTES"},
 		{"empty usage queue", "USAGE_QUEUE_SIZE", "0", "USAGE_QUEUE_SIZE"},
