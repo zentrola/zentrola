@@ -1,12 +1,34 @@
 name: zentrola
 
-# 可选的 PostgreSQL 快速安装示例；Backend 和 Admin Web 均直接运行发布包中的可执行文件。
+# 使用 longjianghu/zentrola:1.0.0 启动 Backend 和 Admin Web。
+# 启动前请在项目根目录 .env 中设置 POSTGRES_PASSWORD、REDIS_PASSWORD、
+# ADMIN_JWT_SECRET 和 MASTER_KEY。
 
 x-logging: &default-logging
   driver: local
   options:
     max-size: "20m"
     max-file: "5"
+
+x-zentrola-environment: &zentrola-environment
+  APP_ENV: ${APP_ENV:-prod}
+  HTTP_ADDR: ":9527"
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: ${POSTGRES_DB:-zentrola}
+  POSTGRES_USER: ${POSTGRES_USER:-zentrola}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+  POSTGRES_SSLMODE: ${POSTGRES_SSLMODE:-disable}
+  POSTGRES_MAX_CONNS: ${POSTGRES_MAX_CONNS:-10}
+  MIGRATIONS_AUTO_APPLY: ${MIGRATIONS_AUTO_APPLY:-true}
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  REDIS_DB: ${REDIS_DB:-2}
+  REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
+  ADMIN_JWT_SECRET: ${ADMIN_JWT_SECRET:?Set ADMIN_JWT_SECRET in .env}
+  MASTER_KEY: ${MASTER_KEY:?Set MASTER_KEY in .env}
+  CORS_ENABLED: ${CORS_ENABLED:-true}
+  CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://127.0.0.1:9528}
 
 services:
   postgres:
@@ -28,5 +50,63 @@ services:
       timeout: 3s
       retries: 10
 
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
+    logging: *default-logging
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    image: longjianghu/zentrola:1.0.0
+    command: ["backend"]
+    ports:
+      - "${HTTP_PUBLISHED_PORT:-9527}:9527"
+    environment:
+      <<: *zentrola-environment
+    logging: *default-logging
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/zentrola", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    volumes:
+      - zentrola_data:/app/data
+    restart: unless-stopped
+
+  web:
+    image: longjianghu/zentrola:1.0.0
+    command:
+      - web
+      - --api
+      - ${WEB_API_BASE_URL:-http://127.0.0.1:9527}
+      - --gateway
+      - ${WEB_GATEWAY_BASE_URL:-http://127.0.0.1:9527}
+    ports:
+      - "${WEB_PUBLISHED_PORT:-9528}:9528"
+    environment:
+      WEB_ADDR: ":9528"
+      WEB_API_BASE_URL: ${WEB_API_BASE_URL:-http://127.0.0.1:9527}
+      WEB_GATEWAY_BASE_URL: ${WEB_GATEWAY_BASE_URL:-http://127.0.0.1:9527}
+    logging: *default-logging
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   postgres_data:
+  redis_data:
+  zentrola_data:
