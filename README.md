@@ -106,13 +106,13 @@ WEB_GATEWAY_BASE_URL=http://127.0.0.1:9527
 
 Keep `ADMIN_JWT_SECRET`, `MASTER_KEY`, the database password, and provider credentials separate. `MASTER_KEY` is read only from `.env` and must be backed up with the database; existing provider credentials cannot be recovered if it is lost.
 
-The repository's `compose.yaml` is an optional PostgreSQL-only example:
+The repository's `compose.yaml` starts the `longjianghu/zentrola:1.0.0` Backend and Admin Web together with PostgreSQL and Redis. Copy `.env.example` to `.env`, set the required passwords and keys, then run:
 
 ```shell
-docker compose up -d postgres
+docker compose up -d
 ```
 
-It publishes PostgreSQL on port `15432` by default. Set `POSTGRES_PORT=15432` when using that example.
+The Admin Web is available at `http://127.0.0.1:9528`, the Backend at `http://127.0.0.1:9527`, and PostgreSQL is published on port `15432` by default.
 
 ### 2. Start the Backend and Admin Web
 

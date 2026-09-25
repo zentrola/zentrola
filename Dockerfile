@@ -1,6 +1,5 @@
 # syntax=docker/dockerfile:1
 
-ARG TARGETARCH=amd64
 ARG BASE_IMAGE=longjianghu/zentrola-codex-base:0.154.0
 
 FROM ${BASE_IMAGE}
@@ -15,11 +14,9 @@ LABEL org.opencontainers.image.title="Zentrola" \
 WORKDIR /app
 
 COPY --chown=zentrola:zentrola dist/linux/${TARGETARCH}/ /app/
-COPY --chown=root:root scripts/docker-entrypoint.sh /usr/local/bin/zentrola-entrypoint
-
-USER root
-
-RUN chmod 0755 /app/zentrola /app/zentrola-web /usr/local/bin/zentrola-entrypoint
+COPY --chmod=0755 --chown=zentrola:zentrola dist/linux/${TARGETARCH}/zentrola /app/zentrola
+COPY --chmod=0755 --chown=zentrola:zentrola dist/linux/${TARGETARCH}/zentrola-web /app/zentrola-web
+COPY --chmod=0755 --chown=root:root scripts/docker-entrypoint.sh /usr/local/bin/zentrola-entrypoint
 
 USER zentrola
 
