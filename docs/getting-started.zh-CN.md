@@ -8,13 +8,13 @@
 
 Zentrola 必须使用 PostgreSQL 17。推荐使用 Redis 保存认证与路由缓存，以及服务商短期冷却状态。Redis 暂时不可用不会导致 readiness 失败，Gateway 会回退到 PostgreSQL，但生产环境仍应部署 Redis。
 
-仓库提供了一个只启动 PostgreSQL 的 Compose 示例：
+仓库中的 Compose 文件可以启动隔离的 PostgreSQL 和 Redis 依赖。执行前先将 `.env.example` 复制为 `.env`，并设置 `POSTGRES_PASSWORD`、`REDIS_PASSWORD`、`ADMIN_JWT_SECRET` 和 `MASTER_KEY`；即使只选择依赖服务，Compose 也会校验完整配置：
 
 ```shell
-docker compose up -d postgres
+docker compose up -d postgres redis
 ```
 
-该示例将 PostgreSQL 发布到 `127.0.0.1:15432`，数据保存在 `zentrola_postgres_data` 卷中。它不会启动 Redis、Backend 或 Admin Web。
+该示例将 PostgreSQL 发布到 `127.0.0.1:15432`，并使用命名卷保存 PostgreSQL 和 Redis 数据；它不会启动 Backend 或 Admin Web。如果要运行完整容器化服务栈，请将 `.env.example` 复制为 `.env`，设置所需密钥后运行 `docker compose up -d`。
 
 ## 2. 准备发布目录
 
@@ -32,7 +32,7 @@ dist/
   assets/
 ```
 
-实际发布包只包含目标操作系统对应的可执行文件。将同目录的 `.env.example` 重命名为 `.env`。
+实际发布包只包含目标操作系统对应的可执行文件。如果尚未为 Compose 准备配置，请将同目录的 `.env.example` 重命名为 `.env`。
 
 ## 3. 配置 Backend
 

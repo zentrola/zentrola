@@ -68,10 +68,10 @@ PostgreSQL 中的 Provider Credential 必须使用原 Master Key 才能解密，
 
 应在隔离环境定期验证恢复流程，并通过权限控制和加密保护备份。只有数据库而没有原 Master Key 时，相关 Provider Credential 必须重新录入。
 
-仓库 Compose 示例停止 PostgreSQL 时不会删除数据：
+仓库 Compose 服务栈停止时不会删除命名数据卷：
 
 ```shell
-docker compose stop postgres
+docker compose stop
 ```
 
 `docker compose down -v` 会永久删除命名数据卷，不能作为日常停止命令使用。

@@ -8,13 +8,13 @@ This guide installs a Zentrola release bundle and completes the first administra
 
 Zentrola requires PostgreSQL 17. Redis is recommended for authentication and route caches and for temporary provider cooldown state. A temporary Redis outage does not prevent readiness and gateway routing falls back to PostgreSQL, but production installations should still provide Redis.
 
-The repository includes a PostgreSQL-only Compose example:
+The repository's Compose file can start isolated PostgreSQL and Redis dependencies. Before running it, copy `.env.example` to `.env` and set `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `ADMIN_JWT_SECRET`, and `MASTER_KEY` because Compose validates the complete configuration even when only dependency services are selected:
 
 ```shell
-docker compose up -d postgres
+docker compose up -d postgres redis
 ```
 
-The example publishes PostgreSQL on `127.0.0.1:15432` and stores data in the `zentrola_postgres_data` volume. It does not start Redis, the Backend, or Admin Web.
+The example publishes PostgreSQL on `127.0.0.1:15432` and stores PostgreSQL and Redis data in named volumes. It does not start the Backend or Admin Web. To run the complete containerized stack instead, copy `.env.example` to `.env`, set the required secrets, and run `docker compose up -d`.
 
 ## 2. Prepare the release directory
 
@@ -32,7 +32,7 @@ dist/
   assets/
 ```
 
-Only the executables for the selected operating system are included. Rename `.env.example` to `.env` in the same directory.
+Only the executables for the selected operating system are included. Rename `.env.example` to `.env` in the same directory if it has not already been prepared for Compose.
 
 ## 3. Configure the Backend
 

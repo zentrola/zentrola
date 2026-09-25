@@ -68,10 +68,10 @@ Provider credentials in PostgreSQL cannot be decrypted without the original mast
 
 Test restoration in an isolated environment. Protect backups with access controls and encryption. If only PostgreSQL is restored without the key, affected provider credentials must be entered again.
 
-The repository's Compose example keeps PostgreSQL data when stopped:
+The repository's Compose stack keeps its named data volumes when stopped:
 
 ```shell
-docker compose stop postgres
+docker compose stop
 ```
 
 `docker compose down -v` permanently removes the named data volume and must not be used as a routine stop command.
