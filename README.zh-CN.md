@@ -104,9 +104,9 @@ WEB_API_BASE_URL=http://127.0.0.1:9527
 WEB_GATEWAY_BASE_URL=http://127.0.0.1:9527
 ```
 
-`ADMIN_JWT_SECRET`、`MASTER_KEY`、数据库密码和 Provider Credential 必须彼此独立。`MASTER_KEY` 只从 `.env` 读取，必须与数据库一起备份；丢失后已有 Provider Credential 无法恢复。
+`ADMIN_JWT_SECRET`、`MASTER_KEY`、数据库密码和 Provider Credential 必须彼此独立。`MASTER_KEY` 只从 Backend 选定的通用配置文件读取；二进制部署默认使用 `.env`，Compose 会将文件顶部填写的值以内联配置挂载为 `/app/.env`。该值必须与数据库一起备份；丢失后已有 Provider Credential 无法恢复。
 
-仓库中的 `compose.yaml` 会使用 `longjianghu/zentrola:1.0.0` 启动 Backend、Admin Web、PostgreSQL 和 Redis。将 `.env.example` 复制为 `.env`，设置所需的密码和密钥后运行：
+仓库中的 `compose.yaml` 会使用 `longjianghu/zentrola:1.0.0` 启动 Backend、Admin Web、PostgreSQL 和 Redis。使用 Docker Compose 2.23.1 或更高版本，直接修改文件顶部 `x-required-settings` 中的四个密码和密钥，然后运行：
 
 ```shell
 docker compose up -d

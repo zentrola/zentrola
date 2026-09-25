@@ -54,11 +54,13 @@ curl -i http://127.0.0.1:9527/health/ready
 
 ## 备份与恢复
 
-Master Key 仅保存在所选通用配置文件中，默认为：
+Master Key 仅保存在所选通用配置中。二进制部署默认为：
 
 ```text
 .env 中的 MASTER_KEY
 ```
+
+仓库 Compose 部署则使用 `compose.yaml` 顶部 `master-key-file` 中的值，并将其挂载为容器内的 `/app/.env`。
 
 PostgreSQL 中的 Provider Credential 必须使用原 Master Key 才能解密，因此有效恢复集包括：
 

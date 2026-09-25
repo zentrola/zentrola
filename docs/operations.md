@@ -54,11 +54,13 @@ Do not run destructive or down migrations against production data unless the rel
 
 ## Backup and recovery
 
-The master key is stored only in the selected common configuration file, which defaults to:
+The master key is stored only in the selected common configuration. A binary deployment defaults to:
 
 ```text
 MASTER_KEY in .env
 ```
+
+The repository's Compose deployment uses the value under `master-key-file` at the top of `compose.yaml` and mounts it as `/app/.env` inside the container.
 
 Provider credentials in PostgreSQL cannot be decrypted without the original master key. A valid recovery set therefore includes:
 

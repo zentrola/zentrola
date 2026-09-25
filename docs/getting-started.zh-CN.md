@@ -8,13 +8,13 @@
 
 Zentrola 必须使用 PostgreSQL 17。推荐使用 Redis 保存认证与路由缓存，以及服务商短期冷却状态。Redis 暂时不可用不会导致 readiness 失败，Gateway 会回退到 PostgreSQL，但生产环境仍应部署 Redis。
 
-仓库中的 Compose 文件可以启动隔离的 PostgreSQL 和 Redis 依赖。执行前先将 `.env.example` 复制为 `.env`，并设置 `POSTGRES_PASSWORD`、`REDIS_PASSWORD`、`ADMIN_JWT_SECRET` 和 `MASTER_KEY`；即使只选择依赖服务，Compose 也会校验完整配置：
+仓库中的 Compose 文件可以启动隔离的 PostgreSQL 和 Redis 依赖。使用 Docker Compose 2.23.1 或更高版本，并直接修改 `compose.yaml` 顶部 `x-required-settings` 中的 PostgreSQL 和 Redis 密码：
 
 ```shell
 docker compose up -d postgres redis
 ```
 
-该示例将 PostgreSQL 发布到 `127.0.0.1:15432`，并使用命名卷保存 PostgreSQL 和 Redis 数据；它不会启动 Backend 或 Admin Web。如果要运行完整容器化服务栈，请将 `.env.example` 复制为 `.env`，设置所需密钥后运行 `docker compose up -d`。
+该示例将 PostgreSQL 发布到 `127.0.0.1:15432`，并使用命名卷保存 PostgreSQL 和 Redis 数据；它不会启动 Backend 或 Admin Web。要运行完整容器化服务栈，请同时填写独立的 `ADMIN_JWT_SECRET` 和 `MASTER_KEY`，然后运行 `docker compose up -d`。Compose 会将 Master Key 以内联配置挂载到 Backend 的 `/app/.env`，无需在宿主机创建 `.env`。
 
 ## 2. 准备发布目录
 
@@ -32,7 +32,7 @@ dist/
   assets/
 ```
 
-实际发布包只包含目标操作系统对应的可执行文件。如果尚未为 Compose 准备配置，请将同目录的 `.env.example` 重命名为 `.env`。
+实际发布包只包含目标操作系统对应的可执行文件。直接运行发布包时，请将同目录的 `.env.example` 重命名为 `.env`；使用仓库 Compose 服务栈时不需要此文件。
 
 ## 3. 配置 Backend
 
@@ -60,7 +60,7 @@ MASTER_KEY=请替换为另一组32个随机字节的Base64字符串
 
 使用仓库 Compose 示例时设置 `POSTGRES_PORT=15432`。生产数据库应启用 TLS，并选择合适的 `POSTGRES_SSLMODE`。
 
-`MASTER_KEY` 用于加密 Provider Credential，必须是 32 个随机字节的 Base64，并且只从所选通用配置文件（默认 `.env`）读取。系统环境变量和 `.env.{APP_ENV}` 都不能覆盖它。缺失或无法解密已有凭据时 Backend 会拒绝启动；该值必须与数据库一起备份。
+`MASTER_KEY` 用于加密 Provider Credential，必须是 32 个随机字节的 Base64，并且只从所选通用配置文件（默认 `.env`）读取。系统环境变量和 `.env.{APP_ENV}` 都不能覆盖它。Compose 会把 `compose.yaml` 中的内联配置挂载为容器内的 `/app/.env`。缺失或无法解密已有凭据时 Backend 会拒绝启动；该值必须与数据库一起备份。
 
 ## 4. 配置 Admin Web
 
