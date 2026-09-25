@@ -104,9 +104,9 @@ WEB_API_BASE_URL=http://127.0.0.1:9527
 WEB_GATEWAY_BASE_URL=http://127.0.0.1:9527
 ```
 
-Keep `ADMIN_JWT_SECRET`, `MASTER_KEY`, the database password, and provider credentials separate. `MASTER_KEY` is read only from `.env` and must be backed up with the database; existing provider credentials cannot be recovered if it is lost.
+Keep `ADMIN_JWT_SECRET`, `MASTER_KEY`, the database password, and provider credentials separate. `MASTER_KEY` is read only from the Backend's selected common configuration file. Binary deployments use `.env` by default; Compose mounts the value entered at the top of `compose.yaml` as an inline `/app/.env` config. Back it up with the database because existing provider credentials cannot be recovered if it is lost.
 
-The repository's `compose.yaml` starts the `longjianghu/zentrola:1.0.0` Backend and Admin Web together with PostgreSQL and Redis. Copy `.env.example` to `.env`, set the required passwords and keys, then run:
+The repository's `compose.yaml` starts the `longjianghu/zentrola:1.0.0` Backend and Admin Web together with PostgreSQL and Redis. With Docker Compose 2.23.1 or later, edit the four passwords and keys under `x-required-settings` at the top of the file, then run:
 
 ```shell
 docker compose up -d

@@ -8,13 +8,13 @@ This guide installs a Zentrola release bundle and completes the first administra
 
 Zentrola requires PostgreSQL 17. Redis is recommended for authentication and route caches and for temporary provider cooldown state. A temporary Redis outage does not prevent readiness and gateway routing falls back to PostgreSQL, but production installations should still provide Redis.
 
-The repository's Compose file can start isolated PostgreSQL and Redis dependencies. Before running it, copy `.env.example` to `.env` and set `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `ADMIN_JWT_SECRET`, and `MASTER_KEY` because Compose validates the complete configuration even when only dependency services are selected:
+The repository's Compose file can start isolated PostgreSQL and Redis dependencies. With Docker Compose 2.23.1 or later, edit the PostgreSQL and Redis passwords under `x-required-settings` at the top of `compose.yaml`:
 
 ```shell
 docker compose up -d postgres redis
 ```
 
-The example publishes PostgreSQL on `127.0.0.1:15432` and stores PostgreSQL and Redis data in named volumes. It does not start the Backend or Admin Web. To run the complete containerized stack instead, copy `.env.example` to `.env`, set the required secrets, and run `docker compose up -d`.
+The example publishes PostgreSQL on `127.0.0.1:15432` and stores PostgreSQL and Redis data in named volumes. It does not start the Backend or Admin Web. To run the complete containerized stack, also set independent `ADMIN_JWT_SECRET` and `MASTER_KEY` values, then run `docker compose up -d`. Compose mounts the master key into the Backend as an inline `/app/.env` config, so no host `.env` file is required.
 
 ## 2. Prepare the release directory
 
@@ -32,7 +32,7 @@ dist/
   assets/
 ```
 
-Only the executables for the selected operating system are included. Rename `.env.example` to `.env` in the same directory if it has not already been prepared for Compose.
+Only the executables for the selected operating system are included. When running a release bundle directly, rename `.env.example` to `.env` in the same directory. The repository's Compose stack does not require this file.
 
 ## 3. Configure the Backend
 
@@ -60,7 +60,7 @@ MASTER_KEY=replace-with-another-32-random-bytes-in-base64
 
 Use `POSTGRES_PORT=15432` with the repository's Compose example. Use TLS and `POSTGRES_SSLMODE` appropriate to the production database.
 
-`MASTER_KEY` encrypts provider credentials. It must contain 32 random bytes encoded as Base64 and is read only from the selected common configuration file (`.env` by default); neither system environment variables nor `.env.{APP_ENV}` can override it. The Backend refuses to start when the value is missing or cannot decrypt existing credentials. Back it up together with the database.
+`MASTER_KEY` encrypts provider credentials. It must contain 32 random bytes encoded as Base64 and is read only from the selected common configuration file (`.env` by default); neither system environment variables nor `.env.{APP_ENV}` can override it. Compose mounts the inline value from `compose.yaml` as `/app/.env` inside the container. The Backend refuses to start when the value is missing or cannot decrypt existing credentials. Back it up together with the database.
 
 ## 4. Configure Admin Web
 

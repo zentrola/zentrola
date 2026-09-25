@@ -1,8 +1,13 @@
 name: zentrola
 
-# 使用 longjianghu/zentrola:1.0.0 启动 Backend 和 Admin Web。
-# 启动前请在项目根目录 .env 中设置 POSTGRES_PASSWORD、REDIS_PASSWORD、
-# ADMIN_JWT_SECRET 和 MASTER_KEY。
+# 快速部署：只需要修改下面四项，然后执行 docker compose up -d。
+# 不要把填写了真实密码和密钥的 compose.yaml 提交到公开仓库。
+x-required-settings:
+  postgres-password: &postgres-password "REPLACE_WITH_STRONG_POSTGRES_PASSWORD"
+  redis-password: &redis-password "REPLACE_WITH_STRONG_REDIS_PASSWORD"
+  admin-jwt-secret: &admin-jwt-secret "REPLACE_WITH_BASE64_32_BYTE_SECRET"
+  master-key-file: &master-key-file |
+    MASTER_KEY=REPLACE_WITH_BASE64_32_BYTE_KEY
 
 x-logging: &default-logging
   driver: local
@@ -10,56 +15,45 @@ x-logging: &default-logging
     max-size: "20m"
     max-file: "5"
 
-x-zentrola-environment: &zentrola-environment
-  APP_ENV: ${APP_ENV:-prod}
-  HTTP_ADDR: ":9527"
-  POSTGRES_HOST: postgres
-  POSTGRES_PORT: "5432"
-  POSTGRES_DB: ${POSTGRES_DB:-zentrola}
-  POSTGRES_USER: ${POSTGRES_USER:-zentrola}
-  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
-  POSTGRES_SSLMODE: ${POSTGRES_SSLMODE:-disable}
-  POSTGRES_MAX_CONNS: ${POSTGRES_MAX_CONNS:-10}
-  MIGRATIONS_AUTO_APPLY: ${MIGRATIONS_AUTO_APPLY:-true}
-  REDIS_HOST: redis
-  REDIS_PORT: "6379"
-  REDIS_DB: ${REDIS_DB:-2}
-  REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
-  ADMIN_JWT_SECRET: ${ADMIN_JWT_SECRET:?Set ADMIN_JWT_SECRET in .env}
-  MASTER_KEY: ${MASTER_KEY:?Set MASTER_KEY in .env}
-  CORS_ENABLED: ${CORS_ENABLED:-true}
-  CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://127.0.0.1:9528}
-
 services:
   postgres:
-    image: postgres:17-alpine
+    image: postgres:17.11-alpine
     ports:
-      - "127.0.0.1:${POSTGRES_PUBLISHED_PORT:-15432}:5432"
+      - "127.0.0.1:15432:5432"
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-zentrola}
-      POSTGRES_USER: ${POSTGRES_USER:-zentrola}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: zentrola
+      POSTGRES_USER: zentrola
+      POSTGRES_PASSWORD: *postgres-password
       TZ: UTC
       PGTZ: UTC
     logging: *default-logging
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      test:
+        - CMD-SHELL
+        - 'PGPASSWORD="$$POSTGRES_PASSWORD" psql -h 127.0.0.1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -tAqc "SELECT 1" | grep -qx 1'
       interval: 5s
       timeout: 3s
       retries: 10
 
   redis:
-    image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}"]
+    image: redis:7.4.11-alpine
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --requirepass
+      - *redis-password
     environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
+      REDIS_PASSWORD: *redis-password
     logging: *default-logging
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      test:
+        - CMD-SHELL
+        - 'REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping | grep -qx PONG'
       interval: 5s
       timeout: 3s
       retries: 10
@@ -68,9 +62,28 @@ services:
     image: longjianghu/zentrola:1.0.0
     command: ["backend"]
     ports:
-      - "${HTTP_PUBLISHED_PORT:-9527}:9527"
+      - "9527:9527"
     environment:
-      <<: *zentrola-environment
+      APP_ENV: prod
+      HTTP_ADDR: ":9527"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: zentrola
+      POSTGRES_USER: zentrola
+      POSTGRES_PASSWORD: *postgres-password
+      POSTGRES_SSLMODE: disable
+      POSTGRES_MAX_CONNS: "10"
+      MIGRATIONS_AUTO_APPLY: "true"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_DB: "2"
+      REDIS_PASSWORD: *redis-password
+      ADMIN_JWT_SECRET: *admin-jwt-secret
+      CORS_ENABLED: "true"
+      CORS_ALLOWED_ORIGINS: http://127.0.0.1:9528
+    configs:
+      - source: zentrola_master_key
+        target: /app/.env
     logging: *default-logging
     depends_on:
       postgres:
@@ -91,20 +104,24 @@ services:
     command:
       - web
       - --api
-      - ${WEB_API_BASE_URL:-http://127.0.0.1:9527}
+      - http://127.0.0.1:9527
       - --gateway
-      - ${WEB_GATEWAY_BASE_URL:-http://127.0.0.1:9527}
+      - http://127.0.0.1:9527
     ports:
-      - "${WEB_PUBLISHED_PORT:-9528}:9528"
+      - "9528:9528"
     environment:
       WEB_ADDR: ":9528"
-      WEB_API_BASE_URL: ${WEB_API_BASE_URL:-http://127.0.0.1:9527}
-      WEB_GATEWAY_BASE_URL: ${WEB_GATEWAY_BASE_URL:-http://127.0.0.1:9527}
+      WEB_API_BASE_URL: http://127.0.0.1:9527
+      WEB_GATEWAY_BASE_URL: http://127.0.0.1:9527
     logging: *default-logging
     depends_on:
       backend:
         condition: service_healthy
     restart: unless-stopped
+
+configs:
+  zentrola_master_key:
+    content: *master-key-file
 
 volumes:
   postgres_data:
