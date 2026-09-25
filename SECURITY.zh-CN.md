@@ -12,7 +12,7 @@ Zentrola 暂未公布稳定的版本支持矩阵。安全修复以最新发布�
 
 不要通过公开 Issue 提交漏洞细节、Credential、利用步骤、私有日志、prompt 或模型响应。
 
-仓库目前尚未公布专用安全联系邮箱。在配置完成前，如果 `zentrola/zentrola` 已启用 GitHub Private Vulnerability Reporting，请优先通过该功能报告；如果无法私下报告，请通过已有的私密渠道联系维护者，并且只发送建立安全沟通所必需的信息。
+如果 `zentrola/zentrola` 已启用 GitHub Private Vulnerability Reporting，请优先通过该功能报告；否则发送邮件至维护者 `longjianghu1982@gmail.com`。首次邮件只发送建立安全沟通所必需的信息，不要附带有效凭据或敏感用户数据。
 
 有效报告应包括：
 

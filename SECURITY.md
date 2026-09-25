@@ -12,7 +12,7 @@ Zentrola has not declared a stable support matrix yet. Security fixes target the
 
 Do not open a public issue with vulnerability details, credentials, exploit steps, private logs, prompts, or model responses.
 
-The repository does not yet publish a dedicated security contact. Until one is configured, use GitHub's private vulnerability reporting feature for `zentrola/zentrola` if it is available. If private reporting is unavailable, contact the maintainers through an established private channel and share only enough information to arrange a secure exchange.
+Use GitHub's private vulnerability reporting feature for `zentrola/zentrola` when it is available. Otherwise, email the maintainer at `longjianghu1982@gmail.com`. Send only enough information in the first message to establish a secure exchange; do not include live credentials or sensitive user data.
 
 A useful report includes:
 

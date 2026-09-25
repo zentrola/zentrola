@@ -43,14 +43,18 @@ ARG CODEX_VERSION
 
 LABEL org.opencontainers.image.title="codex-runtime" \
       org.opencontainers.image.description="Codex native runtime on Alpine (no Node.js)" \
-      org.opencontainers.image.authors="Longjianghu <215241062@qq.com>" \
+      org.opencontainers.image.source="https://github.com/zentrola/zentrola" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.authors="longjianghu <longjianghu1982@gmail.com>" \
       org.opencontainers.image.vendor="Longjianghu" \
-      maintainer="Longjianghu <215241062@qq.com>" \
+      maintainer="longjianghu <longjianghu1982@gmail.com>" \
       codex.version="${CODEX_VERSION}"
 
 COPY --from=codex-builder /out/rootfs/ /
 COPY --from=codex-builder /etc/ssl /etc/ssl
 COPY --from=codex-builder --chown=10001:10001 /out/app /app
+COPY LICENSE /usr/share/licenses/codex/LICENSE
+COPY docker/codex-base/NOTICE /usr/share/licenses/codex/NOTICE
 
 ENV HOME=/app/data \
     CODEX_HOME=/app/data/.codex \

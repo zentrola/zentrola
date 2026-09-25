@@ -45,10 +45,10 @@ Dependencies should point inward: transport calls application services, and doma
 
 ## Local development
 
-Copy `.env.example` to `.env`, then provide local PostgreSQL, Redis, and JWT settings. The Compose file can start an isolated PostgreSQL instance:
+Copy `.env.example` to `.env`, then provide local PostgreSQL, Redis, JWT, and Master Key settings. The Compose file can start isolated PostgreSQL and Redis dependencies:
 
 ```shell
-docker compose up -d postgres
+docker compose up -d postgres redis
 ```
 
 Run the Backend:

@@ -106,13 +106,13 @@ WEB_GATEWAY_BASE_URL=http://127.0.0.1:9527
 
 `ADMIN_JWT_SECRET`、`MASTER_KEY`、数据库密码和 Provider Credential 必须彼此独立。`MASTER_KEY` 只从 `.env` 读取，必须与数据库一起备份；丢失后已有 Provider Credential 无法恢复。
 
-仓库中的 `compose.yaml` 是一个可选的 PostgreSQL 安装示例：
+仓库中的 `compose.yaml` 会使用 `longjianghu/zentrola:1.0.0` 启动 Backend、Admin Web、PostgreSQL 和 Redis。将 `.env.example` 复制为 `.env`，设置所需的密码和密钥后运行：
 
 ```shell
-docker compose up -d postgres
+docker compose up -d
 ```
 
-该示例默认将 PostgreSQL 发布到宿主机端口 `15432`，使用时需要设置 `POSTGRES_PORT=15432`。
+Admin Web 地址为 `http://127.0.0.1:9528`，Backend 地址为 `http://127.0.0.1:9527`，PostgreSQL 默认发布到宿主机端口 `15432`。
 
 ### 2. 启动 Backend 和 Admin Web
 
@@ -199,4 +199,4 @@ Anthropic 兼容客户端使用 `http://127.0.0.1:9527/anthropic` 作为 Base UR
 
 ## License
 
-本项目使用 [Apache License 2.0](LICENSE) 开源许可证。
+Copyright 2026 longjianghu。本项目使用 [Apache License 2.0](LICENSE) 开源许可证，归属信息见 [NOTICE](NOTICE)。

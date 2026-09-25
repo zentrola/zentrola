@@ -45,10 +45,10 @@ dev-docs/                                 本地实现资料，由 Git 忽略
 
 ## 本地开发
 
-将 `.env.example` 复制为 `.env`，配置本地 PostgreSQL、Redis 和 JWT。可以用 Compose 启动隔离的 PostgreSQL：
+将 `.env.example` 复制为 `.env`，配置本地 PostgreSQL、Redis、JWT 和 Master Key。可以用 Compose 启动隔离的 PostgreSQL 和 Redis：
 
 ```shell
-docker compose up -d postgres
+docker compose up -d postgres redis
 ```
 
 启动 Backend：

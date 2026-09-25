@@ -4,7 +4,7 @@
 
 ## 开发
 
-开发时不构建或运行 Zentrola 应用镜像。Backend 直接执行 `go run ./cmd/server`（端口 `9527`），Admin Web 使用 Vite 开发服务（`npm run dev`，端口 `9528`），前端修改通过热更新生效。Docker Compose 仅在本机没有可用 PostgreSQL 时用于启动数据库：`docker compose up -d postgres`。
+开发时不构建或运行 Zentrola 应用镜像。Backend 直接执行 `go run ./cmd/server`（端口 `9527`），Admin Web 使用 Vite 开发服务（`npm run dev`，端口 `9528`），前端修改通过热更新生效。Docker Compose 仅在本机没有可用 PostgreSQL 或 Redis 时用于启动依赖；先按根目录 `.env.example` 准备 `.env`，再执行 `docker compose up -d postgres redis`。
 
 使用 Node.js 24 LTS。先在仓库根目录启动已有 Go 服务，再在另一终端执行：
 

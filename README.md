@@ -199,4 +199,4 @@ Do not publish credentials, Virtual Keys, administrator sessions, prompts, or mo
 
 ## License
 
-Licensed under the [Apache License 2.0](LICENSE).
+Copyright 2026 longjianghu. Licensed under the [Apache License 2.0](LICENSE); see [NOTICE](NOTICE) for attribution information.
