@@ -454,9 +454,18 @@ async function fixture(page: Page) {
     if (method === 'POST' && segments.length === 1) {
       const id = next()
       const { modelIds = [], groupIds = [], mappings = [], ...fields } = body
+      const subscriptionAccountRef =
+        path === '/resources' &&
+        body.authType === 'SUBSCRIPTION' &&
+        body.authAdapter === 'OPENAI_CODEX'
+          ? JSON.parse(body.credential).tokens.account_id
+          : null
       const row = {
         ...fields,
         id,
+        name: subscriptionAccountRef
+          ? `${fields.name} · ${subscriptionAccountRef.slice(-6)}`
+          : fields.name,
         ...(path === '/groups' ? { code: body.code || `group-${id}` } : {}),
         status:
           path === '/members' || path === '/models' || path === '/providers'
@@ -483,7 +492,7 @@ async function fixture(page: Page) {
               authAdapter: body.authAdapter || 'API_KEY',
               subscriptionType: body.authType === 'SUBSCRIPTION' ? 'PERSONAL' : null,
               planCode: body.authType === 'SUBSCRIPTION' ? 'plus' : null,
-              externalAccountRef: body.authType === 'SUBSCRIPTION' ? 'account-fixture' : null,
+              externalAccountRef: subscriptionAccountRef,
               priority: body.priority ?? 100,
               effectiveAt: body.effectiveAt ?? null,
               expiresAt: body.expiresAt ?? null,
@@ -504,6 +513,18 @@ async function fixture(page: Page) {
               : path === '/providers'
                 ? providers
                 : resources
+      if (
+        path === '/resources' &&
+        row.authType === 'SUBSCRIPTION' &&
+        row.externalAccountRef &&
+        resources.some(
+          (resource) =>
+            resource.providerId === row.providerId &&
+            resource.authAdapter === row.authAdapter &&
+            resource.externalAccountRef === row.externalAccountRef,
+        )
+      )
+        return reply(null, 409, 'SUBSCRIPTION_ACCOUNT_ALREADY_EXISTS')
       target.push(row)
       if (path === '/groups') {
         relationships.set(`groups/${id}/models`, new Set(modelIds))
@@ -645,6 +666,12 @@ async function fixture(page: Page) {
                 ? providers
                 : resources
       const row = list.find((x) => x.id === segments[1])
+      if (
+        segments[0] === 'members' &&
+        body.status === 'ACTIVE' &&
+        !keys.some((key) => key.memberID === segments[1])
+      )
+        return reply(null, 409, 'MEMBER_ACCESS_KEY_REQUIRED')
       row.status = body.status
       return reply(row)
     }
@@ -1514,6 +1541,9 @@ test('成员列表不预查密钥且分配密钥后可激活', async ({ page }) 
   const status = row.getByRole('switch', { name: '周予安的激活状态' })
 
   await expect(status).toBeEnabled()
+  await status.click()
+  await expect(page.locator('.toast')).toContainText('请先为该用户生成调用 Key，再启用用户')
+  await expect(status).not.toBeChecked()
   await row.getByRole('button', { name: '密钥', exact: true }).click()
   await modal(page).getByLabel('Key 名称').fill('工作站')
   await modal(page).getByRole('button', { name: '密钥', exact: true }).click()
@@ -2899,7 +2929,7 @@ test('服务商支持个人订阅优先并保留 API Key 兜底', async ({ page 
     '操作',
   ])
   const subscriptionRow = credentialList.getByRole('row').filter({ hasText: '个人订阅' })
-  await expect(subscriptionRow).toContainText('OpenAI 个人订阅')
+  await expect(subscriptionRow).toContainText('OpenAI 个人订阅 · ccount')
   const subscriptionAuthCell = subscriptionRow.getByRole('cell').nth(1)
   await expect(subscriptionAuthCell).not.toContainText('个人订阅')
   await expect(subscriptionAuthCell).toContainText('订阅套餐 · plus')
@@ -2914,7 +2944,7 @@ test('服务商支持个人订阅优先并保留 API Key 兜底', async ({ page 
   await expect(subscriptionRow.getByRole('cell').nth(2)).toHaveText('正常')
   await expect(
     subscriptionRow.getByRole('button', {
-      name: '验证 OpenAI 个人订阅 的可用性',
+      name: '验证 OpenAI 个人订阅 · ccount 的可用性',
       exact: true,
     }),
   ).toBeVisible()
@@ -2925,7 +2955,7 @@ test('服务商支持个人订阅优先并保留 API Key 兜底', async ({ page 
 
   const downloadPromise = page.waitForEvent('download')
   await subscriptionRow
-    .getByRole('button', { name: '导出 OpenAI 个人订阅 的 auth.json', exact: true })
+    .getByRole('button', { name: '导出 OpenAI 个人订阅 · ccount 的 auth.json', exact: true })
     .click()
   const exported = await downloadPromise
   expect(exported.suggestedFilename()).toBe('auth.json')
@@ -2936,7 +2966,7 @@ test('服务商支持个人订阅优先并保留 API Key 兜底', async ({ page 
   await expect(page.getByRole('status')).toContainText('已导出 auth.json')
 
   await subscriptionRow
-    .getByRole('button', { name: '验证 OpenAI 个人订阅 的可用性', exact: true })
+    .getByRole('button', { name: '验证 OpenAI 个人订阅 · ccount 的可用性', exact: true })
     .click()
   await expect(modal(page).getByRole('status')).toContainText('个人订阅验证通过')
   await expect(modal(page)).toContainText(
@@ -3004,6 +3034,38 @@ test('服务商支持个人订阅优先并保留 API Key 兜底', async ({ page 
   const apiKeyRow = modal(page).getByRole('row').filter({ hasText: 'OpenAI API Key' })
   await expect(apiKeyRow).toBeVisible()
   await expect(apiKeyRow.getByRole('button', { name: /导出/ })).toHaveCount(0)
+
+  await modal(page).getByRole('button', { name: '新增凭据', exact: true }).click()
+  await modal(page).getByRole('combobox', { name: '认证方式' }).selectOption('SUBSCRIPTION')
+  await modal(page).getByRole('tab', { name: '手动输入' }).click()
+  await modal(page)
+    .getByLabel('auth.json 内容', { exact: true })
+    .fill(authJSON.replace('fixture-account', 'fixture-account-2'))
+  await modal(page).getByRole('button', { name: '保存', exact: true }).click()
+  const secondSubscriptionRow = modal(page)
+    .getByRole('row')
+    .filter({ hasText: 'OpenAI 个人订阅 · ount-2' })
+  await expect(secondSubscriptionRow).toBeVisible()
+  expect(state.resources).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ name: 'OpenAI 个人订阅 · ccount' }),
+      expect.objectContaining({ name: 'OpenAI 个人订阅 · ount-2' }),
+    ]),
+  )
+  await secondSubscriptionRow.getByRole('button', { name: '删除', exact: true }).click()
+  await modal(page).getByRole('button', { name: '删除', exact: true }).click()
+  await expect(secondSubscriptionRow).toHaveCount(0)
+
+  await modal(page).getByRole('button', { name: '新增凭据', exact: true }).click()
+  await modal(page).getByRole('combobox', { name: '认证方式' }).selectOption('SUBSCRIPTION')
+  await modal(page).getByRole('tab', { name: '手动输入' }).click()
+  await modal(page).getByLabel('auth.json 内容', { exact: true }).fill(authJSON)
+  await modal(page).getByRole('button', { name: '保存', exact: true }).click()
+  await expect(page.locator('.toast')).toContainText(
+    '该服务商下已存在此订阅账号的凭证，请更新已有凭证。',
+  )
+  await modal(page).getByRole('button', { name: '取消', exact: true }).click()
+
   await modal(page).getByRole('button', { name: '关闭', exact: true }).click()
   await expect(page.locator('dialog')).toHaveCount(0)
   expect(state.resources).toEqual(
@@ -3034,7 +3096,7 @@ test('服务商支持个人订阅优先并保留 API Key 兜底', async ({ page 
     .click()
   await modal(page)
     .getByRole('row')
-    .filter({ hasText: 'OpenAI 个人订阅' })
+    .filter({ hasText: 'OpenAI 个人订阅 · ccount' })
     .getByRole('button', { name: '删除', exact: true })
     .click()
   await modal(page).getByRole('button', { name: '删除', exact: true }).click()
