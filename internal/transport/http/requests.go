@@ -80,7 +80,9 @@ func missingRequiredParameter(value reflect.Value, prefix string) string {
 			}
 			field := value.Field(index)
 			path := fieldPath(prefix, name)
-			if hasRequiredBinding(fieldType.Tag.Get("binding")) && isMissingRequired(field) {
+			// 部分集合必须显式传入，但允许用空数组表达清空配置。
+			allowEmpty := fieldType.Tag.Get("allowempty") == "true" && field.Kind() == reflect.Slice && !field.IsNil()
+			if hasRequiredBinding(fieldType.Tag.Get("binding")) && !allowEmpty && isMissingRequired(field) {
 				return path
 			}
 			if !field.IsZero() {
