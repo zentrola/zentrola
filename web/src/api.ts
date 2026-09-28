@@ -117,7 +117,7 @@ export function errorText(error: unknown) {
   const text = t(key, {
     field: error instanceof ApiError && error.field ? error.field : '-',
   })
-  return error instanceof ApiError && error.requestId ? `${text} (${error.requestId})` : text
+  return text
 }
 export async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const controller = new AbortController()

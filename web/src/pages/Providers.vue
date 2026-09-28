@@ -543,6 +543,14 @@ function calculateProviderRuntime(provider: Provider) {
     }
   }
 
+  if (provider.modelCount === 0) {
+    return {
+      status: 'MISSING_MODEL',
+      reason: t('providers.modelRequiredBeforeEnable'),
+      errorCode: '',
+    }
+  }
+
   let healthy = false
   let failed: Resource | undefined
   for (const resource of configured) {
@@ -555,7 +563,7 @@ function calculateProviderRuntime(provider: Provider) {
 
   if (healthy && !failed) {
     return {
-      status: provider.status === 'ACTIVE' ? 'HEALTHY' : 'DISABLED',
+      status: provider.status === 'ACTIVE' ? 'HEALTHY' : 'PENDING_ENABLE',
       reason: '',
       errorCode: '',
     }
@@ -584,6 +592,9 @@ function providerRuntimeLabel(provider: Provider) {
 }
 
 function providerRuntimeActionLabel(provider: Provider) {
+  if (providerRuntime(provider).status === 'MISSING_MODEL') {
+    return t('providers.configureModelsFromRuntime', { name: provider.name })
+  }
   return t('providers.openCredentialsFromRuntime', {
     name: provider.name,
     status: providerRuntimeLabel(provider),
@@ -597,7 +608,7 @@ function lastCredentialVerification(resource: Resource) {
 function providerRuntimeAbnormal(provider: Provider) {
   if (provider.status !== 'ACTIVE') return false
   const runtime = providerRuntime(provider)
-  return runtime.status === 'UNCONFIGURED' || runtime.status === 'BLOCKED'
+  return ['UNCONFIGURED', 'MISSING_MODEL', 'BLOCKED'].includes(runtime.status)
 }
 
 const visible = computed(() =>
@@ -1557,7 +1568,11 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
                 :title="providerRuntimeActionLabel(provider)"
                 :aria-label="providerRuntimeActionLabel(provider)"
                 :disabled="busy"
-                @click="configureCredential(provider)"
+                @click="
+                  providerRuntime(provider).status === 'MISSING_MODEL'
+                    ? openEdit(provider)
+                    : configureCredential(provider)
+                "
               >
                 <Status :value="providerRuntime(provider).status" />
               </button>

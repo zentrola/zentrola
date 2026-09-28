@@ -257,6 +257,8 @@ export default {
     BLOCKED: 'Blocked',
     DEGRADED: 'Degraded',
     UNCONFIGURED: 'Not configured',
+    MISSING_MODEL: 'No models configured',
+    PENDING_ENABLE: 'Awaiting activation',
     UNAVAILABLE: 'Unavailable',
     AVAILABLE: 'Available',
     NEAR_LIMIT: 'Near limit',
@@ -479,6 +481,7 @@ export default {
       UNKNOWN: 'No credential is currently available',
     },
     openCredentialsFromRuntime: 'View credentials for {name}. Current runtime status: {status}',
+    configureModelsFromRuntime: 'Configure model mappings for {name} before enabling it',
     proxyAccess: 'Proxy access',
     proxyEnabledFor: 'Proxy access enabled for {name}',
     proxyDisabledFor: 'Proxy access disabled for {name}',
@@ -848,7 +851,7 @@ export default {
     NETWORK:
       'Cannot reach the service. Check that the backend is running, then refresh before retrying a write.',
     TIMEOUT: 'The request timed out. Refresh to confirm the result before retrying.',
-    UNKNOWN: 'The action failed. Try again later or use the request ID to investigate.',
+    UNKNOWN: 'The action failed. Try again later.',
     UPSTREAM_AUTH_FAILED: 'Upstream authentication failed. Check the credential.',
     UPSTREAM_BILLING_BLOCKED:
       'The upstream balance is insufficient, billing is unavailable, or the subscription expired.',

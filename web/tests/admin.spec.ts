@@ -1422,6 +1422,7 @@ test('成员列表按需查看 Key 并处理删除和失败恢复', async ({ pag
   state.conflict(true)
   await modal(page).getByRole('button', { name: '撤销', exact: true }).click()
   await expect(page.locator('.toast')).toContainText('操作冲突')
+  await expect(page.locator('.toast')).not.toContainText('req_browser_fixture')
   expect(state.keys[0].status).toBe('ACTIVE')
   state.conflict(false)
   await modal(page).getByRole('button', { name: '撤销', exact: true }).click()
@@ -1945,6 +1946,7 @@ test('服务商启用开关分别提示缺少模型映射和认证凭据', async
     disabledProvider('82', '模型凭据均未配置'),
     disabledProvider('83', '仅配置凭据'),
     disabledProvider('84', '仅配置模型'),
+    disabledProvider('85', '配置齐全'),
   )
   state.providerMappings.set('82', [])
   state.providerMappings.set('83', [])
@@ -1977,6 +1979,15 @@ test('服务商启用开关分别提示缺少模型映射和认证凭据', async
     createdAt: stamp,
     updatedAt: stamp,
   })
+  state.providerMappings.set(
+    '85',
+    state.providerMappings.get('84')!.map((mapping) => ({
+      ...mapping,
+      id: '95',
+      providerId: '85',
+    })),
+  )
+  state.resources.push({ ...state.resources.at(-1)!, id: '90', providerId: '85' })
 
   await signIn(page, 'home')
   await page.getByRole('link', { name: '服务商', exact: true }).click()
@@ -1992,6 +2003,24 @@ test('服务商启用开关分别提示缺少模型映射和认证凭据', async
   await expect(switchFor('仅配置凭据')).toHaveAttribute('title', '请先配置模型。')
   await expect(switchFor('仅配置模型')).toBeDisabled()
   await expect(switchFor('仅配置模型')).toHaveAttribute('title', '请先配置凭证。')
+  const configuredRow = page.getByRole('row').filter({ hasText: '配置齐全' })
+  await expect(configuredRow.locator('.provider-runtime-state')).toHaveText('待启用')
+  await expect(switchFor('配置齐全')).toBeEnabled()
+  await switchFor('配置齐全').click()
+  await expect(configuredRow.locator('.provider-runtime-state')).toHaveText('正常')
+  const credentialOnlyRow = page.getByRole('row').filter({ hasText: '仅配置凭据' })
+  await expect(credentialOnlyRow.locator('.provider-runtime-state')).toHaveText('未配置模型')
+  await expect(credentialOnlyRow.locator('.provider-runtime-state')).toHaveAttribute(
+    'title',
+    '为 仅配置凭据 配置模型映射后即可启用',
+  )
+  await mkdir('../.cache/web-visual', { recursive: true })
+  await credentialOnlyRow.screenshot({ path: '../.cache/web-visual/provider-missing-model.png' })
+  await credentialOnlyRow.locator('.provider-runtime-state').click()
+  await expect(modal(page).getByRole('tab', { name: '模型配置' })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  )
 })
 
 test('服务商操作引导依次高亮配置入口', async ({ page }) => {
