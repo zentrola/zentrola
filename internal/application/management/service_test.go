@@ -654,21 +654,16 @@ func TestConsumeResourceResetCreditRefreshesQuotaAndRestoresResource(t *testing.
 	}
 }
 
-func TestCreatePersonalSubscriptionProbesAndPersistsQuota(t *testing.T) {
+func TestCreatePersonalSubscriptionPersistsWithoutOnlineProbe(t *testing.T) {
 	local := time.FixedZone("CST", 8*60*60)
-	reset := time.Now().In(local).Add(time.Hour).Truncate(time.Second)
 	effectiveAt := time.Date(2026, 9, 1, 8, 0, 0, 0, local)
 	expiresAt := effectiveAt.Add(24 * time.Hour)
-	percent := 20.0
 	writer := &resourceCreateWriter{}
 	service := New(resourceCreateStore{writer: writer}, fixedMemberID{id: 48}, providerTestCipher{}, nil,
-		WithSubscriptionAdapter(subscriptionAdapterStub{probe: SubscriptionProbe{
-			Inspection: SubscriptionInspection{AccountRef: "account-1", PlanCode: "plus"},
-			Credential: []byte("refreshed-auth-cache"),
-			Quotas:     []ResourceQuota{{Code: "codex.primary", Status: QuotaAvailable, UsedPercent: &percent, ResetsAt: &reset}},
+		WithSubscriptionAdapter(subscriptionAdapterStub{onProbe: func(*catalog.OutboundProxy) {
+			t.Fatal("saving must not probe upstream")
 		}}),
 	)
-
 	created, err := service.CreateAuthenticationResource(context.Background(), admin.Identity{ID: 1}, CreateResourceInput{
 		ProviderID: 40, Name: "个人订阅", Credential: "imported-auth-cache",
 		AuthType: AuthTypeSubscription, AuthAdapter: AuthAdapterOpenAICodex, Priority: 10,
@@ -677,16 +672,46 @@ func TestCreatePersonalSubscriptionProbesAndPersistsQuota(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created.SubscriptionType == nil || *created.SubscriptionType != SubscriptionPersonal || created.QuotaStatus != QuotaAvailable || created.PlanCode == nil || *created.PlanCode != "plus" {
+	if created.SubscriptionType == nil || *created.SubscriptionType != SubscriptionPersonal || created.QuotaStatus != QuotaUnknown || created.QuotaCheckedAt != nil {
 		t.Fatalf("unexpected subscription resource: %+v", created)
 	}
-	if created.EffectiveAt == nil || created.ExpiresAt == nil || created.QuotaResetsAt == nil ||
-		created.EffectiveAt.Location() != time.UTC || created.ExpiresAt.Location() != time.UTC || created.QuotaResetsAt.Location() != time.UTC ||
-		writer.quotas[0].ResetsAt == nil || writer.quotas[0].ResetsAt.Location() != time.UTC {
-		t.Fatalf("resource times were not normalized to UTC: created=%+v quotas=%+v", created, writer.quotas)
+	if created.EffectiveAt == nil || created.ExpiresAt == nil || created.EffectiveAt.Location() != time.UTC || created.ExpiresAt.Location() != time.UTC {
+		t.Fatal("resource times were not normalized to UTC")
 	}
-	if string(writer.created.Sealed.Ciphertext) != "refreshed-auth-cache" || len(writer.quotas) != 1 || writer.quotas[0].Code != "codex.primary" {
-		t.Fatalf("credential or quotas were not persisted: sealed=%q quotas=%+v", writer.created.Sealed.Ciphertext, writer.quotas)
+	if string(writer.created.Sealed.Ciphertext) != "imported-auth-cache" || len(writer.quotas) != 0 {
+		t.Fatal("original credential must be persisted without quotas")
+	}
+}
+
+func TestUpdateSubscriptionCredentialClearsStaleQuotaWithoutOnlineProbe(t *testing.T) {
+	for _, code := range []string{AuthAdapterOpenAICodex, AuthAdapterClaudeCode} {
+		t.Run(code, func(t *testing.T) {
+			stub := subscriptionAdapterStub{onProbe: func(*catalog.OutboundProxy) { t.Fatal("saving must not probe upstream") }}
+			var adapter SubscriptionAdapter = stub
+			provider := Provider{ID: 40, Code: catalog.OpenAIOfficialCode}
+			if code == AuthAdapterClaudeCode {
+				adapter = claudeSubscriptionAdapterStub{subscriptionAdapterStub: stub}
+				provider.Code = catalog.AnthropicOfficialCode
+			}
+			now := time.Now().UTC()
+			writer := &resourceTestWriter{provider: provider, resource: ResourceRecord{Resource: Resource{
+				ID: 48, ProviderID: 40, AuthType: AuthTypeSubscription, AuthAdapter: code,
+				ExternalAccountRef: stringPointer("old-account"), PlanCode: stringPointer("old-plan"),
+				QuotaStatus: QuotaAvailable, QuotaCheckedAt: &now, QuotaResetsAt: &now,
+				CredentialRefreshedAt: &now, CredentialExpiresAt: &now,
+			}}, quotas: []ResourceQuota{{Code: "old-quota"}}}
+			service := New(resourceTestStore{writer: writer}, nil, providerTestCipher{}, nil, WithSubscriptionAdapter(adapter))
+			if err := service.UpdateCredential(context.Background(), admin.Identity{ID: 1}, 48, "replacement-auth-cache", appsec.RequestMeta{}); err != nil {
+				t.Fatal(err)
+			}
+			updated := writer.updated
+			if string(updated.Sealed.Ciphertext) != "replacement-auth-cache" || updated.QuotaStatus != QuotaUnknown || updated.QuotaCheckedAt != nil || updated.QuotaResetsAt != nil || len(writer.quotas) != 0 {
+				t.Fatal("replacement credential must be saved and stale quota cleared")
+			}
+			if updated.ExternalAccountRef != nil || updated.PlanCode != nil || updated.CredentialRefreshedAt != nil || updated.CredentialExpiresAt != nil {
+				t.Fatal("stale credential metadata was retained")
+			}
+		})
 	}
 }
 
