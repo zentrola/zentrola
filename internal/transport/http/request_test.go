@@ -143,6 +143,25 @@ func TestMissingRequiredParameterReturnsField(t *testing.T) {
 	})
 }
 
+func TestProviderProxyUpdateAllowsEmptyMappings(t *testing.T) {
+	const fields = `"name":"OpenAI","website":"https://openai.com","endpoints":[{"protocolType":"OPENAI","baseUrl":"https://api.openai.com/v1","networkScope":"PUBLIC"}],"proxyEnabled":true,"proxyUrl":"socks5h://proxy.example.com:8001","proxyHeaders":[]`
+	for _, method := range []string{http.MethodPost, http.MethodPut} {
+		t.Run(method, func(t *testing.T) {
+			const path = "/api/v1/providers/4"
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(method, path, strings.NewReader(`{`+fields+`,"mappings":[]}`))
+			input, ok := decodeRequest[mgmt.ProviderInput](recorder, request)
+			if !ok || input.Mappings == nil || len(input.Mappings) != 0 || !input.ProxyEnabled {
+				t.Fatalf("proxy configuration with empty mappings rejected: status=%d body=%s", recorder.Code, recorder.Body.String())
+			}
+			for _, suffix := range []string{"", `,"mappings":null`} {
+				assertMissingParameter[mgmt.ProviderInput](t, method, path, `{`+fields+suffix+`}`, "mappings")
+			}
+			assertMissingParameter[mgmt.ProviderInput](t, method, path, `{`+fields+`,"mappings":[{}]}`, "mappings[0].modelId")
+		})
+	}
+}
+
 func TestDecodeRequestNormalizesTextFields(t *testing.T) {
 	t.Run("login preserves password", func(t *testing.T) {
 		recorder := httptest.NewRecorder()

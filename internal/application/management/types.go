@@ -122,7 +122,7 @@ type ProviderInput struct {
 	ProxyEnabled bool                       `json:"proxyEnabled"`
 	ProxyURL     string                     `json:"proxyUrl"`
 	ProxyHeaders []ProviderProxyHeaderInput `json:"proxyHeaders"`
-	Mappings     []ProviderMappingInput     `json:"mappings" binding:"required"`
+	Mappings     []ProviderMappingInput     `json:"mappings" binding:"required" allowempty:"true"`
 }
 type ProviderMappingInput struct {
 	ModelID           int64  `json:"modelId,string" binding:"required"`
