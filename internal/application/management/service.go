@@ -554,7 +554,6 @@ func (s *Service) CreateAuthenticationResource(ctx context.Context, actor admin.
 	plain := []byte(input.Credential)
 	defer func() { clear(plain) }()
 	var inspection SubscriptionInspection
-	var subscriptionProbe *SubscriptionProbe
 	var subscription SubscriptionAdapter
 	switch input.AuthType {
 	case AuthTypeAPIKey:
@@ -582,28 +581,7 @@ func (s *Service) CreateAuthenticationResource(ctx context.Context, actor admin.
 		if !subscription.SupportsProvider(provider) {
 			return Resource{}, appsec.ErrInvalidArgument
 		}
-		// Claude Code setup token 在保存时只做本地结构检查。在线有效性和额度读取由“测试连接”负责，
-		// 避免网络、代理或 Anthropic 服务异常阻止管理员先保存凭据。
-		if input.AuthAdapter != AuthAdapterClaudeCode {
-			subscriptionProxy, proxyErr := s.decryptedProviderProxy(provider)
-			if proxyErr != nil {
-				return Resource{}, ErrProvider
-			}
-			probe, probeErr := subscription.Probe(ctx, plain, subscriptionProxy)
-			if probeErr != nil {
-				return Resource{}, appsec.ErrUnavailable
-			}
-			if len(probe.Credential) == 0 {
-				clear(probe.Credential)
-				return Resource{}, appsec.ErrUnavailable
-			}
-			normalizeSubscriptionProbe(&probe)
-			inspection = probe.Inspection
-			clear(plain)
-			plain = probe.Credential
-			probe.Credential = nil
-			subscriptionProbe = &probe
-		}
+		// 保存只做本地校验；在线认证和额度读取由独立的测试连接负责。
 	default:
 		return Resource{}, appsec.ErrInvalidArgument
 	}
@@ -624,14 +602,10 @@ func (s *Service) CreateAuthenticationResource(ctx context.Context, actor admin.
 		resource.SubscriptionType = &subscriptionType
 		resource.ExternalAccountRef = stringPointer(inspection.AccountRef)
 		resource.PlanCode = stringPointer(inspection.PlanCode)
-		resource.CredentialRefreshedAt = inspection.CredentialRefreshedAt
-		resource.CredentialExpiresAt = inspection.CredentialExpiresAt
+		resource.CredentialRefreshedAt = utcTimePointer(inspection.CredentialRefreshedAt)
+		resource.CredentialExpiresAt = utcTimePointer(inspection.CredentialExpiresAt)
 		if resource.ExpiresAt == nil {
-			resource.ExpiresAt = inspection.ExpiresAt
-		}
-		if subscriptionProbe != nil {
-			resource.QuotaStatus, resource.QuotaResetsAt = aggregateQuota(subscriptionProbe.Quotas)
-			resource.QuotaCheckedAt = &now
+			resource.ExpiresAt = utcTimePointer(inspection.ExpiresAt)
 		}
 	}
 	sealed, err := s.cipher.Encrypt(plain, owner(actor, resource))
@@ -644,11 +618,6 @@ func (s *Service) CreateAuthenticationResource(ctx context.Context, actor admin.
 		}
 		if err := w.CreateResource(ctx, ResourceRecord{Resource: resource, Sealed: sealed}); err != nil {
 			return err
-		}
-		if subscriptionProbe != nil {
-			if err := w.ReplaceResourceQuotas(ctx, id, subscriptionProbe.Quotas); err != nil {
-				return err
-			}
 		}
 		return w.Audit(ctx, Audit{Event: operation.ResourceCreate, Target: "RESOURCE", ID: id, Name: input.Name, After: resource}, meta)
 	})
@@ -707,7 +676,7 @@ func (s *Service) UpdateCredential(ctx context.Context, actor admin.Identity, id
 	}
 	plain := []byte(credential)
 	defer func() { clear(plain) }()
-	var subscriptionProbe *SubscriptionProbe
+	var inspection SubscriptionInspection
 	if original.AuthType == AuthTypeAPIKey {
 		if !validCredential(credential) {
 			return appsec.ErrInvalidArgument
@@ -717,24 +686,10 @@ func (s *Service) UpdateCredential(ctx context.Context, actor admin.Identity, id
 		if !validSubscriptionCredential(credential) || subscription == nil || !subscription.SupportsProvider(provider) {
 			return appsec.ErrInvalidArgument
 		}
-		if _, err := subscription.Inspect(plain); err != nil {
+		var err error
+		inspection, err = subscription.Inspect(plain)
+		if err != nil {
 			return appsec.ErrInvalidArgument
-		}
-		if original.AuthAdapter != AuthAdapterClaudeCode {
-			proxy, err := s.decryptedProviderProxy(provider)
-			if err != nil {
-				return ErrProvider
-			}
-			probe, err := subscription.Probe(ctx, plain, proxy)
-			if err != nil || len(probe.Credential) == 0 {
-				clear(probe.Credential)
-				return appsec.ErrUnavailable
-			}
-			normalizeSubscriptionProbe(&probe)
-			clear(plain)
-			plain = probe.Credential
-			probe.Credential = nil
-			subscriptionProbe = &probe
 		}
 	}
 	sealed, err := s.cipher.Encrypt(plain, owner(actor, original.Resource))
@@ -750,22 +705,14 @@ func (s *Service) UpdateCredential(ctx context.Context, actor admin.Identity, id
 			return ErrConflict
 		}
 		record.Sealed = sealed
-		if subscriptionProbe != nil {
-			record.ExternalAccountRef = stringPointer(subscriptionProbe.Inspection.AccountRef)
-			record.PlanCode = stringPointer(subscriptionProbe.Inspection.PlanCode)
-			record.CredentialRefreshedAt = subscriptionProbe.Inspection.CredentialRefreshedAt
-			record.CredentialExpiresAt = subscriptionProbe.Inspection.CredentialExpiresAt
-			if subscriptionProbe.Inspection.ExpiresAt != nil {
-				record.ExpiresAt = subscriptionProbe.Inspection.ExpiresAt
+		if record.AuthType == AuthTypeSubscription {
+			record.ExternalAccountRef = stringPointer(inspection.AccountRef)
+			record.PlanCode = stringPointer(inspection.PlanCode)
+			record.CredentialRefreshedAt = utcTimePointer(inspection.CredentialRefreshedAt)
+			record.CredentialExpiresAt = utcTimePointer(inspection.CredentialExpiresAt)
+			if inspection.ExpiresAt != nil {
+				record.ExpiresAt = utcTimePointer(inspection.ExpiresAt)
 			}
-			record.QuotaStatus, record.QuotaResetsAt = aggregateQuota(subscriptionProbe.Quotas)
-			now := time.Now().UTC().Truncate(time.Microsecond)
-			record.QuotaCheckedAt = &now
-		} else if record.AuthAdapter == AuthAdapterClaudeCode {
-			record.ExternalAccountRef = nil
-			record.PlanCode = nil
-			record.CredentialRefreshedAt = nil
-			record.CredentialExpiresAt = nil
 			record.QuotaStatus = QuotaUnknown
 			record.QuotaResetsAt = nil
 			record.QuotaCheckedAt = nil
@@ -774,11 +721,7 @@ func (s *Service) UpdateCredential(ctx context.Context, actor admin.Identity, id
 		if err := w.UpdateResource(ctx, record); err != nil {
 			return err
 		}
-		if subscriptionProbe != nil {
-			if err := w.ReplaceResourceQuotas(ctx, id, subscriptionProbe.Quotas); err != nil {
-				return err
-			}
-		} else if record.AuthAdapter == AuthAdapterClaudeCode {
+		if record.AuthType == AuthTypeSubscription {
 			if err := w.ReplaceResourceQuotas(ctx, id, nil); err != nil {
 				return err
 			}
