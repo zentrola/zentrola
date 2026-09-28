@@ -12,8 +12,9 @@ import (
 )
 
 type subscriptionAdapterStub struct {
-	probe   SubscriptionProbe
-	onProbe func(*catalog.OutboundProxy)
+	probe      SubscriptionProbe
+	inspection SubscriptionInspection
+	onProbe    func(*catalog.OutboundProxy)
 }
 
 func (subscriptionAdapterStub) Code() string              { return AuthAdapterOpenAICodex }
@@ -21,8 +22,8 @@ func (subscriptionAdapterStub) Supports(code string) bool { return code == AuthA
 func (subscriptionAdapterStub) SupportsProvider(provider Provider) bool {
 	return provider.Code == "openai-official"
 }
-func (subscriptionAdapterStub) Inspect([]byte) (SubscriptionInspection, error) {
-	return SubscriptionInspection{}, nil
+func (s subscriptionAdapterStub) Inspect([]byte) (SubscriptionInspection, error) {
+	return s.inspection, nil
 }
 func (s subscriptionAdapterStub) Probe(_ context.Context, _ []byte, proxy *catalog.OutboundProxy) (SubscriptionProbe, error) {
 	if s.onProbe != nil {
@@ -223,6 +224,36 @@ func (s memberCreateStore) Write(_ context.Context, _ admin.Identity, fn func(Wr
 	return fn(s.writer)
 }
 
+type memberStatusWriter struct {
+	Writer
+	member    Member
+	keys      []Key
+	statusSet bool
+}
+
+func (w *memberStatusWriter) Member(context.Context, int64) (Member, error) {
+	return w.member, nil
+}
+
+func (w *memberStatusWriter) Keys(context.Context, int64, Page) ([]Key, error) {
+	return w.keys, nil
+}
+
+func (w *memberStatusWriter) SetMemberStatus(context.Context, int64, string) error {
+	w.statusSet = true
+	return nil
+}
+
+type memberStatusStore struct{ writer *memberStatusWriter }
+
+func (s memberStatusStore) Read(_ context.Context, _ admin.Identity, fn func(Reader) error) error {
+	return fn(s.writer)
+}
+
+func (s memberStatusStore) Write(_ context.Context, _ admin.Identity, fn func(Writer) error) error {
+	return fn(s.writer)
+}
+
 type credentialUpdateWriter struct {
 	Writer
 	resource ResourceRecord
@@ -296,6 +327,25 @@ func TestCreateMemberDefaultsToDisabled(t *testing.T) {
 	after, ok := writer.audit.After.(Member)
 	if !ok || after.Status != "DISABLED" {
 		t.Fatalf("audit after=%#v; want disabled member", writer.audit.After)
+	}
+}
+
+func TestSetMemberStatusRequiresAccessKeyBeforeActivation(t *testing.T) {
+	writer := &memberStatusWriter{member: Member{ID: 42, Name: "新用户", Status: "DISABLED"}}
+	service := New(memberStatusStore{writer: writer}, nil, nil, nil)
+
+	err := service.SetMemberStatus(
+		context.Background(),
+		admin.Identity{ID: 1},
+		42,
+		"ACTIVE",
+		appsec.RequestMeta{},
+	)
+	if !errors.Is(err, ErrMemberAccessKeyRequired) {
+		t.Fatalf("error=%v; want ErrMemberAccessKeyRequired", err)
+	}
+	if writer.statusSet {
+		t.Fatal("member status changed without an access key")
 	}
 }
 
@@ -660,9 +710,12 @@ func TestCreatePersonalSubscriptionPersistsWithoutOnlineProbe(t *testing.T) {
 	expiresAt := effectiveAt.Add(24 * time.Hour)
 	writer := &resourceCreateWriter{}
 	service := New(resourceCreateStore{writer: writer}, fixedMemberID{id: 48}, providerTestCipher{}, nil,
-		WithSubscriptionAdapter(subscriptionAdapterStub{onProbe: func(*catalog.OutboundProxy) {
-			t.Fatal("saving must not probe upstream")
-		}}),
+		WithSubscriptionAdapter(subscriptionAdapterStub{
+			inspection: SubscriptionInspection{AccountRef: "account-123456"},
+			onProbe: func(*catalog.OutboundProxy) {
+				t.Fatal("saving must not probe upstream")
+			},
+		}),
 	)
 	created, err := service.CreateAuthenticationResource(context.Background(), admin.Identity{ID: 1}, CreateResourceInput{
 		ProviderID: 40, Name: "个人订阅", Credential: "imported-auth-cache",
@@ -674,6 +727,9 @@ func TestCreatePersonalSubscriptionPersistsWithoutOnlineProbe(t *testing.T) {
 	}
 	if created.SubscriptionType == nil || *created.SubscriptionType != SubscriptionPersonal || created.QuotaStatus != QuotaUnknown || created.QuotaCheckedAt != nil {
 		t.Fatalf("unexpected subscription resource: %+v", created)
+	}
+	if created.Name != "个人订阅 · 123456" || created.ExternalAccountRef == nil || *created.ExternalAccountRef != "account-123456" {
+		t.Fatalf("unexpected subscription identity: %+v", created)
 	}
 	if created.EffectiveAt == nil || created.ExpiresAt == nil || created.EffectiveAt.Location() != time.UTC || created.ExpiresAt.Location() != time.UTC {
 		t.Fatal("resource times were not normalized to UTC")

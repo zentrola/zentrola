@@ -216,6 +216,28 @@ func TestProviderCredentialRequiredReturnsConflict(t *testing.T) {
 	}
 }
 
+func TestMemberAccessKeyRequiredReturnsConflict(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/members/8/status", nil)
+
+	securityError(recorder, request, mgmt.ErrMemberAccessKeyRequired)
+
+	if recorder.Code != http.StatusConflict || !strings.Contains(recorder.Body.String(), `"code":"MEMBER_ACCESS_KEY_REQUIRED"`) {
+		t.Fatalf("unexpected response: status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestSubscriptionAccountAlreadyExistsReturnsConflict(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/resources", nil)
+
+	securityError(recorder, request, mgmt.ErrSubscriptionAccountExists)
+
+	if recorder.Code != http.StatusConflict || !strings.Contains(recorder.Body.String(), `"code":"SUBSCRIPTION_ACCOUNT_ALREADY_EXISTS"`) {
+		t.Fatalf("unexpected response: status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestProviderModelMappingRequiredReturnsConflict(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPatch, "/api/v1/providers/8/status", nil)

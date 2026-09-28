@@ -240,7 +240,7 @@ func (s *Service) SetMemberStatus(ctx context.Context, actor admin.Identity, id 
 				return err
 			}
 			if len(keys) == 0 {
-				return ErrConflict
+				return ErrMemberAccessKeyRequired
 			}
 		}
 		if err := w.SetMemberStatus(ctx, id, status); err != nil {
@@ -581,6 +581,12 @@ func (s *Service) CreateAuthenticationResource(ctx context.Context, actor admin.
 		if !subscription.SupportsProvider(provider) {
 			return Resource{}, appsec.ErrInvalidArgument
 		}
+		if inspection.AccountRef != "" {
+			input.Name = subscriptionResourceName(input.Name, inspection.AccountRef)
+			if !validText(input.Name, 128) {
+				return Resource{}, appsec.ErrInvalidArgument
+			}
+		}
 		// 保存只做本地校验；在线认证和额度读取由独立的测试连接负责。
 	default:
 		return Resource{}, appsec.ErrInvalidArgument
@@ -629,6 +635,25 @@ func stringPointer(value string) *string {
 		return nil
 	}
 	return &value
+}
+
+func accountRefSuffix(accountRef string) string {
+	characters := []rune(accountRef)
+	if len(characters) <= 6 {
+		return accountRef
+	}
+	return string(characters[len(characters)-6:])
+}
+
+func subscriptionResourceName(name, accountRef string) string {
+	return name + " · " + accountRefSuffix(accountRef)
+}
+
+func replaceSubscriptionResourceName(name string, previous *string, accountRef string) string {
+	if previous != nil && *previous != "" {
+		name = strings.TrimSuffix(name, " · "+accountRefSuffix(*previous))
+	}
+	return subscriptionResourceName(name, accountRef)
 }
 
 func utcTimePointer(value *time.Time) *time.Time {
@@ -706,6 +731,12 @@ func (s *Service) UpdateCredential(ctx context.Context, actor admin.Identity, id
 		}
 		record.Sealed = sealed
 		if record.AuthType == AuthTypeSubscription {
+			if inspection.AccountRef != "" {
+				record.Name = replaceSubscriptionResourceName(record.Name, record.ExternalAccountRef, inspection.AccountRef)
+				if !validText(record.Name, 128) {
+					return appsec.ErrInvalidArgument
+				}
+			}
 			record.ExternalAccountRef = stringPointer(inspection.AccountRef)
 			record.PlanCode = stringPointer(inspection.PlanCode)
 			record.CredentialRefreshedAt = utcTimePointer(inspection.CredentialRefreshedAt)

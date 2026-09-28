@@ -468,6 +468,10 @@ func securityError(w http.ResponseWriter, r *http.Request, err error) {
 		status, code, message = http.StatusNotFound, "NOT_FOUND", "Object not found."
 	case errors.Is(err, mgmt.ErrConflict):
 		status, code, message = http.StatusConflict, "CONFLICT", "The request conflicts with the current state."
+	case errors.Is(err, mgmt.ErrMemberAccessKeyRequired):
+		status, code, message = http.StatusConflict, "MEMBER_ACCESS_KEY_REQUIRED", "Create an access key before enabling the member."
+	case errors.Is(err, mgmt.ErrSubscriptionAccountExists):
+		status, code, message = http.StatusConflict, "SUBSCRIPTION_ACCOUNT_ALREADY_EXISTS", "A credential for this subscription account already exists."
 	case errors.Is(err, mgmt.ErrCredential):
 		status, code, message = http.StatusUnprocessableEntity, "CREDENTIAL_UNRECOVERABLE", "Replace the resource credential before enabling it."
 	case errors.Is(err, mgmt.ErrProvider):

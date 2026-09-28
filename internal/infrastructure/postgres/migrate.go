@@ -60,8 +60,24 @@ SELECT EXISTS (
 	if err != nil {
 		return err
 	}
-	provider, err := goose.NewProvider(goose.DialectPostgres, db, source,
-		goose.WithSessionLocker(locker), goose.WithDisableGlobalRegistry(true))
+	providerOptions := []goose.ProviderOption{
+		goose.WithSessionLocker(locker),
+		goose.WithDisableGlobalRegistry(true),
+	}
+	// Baseline 数据库只记录版本 41；达到该版本后，旧迁移已由 baseline 代表，
+	// 后续执行必须排除 00001–00041，避免 Goose 将它们识别为缺失的乱序迁移。
+	var currentVersion int64
+	if err := pool.QueryRow(ctx, `SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version WHERE is_applied`).Scan(&currentVersion); err != nil {
+		return errors.New("cannot inspect migration version")
+	}
+	if currentVersion >= 41 {
+		excluded := make([]int64, 41)
+		for index := range excluded {
+			excluded[index] = int64(index + 1)
+		}
+		providerOptions = append(providerOptions, goose.WithExcludeVersions(excluded))
+	}
+	provider, err := goose.NewProvider(goose.DialectPostgres, db, source, providerOptions...)
 	if err != nil {
 		return errors.New("cannot initialize migrations")
 	}

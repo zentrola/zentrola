@@ -1949,9 +1949,11 @@ COMMENT ON COLUMN provider_credential.updated_by IS '更新者引用：system、
 COMMENT ON COLUMN provider_credential.created_at IS '创建时间，UTC';
 COMMENT ON COLUMN provider_credential.updated_at IS '更新时间，UTC';
 
-CREATE UNIQUE INDEX uk_provider_credential_provider_name
-    ON provider_credential (provider_id, resource_name)
-    WHERE is_deleted = false;
+CREATE UNIQUE INDEX uk_provider_credential_subscription_account
+    ON provider_credential (provider_id, auth_adapter, external_account_ref)
+    WHERE is_deleted = false
+      AND auth_type = 'SUBSCRIPTION'
+      AND external_account_ref IS NOT NULL;
 CREATE INDEX ix_provider_credential_route
     ON provider_credential (provider_id, auth_type, priority, id)
     WHERE is_deleted = false;

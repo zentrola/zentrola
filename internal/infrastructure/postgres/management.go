@@ -78,6 +78,9 @@ func managementError(err error) error {
 	}
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
+		if pgErr.Code == "23505" && pgErr.ConstraintName == "uk_provider_credential_subscription_account" {
+			return mgmt.ErrSubscriptionAccountExists
+		}
 		switch pgErr.Code {
 		case "23505", "40001", "40P01":
 			return mgmt.ErrConflict
@@ -85,7 +88,7 @@ func managementError(err error) error {
 			return appsec.ErrInvalidArgument
 		}
 	}
-	for _, known := range []error{appsec.ErrInvalidArgument, appsec.ErrUnauthenticated, appsec.ErrNotFound, appsec.ErrUnavailable, mgmt.ErrConflict, mgmt.ErrCredential, mgmt.ErrProvider, mgmt.ErrProviderCredentialRequired, mgmt.ErrProviderModelMappingRequired, mgmt.ErrModelSyncCredentialRequired, mgmt.ErrCredentialExportUnsupported} {
+	for _, known := range []error{appsec.ErrInvalidArgument, appsec.ErrUnauthenticated, appsec.ErrNotFound, appsec.ErrUnavailable, mgmt.ErrConflict, mgmt.ErrMemberAccessKeyRequired, mgmt.ErrSubscriptionAccountExists, mgmt.ErrCredential, mgmt.ErrProvider, mgmt.ErrProviderCredentialRequired, mgmt.ErrProviderModelMappingRequired, mgmt.ErrModelSyncCredentialRequired, mgmt.ErrCredentialExportUnsupported} {
 		if errors.Is(err, known) {
 			return known
 		}

@@ -843,6 +843,8 @@ export const i18n = createI18n({
         INVALID_ARGUMENT: '参数无效，请检查填写内容。',
         NOT_FOUND: '记录不存在或已不可用，请刷新列表。',
         CONFLICT: '操作冲突，请检查重复编码、对象状态或已启用的服务商凭证。',
+        MEMBER_ACCESS_KEY_REQUIRED: '请先为该用户生成调用 Key，再启用用户。',
+        SUBSCRIPTION_ACCOUNT_ALREADY_EXISTS: '该服务商下已存在此订阅账号的凭证，请更新已有凭证。',
         PROVIDER_UNAVAILABLE: '上游服务已停用。',
         CREDENTIAL_UNRECOVERABLE: '凭证无法解密，请重新录入。',
         CREDENTIAL_EXPORT_UNSUPPORTED: '仅 OpenAI 个人订阅凭据支持导出。',

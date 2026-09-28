@@ -838,6 +838,9 @@ export default {
     INVALID_ARGUMENT: 'The request is invalid. Check the entered values.',
     NOT_FOUND: 'The record does not exist or is no longer available. Refresh the list.',
     CONFLICT: 'The action conflicts with an existing code, state, or enabled provider credential.',
+    MEMBER_ACCESS_KEY_REQUIRED: 'Create an access key for this user before enabling the user.',
+    SUBSCRIPTION_ACCOUNT_ALREADY_EXISTS:
+      'A credential for this subscription account already exists. Update the existing credential.',
     PROVIDER_UNAVAILABLE: 'The upstream provider is disabled.',
     CREDENTIAL_UNRECOVERABLE: 'The credential cannot be decrypted. Enter it again.',
     CREDENTIAL_EXPORT_UNSUPPORTED: 'Only OpenAI personal subscription credentials can be exported.',

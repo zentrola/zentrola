@@ -15,6 +15,8 @@ import (
 
 var (
 	ErrConflict                     = errors.New("conflict")
+	ErrMemberAccessKeyRequired      = errors.New("member access key required")
+	ErrSubscriptionAccountExists    = errors.New("subscription account already exists")
 	ErrCredential                   = errors.New("credential unrecoverable")
 	ErrProvider                     = errors.New("provider unavailable")
 	ErrProviderCredentialRequired   = errors.New("provider credential required")
