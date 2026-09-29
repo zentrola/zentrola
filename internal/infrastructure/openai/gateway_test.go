@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -84,16 +85,21 @@ func TestPrivateEndpointForwarding(t *testing.T) {
 
 func TestResponsesForwarding(t *testing.T) {
 	c := NewGatewayClient(time.Second)
+	const body = `{"model":"system-model","input":"hello","store":true,"stream":false}`
 	c.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if r.URL.String() != "https://api.example.com/v1/responses" {
 			t.Fatalf("unexpected Responses URL: %s", r.URL)
+		}
+		data, _ := io.ReadAll(r.Body)
+		if string(data) != body {
+			t.Fatalf("API key Responses request was changed: %s", data)
 		}
 		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"id":"resp_1"}`))}, nil
 	})
 	response, err := c.Open(context.Background(), gw.Route{BaseURL: "https://api.example.com/v1"}, gw.Request{
 		Protocol: gw.OpenAIResponsesProtocol,
 		Path:     "/v1/responses",
-		Body:     []byte(`{"model":"system-model","input":"hello"}`),
+		Body:     []byte(body),
 	}, []byte("upstream-only"))
 	if err != nil || response.Status != 200 {
 		t.Fatalf("Responses forwarding failed: response=%+v err=%v", response, err)
@@ -159,12 +165,34 @@ func TestCodexSubscriptionResponsesForwarding(t *testing.T) {
 		if !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer x.") || strings.Contains(r.Header.Get("Authorization"), "refresh") || r.Header.Get("ChatGPT-Account-Id") != "account-1" || r.Header.Get("Originator") != "zentrola" {
 			t.Fatalf("unexpected subscription headers: %+v", r.Header)
 		}
-		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"id":"resp_1"}`))}, nil
+		var request struct {
+			Input []struct {
+				Type    string `json:"type"`
+				Role    string `json:"role"`
+				Content []struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"input"`
+			Store  *bool           `json:"store"`
+			Stream bool            `json:"stream"`
+			Future json.RawMessage `json:"future"`
+		}
+		data, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(data, &request); err != nil {
+			t.Fatalf("invalid subscription request: %s: %v", data, err)
+		}
+		if !request.Stream || request.Store == nil || *request.Store || string(request.Future) != "9007199254740993" ||
+			len(request.Input) != 1 || request.Input[0].Type != "message" || request.Input[0].Role != "user" ||
+			len(request.Input[0].Content) != 1 || request.Input[0].Content[0].Type != "input_text" || request.Input[0].Content[0].Text != "draw an otter" {
+			t.Fatalf("subscription request was not normalized: %s", data)
+		}
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("event: response.completed\ndata: {}\n\n"))}, nil
 	})
 	payload := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf(`{"exp":%d}`, time.Now().Add(time.Hour).Unix())))
 	auth := []byte(fmt.Sprintf(`{"auth_mode":"chatgpt","tokens":{"id_token":"id","access_token":"x.%s.x","refresh_token":"refresh","account_id":"account-1"}}`, payload))
 	response, err := c.Open(context.Background(), gw.Route{AuthType: "SUBSCRIPTION", AuthAdapter: "OPENAI_CODEX"}, gw.Request{
-		Protocol: gw.OpenAIResponsesProtocol, Path: "/v1/responses", Body: []byte(`{"model":"system-model","input":"hello"}`),
+		Protocol: gw.OpenAIResponsesProtocol, Path: "/v1/responses", Body: []byte(`{"model":"system-model","input":"draw an otter","store":true,"stream":true,"future":9007199254740993}`),
 	}, auth)
 	clear(auth)
 	if err != nil || response.Status != 200 {
@@ -173,6 +201,30 @@ func TestCodexSubscriptionResponsesForwarding(t *testing.T) {
 	response.Body.Close()
 	if headers.Get("Authorization") != "" || headers.Get("ChatGPT-Account-Id") != "" {
 		t.Fatal("subscription credential retained after Close")
+	}
+}
+
+func TestCodexSubscriptionResponsesRequiresStreaming(t *testing.T) {
+	c := NewGatewayClient(time.Second)
+	calls := 0
+	c.client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return nil, errors.New("unexpected transport call")
+	})
+	for _, body := range []string{
+		`{"model":"system-model","input":"hello"}`,
+		`{"model":"system-model","input":"hello","stream":false}`,
+		`{"model":"system-model","input":null,"stream":true}`,
+	} {
+		_, err := c.Open(context.Background(), gw.Route{AuthType: "SUBSCRIPTION", AuthAdapter: "OPENAI_CODEX"}, gw.Request{
+			Protocol: gw.OpenAIResponsesProtocol, Path: "/v1/responses", Body: []byte(body),
+		}, []byte("unused"))
+		if !errors.Is(err, gw.ErrInvalid) {
+			t.Fatalf("unsupported subscription request accepted: body=%s err=%v", body, err)
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("invalid subscription request reached transport %d times", calls)
 	}
 }
 

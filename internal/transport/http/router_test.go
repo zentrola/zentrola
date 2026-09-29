@@ -291,7 +291,7 @@ func TestNonProductionAccessLogBoundsLargeBodies(t *testing.T) {
 				w.Header().Set("Content-Type", "text/event-stream")
 				_, _ = io.WriteString(w, responseBody)
 			}))
-			req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(requestBody))
+			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(requestBody))
 			req.Header.Set("Content-Type", "application/json")
 			handler.ServeHTTP(httptest.NewRecorder(), req)
 
@@ -304,6 +304,35 @@ func TestNonProductionAccessLogBoundsLargeBodies(t *testing.T) {
 			body, bodyOK := request["body"].(string)
 			if !requestOK || !responseOK || !bodyOK || len(body) > accessLogBodyLimit || request["body_truncated"] != true || response["body"] != responseBody || response["body_truncated"] == true {
 				t.Fatalf("%s access log body capture was not bounded correctly", environment)
+			}
+		})
+	}
+}
+
+func TestNonProductionAccessLogOmitsResponsesSSEBody(t *testing.T) {
+	const responseBody = "event: response.output_text.delta\ndata: private-stream-response\n\n"
+	for _, environment := range []string{"dev", "test"} {
+		t.Run(environment, func(t *testing.T) {
+			var logs bytes.Buffer
+			logger := logging.New(&logs, "json", slog.LevelInfo)
+			handler := accessLog(logger, environment)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+				_, _ = io.WriteString(w, responseBody)
+			}))
+			req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","stream":true}`))
+			req.Header.Set("Content-Type", "application/json")
+			handler.ServeHTTP(httptest.NewRecorder(), req)
+
+			var record map[string]any
+			if err := json.Unmarshal(logs.Bytes(), &record); err != nil {
+				t.Fatal(err)
+			}
+			response, ok := record["response"].(map[string]any)
+			if !ok || response["bytes"] != float64(len(responseBody)) {
+				t.Fatalf("%s Responses SSE metadata missing: %v", environment, record)
+			}
+			if _, logged := response["body"]; logged || strings.Contains(logs.String(), "private-stream-response") {
+				t.Fatalf("%s Responses SSE body was logged: %s", environment, logs.String())
 			}
 		})
 	}

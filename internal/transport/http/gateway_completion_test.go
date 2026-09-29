@@ -294,6 +294,44 @@ func TestOpenAIResponsesCompletionWinsFollowingClientCancellation(t *testing.T) 
 	}
 }
 
+func TestOpenAIResponsesPassesThroughOversizedImageGenerationEvent(t *testing.T) {
+	stream := "event: response.image_generation_call.completed\n" +
+		"data: {\"type\":\"response.image_generation_call.completed\",\"result\":\"" + strings.Repeat("a", 300<<10) + "\"}\n\n" +
+		"event: response.completed\n" +
+		"data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":12,\"output_tokens\":7}}}\n\n"
+	var trace *usage.Event
+	upstream := completionUpstream(func(_ context.Context, _ gw.Route, request gw.Request, _ []byte) (*gw.Response, error) {
+		trace = request.Trace
+		return &gw.Response{
+			Status:  http.StatusOK,
+			Headers: map[string][]string{"Content-Type": {"text/event-stream"}},
+			Body:    io.NopCloser(strings.NewReader(stream)),
+		}, nil
+	})
+	service := gw.New(completionStore{}, completionCipher{}, upstream)
+	handler := NewOpenAIGatewayHandler(service, config.Gateway{
+		MaxBodyBytes:    1 << 20,
+		RequestTimeout:  time.Second,
+		BodyReadTimeout: time.Second,
+		WriteTimeout:    time.Second,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"client-model","stream":true}`))
+	request.Header.Set("Content-Type", "application/json")
+	request = request.WithContext(context.WithValue(request.Context(), principalIdentityKey{}, appsec.PrincipalIdentity{ID: 10, AccessKeyID: 11}))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK || recorder.Body.String() != stream {
+		t.Fatalf("oversized image event was not passed through unchanged: status=%d bytes=%d", recorder.Code, recorder.Body.Len())
+	}
+	if trace == nil || trace.Status != usage.Success || trace.ErrorType != "" || trace.Attempt == nil ||
+		trace.Attempt.InputTokens == nil || *trace.Attempt.InputTokens != 12 ||
+		trace.Attempt.OutputTokens == nil || *trace.Attempt.OutputTokens != 7 {
+		t.Fatalf("oversized image stream usage missing: %+v", trace)
+	}
+}
+
 func TestOpenAIResponsesInfersStreamWhenUpstreamOmitsContentType(t *testing.T) {
 	var trace *usage.Event
 	upstream := completionUpstream(func(_ context.Context, _ gw.Route, request gw.Request, _ []byte) (*gw.Response, error) {
