@@ -4,6 +4,7 @@ package openai
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -55,6 +56,11 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 		if route.AuthAdapter != openaicodex.AdapterCode || input.Protocol != gw.OpenAIResponsesProtocol || input.Path != "/v1/responses" {
 			return nil, gw.ErrRoute
 		}
+		body, err := codexSubscriptionResponsesBody(input.Body)
+		if err != nil {
+			return nil, err
+		}
+		input.Body = body
 		accessToken, account, expiresAt, err := openaicodex.RequestCredential(credential)
 		if err != nil || expiresAt != nil && !expiresAt.After(time.Now().Add(time.Minute)) {
 			return nil, gw.ErrCredential
@@ -169,6 +175,63 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 		return nil, gw.ErrUpstream
 	}
 	return &gw.Response{Status: resp.StatusCode, Headers: resp.Header, Body: &responseBody{ReadCloser: resp.Body, sentHeaders: sentHeaders, cleanup: cleanup}}, nil
+}
+
+// codexSubscriptionResponsesBody 收紧 ChatGPT Codex 订阅端点的请求形态。
+// 该端点只提供 SSE；网关不把流式事件重新聚合成非流式 Responses JSON。
+func codexSubscriptionResponsesBody(body []byte) ([]byte, error) {
+	var request map[string]json.RawMessage
+	if err := json.Unmarshal(body, &request); err != nil {
+		return nil, gw.ErrInvalid
+	}
+	var stream bool
+	if raw, ok := request["stream"]; !ok || json.Unmarshal(raw, &stream) != nil || !stream {
+		return nil, gw.ErrInvalid
+	}
+	request["stream"] = json.RawMessage("true")
+	request["store"] = json.RawMessage("false")
+
+	if raw, ok := request["input"]; ok {
+		trimmed := bytes.TrimSpace(raw)
+		switch {
+		case len(trimmed) > 0 && trimmed[0] == '"':
+			var text string
+			if err := json.Unmarshal(trimmed, &text); err != nil {
+				return nil, gw.ErrInvalid
+			}
+			messages := []codexInputMessage{{
+				Type: "message",
+				Role: "user",
+				Content: []codexInputContent{{
+					Type: "input_text",
+					Text: text,
+				}},
+			}}
+			encoded, err := json.Marshal(messages)
+			if err != nil {
+				return nil, gw.ErrInvalid
+			}
+			request["input"] = encoded
+		case len(trimmed) == 0 || trimmed[0] != '[':
+			return nil, gw.ErrInvalid
+		}
+	}
+	encoded, err := json.Marshal(request)
+	if err != nil {
+		return nil, gw.ErrInvalid
+	}
+	return encoded, nil
+}
+
+type codexInputMessage struct {
+	Type    string              `json:"type"`
+	Role    string              `json:"role"`
+	Content []codexInputContent `json:"content"`
+}
+
+type codexInputContent struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
 }
 
 type responseBody struct {

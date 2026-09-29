@@ -131,3 +131,27 @@ func TestOpenAIResponsesUsageAutoDetectsSSEAndJSON(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenAIResponsesUsageSkipsOversizedImageGenerationEvent(t *testing.T) {
+	for _, eventHeader := range []string{"event: response.image_generation_call.completed\n", ""} {
+		stream := eventHeader +
+			"data: {\"type\":\"response.image_generation_call.completed\",\"result\":\"" + strings.Repeat("a", 300<<10) + "\"}\n\n" +
+			"event: response.completed\n" +
+			"data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":12,\"input_tokens_details\":{\"cached_tokens\":4},\"output_tokens\":9}}}\n\n"
+		for _, step := range []int{1, 32768} {
+			observer := NewOpenAIResponsesUsageObserver(true)
+			for offset := 0; offset < len(stream); offset += step {
+				observer.Feed([]byte(stream[offset:min(offset+step, len(stream))]))
+			}
+			input, output, cached := observer.Tokens(observer.Complete())
+			diagnostics := observer.Diagnostics()
+			if !observer.Complete() || diagnostics.BadUsage || diagnostics.LastEvent != "response.completed" ||
+				input == nil || *input != 12 || output == nil || *output != 9 || cached == nil || *cached != 4 {
+				t.Fatalf("oversized image event prevented completion with header=%q step=%d: %+v", eventHeader, step, diagnostics)
+			}
+			if len(observer.line) > 256<<10 || len(observer.data) > 256<<10 {
+				t.Fatalf("oversized image event exceeded observer bounds with header=%q step=%d", eventHeader, step)
+			}
+		}
+	}
+}

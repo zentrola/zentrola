@@ -351,8 +351,12 @@ func accessLog(logger *slog.Logger, environments ...string) func(http.Handler) h
 				if logDetails {
 					request.Body = bodyLogValue(requestBody)
 					request.BodyTruncated = requestBody.truncated
-					response.Body = bodyLogValue(responseBody)
-					response.BodyTruncated = responseBody.truncated
+					// Responses 的 SSE 可能包含完整 base64 图像；开发日志只保留
+					// 状态、响应头和字节数，不记录事件正文。
+					if r.URL.Path != "/v1/responses" || !strings.HasPrefix(strings.ToLower(wrapped.Header().Get("Content-Type")), "text/event-stream") {
+						response.Body = bodyLogValue(responseBody)
+						response.BodyTruncated = responseBody.truncated
+					}
 				} else {
 					if request.Bytes != 0 {
 						request.Body = "******"

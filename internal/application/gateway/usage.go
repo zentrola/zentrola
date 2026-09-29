@@ -17,6 +17,7 @@ type UsageObserver struct {
 	fallbackStream                bool
 	prefix                        []byte
 	line, data                    []byte
+	eventName                     string
 	drop                          bool
 	start, stop, failed, badUsage bool
 	protocolInvalid               bool
@@ -181,8 +182,7 @@ func (o *UsageObserver) feed(p []byte) {
 		if len(o.line) < 256<<10 {
 			o.line = append(o.line, b)
 		} else {
-			o.drop = true
-			o.badUsage = true
+			o.dropCurrentSSEEvent()
 		}
 	}
 }
@@ -195,18 +195,59 @@ func (o *UsageObserver) sseLine() {
 		clear(o.data)
 		o.data = o.data[:0]
 		o.drop = false
+		o.eventName = ""
+		return
+	}
+	if o.drop {
+		return
+	}
+	if bytes.HasPrefix(line, []byte("event:")) {
+		name := strings.TrimSpace(string(line[6:]))
+		if len(name) > 128 {
+			o.dropCurrentSSEEvent()
+			return
+		}
+		o.eventName = name
 		return
 	}
 	if bytes.HasPrefix(line, []byte("data:")) {
 		part := bytes.TrimPrefix(line[5:], []byte{' '})
 		if len(o.data)+len(part)+1 > 256<<10 {
-			o.drop = true
-			o.badUsage = true
+			o.dropCurrentSSEEvent()
 			return
 		}
 		o.data = append(o.data, part...)
 		o.data = append(o.data, '\n')
 	}
+}
+
+func (o *UsageObserver) dropCurrentSSEEvent() {
+	o.drop = true
+	// Responses 的图像生成事件可能包含数 MiB 的 base64。它们不携带
+	// usage，跳过观察即可；原始字节仍由 HTTP 转发链路直接交付客户端。
+	if !o.imageGenerationSSEEvent() {
+		o.badUsage = true
+	}
+}
+
+func (o *UsageObserver) imageGenerationSSEEvent() bool {
+	if !o.responses {
+		return false
+	}
+	if strings.Contains(o.eventName, "image_generation") {
+		return true
+	}
+	// event 字段不是 SSE 必填项。兼容只发送 data 的上游，但仅检查事件
+	// 开头的小段元数据，避免扫描完整 base64。
+	for _, prefix := range [][]byte{o.data, o.line} {
+		if len(prefix) > 4<<10 {
+			prefix = prefix[:4<<10]
+		}
+		if bytes.Contains(prefix, []byte("image_generation")) {
+			return true
+		}
+	}
+	return false
 }
 func (o *UsageObserver) event(raw []byte) {
 	if o.openai {
