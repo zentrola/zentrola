@@ -2139,6 +2139,19 @@ test('没有服务商时操作引导只显示添加服务商', async ({ page }) 
 
 test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => {
   const state = await fixture(page)
+  state.models.push({
+    id: '73',
+    code: 'deepseek-v3-legacy',
+    name: 'DeepSeek V3 Legacy',
+    status: 'DISABLED',
+    inputModalities: ['TEXT'],
+    outputModalities: ['TEXT'],
+    remark: '',
+    publisherProviderId: '81',
+    publisherProviderName: 'DeepSeek',
+    createdAt: stamp,
+    updatedAt: stamp,
+  })
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
   await signIn(page)
 
@@ -2268,10 +2281,12 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   const existingProviderModelCode = modal(page).getByLabel('DeepSeek V4 Flash 的服务商模型编码')
   await expect(existingProviderModelCode).toHaveValue('deepseek-v4-flash')
   await expect(modal(page).getByText('Claude Sonnet', { exact: true })).toHaveCount(0)
-  await expect(modal(page).getByRole('checkbox', { name: '启用 Claude Sonnet 映射' })).toHaveCount(
-    0,
-  )
-  await expect(modal(page).getByText('已启用 1 / 1', { exact: true })).toBeVisible()
+  await expect(modal(page).getByText('DeepSeek V3 Legacy', { exact: true })).toBeVisible()
+  await expect(
+    modal(page).getByRole('checkbox', { name: '启用 DeepSeek V3 Legacy 映射' }),
+  ).not.toBeChecked()
+  await expect(modal(page).getByLabel('DeepSeek V3 Legacy 的服务商模型编码')).toBeDisabled()
+  await expect(modal(page).getByText('已启用 1 / 2', { exact: true })).toBeVisible()
   const editDialog = modal(page)
   const dialogBody = editDialog.locator('.modal-body')
   const dialogHeader = editDialog.locator('.modal-head')
