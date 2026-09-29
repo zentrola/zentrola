@@ -235,7 +235,7 @@ const onlySelectedMappings = ref(false)
 const enabledModels = computed(() => models.value.filter((model) => model.status === 'ACTIVE'))
 const availableMappingModels = computed(() => {
   if (editTarget.value?.type !== 'OFFICIAL') return enabledModels.value
-  return enabledModels.value.filter((model) => model.publisherProviderId === editTarget.value?.id)
+  return models.value.filter((model) => model.publisherProviderId === editTarget.value?.id)
 })
 const mappingByModelID = computed(
   () => new Map(form.mappings.map((mapping) => [mapping.modelId, mapping])),
