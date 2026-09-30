@@ -255,7 +255,6 @@ const filteredMappingRows = computed(() => {
 })
 const mappingFilterActive = computed(() => Boolean(mappingQuery.value.trim()))
 const selectedMappingRows = computed(() => mappingRows.value.filter((row) => row.mapping))
-const selectedMappingCount = computed(() => selectedMappingRows.value.length)
 const visibleSelectedMappingCount = computed(
   () => filteredMappingRows.value.filter((row) => row.mapping).length,
 )
@@ -1998,20 +1997,12 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
             </section>
             <section
               class="mapping-pane mapping-selected-pane"
-              aria-labelledby="selected-mappings-title"
+              :aria-label="t('providers.selectedMappingsTitle')"
             >
-              <header class="mapping-pane-head">
-                <strong id="selected-mappings-title">{{
-                  t('providers.selectedMappingsTitle')
-                }}</strong>
-                <span>
-                  {{
-                    t('providers.mappingSelectionCount', {
-                      count: selectedMappingCount,
-                      total: availableMappingModels.length,
-                    })
-                  }}
-                </span>
+              <header class="mapping-pane-head mapping-selected-head">
+                <strong>{{ t('providers.logicalModel') }}</strong>
+                <strong>{{ t('providers.upstreamModelCode') }}</strong>
+                <span aria-hidden="true"></span>
               </header>
               <div v-if="selectedMappingRows.length" class="mapping-selected-list">
                 <div
@@ -2026,7 +2017,6 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
                     <span>{{ row.model.code }}</span>
                   </span>
                   <label class="mapping-control">
-                    <span>{{ t('providers.upstreamModelCode') }}</span>
                     <input
                       :value="row.mapping?.upstreamModelCode ?? ''"
                       spellcheck="false"
@@ -4255,6 +4245,12 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   font-size: 11px;
   white-space: nowrap;
 }
+.mapping-selected-head {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr) 32px;
+  gap: 10px;
+  padding-right: 22px;
+}
 .mapping-toolbar {
   min-width: 0;
   padding: 10px 10px 8px;
@@ -4411,8 +4407,8 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
 }
 .mapping-selected-row {
   display: grid;
-  min-height: 66px;
-  grid-template-columns: minmax(130px, 0.8fr) minmax(180px, 1.2fr) 32px;
+  min-height: 52px;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr) 32px;
   align-items: center;
   gap: 10px;
   padding: 8px 10px 8px 12px;
@@ -4426,13 +4422,6 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   display: block;
   min-width: 0;
   margin: 0;
-}
-.mapping-control > span {
-  display: block;
-  margin-bottom: 4px;
-  color: #60788d;
-  font-size: 10px;
-  font-weight: 600;
 }
 .mapping-control input {
   width: 100%;
@@ -4676,19 +4665,6 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   }
   .mapping-pane {
     min-height: 260px;
-  }
-  .mapping-selected-row {
-    grid-template-columns: minmax(0, 1fr) 32px;
-    align-items: start;
-  }
-  .mapping-selected-model,
-  .mapping-control {
-    grid-column: 1;
-  }
-  .mapping-remove {
-    grid-column: 2;
-    grid-row: 1 / span 2;
-    align-self: center;
   }
 }
 </style>

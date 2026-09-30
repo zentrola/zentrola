@@ -2356,8 +2356,10 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   ).not.toBeChecked()
   await expect(modal(page).getByLabel('DeepSeek V3 Legacy 的服务商模型编码')).toHaveCount(0)
   await expect(modal(page).getByText('模型目录', { exact: true })).toBeVisible()
-  await expect(modal(page).getByText('已启用模型映射', { exact: true })).toBeVisible()
-  await expect(modal(page).getByText('已启用 1 / 2', { exact: true })).toBeVisible()
+  await expect(modal(page).getByText('已启用模型映射', { exact: true })).toHaveCount(0)
+  await expect(modal(page).getByText('模型名称', { exact: true })).toHaveCount(2)
+  await expect(modal(page).getByText('服务商编码', { exact: true })).toBeVisible()
+  await expect(modal(page).locator('.mapping-control > span')).toHaveCount(0)
   const editDialog = modal(page)
   const dialogBody = editDialog.locator('.modal-body')
   const dialogHeader = editDialog.locator('.modal-head')
@@ -2430,7 +2432,6 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   const claudeMappingCheckbox = dialog.getByRole('checkbox', {
     name: '启用 Claude Sonnet 映射',
   })
-  await expect(dialog.getByText('已启用 0 / 2', { exact: true })).toBeVisible()
   await expect(dialog.getByText('尚未启用模型，请从左侧模型目录中勾选。')).toBeVisible()
   const mappingSearch = dialog.getByRole('searchbox', { name: '搜索模型映射' })
   await expect(mappingSearch).toHaveAttribute(
@@ -2442,7 +2443,6 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await expect(mappingCheckbox).toHaveCount(0)
   await expect(claudeMappingCheckbox).toBeVisible()
   await expect(dialog.getByText('显示 1 个', { exact: true })).toBeVisible()
-  await expect(dialog.getByText('已启用 0 / 2', { exact: true })).toBeVisible()
   await mappingSearch.fill('不存在的模型')
   await expect(dialog.locator('.mapping-filter-empty')).toContainText('没有匹配的模型。')
   await dialog.getByRole('button', { name: '清除筛选', exact: true }).click()
