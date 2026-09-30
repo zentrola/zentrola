@@ -3815,8 +3815,8 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   overflow-y: hidden;
   scrollbar-gutter: auto;
 }
-:global(.modal-body.provider-model-modal-body) .provider-form {
-  height: 100%;
+:global(.modal-body.provider-model-modal-body .provider-form) {
+  height: min(640px, calc(100dvh - 200px));
   min-height: 0;
   grid-template-rows: auto minmax(0, 1fr);
 }
@@ -4272,7 +4272,6 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
 }
 .mapping-list {
   grid-row: 4;
-  max-height: min(46dvh, 420px);
   min-height: 0;
   min-width: 0;
   overflow-x: clip;
