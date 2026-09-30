@@ -532,6 +532,7 @@ export const i18n = createI18n({
         proxyEnabled: '启用代理',
         proxyHint: '仅该服务商的连接测试和模型调用使用此代理，默认直连。',
         proxyUrl: '代理服务器地址',
+        proxyProtocol: '代理协议',
         proxyUrlCredentialHint: '用户名和密码将加密保存',
         proxyCredentialsUpdate: '修改代理凭据',
         proxyCredentialsUpdateHint: '默认保留原用户名和密码；开启后请在代理地址中填写新凭据。',
