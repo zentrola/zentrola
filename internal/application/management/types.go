@@ -118,13 +118,16 @@ type ProviderProxyHeaderInput struct {
 	Value string `json:"value"`
 }
 type ProviderInput struct {
-	Name         string                     `json:"name" binding:"required"`
-	Website      string                     `json:"website"`
-	Endpoints    []ProviderEndpoint         `json:"endpoints" binding:"required"`
-	ProxyEnabled bool                       `json:"proxyEnabled"`
-	ProxyURL     string                     `json:"proxyUrl"`
-	ProxyHeaders []ProviderProxyHeaderInput `json:"proxyHeaders"`
-	Mappings     []ProviderMappingInput     `json:"mappings" binding:"required" allowempty:"true"`
+	Name         string             `json:"name" binding:"required"`
+	Website      string             `json:"website"`
+	Endpoints    []ProviderEndpoint `json:"endpoints" binding:"required"`
+	ProxyEnabled bool               `json:"proxyEnabled"`
+	ProxyURL     string             `json:"proxyUrl"`
+	// UpdateProxyCredentials 表示编辑服务商时使用 ProxyURL 中的新认证信息；
+	// 否则保留已加密保存的用户名和密码，只更新代理地址的其他部分。
+	UpdateProxyCredentials bool                       `json:"updateProxyCredentials"`
+	ProxyHeaders           []ProviderProxyHeaderInput `json:"proxyHeaders"`
+	Mappings               []ProviderMappingInput     `json:"mappings" binding:"required" allowempty:"true"`
 }
 type ProviderMappingInput struct {
 	ModelID           int64  `json:"modelId,string" binding:"required"`

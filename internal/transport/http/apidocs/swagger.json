@@ -7267,6 +7267,10 @@
                 "proxyUrl": {
                     "type": "string"
                 },
+                "updateProxyCredentials": {
+                    "description": "UpdateProxyCredentials 表示编辑服务商时使用 ProxyURL 中的新认证信息；\n否则保留已加密保存的用户名和密码，只更新代理地址的其他部分。",
+                    "type": "boolean"
+                },
                 "website": {
                     "type": "string"
                 }

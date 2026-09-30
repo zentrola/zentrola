@@ -345,14 +345,14 @@ func TestApplyProviderProxyPreservesMaskedSecrets(t *testing.T) {
 	}
 	updated, err := service.applyProviderProxy(created, ProviderInput{
 		ProxyEnabled: true,
-		ProxyURL:     *created.ProxyURL,
+		ProxyURL:     "https://******:******@new-proxy.example.com:8443",
 		ProxyHeaders: []ProviderProxyHeaderInput{{Key: "X-Proxy-Token", Value: ""}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(updated.ProxyURLSealed.Ciphertext) != "http://user:password@proxy.example.com:8080" {
-		t.Fatal("masked URL did not preserve the encrypted value")
+	if string(updated.ProxyURLSealed.Ciphertext) != "https://user:password@new-proxy.example.com:8443" {
+		t.Fatalf("masked URL did not preserve credentials while updating the address: %q", updated.ProxyURLSealed.Ciphertext)
 	}
 	values := map[string]string{}
 	if err := json.Unmarshal(updated.ProxyHeadersSealed.Ciphertext, &values); err != nil || values["X-Proxy-Token"] != "header-secret" {
@@ -364,5 +364,39 @@ func TestApplyProviderProxyPreservesMaskedSecrets(t *testing.T) {
 		ProxyHeaders: []ProviderProxyHeaderInput{{Key: "X-Renamed-Token", Value: ""}},
 	}); !errors.Is(err, errInvalidProviderProxy) {
 		t.Fatal("renamed header without a value was accepted")
+	}
+}
+
+func TestApplyProviderProxyUpdatesCredentialsOnlyWhenRequested(t *testing.T) {
+	service := &Service{cipher: providerTestCipher{}}
+	created, err := service.applyProviderProxy(Provider{ID: 81}, ProviderInput{
+		ProxyEnabled: true,
+		ProxyURL:     "http://user:password@proxy.example.com:8080",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := service.applyProviderProxy(created, ProviderInput{
+		ProxyEnabled:           true,
+		ProxyURL:               "http://new-user:new-password@proxy.example.com:8080",
+		UpdateProxyCredentials: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(updated.ProxyURLSealed.Ciphertext) != "http://new-user:new-password@proxy.example.com:8080" {
+		t.Fatalf("new proxy credentials were not saved: %q", updated.ProxyURLSealed.Ciphertext)
+	}
+
+	preserved, err := service.applyProviderProxy(updated, ProviderInput{
+		ProxyEnabled: true,
+		ProxyURL:     "http://proxy.example.com:9000",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(preserved.ProxyURLSealed.Ciphertext) != "http://new-user:new-password@proxy.example.com:9000" {
+		t.Fatalf("omitted proxy credentials were not preserved: %q", preserved.ProxyURLSealed.Ciphertext)
 	}
 }

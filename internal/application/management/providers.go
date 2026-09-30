@@ -238,17 +238,38 @@ func (s *Service) applyProviderProxy(current Provider, input ProviderInput) (Pro
 	}
 
 	proxyURL := strings.TrimSpace(input.ProxyURL)
-	normalized, display, ok := normalizeProxyURL(proxyURL)
+	normalized, _, ok := normalizeProxyURL(proxyURL)
 	if !ok || len(input.ProxyHeaders) > 32 {
+		return Provider{}, errInvalidProviderProxy
+	}
+	preserveSealedURL := false
+	if current.ProxyEnabled && current.ProxyURLSealed.KeyVersion > 0 && !input.UpdateProxyCredentials {
+		if current.ProxyURL != nil && proxyURL == *current.ProxyURL {
+			preserveSealedURL = true
+		} else {
+			plain, err := s.cipher.DecryptProviderProxy(current.ProxyURLSealed, proxyOwner(current.ID, "url"))
+			if err != nil {
+				return Provider{}, err
+			}
+			currentURL, currentErr := url.Parse(string(plain))
+			clear(plain)
+			updatedURL, updatedErr := url.Parse(normalized)
+			if currentErr != nil || updatedErr != nil {
+				return Provider{}, errInvalidProviderProxy
+			}
+			updatedURL.User = currentURL.User
+			normalized = strings.TrimSuffix(updatedURL.String(), "/")
+		}
+	}
+	normalized, display, ok := normalizeProxyURL(normalized)
+	if !ok {
 		return Provider{}, errInvalidProviderProxy
 	}
 	parsedProxyURL, _ := url.Parse(normalized)
 	if catalog.SOCKSProxyScheme(parsedProxyURL.Scheme) && len(input.ProxyHeaders) > 0 {
 		return Provider{}, errInvalidProviderProxy
 	}
-	if current.ProxyEnabled && current.ProxyURL != nil && proxyURL == *current.ProxyURL && current.ProxyURLSealed.KeyVersion > 0 {
-		// 管理端回传脱敏展示值表示 URL 未修改，保留原密文。
-	} else {
+	if !preserveSealedURL {
 		plain := []byte(normalized)
 		sealed, err := s.cipher.EncryptProviderProxy(plain, proxyOwner(current.ID, "url"))
 		clear(plain)
