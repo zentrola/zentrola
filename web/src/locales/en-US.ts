@@ -513,6 +513,7 @@ export default {
     proxyEnabled: 'Enable proxy',
     proxyHint: 'Only connection tests and model calls for this provider use the proxy.',
     proxyUrl: 'Proxy server URL',
+    proxyProtocol: 'Proxy protocol',
     proxyUrlCredentialHint: 'Usernames and passwords are stored encrypted',
     proxyCredentialsUpdate: 'Change proxy credentials',
     proxyCredentialsUpdateHint:

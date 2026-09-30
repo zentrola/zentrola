@@ -1855,14 +1855,17 @@ test('编辑服务商代理时默认保留凭据并可显式修改', async ({ pa
     name: '修改代理凭据',
     exact: true,
   })
+  const proxyProtocol = dialog.getByLabel('代理协议', { exact: true })
+  const proxyURLInput = dialog.getByLabel('代理服务器地址', { exact: true })
   await expect(credentialSwitch).not.toBeChecked()
-  await dialog
-    .getByLabel('代理服务器地址', { exact: true })
-    .fill('http://******:******@geo.miyaip.app:8002')
+  await expect(proxyProtocol).toHaveValue('http')
+  await proxyURLInput.fill('https://******:******@geo.miyaip.app:8002')
+  await expect(proxyProtocol).toHaveValue('https')
+  await expect(proxyURLInput).toHaveValue('******:******@geo.miyaip.app:8002')
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   expect(state.providerInputs.at(-1)).toEqual(
     expect.objectContaining({
-      proxyUrl: 'http://******:******@geo.miyaip.app:8002',
+      proxyUrl: 'https://******:******@geo.miyaip.app:8002',
       updateProxyCredentials: false,
     }),
   )
@@ -1871,13 +1874,16 @@ test('编辑服务商代理时默认保留凭据并可显式修改', async ({ pa
   dialog = page.getByRole('dialog', { name: '编辑服务商' })
   await dialog.getByRole('tab', { name: '代理配置', exact: true }).click()
   const proxyURL = dialog.getByLabel('代理服务器地址', { exact: true })
+  await expect(dialog.getByLabel('代理协议', { exact: true })).toHaveValue('https')
   await dialog.getByRole('switch', { name: '修改代理凭据', exact: true }).check()
-  await expect(proxyURL).toHaveValue('http://geo.miyaip.app:8002')
-  await proxyURL.fill('http://new-user:new-password@geo.miyaip.app:8002')
+  await expect(proxyURL).toHaveValue('geo.miyaip.app:8002')
+  await proxyURL.fill('socks5://new-user:new-password@geo.miyaip.app:8002')
+  await expect(proxyURL).toHaveValue('new-user:new-password@geo.miyaip.app:8002')
+  await expect(dialog.getByLabel('代理协议', { exact: true })).toHaveValue('socks5')
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   expect(state.providerInputs.at(-1)).toEqual(
     expect.objectContaining({
-      proxyUrl: 'http://new-user:new-password@geo.miyaip.app:8002',
+      proxyUrl: 'socks5://new-user:new-password@geo.miyaip.app:8002',
       updateProxyCredentials: true,
     }),
   )
@@ -2616,15 +2622,21 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   const proxyURLLabelBox = await dialog
       .locator('.proxy-url-row .provider-field-label')
       .boundingBox(),
+    proxyURLControlBox = await dialog.locator('.proxy-url-control').boundingBox(),
+    proxyProtocolBox = await dialog.getByLabel('代理协议', { exact: true }).boundingBox(),
     proxyURLInputBox = await dialog.getByLabel('代理服务器地址', { exact: true }).boundingBox()
   expect(proxyURLLabelBox).not.toBeNull()
+  expect(proxyURLControlBox).not.toBeNull()
+  expect(proxyProtocolBox).not.toBeNull()
   expect(proxyURLInputBox).not.toBeNull()
   expect(Math.abs(proxyURLLabelBox!.width - providerNameLabelBox!.width)).toBeLessThanOrEqual(1)
-  expect(Math.abs(proxyURLInputBox!.x - providerNameInputBox!.x)).toBeLessThanOrEqual(1)
+  expect(Math.abs(proxyURLControlBox!.x - providerNameInputBox!.x)).toBeLessThanOrEqual(1)
+  expect(Math.abs(proxyProtocolBox!.x - providerNameInputBox!.x)).toBeLessThanOrEqual(1)
+  expect(proxyURLInputBox!.x).toBeGreaterThan(proxyProtocolBox!.x + proxyProtocolBox!.width)
   const proxySwitchBox = await proxySwitch.boundingBox()
   expect(proxySwitchBox).not.toBeNull()
   expect(Math.abs(proxySwitchBox!.x - proxySwitchBoxBeforeEnable!.x)).toBeLessThanOrEqual(1)
-  expect(Math.abs(proxySwitchBox!.x - proxyURLInputBox!.x)).toBeLessThanOrEqual(1)
+  expect(Math.abs(proxySwitchBox!.x - proxyURLControlBox!.x)).toBeLessThanOrEqual(1)
   await dialog
     .getByLabel('代理服务器地址', { exact: true })
     .fill('http://proxy-user:proxy-password@proxy.example.com:8080')
@@ -2652,7 +2664,7 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   )
   const proxyHeaderBox = await dialog.locator('.proxy-header-field').first().boundingBox()
   expect(proxyHeaderBox).not.toBeNull()
-  expect(Math.abs(proxyHeaderBox!.x - proxyURLInputBox!.x)).toBeLessThanOrEqual(1)
+  expect(Math.abs(proxyHeaderBox!.x - proxyURLControlBox!.x)).toBeLessThanOrEqual(1)
   await dialog.getByLabel('KEY', { exact: true }).fill('X-Proxy-Token')
   await expect(dialog.getByLabel('VALUE', { exact: true })).toHaveAttribute('type', 'text')
   await dialog.getByLabel('VALUE', { exact: true }).fill('proxy-header-secret')

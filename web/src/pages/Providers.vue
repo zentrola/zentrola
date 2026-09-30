@@ -217,6 +217,8 @@ type ProxyHeaderDraft = {
   configured: boolean
   originalKey: string
 }
+const proxySchemes = ['http', 'https', 'socks5', 'socks5h'] as const
+type ProxyScheme = (typeof proxySchemes)[number]
 const form = reactive({
   name: '',
   website: '',
@@ -225,6 +227,7 @@ const form = reactive({
   openaiBaseUrl: '',
   openaiNetworkScope: 'PUBLIC' as ProviderNetworkScope,
   proxyEnabled: false,
+  proxyScheme: 'http' as ProxyScheme,
   proxyUrl: '',
   updateProxyCredentials: false,
   proxyHeaders: [] as ProxyHeaderDraft[],
@@ -328,6 +331,7 @@ function assignForm(provider: Provider | null, mappings: MappingDraft[] = []) {
       provider?.endpoints.find((endpoint) => endpoint.protocolType === 'OPENAI')?.networkScope ??
       'PUBLIC',
     proxyEnabled: provider?.proxyEnabled ?? false,
+    proxyScheme: proxySchemeFromURL(provider?.proxyUrl ?? ''),
     proxyUrl: provider?.proxyUrl ?? '',
     updateProxyCredentials: false,
     proxyHeaders: (provider?.proxyHeaders ?? []).map((header) => ({
@@ -367,6 +371,39 @@ function validProxyURL(value: string) {
   } catch {
     return false
   }
+}
+
+function splitProxyAddress(value: string, fallback: ProxyScheme) {
+  let address = value.trimStart()
+  let scheme = fallback
+  let match = /^(https?|socks5h?):\/\//i.exec(address)
+  while (match) {
+    const candidate = match[1].toLowerCase()
+    if (proxySchemes.includes(candidate as ProxyScheme)) scheme = candidate as ProxyScheme
+    address = address.slice(match[0].length)
+    match = /^(https?|socks5h?):\/\//i.exec(address)
+  }
+  return { scheme, address }
+}
+
+function proxySchemeFromURL(value: string): ProxyScheme {
+  return splitProxyAddress(value, 'http').scheme
+}
+
+const proxyAddress = computed({
+  get: () => splitProxyAddress(form.proxyUrl, form.proxyScheme).address,
+  set: (value: string) => {
+    const parsed = splitProxyAddress(value, form.proxyScheme)
+    form.proxyScheme = parsed.scheme
+    form.proxyUrl = `${parsed.scheme}://${parsed.address}`
+  },
+})
+
+function changeProxyScheme(event: Event) {
+  const scheme = (event.target as HTMLSelectElement).value as ProxyScheme
+  const address = proxyAddress.value
+  form.proxyScheme = scheme
+  form.proxyUrl = `${scheme}://${address}`
 }
 
 function proxyCredentialSignature(value: string | null) {
@@ -2150,12 +2187,24 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
                   >i</span
                 >
               </div>
-              <div class="provider-field-control">
+              <div class="provider-field-control proxy-url-control">
+                <select
+                  id="provider-proxy-scheme"
+                  :value="form.proxyScheme"
+                  :aria-label="t('providers.proxyProtocol')"
+                  :disabled="busy"
+                  @change="changeProxyScheme"
+                >
+                  <option value="http">HTTP</option>
+                  <option value="https">HTTPS</option>
+                  <option value="socks5">SOCKS5</option>
+                  <option value="socks5h">SOCKS5H</option>
+                </select>
                 <input
                   id="provider-proxy-url"
-                  v-model="form.proxyUrl"
+                  v-model="proxyAddress"
                   type="text"
-                  placeholder="socks5://username:password@proxy.example.com:1080"
+                  placeholder="username:password@proxy.example.com:1080"
                   autocomplete="off"
                   spellcheck="false"
                   :disabled="busy"
@@ -4158,6 +4207,11 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   display: flex;
   align-items: center;
   gap: 5px;
+}
+.proxy-url-control {
+  display: grid;
+  grid-template-columns: 124px minmax(0, 1fr);
+  gap: 8px;
 }
 .provider-field-help {
   position: relative;
