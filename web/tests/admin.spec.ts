@@ -2165,7 +2165,7 @@ test('服务商编辑模型列表在大量模型时可独立滚动', async ({ pa
   const providerRow = page.getByRole('row').filter({ hasText: 'DeepSeek' })
   await providerRow.getByRole('button', { name: '编辑', exact: true }).click()
 
-  const mappingList = modal(page).locator('.mapping-list')
+  const mappingList = modal(page).locator('.mapping-catalog-list')
   await expect(mappingList).toBeVisible()
   const dimensions = await mappingList.evaluate((element) => ({
     clientHeight: element.clientHeight,
@@ -2187,13 +2187,21 @@ test('服务商编辑模型列表在大量模型时可独立滚动', async ({ pa
     )
     .toBe(true)
   const listBox = (await mappingList.boundingBox())!
-  const lastRowBox = (await mappingList.locator('.mapping-row').last().boundingBox())!
+  const lastRowBox = (await mappingList.locator('.mapping-catalog-row').last().boundingBox())!
   expect(lastRowBox.y + lastRowBox.height).toBeLessThanOrEqual(listBox.y + listBox.height + 1)
   const bottomGap = await mappingList.evaluate((element) => {
     const editor = element.closest<HTMLElement>('.mapping-editor')!
     return editor.getBoundingClientRect().bottom - element.getBoundingClientRect().bottom
   })
   expect(bottomGap).toBeGreaterThanOrEqual(16)
+
+  await page.setViewportSize({ width: 700, height: 800 })
+  const mappingWorkspace = modal(page).locator('.mapping-workspace')
+  await expect(mappingWorkspace).toHaveCSS('grid-template-columns', /^\S+$/)
+  await expect(modal(page).locator('.mapping-editor')).toHaveCSS('overflow-y', 'auto')
+  const catalogBox = (await modal(page).locator('.mapping-catalog-pane').boundingBox())!
+  const selectedBox = (await modal(page).locator('.mapping-selected-pane').boundingBox())!
+  expect(selectedBox.y).toBeGreaterThan(catalogBox.y + catalogBox.height)
 })
 
 test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => {
@@ -2346,7 +2354,9 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await expect(
     modal(page).getByRole('checkbox', { name: '启用 DeepSeek V3 Legacy 映射' }),
   ).not.toBeChecked()
-  await expect(modal(page).getByLabel('DeepSeek V3 Legacy 的服务商模型编码')).toBeDisabled()
+  await expect(modal(page).getByLabel('DeepSeek V3 Legacy 的服务商模型编码')).toHaveCount(0)
+  await expect(modal(page).getByText('模型目录', { exact: true })).toBeVisible()
+  await expect(modal(page).getByText('已启用模型映射', { exact: true })).toBeVisible()
   await expect(modal(page).getByText('已启用 1 / 2', { exact: true })).toBeVisible()
   const editDialog = modal(page)
   const dialogBody = editDialog.locator('.modal-body')
@@ -2421,6 +2431,7 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
     name: '启用 Claude Sonnet 映射',
   })
   await expect(dialog.getByText('已启用 0 / 2', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('尚未启用模型，请从左侧模型目录中勾选。')).toBeVisible()
   const mappingSearch = dialog.getByRole('searchbox', { name: '搜索模型映射' })
   await expect(mappingSearch).toHaveAttribute(
     'placeholder',
@@ -2450,15 +2461,13 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await selectAllMappings.uncheck()
   await expect(mappingCheckbox).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   await expect(mappingCheckbox).toHaveCSS('border-top-style', 'none')
-  const mappingList = dialog.locator('.mapping-list')
+  const mappingList = dialog.locator('.mapping-catalog-list')
   await expect(mappingList).toHaveCSS('overflow-y', 'scroll')
   expect(
-    await mappingList.evaluate(
-      (element) => getComputedStyle(element, '::-webkit-scrollbar').width,
-    ),
+    await mappingList.evaluate((element) => getComputedStyle(element, '::-webkit-scrollbar').width),
   ).toBe('12px')
   await expect(dialog.locator('.modal-body')).toHaveCSS('overflow-y', 'hidden')
-  await expect(dialog.locator('.mapping-row').first()).toHaveCSS('min-height', '44px')
+  await expect(dialog.locator('.mapping-catalog-row').first()).toHaveCSS('min-height', '52px')
   const providerModelCode = dialog.getByLabel('DeepSeek V4 Flash 的服务商模型编码')
   await selectAllMappings.check()
   await expect(mappingCheckbox).toBeChecked()
@@ -2466,26 +2475,26 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await selectAllMappings.uncheck()
   await expect(mappingCheckbox).not.toBeChecked()
   await expect(claudeMappingCheckbox).not.toBeChecked()
-  await expect(providerModelCode).toBeDisabled()
+  await expect(providerModelCode).toHaveCount(0)
   await mappingCheckbox.check()
   await expect(mappingCheckbox).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   await expect(mappingCheckbox).toHaveCSS('border-top-style', 'none')
   await expect(selectAllMappings).toHaveJSProperty('indeterminate', true)
-  const selectedMappingsOnly = dialog.getByRole('button', { name: '仅看已选', exact: true })
-  await selectedMappingsOnly.click()
-  await expect(selectedMappingsOnly).toHaveAttribute('aria-pressed', 'true')
   await expect(mappingCheckbox).toBeVisible()
-  await expect(claudeMappingCheckbox).toHaveCount(0)
-  await selectedMappingsOnly.click()
   await expect(claudeMappingCheckbox).toBeVisible()
   await expect(providerModelCode).toBeEnabled()
   await expect(providerModelCode).toHaveValue('')
   await expect(providerModelCode).toHaveAttribute('placeholder', '默认为 deepseek-v4-flash')
+  await mappingSearch.fill('Claude')
+  await expect(mappingCheckbox).toHaveCount(0)
+  await expect(providerModelCode).toBeVisible()
+  await dialog.getByRole('button', { name: '清空模型映射搜索', exact: true }).click()
   await providerModelCode.fill('deepseek-v4-flash')
   await providerModelCode.blur()
   await expect(providerModelCode).toHaveValue('deepseek-v4-flash')
-  await mappingCheckbox.uncheck()
-  await expect(providerModelCode).toBeDisabled()
+  await dialog.getByRole('button', { name: '移除 DeepSeek V4 Flash 映射' }).click()
+  await expect(mappingCheckbox).not.toBeChecked()
+  await expect(providerModelCode).toHaveCount(0)
   await dialog.getByLabel('服务商名称').fill('自定义百炼')
   await dialog.getByLabel('官方网站').fill('https://www.aliyun.com')
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
