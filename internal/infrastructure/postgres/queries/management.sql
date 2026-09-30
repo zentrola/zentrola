@@ -140,6 +140,10 @@ SELECT EXISTS(
 );
 -- name: ManageProviderEndpoints :many
 SELECT * FROM provider_endpoint WHERE provider_id=$1 ORDER BY protocol_type;
+-- name: ManageProviderEndpointsByProviders :many
+SELECT * FROM provider_endpoint
+WHERE provider_id=ANY(sqlc.arg(provider_ids)::bigint[])
+ORDER BY provider_id,protocol_type;
 -- name: ManageCreateProvider :exec
 INSERT INTO provider(id,provider_code,provider_name,provider_type,official_website,proxy_enabled,proxy_url_display,proxy_url_ciphertext,proxy_url_nonce,proxy_url_key_version,proxy_header_names,proxy_headers_ciphertext,proxy_headers_nonce,proxy_headers_key_version,status,created_by,updated_by,created_at,updated_at)
 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$16,$17,$17);

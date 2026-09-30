@@ -152,7 +152,6 @@ func (d *Discoverer) Discover(ctx context.Context, source mgmt.ModelDiscoverySou
 			"upstream_url", requestSpec.URL,
 			"upstream_status", resp.StatusCode,
 			"response_bytes", len(data),
-			"response_body", string(data),
 		)
 		if resp.StatusCode != http.StatusOK {
 			result.Code = connectionStatusCode(resp.StatusCode)

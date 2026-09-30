@@ -52,7 +52,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 	goCommand, err := exec.LookPath("go")
 	if err != nil {
-		return errors.New("Go executable not found in PATH")
+		return errors.New("go executable not found in PATH")
 	}
 	npmCommand := ""
 	if component != "backend" {

@@ -276,6 +276,7 @@ func (s *managementSession) Providers(ctx context.Context, p mgmt.Page, provider
 		providerIDs = append(providerIDs, row.ID)
 	}
 	modelCounts := make(map[int64]int64, len(providerIDs))
+	endpoints := make(map[int64][]mgmt.ProviderEndpoint, len(providerIDs))
 	if len(providerIDs) > 0 {
 		countRows, err := s.q.ManageProviderModelCounts(ctx, providerIDs)
 		if err != nil {
@@ -284,14 +285,20 @@ func (s *managementSession) Providers(ctx context.Context, p mgmt.Page, provider
 		for _, row := range countRows {
 			modelCounts[row.ProviderID] = row.ModelCount
 		}
+		endpointRows, err := s.q.ManageProviderEndpointsByProviders(ctx, providerIDs)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range endpointRows {
+			endpoints[row.ProviderID] = append(endpoints[row.ProviderID], endpointView(row))
+		}
 	}
 	result := make([]mgmt.Provider, 0, len(rows))
 	for _, row := range rows {
 		provider := providerView(row)
 		provider.ModelCount = modelCounts[provider.ID]
-		provider.Endpoints, err = s.providerEndpoints(ctx, provider.ID)
-		if err != nil {
-			return nil, err
+		if values := endpoints[provider.ID]; values != nil {
+			provider.Endpoints = values
 		}
 		result = append(result, provider)
 	}

@@ -30,7 +30,7 @@ const (
 
 var (
 	errInvalidCredential    = errors.New("invalid Codex ChatGPT credential")
-	errAppServerUnavailable = errors.New("Codex app-server is unavailable")
+	errAppServerUnavailable = errors.New("codex app-server is unavailable")
 )
 
 type connectionFailure struct {
@@ -292,12 +292,12 @@ func (a *Adapter) refreshCredential(ctx context.Context, raw []byte, proxy *cata
 	if err != nil {
 		code, _ := a.ClassifyRefreshError(err)
 		return nil, mgmt.SubscriptionInspection{}, &connectionFailure{
-			code: code, cause: fmt.Errorf("Codex ChatGPT authentication failed: %w", err),
+			code: code, cause: fmt.Errorf("codex ChatGPT authentication failed: %w", err),
 		}
 	}
 	if account.Account == nil || account.Account.Type != "chatgpt" {
 		clear(updated)
-		return nil, mgmt.SubscriptionInspection{}, errors.New("Codex ChatGPT authentication failed")
+		return nil, mgmt.SubscriptionInspection{}, errors.New("codex ChatGPT authentication failed")
 	}
 	if account.Account.PlanType != "" {
 		inspection.PlanCode = account.Account.PlanType
@@ -516,7 +516,7 @@ func (c *rpcClient) call(ctx context.Context, id int64, method string, params an
 			continue
 		}
 		if response.Error != nil {
-			return fmt.Errorf("Codex app-server request failed (%d): %s", response.Error.Code, response.Error.Message)
+			return fmt.Errorf("codex app-server request failed (%d): %s", response.Error.Code, response.Error.Message)
 		}
 		if target == nil {
 			return nil
@@ -526,7 +526,7 @@ func (c *rpcClient) call(ctx context.Context, id int64, method string, params an
 		}
 		return nil
 	}
-	return errors.New("Codex app-server stopped unexpectedly")
+	return errors.New("codex app-server stopped unexpectedly")
 }
 
 func writeJSONLine(writer io.Writer, value any) error {

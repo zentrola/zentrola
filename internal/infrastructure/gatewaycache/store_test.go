@@ -254,6 +254,41 @@ func TestGatewayStoreCoalescesConcurrentCacheMisses(t *testing.T) {
 	}
 }
 
+func TestGatewayStoreSharedLoadSurvivesFirstRequestCancellation(t *testing.T) {
+	cache := &cacheStub{}
+	next := &blockingGatewayStore{started: make(chan struct{}, 1), release: make(chan struct{})}
+	store := NewGatewayStore(next, cache)
+	identity := appsec.PrincipalIdentity{ID: 12, AccessKeyID: 34}
+
+	firstCtx, cancelFirst := context.WithCancel(context.Background())
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := store.ResolveCandidates(firstCtx, identity, "model-a", gw.OpenAIProtocol)
+		firstDone <- err
+	}()
+	<-next.started
+
+	secondDone := make(chan error, 1)
+	go func() {
+		routes, err := store.ResolveCandidates(context.Background(), identity, "model-a", gw.OpenAIProtocol)
+		if err == nil && len(routes) != 1 {
+			err = errors.New("shared load returned no route")
+		}
+		secondDone <- err
+	}()
+	cancelFirst()
+	if err := <-firstDone; !errors.Is(err, context.Canceled) {
+		t.Fatalf("first request error = %v, want context cancellation", err)
+	}
+	close(next.release)
+	if err := <-secondDone; err != nil {
+		t.Fatalf("second request did not receive shared result: %v", err)
+	}
+	if calls := next.calls.Load(); calls != 1 {
+		t.Fatalf("database route resolution count = %d", calls)
+	}
+}
+
 func TestGatewayStoreDoesNotCoalesceAcrossGenerationChange(t *testing.T) {
 	cache := &cacheStub{generation: "old"}
 	next := &blockingGatewayStore{started: make(chan struct{}), release: make(chan struct{})}

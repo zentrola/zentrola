@@ -26,6 +26,26 @@ type StoreCache interface {
 	Clear(context.Context, string) bool
 }
 
+const coalescedLoadTimeout = 10 * time.Second
+
+func coalescedLoad(ctx context.Context, group *singleflight.Group, key string, load func(context.Context) (any, error)) (any, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	result := group.DoChan(key, func() (any, error) {
+		// 共享加载不绑定首个请求的取消信号，否则一个客户端断开会使同批请求全部失败。
+		loadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), coalescedLoadTimeout)
+		defer cancel()
+		return load(loadCtx)
+	})
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case completed := <-result:
+		return completed.Val, completed.Err
+	}
+}
+
 // KeyStore 为 Access Key 查询增加缓存，并在创建或撤销成功后失效 Gateway 缓存。
 type KeyStore struct {
 	next   appsec.KeyStore
@@ -69,38 +89,38 @@ func (s *KeyStore) Authenticate(ctx context.Context, hash []byte, now time.Time)
 	}
 	s.logger.InfoContext(ctx, "gateway identity cache missed; loading from database",
 		"cache_type", "identity", "cache_result", "miss")
-	load := func() (any, error) {
+	load := func(loadCtx context.Context) (any, error) {
 		// 等待同 Key 的并发加载期间，首个请求可能已经填充缓存。
-		cached, generation, hit := s.cache.GetIdentity(ctx, key)
+		cached, generation, hit := s.cache.GetIdentity(loadCtx, key)
 		if hit {
-			s.logger.InfoContext(ctx, "gateway identity obtained from cache after concurrent load",
+			s.logger.InfoContext(loadCtx, "gateway identity obtained from cache after concurrent load",
 				"cache_type", "identity", "cache_result", "hit",
 				"principal_id", cached.ID, "access_key_id", cached.AccessKeyID)
 			return cached, nil
 		}
-		value, loadErr := s.next.Authenticate(ctx, hash, now)
+		value, loadErr := s.next.Authenticate(loadCtx, hash, now)
 		if loadErr != nil {
 			return appsec.PrincipalIdentity{}, loadErr
 		}
-		if s.cache.SetIdentity(ctx, key, generation, value) {
-			s.logger.InfoContext(ctx, "gateway identity cached after database load",
+		if s.cache.SetIdentity(loadCtx, key, generation, value) {
+			s.logger.InfoContext(loadCtx, "gateway identity cached after database load",
 				"cache_type", "identity", "cache_result", "populated",
 				"principal_id", value.ID, "access_key_id", value.AccessKeyID)
 		} else {
-			s.logger.InfoContext(ctx, "gateway identity cache population skipped",
+			s.logger.InfoContext(loadCtx, "gateway identity cache population skipped",
 				"cache_type", "identity", "cache_result", "skipped",
 				"principal_id", value.ID, "access_key_id", value.AccessKeyID)
 		}
 		return value, nil
 	}
 	if generation == "" {
-		loaded, err := load()
+		loaded, err := load(ctx)
 		if err != nil {
 			return appsec.PrincipalIdentity{}, err
 		}
 		return loaded.(appsec.PrincipalIdentity), nil
 	}
-	loaded, err, _ := s.loads.Do(key+":"+generation, load)
+	loaded, err := coalescedLoad(ctx, &s.loads, key+":"+generation, load)
 	if err != nil {
 		return appsec.PrincipalIdentity{}, err
 	}
@@ -174,10 +194,10 @@ func (s *GatewayStore) ResolveCandidates(ctx context.Context, identity appsec.Pr
 		"cache_type", "routes", "cache_result", "miss",
 		"principal_id", identity.ID, "access_key_id", identity.AccessKeyID,
 		"model", model, "protocol", protocol)
-	load := func() (any, error) {
-		cached, generation, hit := s.cache.GetRoutes(ctx, key)
+	load := func(loadCtx context.Context) (any, error) {
+		cached, generation, hit := s.cache.GetRoutes(loadCtx, key)
 		if hit {
-			s.logger.InfoContext(ctx, "gateway routes obtained from cache after concurrent load",
+			s.logger.InfoContext(loadCtx, "gateway routes obtained from cache after concurrent load",
 				"cache_type", "routes", "cache_result", "hit",
 				"principal_id", identity.ID, "access_key_id", identity.AccessKeyID,
 				"model", model, "protocol", protocol, "candidate_count", len(cached))
@@ -185,29 +205,29 @@ func (s *GatewayStore) ResolveCandidates(ctx context.Context, identity appsec.Pr
 		}
 		next, candidateStore := s.next.(gw.CandidateStore)
 		if !candidateStore {
-			route, loadErr := s.next.Resolve(ctx, identity, model, protocol)
+			route, loadErr := s.next.Resolve(loadCtx, identity, model, protocol)
 			if loadErr != nil {
 				return nil, loadErr
 			}
 			value := []gw.Route{route}
-			s.logRoutePopulation(ctx, key, generation, value, identity, model, protocol)
+			s.logRoutePopulation(loadCtx, key, generation, value, identity, model, protocol)
 			return value, nil
 		}
-		value, loadErr := next.ResolveCandidates(ctx, identity, model, protocol)
+		value, loadErr := next.ResolveCandidates(loadCtx, identity, model, protocol)
 		if loadErr != nil {
 			return nil, loadErr
 		}
-		s.logRoutePopulation(ctx, key, generation, value, identity, model, protocol)
+		s.logRoutePopulation(loadCtx, key, generation, value, identity, model, protocol)
 		return value, nil
 	}
 	if generation == "" {
-		loaded, err := load()
+		loaded, err := load(ctx)
 		if err != nil {
 			return nil, err
 		}
 		return loaded.([]gw.Route), nil
 	}
-	loaded, err, _ := s.routeLoads.Do(key+":"+generation, load)
+	loaded, err := coalescedLoad(ctx, &s.routeLoads, key+":"+generation, load)
 	if err != nil {
 		return nil, err
 	}
@@ -227,10 +247,10 @@ func (s *GatewayStore) Models(ctx context.Context, identity appsec.PrincipalIden
 	s.logger.InfoContext(ctx, "gateway model list cache missed; loading from database",
 		"cache_type", "models", "cache_result", "miss",
 		"principal_id", identity.ID, "access_key_id", identity.AccessKeyID)
-	load := func() (any, error) {
-		cached, generation, hit := s.cache.GetModels(ctx, key)
+	load := func(loadCtx context.Context) (any, error) {
+		cached, generation, hit := s.cache.GetModels(loadCtx, key)
 		if hit {
-			s.logger.InfoContext(ctx, "gateway model list obtained from cache after concurrent load",
+			s.logger.InfoContext(loadCtx, "gateway model list obtained from cache after concurrent load",
 				"cache_type", "models", "cache_result", "hit",
 				"principal_id", identity.ID, "access_key_id", identity.AccessKeyID,
 				"model_count", len(cached))
@@ -240,30 +260,30 @@ func (s *GatewayStore) Models(ctx context.Context, identity appsec.PrincipalIden
 		if !modelStore {
 			return nil, gw.ErrUnavailable
 		}
-		value, loadErr := next.Models(ctx, identity)
+		value, loadErr := next.Models(loadCtx, identity)
 		if loadErr != nil {
 			return nil, loadErr
 		}
-		if s.cache.SetModels(ctx, key, generation, value) {
-			s.logger.InfoContext(ctx, "gateway model list cached after database load",
+		if s.cache.SetModels(loadCtx, key, generation, value) {
+			s.logger.InfoContext(loadCtx, "gateway model list cached after database load",
 				"cache_type", "models", "cache_result", "populated",
 				"principal_id", identity.ID, "access_key_id", identity.AccessKeyID,
 				"model_count", len(value))
 		} else {
-			s.logger.InfoContext(ctx, "gateway model list cache population skipped",
+			s.logger.InfoContext(loadCtx, "gateway model list cache population skipped",
 				"cache_type", "models", "cache_result", "skipped",
 				"principal_id", identity.ID, "access_key_id", identity.AccessKeyID)
 		}
 		return value, nil
 	}
 	if generation == "" {
-		loaded, err := load()
+		loaded, err := load(ctx)
 		if err != nil {
 			return nil, err
 		}
 		return loaded.([]gw.Model), nil
 	}
-	loaded, err, _ := s.modelLoads.Do(key+":"+generation, load)
+	loaded, err := coalescedLoad(ctx, &s.modelLoads, key+":"+generation, load)
 	if err != nil {
 		return nil, err
 	}

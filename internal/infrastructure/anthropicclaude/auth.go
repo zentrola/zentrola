@@ -222,7 +222,7 @@ func (a *Adapter) readUsage(ctx context.Context, token string, proxy *catalog.Ou
 	defer response.Body.Close()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
-		return usageResponse{}, connectionError(usageStatusCode(response.StatusCode), fmt.Errorf("Claude usage request failed with HTTP %d", response.StatusCode))
+		return usageResponse{}, connectionError(usageStatusCode(response.StatusCode), fmt.Errorf("claude usage request failed with HTTP %d", response.StatusCode))
 	}
 	var usage usageResponse
 	decoder := json.NewDecoder(io.LimitReader(response.Body, 1<<20))

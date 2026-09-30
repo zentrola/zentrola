@@ -112,10 +112,6 @@ func EndpointDialContext(dialer *net.Dialer, networkScope string) func(context.C
 	return endpointDialContext(dialer, resolver, networkScope)
 }
 
-func publicDialContext(dialer *net.Dialer, resolver ipResolver) func(context.Context, string, string) (net.Conn, error) {
-	return endpointDialContext(dialer, resolver, catalog.NetworkScopePublic)
-}
-
 func endpointDialContext(dialer *net.Dialer, resolver ipResolver, networkScope string) func(context.Context, string, string) (net.Conn, error) {
 	return func(ctx context.Context, network, address string) (net.Conn, error) {
 		host, port, err := net.SplitHostPort(address)

@@ -23,21 +23,23 @@ import (
 )
 
 type SecurityHandlers struct {
-	Admin        *appsec.AdminService
-	Keys         *appsec.Keys
-	Management   *mgmt.Service
-	Gateway      *GatewayHandler
-	OpenAI       *GatewayHandler
-	ActiveModels gw.ActiveModelReader
-	Usage        *usageapp.QueryService
-	UsageWriter  *usageapp.Writer
-	logger       *slog.Logger
+	Admin           *appsec.AdminService
+	Keys            *appsec.Keys
+	Management      *mgmt.Service
+	Gateway         *GatewayHandler
+	OpenAI          *GatewayHandler
+	ActiveModels    gw.ActiveModelReader
+	Usage           *usageapp.QueryService
+	UsageWriter     *usageapp.Writer
+	BodyReadTimeout time.Duration
+	logger          *slog.Logger
 }
 type adminIdentityKey struct{}
 type principalIdentityKey struct{}
 
 func (s *SecurityHandlers) mount(r chi.Router) {
 	r.Route("/api/v1", func(api chi.Router) {
+		api.Use(bodyReadDeadline(s.BodyReadTimeout))
 		api.Use(func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Cache-Control", "no-store")
@@ -176,6 +178,22 @@ func (s *SecurityHandlers) mount(r chi.Router) {
 			s.OpenAI.ServeHTTP(w, r)
 		})
 	})
+}
+
+func bodyReadDeadline(timeout time.Duration) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if timeout <= 0 || r.Body == nil || r.Body == http.NoBody {
+				next.ServeHTTP(w, r)
+				return
+			}
+			controller := http.NewResponseController(w)
+			if err := controller.SetReadDeadline(time.Now().Add(timeout)); err == nil {
+				defer controller.SetReadDeadline(time.Time{})
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func (s *SecurityHandlers) login(w http.ResponseWriter, r *http.Request) {
@@ -402,7 +420,7 @@ func decodeRequest[T any](w http.ResponseWriter, r *http.Request) (T, bool) {
 		securityError(w, r, appsec.ErrInvalidArgument)
 		return input, false
 	}
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, requestBodyLimit(any(&input))))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&input); err != nil {
 		securityError(w, r, appsec.ErrInvalidArgument)
@@ -426,6 +444,18 @@ func decodeRequest[T any](w http.ResponseWriter, r *http.Request) (T, bool) {
 		return input, false
 	}
 	return input, true
+}
+
+func requestBodyLimit(payload any) int64 {
+	const defaultLimit int64 = 16 << 10
+	const credentialLimit int64 = 512 << 10
+	switch payload.(type) {
+	case *CreateResourceRequest, *UpdateCredentialRequest:
+		// Credential 解码后最多允许 64 KiB；JSON 转义可能显著放大线上字节数。
+		return credentialLimit
+	default:
+		return defaultLimit
+	}
 }
 
 func securityError(w http.ResponseWriter, r *http.Request, err error) {
