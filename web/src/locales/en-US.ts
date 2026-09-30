@@ -514,6 +514,13 @@ export default {
     proxyHint: 'Only connection tests and model calls for this provider use the proxy.',
     proxyUrl: 'Proxy server URL',
     proxyUrlCredentialHint: 'Usernames and passwords are stored encrypted',
+    proxyCredentialsUpdate: 'Change proxy credentials',
+    proxyCredentialsUpdateHint:
+      'Existing credentials are kept by default. Turn this on to enter new credentials in the proxy URL.',
+    proxyCredentialsUpdateRequired:
+      'Turn on “Change proxy credentials” before changing the proxy username or password.',
+    proxyCredentialsRequired:
+      'Enter a new username or password in the proxy URL after enabling credential changes.',
     proxyUrlInvalid:
       'Enter a valid HTTP, HTTPS, or SOCKS5 proxy URL without a path, query string, or fragment.',
     proxyHeaders: 'Proxy headers',

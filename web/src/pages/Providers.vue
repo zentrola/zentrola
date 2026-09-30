@@ -226,6 +226,7 @@ const form = reactive({
   openaiNetworkScope: 'PUBLIC' as ProviderNetworkScope,
   proxyEnabled: false,
   proxyUrl: '',
+  updateProxyCredentials: false,
   proxyHeaders: [] as ProxyHeaderDraft[],
   mappings: [] as MappingDraft[],
 })
@@ -328,6 +329,7 @@ function assignForm(provider: Provider | null, mappings: MappingDraft[] = []) {
       'PUBLIC',
     proxyEnabled: provider?.proxyEnabled ?? false,
     proxyUrl: provider?.proxyUrl ?? '',
+    updateProxyCredentials: false,
     proxyHeaders: (provider?.proxyHeaders ?? []).map((header) => ({
       key: header.key,
       value: '',
@@ -365,6 +367,51 @@ function validProxyURL(value: string) {
   } catch {
     return false
   }
+}
+
+function proxyCredentialSignature(value: string | null) {
+  if (!value) return ''
+  try {
+    const parsed = new URL(value.trim())
+    if (!parsed.username && !parsed.password) return ''
+    return `${parsed.username}\u0000${parsed.password}`
+  } catch {
+    return ''
+  }
+}
+
+function proxyURLWithoutCredentials(value: string) {
+  try {
+    const parsed = new URL(value.trim())
+    parsed.username = ''
+    parsed.password = ''
+    return parsed.toString().replace(/\/$/, '')
+  } catch {
+    return value
+  }
+}
+
+function proxyURLWithOriginalCredentials(value: string, original: string | null) {
+  if (!original) return value
+  try {
+    const parsed = new URL(value.trim())
+    const originalParsed = new URL(original)
+    parsed.username = originalParsed.username
+    parsed.password = originalParsed.password
+    return parsed.toString().replace(/\/$/, '')
+  } catch {
+    return value
+  }
+}
+
+const canUpdateProxyCredentials = computed(() => Boolean(editTarget.value?.proxyEnabled))
+
+function toggleProxyCredentialUpdate(event: Event) {
+  const checked = (event.target as HTMLInputElement).checked
+  form.updateProxyCredentials = checked
+  form.proxyUrl = checked
+    ? proxyURLWithoutCredentials(form.proxyUrl)
+    : proxyURLWithOriginalCredentials(form.proxyUrl, editTarget.value?.proxyUrl ?? null)
 }
 
 function isSocksProxyURL(value: string) {
@@ -1280,6 +1327,7 @@ function save() {
     endpoints: endpointDrafts.filter((endpoint) => endpoint.baseUrl),
     proxyEnabled: form.proxyEnabled,
     proxyUrl: form.proxyEnabled ? form.proxyUrl.trim() : '',
+    updateProxyCredentials: form.proxyEnabled && (!editTarget.value || form.updateProxyCredentials),
     proxyHeaders:
       form.proxyEnabled && !socksProxy
         ? form.proxyHeaders.map((header) => ({ key: header.key.trim(), value: header.value }))
@@ -1298,6 +1346,19 @@ function save() {
   else if (!input.endpoints.length) validation = t('providers.endpointRequired')
   else if (input.proxyEnabled && !validProxyURL(input.proxyUrl))
     validation = t('providers.proxyUrlInvalid')
+  else if (
+    input.proxyEnabled &&
+    editTarget.value?.proxyEnabled &&
+    !form.updateProxyCredentials &&
+    proxyCredentialSignature(input.proxyUrl) !== proxyCredentialSignature(editTarget.value.proxyUrl)
+  )
+    validation = t('providers.proxyCredentialsUpdateRequired')
+  else if (
+    input.proxyEnabled &&
+    form.updateProxyCredentials &&
+    !proxyCredentialSignature(input.proxyUrl)
+  )
+    validation = t('providers.proxyCredentialsRequired')
   else if (input.proxyEnabled && !socksProxy && !validProxyHeaders())
     validation = t('providers.proxyHeadersInvalid')
   else if (
@@ -2099,6 +2160,29 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
                   spellcheck="false"
                   :disabled="busy"
                 />
+              </div>
+            </div>
+            <div
+              v-if="canUpdateProxyCredentials"
+              class="provider-field-row proxy-switch-row proxy-credential-update-row"
+            >
+              <label class="provider-field-label" for="provider-proxy-credentials-update">{{
+                t('providers.proxyCredentialsUpdate')
+              }}</label>
+              <div class="provider-field-control proxy-switch-field">
+                <span class="proxy-switch-control">
+                  <input
+                    id="provider-proxy-credentials-update"
+                    :checked="form.updateProxyCredentials"
+                    type="checkbox"
+                    role="switch"
+                    :aria-label="t('providers.proxyCredentialsUpdate')"
+                    :title="t('providers.proxyCredentialsUpdateHint')"
+                    :disabled="busy"
+                    @change="toggleProxyCredentialUpdate"
+                  />
+                  <span class="proxy-switch-track" aria-hidden="true"></span>
+                </span>
               </div>
             </div>
             <p v-if="isSocksProxyURL(form.proxyUrl)" class="proxy-socks-hint">
