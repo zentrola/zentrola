@@ -2171,10 +2171,24 @@ test('服务商编辑模型列表在大量模型时可独立滚动', async ({ pa
     clientHeight: element.clientHeight,
     scrollHeight: element.scrollHeight,
   }))
+  expect(dimensions.clientHeight).toBeLessThanOrEqual(640)
   expect(dimensions.scrollHeight).toBeGreaterThan(dimensions.clientHeight)
   await mappingList.hover()
   await page.mouse.wheel(0, 600)
   await expect.poll(() => mappingList.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
+  await mappingList.evaluate((element) => {
+    element.scrollTop = element.scrollHeight
+  })
+  await expect
+    .poll(() =>
+      mappingList.evaluate(
+        (element) => element.scrollTop + element.clientHeight >= element.scrollHeight - 1,
+      ),
+    )
+    .toBe(true)
+  const listBox = (await mappingList.boundingBox())!
+  const lastRowBox = (await mappingList.locator('.mapping-row').last().boundingBox())!
+  expect(lastRowBox.y + lastRowBox.height).toBeLessThanOrEqual(listBox.y + listBox.height + 1)
 })
 
 test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => {
