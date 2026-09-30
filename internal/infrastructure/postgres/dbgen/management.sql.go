@@ -811,7 +811,7 @@ func (q *Queries) ManageGroupMembers(ctx context.Context, arg ManageGroupMembers
 }
 
 const manageGroupModels = `-- name: ManageGroupModels :many
-SELECT m.id, m.is_deleted, m.status, m.model_code, m.display_name, m.input_modalities, m.output_modalities, m.remark, m.created_by, m.updated_by, m.created_at, m.updated_at, m.publisher_provider_id,p.provider_name AS publisher_provider_name
+SELECT m.id, m.is_deleted, m.status, m.model_code, m.display_name, m.publisher_provider_id, m.input_modalities, m.output_modalities, m.remark, m.created_by, m.updated_by, m.created_at, m.updated_at,p.provider_name AS publisher_provider_name
 FROM model m
 JOIN principal_group_model_permission g ON g.model_id=m.id
 LEFT JOIN provider p ON p.id=m.publisher_provider_id
@@ -830,6 +830,7 @@ type ManageGroupModelsRow struct {
 	Status                string
 	ModelCode             string
 	DisplayName           string
+	PublisherProviderID   *int64
 	InputModalities       []byte
 	OutputModalities      []byte
 	Remark                string
@@ -837,7 +838,6 @@ type ManageGroupModelsRow struct {
 	UpdatedBy             string
 	CreatedAt             pgtype.Timestamptz
 	UpdatedAt             pgtype.Timestamptz
-	PublisherProviderID   *int64
 	PublisherProviderName *string
 }
 
@@ -856,6 +856,7 @@ func (q *Queries) ManageGroupModels(ctx context.Context, arg ManageGroupModelsPa
 			&i.Status,
 			&i.ModelCode,
 			&i.DisplayName,
+			&i.PublisherProviderID,
 			&i.InputModalities,
 			&i.OutputModalities,
 			&i.Remark,
@@ -863,7 +864,6 @@ func (q *Queries) ManageGroupModels(ctx context.Context, arg ManageGroupModelsPa
 			&i.UpdatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.PublisherProviderID,
 			&i.PublisherProviderName,
 		); err != nil {
 			return nil, err
@@ -1182,7 +1182,7 @@ func (q *Queries) ManageMembershipExists(ctx context.Context, arg ManageMembersh
 }
 
 const manageModel = `-- name: ManageModel :one
-SELECT m.id, m.is_deleted, m.status, m.model_code, m.display_name, m.input_modalities, m.output_modalities, m.remark, m.created_by, m.updated_by, m.created_at, m.updated_at, m.publisher_provider_id,p.provider_name AS publisher_provider_name
+SELECT m.id, m.is_deleted, m.status, m.model_code, m.display_name, m.publisher_provider_id, m.input_modalities, m.output_modalities, m.remark, m.created_by, m.updated_by, m.created_at, m.updated_at,p.provider_name AS publisher_provider_name
 FROM model m
 LEFT JOIN provider p ON p.id=m.publisher_provider_id
 WHERE m.id=$1 AND m.is_deleted=false
@@ -1194,6 +1194,7 @@ type ManageModelRow struct {
 	Status                string
 	ModelCode             string
 	DisplayName           string
+	PublisherProviderID   *int64
 	InputModalities       []byte
 	OutputModalities      []byte
 	Remark                string
@@ -1201,7 +1202,6 @@ type ManageModelRow struct {
 	UpdatedBy             string
 	CreatedAt             pgtype.Timestamptz
 	UpdatedAt             pgtype.Timestamptz
-	PublisherProviderID   *int64
 	PublisherProviderName *string
 }
 
@@ -1214,6 +1214,7 @@ func (q *Queries) ManageModel(ctx context.Context, id int64) (ManageModelRow, er
 		&i.Status,
 		&i.ModelCode,
 		&i.DisplayName,
+		&i.PublisherProviderID,
 		&i.InputModalities,
 		&i.OutputModalities,
 		&i.Remark,
@@ -1221,7 +1222,6 @@ func (q *Queries) ManageModel(ctx context.Context, id int64) (ManageModelRow, er
 		&i.UpdatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.PublisherProviderID,
 		&i.PublisherProviderName,
 	)
 	return i, err
@@ -1249,7 +1249,7 @@ func (q *Queries) ManageModelStatus(ctx context.Context, arg ManageModelStatusPa
 }
 
 const manageModels = `-- name: ManageModels :many
-SELECT m.id, m.is_deleted, m.status, m.model_code, m.display_name, m.input_modalities, m.output_modalities, m.remark, m.created_by, m.updated_by, m.created_at, m.updated_at, m.publisher_provider_id,p.provider_name AS publisher_provider_name
+SELECT m.id, m.is_deleted, m.status, m.model_code, m.display_name, m.publisher_provider_id, m.input_modalities, m.output_modalities, m.remark, m.created_by, m.updated_by, m.created_at, m.updated_at,p.provider_name AS publisher_provider_name
 FROM model m
 LEFT JOIN provider p ON p.id=m.publisher_provider_id
 WHERE m.is_deleted=false
@@ -1271,6 +1271,7 @@ type ManageModelsRow struct {
 	Status                string
 	ModelCode             string
 	DisplayName           string
+	PublisherProviderID   *int64
 	InputModalities       []byte
 	OutputModalities      []byte
 	Remark                string
@@ -1278,7 +1279,6 @@ type ManageModelsRow struct {
 	UpdatedBy             string
 	CreatedAt             pgtype.Timestamptz
 	UpdatedAt             pgtype.Timestamptz
-	PublisherProviderID   *int64
 	PublisherProviderName *string
 }
 
@@ -1297,6 +1297,7 @@ func (q *Queries) ManageModels(ctx context.Context, arg ManageModelsParams) ([]M
 			&i.Status,
 			&i.ModelCode,
 			&i.DisplayName,
+			&i.PublisherProviderID,
 			&i.InputModalities,
 			&i.OutputModalities,
 			&i.Remark,
@@ -1304,7 +1305,6 @@ func (q *Queries) ManageModels(ctx context.Context, arg ManageModelsParams) ([]M
 			&i.UpdatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.PublisherProviderID,
 			&i.PublisherProviderName,
 		); err != nil {
 			return nil, err
@@ -1470,8 +1470,43 @@ func (q *Queries) ManageProviderEndpoints(ctx context.Context, providerID int64)
 	return items, nil
 }
 
+const manageProviderEndpointsByProviders = `-- name: ManageProviderEndpointsByProviders :many
+SELECT provider_id, protocol_type, base_url, created_by, updated_by, created_at, updated_at, network_scope FROM provider_endpoint
+WHERE provider_id=ANY($1::bigint[])
+ORDER BY provider_id,protocol_type
+`
+
+func (q *Queries) ManageProviderEndpointsByProviders(ctx context.Context, providerIds []int64) ([]ProviderEndpoint, error) {
+	rows, err := q.db.Query(ctx, manageProviderEndpointsByProviders, providerIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ProviderEndpoint{}
+	for rows.Next() {
+		var i ProviderEndpoint
+		if err := rows.Scan(
+			&i.ProviderID,
+			&i.ProtocolType,
+			&i.BaseUrl,
+			&i.CreatedBy,
+			&i.UpdatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.NetworkScope,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const manageProviderMappings = `-- name: ManageProviderMappings :many
-SELECT id, is_deleted, provider_id, model_id, upstream_model_code, created_by, updated_by, created_at, updated_at, priority FROM provider_model
+SELECT id, is_deleted, provider_id, model_id, upstream_model_code, priority, created_by, updated_by, created_at, updated_at FROM provider_model
 WHERE provider_id=$1 AND is_deleted=false
 ORDER BY priority,id
 `
@@ -1491,11 +1526,11 @@ func (q *Queries) ManageProviderMappings(ctx context.Context, providerID int64) 
 			&i.ProviderID,
 			&i.ModelID,
 			&i.UpstreamModelCode,
+			&i.Priority,
 			&i.CreatedBy,
 			&i.UpdatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.Priority,
 		); err != nil {
 			return nil, err
 		}
@@ -1643,7 +1678,7 @@ func (q *Queries) ManageRemoveMember(ctx context.Context, arg ManageRemoveMember
 }
 
 const manageResource = `-- name: ManageResource :one
-SELECT id, is_deleted, provider_id, resource_name, credential_ciphertext, credential_nonce, key_version, created_by, updated_by, created_at, updated_at, runtime_status, blocked_reason, blocked_at, last_error_at, last_http_status, last_error_code, auth_type, auth_adapter, subscription_type, plan_code, external_account_ref, priority, effective_at, expires_at, quota_status, quota_checked_at, quota_resets_at, credential_refreshed_at, credential_expires_at FROM provider_credential WHERE id=$1 AND is_deleted=false
+SELECT id, is_deleted, provider_id, resource_name, credential_ciphertext, credential_nonce, runtime_status, blocked_reason, blocked_at, last_error_at, last_http_status, last_error_code, auth_type, auth_adapter, subscription_type, plan_code, external_account_ref, priority, effective_at, expires_at, quota_status, quota_checked_at, quota_resets_at, credential_refreshed_at, credential_expires_at, key_version, created_by, updated_by, created_at, updated_at FROM provider_credential WHERE id=$1 AND is_deleted=false
 `
 
 func (q *Queries) ManageResource(ctx context.Context, id int64) (ProviderCredential, error) {
@@ -1656,11 +1691,6 @@ func (q *Queries) ManageResource(ctx context.Context, id int64) (ProviderCredent
 		&i.ResourceName,
 		&i.CredentialCiphertext,
 		&i.CredentialNonce,
-		&i.KeyVersion,
-		&i.CreatedBy,
-		&i.UpdatedBy,
-		&i.CreatedAt,
-		&i.UpdatedAt,
 		&i.RuntimeStatus,
 		&i.BlockedReason,
 		&i.BlockedAt,
@@ -1680,6 +1710,11 @@ func (q *Queries) ManageResource(ctx context.Context, id int64) (ProviderCredent
 		&i.QuotaResetsAt,
 		&i.CredentialRefreshedAt,
 		&i.CredentialExpiresAt,
+		&i.KeyVersion,
+		&i.CreatedBy,
+		&i.UpdatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

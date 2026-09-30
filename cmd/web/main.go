@@ -217,7 +217,7 @@ func run(options webOptions) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := server.Shutdown(shutdownCtx); err != nil {
-			return errors.New("Admin Web shutdown timed out")
+			return errors.New("admin web shutdown timed out")
 		}
 		return <-done
 	}

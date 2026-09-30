@@ -38,13 +38,13 @@ func TestDiscoverDeepSeekModels(t *testing.T) {
 		t.Fatalf("unexpected discovery: %+v %+v", models, result)
 	}
 	output := logs.String()
-	for _, expected := range []string{"official model catalog response", `"provider_code":"deepseek-official"`, `"catalog_adapter":"deepseek"`, `"upstream_status":200`, `"response_body":"{\"object\":\"list\"`} {
+	for _, expected := range []string{"official model catalog response", `"provider_code":"deepseek-official"`, `"catalog_adapter":"deepseek"`, `"upstream_status":200`, `"response_bytes":`} {
 		if !strings.Contains(output, expected) {
 			t.Fatalf("discovery response log missing %q: %s", expected, output)
 		}
 	}
-	if strings.Contains(output, "test-secret") {
-		t.Fatalf("discovery response log leaked credential: %s", output)
+	if strings.Contains(output, "test-secret") || strings.Contains(output, "deepseek-v4-flash") || strings.Contains(output, "response_body") {
+		t.Fatalf("discovery response log leaked credential or response content: %s", output)
 	}
 }
 

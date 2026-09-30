@@ -13,6 +13,7 @@ func TestConfigValidation(t *testing.T) {
 		{"wildcard origin", "CORS_ALLOWED_ORIGINS", "*", "CORS_ALLOWED_ORIGINS"},
 		{"origin path", "CORS_ALLOWED_ORIGINS", "http://localhost:5173/path", "CORS_ALLOWED_ORIGINS"},
 		{"unbounded shutdown", "SHUTDOWN_TIMEOUT", "0s", "SHUTDOWN_TIMEOUT"},
+		{"unbounded body read", "HTTP_BODY_READ_TIMEOUT", "0s", "HTTP_BODY_READ_TIMEOUT"},
 		{"invalid pool lower bound", "POSTGRES_MAX_CONNS", "1", "POSTGRES_MAX_CONNS"},
 		{"invalid pool zero", "POSTGRES_MAX_CONNS", "0", "POSTGRES_MAX_CONNS"},
 		{"invalid redis port", "REDIS_PORT", "0", "REDIS_PORT"},
@@ -48,6 +49,21 @@ func TestConfigValidation(t *testing.T) {
 				t.Fatalf("expected %s error, got %v", tt.want, err)
 			}
 		})
+	}
+}
+
+func TestHTTPBodyReadTimeoutDefault(t *testing.T) {
+	cfg, err := parse(func(key string) (string, bool) {
+		if key == "POSTGRES_PASSWORD" {
+			return "test-only", true
+		}
+		return "", false
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.BodyReadTimeout != 30*time.Second {
+		t.Fatalf("body read timeout = %s, want 30s", cfg.BodyReadTimeout)
 	}
 }
 

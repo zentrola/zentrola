@@ -15,6 +15,16 @@ import (
 	"github.com/zentrola/zentrola/internal/domain/admin"
 )
 
+type deadlineRecorder struct {
+	*httptest.ResponseRecorder
+	deadlines []time.Time
+}
+
+func (r *deadlineRecorder) SetReadDeadline(deadline time.Time) error {
+	r.deadlines = append(r.deadlines, deadline)
+	return nil
+}
+
 func assertMissingParameter[T any](t *testing.T, method, path, body, field string) {
 	t.Helper()
 	recorder := httptest.NewRecorder()
@@ -69,6 +79,41 @@ func TestDecodeRequest(t *testing.T) {
 				t.Fatalf("invalid request response = %d %s", recorder.Code, recorder.Body.String())
 			}
 		})
+	}
+}
+
+func TestDecodeRequestUsesCredentialSpecificBodyLimit(t *testing.T) {
+	credential := strings.Repeat("x", 64<<10)
+	body, err := json.Marshal(map[string]any{
+		"providerId": "1", "name": "subscription", "credential": credential,
+		"authType": "SUBSCRIPTION", "authAdapter": "OPENAI_CODEX",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/resources", strings.NewReader(string(body)))
+	input, ok := decodeRequest[CreateResourceRequest](recorder, request)
+	if !ok || input.Credential != credential {
+		t.Fatalf("valid large credential rejected: status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+
+	recorder = httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPatch, "/api/v1/models/1/status", strings.NewReader(
+		`{"status":"ACTIVE","padding":"`+strings.Repeat("x", 20<<10)+`"}`,
+	))
+	if _, ok := decodeRequest[UpdateStatusRequest](recorder, request); ok || recorder.Code != http.StatusBadRequest {
+		t.Fatalf("oversized ordinary request accepted: status=%d", recorder.Code)
+	}
+}
+
+func TestBodyReadDeadlineIsSetAndCleared(t *testing.T) {
+	recorder := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/test", strings.NewReader(`{}`))
+	handler := bodyReadDeadline(time.Second)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	handler.ServeHTTP(recorder, request)
+	if len(recorder.deadlines) != 2 || recorder.deadlines[0].IsZero() || !recorder.deadlines[1].IsZero() {
+		t.Fatalf("read deadlines = %v, want set then clear", recorder.deadlines)
 	}
 }
 

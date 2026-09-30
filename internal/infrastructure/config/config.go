@@ -19,6 +19,7 @@ type Config struct {
 	Environment          string
 	HTTPAddr             string
 	ReadHeaderTimeout    time.Duration
+	BodyReadTimeout      time.Duration
 	IdleTimeout          time.Duration
 	ShutdownTimeout      time.Duration
 	StartupTimeout       time.Duration
@@ -248,6 +249,7 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 		Environment:          get("APP_ENV", "dev"),
 		HTTPAddr:             get("HTTP_ADDR", ":9527"),
 		ReadHeaderTimeout:    duration("HTTP_READ_HEADER_TIMEOUT", "5s"),
+		BodyReadTimeout:      duration("HTTP_BODY_READ_TIMEOUT", "30s"),
 		IdleTimeout:          duration("HTTP_IDLE_TIMEOUT", "120s"),
 		ShutdownTimeout:      duration("SHUTDOWN_TIMEOUT", "20s"),
 		StartupTimeout:       duration("STARTUP_TIMEOUT", "30s"),
