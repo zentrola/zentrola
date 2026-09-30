@@ -112,7 +112,6 @@ const deleteTarget = ref<Provider | null>(null)
 const resources = ref<Resource[]>([])
 const resourceError = ref('')
 const models = ref<Model[]>([])
-const modelError = ref('')
 const emptyResources: Resource[] = []
 const resourcesByProvider = computed(() => {
   const grouped = new Map<string, Resource[]>()
@@ -232,11 +231,7 @@ const form = reactive({
 })
 const mappingQuery = ref('')
 const onlySelectedMappings = ref(false)
-const enabledModels = computed(() => models.value.filter((model) => model.status === 'ACTIVE'))
-const availableMappingModels = computed(() => {
-  if (editTarget.value?.type !== 'OFFICIAL') return enabledModels.value
-  return models.value.filter((model) => model.publisherProviderId === editTarget.value?.id)
-})
+const availableMappingModels = computed(() => models.value)
 const mappingByModelID = computed(
   () => new Map(form.mappings.map((mapping) => [mapping.modelId, mapping])),
 )
@@ -416,21 +411,20 @@ function validProxyHeaders() {
 
 function openEdit(provider: Provider | null = null) {
   activeConfigTab.value = 'models'
-  if (!provider) {
-    assignForm(null)
-    editing.value = true
-    return
-  }
   actionError.value = ''
   void run(async () => {
-    const detail = await api<ProviderDetail>(`/providers/${provider.id}`)
+    const detail = provider ? await api<ProviderDetail>(`/providers/${provider.id}`) : null
+    if (detail) models.value = detail.models
+    else await loadActiveModels()
+    const modelIDs = new Set(models.value.map((model) => model.id))
     assignForm(
       detail,
-      detail.mappings
+      (detail?.mappings ?? [])
         .map((mapping) => ({
           modelId: mapping.modelId,
           upstreamModelCode: mapping.upstreamModelCode,
         }))
+        .filter((mapping) => modelIDs.has(mapping.modelId))
         .filter(
           (mapping, index, mappings) =>
             mappings.findIndex((candidate) => candidate.modelId === mapping.modelId) === index,
@@ -792,19 +786,13 @@ async function refreshProviderQuotas(provider: Provider) {
   if (subscriptions.length) await loadResources()
 }
 
-async function loadModels() {
-  modelError.value = ''
-  try {
-    models.value = await all<Model>('/models')
-  } catch (error) {
-    modelError.value = errorText(error)
-  }
+async function loadActiveModels() {
+  models.value = await all<Model>('/models?status=ACTIVE')
 }
 
 function reload() {
   void retry()
   void loadResources()
-  void loadModels()
 }
 
 function openProviderInitialization() {
@@ -1146,7 +1134,7 @@ function testModelOptionsFor(detail: ProviderDetail) {
   return detail.mappings
     .map((mapping) => ({
       mapping,
-      model: models.value.find((model) => model.id === mapping.modelId),
+      model: detail.models.find((model) => model.id === mapping.modelId),
     }))
     .filter((option) => option.model?.status === 'ACTIVE')
 }
@@ -1255,7 +1243,6 @@ function syncModels(provider: Provider) {
     try {
       const result = await api<ModelSyncResult>(`/providers/${provider.id}/sync-models`, 'POST')
       syncResult.value = result
-      if (result.ok) await loadModels()
     } catch (error) {
       syncTarget.value = null
       throw error
@@ -1376,7 +1363,6 @@ function changeStatus(provider: Provider) {
 onMounted(() => {
   void load()
   void loadResources()
-  void loadModels()
   document.addEventListener('pointerdown', onCreateMenuOutside)
 })
 onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutside))
@@ -1475,8 +1461,8 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
         </div>
       </template>
     </ListSearch>
-    <p v-if="error || resourceError || modelError" class="alert error" role="alert">
-      {{ error || resourceError || modelError
+    <p v-if="error || resourceError" class="alert error" role="alert">
+      {{ error || resourceError
       }}<button class="text-button" @click="reload">
         {{ t('common.retry') }}
       </button>
@@ -4289,11 +4275,28 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   min-height: 0;
   min-width: 0;
   overflow-x: clip;
-  overflow-y: auto;
+  overflow-y: scroll;
   overscroll-behavior: contain;
+  scrollbar-color: #94a3b8 #f1f5f9;
   scrollbar-gutter: stable;
+  scrollbar-width: auto;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-control);
+}
+.mapping-list::-webkit-scrollbar {
+  width: 12px;
+}
+.mapping-list::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+.mapping-list::-webkit-scrollbar-thumb {
+  min-height: 40px;
+  border: 3px solid #f1f5f9;
+  border-radius: 999px;
+  background: #94a3b8;
+}
+.mapping-list::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
 }
 .mapping-editor {
   display: grid;
