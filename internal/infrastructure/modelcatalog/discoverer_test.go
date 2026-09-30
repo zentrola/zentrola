@@ -86,7 +86,10 @@ func TestDiscoverOpenAIModels(t *testing.T) {
 	})
 
 	models, result := discoverer.Discover(context.Background(), mgmt.ModelDiscoverySource{ProviderCode: catalog.OpenAIOfficialCode}, []byte("test-secret"), nil)
-	if !result.OK || result.Code != "OK" || len(models) != 2 || models[0].Code != "gpt-4o" || models[0].Name != "GPT-4o" || models[1].Code != "text-embedding-3-small" || models[1].Name != "Text embedding 3 small" {
+	if !result.OK || result.Code != "OK" || len(models) != 3 ||
+		models[0].Code != "codex-auto-review" || models[0].Name != "Codex Auto Review" ||
+		models[1].Code != "gpt-4o" || models[1].Name != "GPT-4o" ||
+		models[2].Code != "text-embedding-3-small" || models[2].Name != "Text embedding 3 small" {
 		t.Fatalf("unexpected discovery: %+v %+v", models, result)
 	}
 	output := logs.String()
@@ -97,6 +100,13 @@ func TestDiscoverOpenAIModels(t *testing.T) {
 	}
 	if strings.Contains(output, "test-secret") {
 		t.Fatalf("discovery response log leaked credential: %s", output)
+	}
+}
+
+func TestOpenAIModelCatalogDoesNotDuplicateInternalAutoReviewModel(t *testing.T) {
+	models, _, err := (openAIAdapter{}).Decode([]byte(`{"object":"list","data":[{"id":"codex-auto-review","object":"model","owned_by":"openai"}]}`), 1)
+	if err != nil || len(models) != 1 || models[0].Code != "codex-auto-review" || models[0].Name != "Codex Auto Review" {
+		t.Fatalf("unexpected internal model discovery: %+v err=%v", models, err)
 	}
 }
 

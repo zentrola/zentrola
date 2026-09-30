@@ -11,6 +11,8 @@ import (
 
 var errInvalidOpenAICatalog = errors.New("invalid OpenAI model catalog response")
 
+const codexAutoReviewModelCode = "codex-auto-review"
+
 type openAIAdapter struct{}
 
 func (openAIAdapter) Name() string { return "openai" }
@@ -47,12 +49,22 @@ func (openAIAdapter) Decode(data []byte, _ int) ([]mgmt.DiscoveredModel, string,
 			Name: openAIDisplayName(item.ID),
 		})
 	}
+	// Codex 的自动审批使用内部模型编码，OpenAI 公共模型目录不会返回它。
+	// 同步 OpenAI 目录时必须补齐该逻辑模型及映射，确保自定义网关可以转发审核请求。
+	if _, exists := seen[codexAutoReviewModelCode]; !exists {
+		models = append(models, mgmt.DiscoveredModel{
+			Code: codexAutoReviewModelCode,
+			Name: "Codex Auto Review",
+		})
+	}
 	sort.Slice(models, func(i, j int) bool { return models[i].Code < models[j].Code })
 	return models, "", nil
 }
 
 func openAIDisplayName(code string) string {
 	switch {
+	case code == codexAutoReviewModelCode:
+		return "Codex Auto Review"
 	case strings.HasPrefix(code, "gpt-"):
 		return "GPT-" + code[len("gpt-"):]
 	case strings.HasPrefix(code, "chatgpt-"):
