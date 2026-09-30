@@ -340,6 +340,10 @@ async function fixture(page: Page) {
     if (segments[0] === 'providers' && segments.length === 2 && method === 'GET') {
       const row = providers.find((provider) => provider.id === segments[1])
       if (!row) return reply(null, 404, 'NOT_FOUND')
+      const providerModels =
+        row.type === 'OFFICIAL'
+          ? models.filter((model) => model.publisherProviderId === row.id)
+          : models.filter((model) => model.status === 'ACTIVE')
       const mappings = providerMappings.get(row.id) || []
       return reply({
         ...row,
@@ -347,6 +351,7 @@ async function fixture(page: Page) {
           models.some((model) => model.id === mapping.modelId && model.status === 'ACTIVE'),
         ).length,
         mappings,
+        models: providerModels,
       })
     }
     if (segments[0] === 'providers' && segments[2] === 'sync-models' && method === 'POST') {
@@ -2270,7 +2275,9 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   expect(moreMenuBox.x).toBeGreaterThanOrEqual(tableBox.x)
   expect(moreMenuBox.y).toBeGreaterThanOrEqual(tableBox.y)
   await moreActions.click()
+  expect(state.modelQueries).toHaveLength(0)
   await deepSeekRow.getByRole('button', { name: '编辑', exact: true }).click()
+  expect(state.modelQueries).toHaveLength(0)
   await expect(modal(page).getByRole('tab', { name: '模型配置', exact: true })).toHaveAttribute(
     'aria-selected',
     'true',
@@ -2327,6 +2334,7 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
     .getByRole('menu', { name: '创建服务商' })
     .getByRole('menuitem', { name: /三方服务商/ })
     .click()
+  expect(state.modelQueries.at(-1)?.get('status')).toBe('ACTIVE')
   const dialog = modal(page)
   const providerFieldRows = dialog.locator('.connection-fields .provider-field-row')
   await expect(providerFieldRows).toHaveCount(4)
@@ -2389,7 +2397,13 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await expect(mappingCheckbox).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   await expect(mappingCheckbox).toHaveCSS('border-top-style', 'none')
   await expect(dialog.locator('.mapping-list')).toHaveCSS('max-height', 'none')
-  await expect(dialog.locator('.mapping-list')).toHaveCSS('overflow-y', 'auto')
+  const mappingList = dialog.locator('.mapping-list')
+  await expect(mappingList).toHaveCSS('overflow-y', 'scroll')
+  expect(
+    await mappingList.evaluate(
+      (element) => getComputedStyle(element, '::-webkit-scrollbar').width,
+    ),
+  ).toBe('12px')
   await expect(dialog.locator('.modal-body')).toHaveCSS('overflow-y', 'hidden')
   await expect(dialog.locator('.mapping-row').first()).toHaveCSS('min-height', '44px')
   const providerModelCode = dialog.getByLabel('DeepSeek V4 Flash 的服务商模型编码')

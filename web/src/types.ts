@@ -71,6 +71,7 @@ export interface ProviderMapping {
 }
 export interface ProviderDetail extends Provider {
   mappings: ProviderMapping[]
+  models: Model[]
 }
 export interface ProviderInitializeOption {
   code: string

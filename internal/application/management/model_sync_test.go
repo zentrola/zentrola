@@ -3,6 +3,7 @@ package management
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -33,9 +34,13 @@ func TestConnectionTestEndpointSelection(t *testing.T) {
 }
 
 func TestProviderDetailIgnoresMappingsForMissingModels(t *testing.T) {
+	publisherID := int64(20)
 	state := &syncState{
-		provider: Provider{ID: 20, Code: catalog.GoogleOfficialCode, Name: "Google"},
-		models:   []Model{{ID: 30, Code: "gemini-2.5-flash", Name: "Gemini 2.5 Flash", Status: "ACTIVE"}},
+		provider: Provider{ID: 20, Code: catalog.GoogleOfficialCode, Name: "Google", Type: string(catalog.Official)},
+		models: []Model{{
+			ID: 30, Code: "gemini-2.5-flash", Name: "Gemini 2.5 Flash", Status: "ACTIVE",
+			PublisherProviderID: &publisherID,
+		}},
 		mappings: []ProviderMapping{
 			{ID: 40, ProviderID: 20, ModelID: 29, UpstreamModelCode: "deleted-model"},
 			{ID: 41, ProviderID: 20, ModelID: 30, UpstreamModelCode: "gemini-2.5-flash"},
@@ -44,8 +49,57 @@ func TestProviderDetailIgnoresMappingsForMissingModels(t *testing.T) {
 	service := New(syncStore{state: state}, nil, nil, nil)
 
 	detail, err := service.Provider(context.Background(), admin.Identity{}, 20)
-	if err != nil || len(detail.Mappings) != 1 || detail.Mappings[0].ModelID != 30 || detail.ModelCount != 1 {
+	if err != nil || len(detail.Models) != 1 || detail.Models[0].ID != 30 || len(detail.Mappings) != 1 || detail.Mappings[0].ModelID != 30 || detail.ModelCount != 1 {
 		t.Fatalf("unexpected provider detail: detail=%+v err=%v", detail, err)
+	}
+}
+
+func TestProviderDetailReturnsModelsAllowedForProviderType(t *testing.T) {
+	officialID, otherOfficialID := int64(20), int64(21)
+	models := []Model{
+		{ID: 30, Status: "ACTIVE", PublisherProviderID: &officialID},
+		{ID: 31, Status: "DISABLED", PublisherProviderID: &officialID},
+		{ID: 32, Status: "ACTIVE", PublisherProviderID: &otherOfficialID},
+		{ID: 33, Status: "DISABLED"},
+	}
+	mappings := []ProviderMapping{
+		{ID: 40, ModelID: 30},
+		{ID: 41, ModelID: 31},
+		{ID: 42, ModelID: 32},
+		{ID: 43, ModelID: 33},
+	}
+	tests := []struct {
+		name         string
+		provider     Provider
+		wantModelIDs []int64
+	}{
+		{
+			name:         "official includes all of its own models",
+			provider:     Provider{ID: officialID, Type: string(catalog.Official)},
+			wantModelIDs: []int64{30, 31},
+		},
+		{
+			name:         "non-official includes every active model",
+			provider:     Provider{ID: 50, Type: string(catalog.Custom)},
+			wantModelIDs: []int64{30, 32},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			state := &syncState{provider: test.provider, models: models, mappings: mappings}
+			service := New(syncStore{state: state}, nil, nil, nil)
+			detail, err := service.Provider(context.Background(), admin.Identity{}, test.provider.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			gotModelIDs := make([]int64, 0, len(detail.Models))
+			for _, model := range detail.Models {
+				gotModelIDs = append(gotModelIDs, model.ID)
+			}
+			if !slices.Equal(gotModelIDs, test.wantModelIDs) {
+				t.Fatalf("models=%v", gotModelIDs)
+			}
+		})
 	}
 }
 

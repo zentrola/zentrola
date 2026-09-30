@@ -25,6 +25,15 @@ const defaultProviderMappingPriority int32 = 100
 
 var providerProtocols = [...]string{"OPENAI", "ANTHROPIC"}
 
+type providerAuditSnapshot struct {
+	Provider
+	Mappings []ProviderMapping `json:"mappings"`
+}
+
+func providerSnapshot(provider Provider, mappings []ProviderMapping) providerAuditSnapshot {
+	return providerAuditSnapshot{Provider: provider, Mappings: mappings}
+}
+
 func (input *ProviderInput) Normalize() {
 	input.Name = strings.TrimSpace(input.Name)
 	input.Website = strings.TrimSpace(input.Website)
@@ -420,7 +429,7 @@ func (s *Service) CreateProvider(ctx context.Context, actor admin.Identity, inpu
 		if err != nil {
 			return err
 		}
-		return w.Audit(ctx, Audit{Event: operation.ProviderCreate, Target: "PROVIDER", ID: id, Name: provider.Name, After: ProviderDetail{Provider: provider, Mappings: mappings}}, meta)
+		return w.Audit(ctx, Audit{Event: operation.ProviderCreate, Target: "PROVIDER", ID: id, Name: provider.Name, After: providerSnapshot(provider, mappings)}, meta)
 	})
 	return s.withProviderCapabilities(provider), err
 }
@@ -460,7 +469,7 @@ func (s *Service) UpdateProvider(ctx context.Context, actor admin.Identity, id i
 		if err != nil {
 			return err
 		}
-		return w.Audit(ctx, Audit{Event: operation.ProviderUpdate, Target: "PROVIDER", ID: id, Name: updated.Name, Before: ProviderDetail{Provider: current, Mappings: beforeMappings}, After: ProviderDetail{Provider: updated, Mappings: mappings}}, meta)
+		return w.Audit(ctx, Audit{Event: operation.ProviderUpdate, Target: "PROVIDER", ID: id, Name: updated.Name, Before: providerSnapshot(current, beforeMappings), After: providerSnapshot(updated, mappings)}, meta)
 	})
 	return s.withProviderCapabilities(updated), err
 }
@@ -517,7 +526,7 @@ func (s *Service) DeleteProvider(ctx context.Context, actor admin.Identity, id i
 		if err != nil {
 			return err
 		}
-		before := ProviderDetail{Provider: provider, Mappings: mappings}
+		before := providerSnapshot(provider, mappings)
 		if err := w.DeleteProvider(ctx, id, time.Now().UTC().Truncate(time.Microsecond)); err != nil {
 			return err
 		}

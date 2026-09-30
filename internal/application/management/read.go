@@ -173,8 +173,29 @@ func (s *Service) Provider(ctx context.Context, a admin.Identity, id int64) (Pro
 		}
 		liveMappings := liveProviderMappings(mappings, models)
 		provider.ModelCount = activeProviderMappingCount(liveMappings, models)
-		return ProviderDetail{Provider: s.withProviderCapabilities(provider), Mappings: liveMappings}, nil
+		selectableModels := providerSelectableModels(provider, models)
+		return ProviderDetail{
+			Provider: s.withProviderCapabilities(provider),
+			Mappings: liveMappings,
+			Models:   selectableModels,
+		}, nil
 	})
+}
+
+func providerSelectableModels(provider Provider, models []Model) []Model {
+	selectable := make([]Model, 0, len(models))
+	for _, model := range models {
+		if provider.Type == string(catalog.Official) {
+			if model.PublisherProviderID != nil && *model.PublisherProviderID == provider.ID {
+				selectable = append(selectable, model)
+			}
+			continue
+		}
+		if model.Status == "ACTIVE" {
+			selectable = append(selectable, model)
+		}
+	}
+	return selectable
 }
 
 func liveProviderMappings(mappings []ProviderMapping, models []Model) []ProviderMapping {

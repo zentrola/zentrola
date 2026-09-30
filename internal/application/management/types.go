@@ -143,6 +143,7 @@ type ProviderMapping struct {
 type ProviderDetail struct {
 	Provider
 	Mappings []ProviderMapping `json:"mappings"`
+	Models   []Model           `json:"models"`
 }
 type ProviderInitializeInput struct {
 	Locale        string   `json:"locale" binding:"required" enums:"zh-CN,en-US"`

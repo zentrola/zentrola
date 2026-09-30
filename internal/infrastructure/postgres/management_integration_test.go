@@ -191,6 +191,9 @@ func TestStage3Integration(t *testing.T) {
 	if len(providerDetail.Mappings) != 2 || providerDetail.Mappings[0].ModelID != mappedModel.ID || providerDetail.Mappings[0].UpstreamModelCode != "vendor-model-v1" || providerDetail.Mappings[0].Priority != 100 {
 		t.Fatalf("unexpected provider mappings: %+v", providerDetail.Mappings)
 	}
+	if len(providerDetail.Models) != 1 || providerDetail.Models[0].ID != model.ID {
+		t.Fatalf("unexpected provider models: %+v", providerDetail.Models)
+	}
 	mappingID := providerDetail.Mappings[0].ID
 	customProviderInput.Mappings[0].UpstreamModelCode = ""
 	customProviderInput.Mappings = customProviderInput.Mappings[:1]
