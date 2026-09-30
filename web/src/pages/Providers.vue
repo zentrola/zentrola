@@ -230,7 +230,6 @@ const form = reactive({
   mappings: [] as MappingDraft[],
 })
 const mappingQuery = ref('')
-const onlySelectedMappings = ref(false)
 const availableMappingModels = computed(() => models.value)
 const mappingByModelID = computed(
   () => new Map(form.mappings.map((mapping) => [mapping.modelId, mapping])),
@@ -245,20 +244,18 @@ const filteredMappingRows = computed(() => {
   const keyword = mappingQuery.value.trim().toLocaleLowerCase()
   return mappingRows.value.filter(
     (row) =>
-      (!onlySelectedMappings.value || Boolean(row.mapping)) &&
-      (!keyword ||
-        [
-          row.model.name,
-          row.model.code,
-          row.model.publisherProviderName || '',
-          row.mapping?.upstreamModelCode || '',
-        ].some((value) => value.toLocaleLowerCase().includes(keyword))),
+      !keyword ||
+      [
+        row.model.name,
+        row.model.code,
+        row.model.publisherProviderName || '',
+        row.mapping?.upstreamModelCode || '',
+      ].some((value) => value.toLocaleLowerCase().includes(keyword)),
   )
 })
-const mappingFilterActive = computed(
-  () => Boolean(mappingQuery.value.trim()) || onlySelectedMappings.value,
-)
-const selectedMappingCount = computed(() => mappingRows.value.filter((row) => row.mapping).length)
+const mappingFilterActive = computed(() => Boolean(mappingQuery.value.trim()))
+const selectedMappingRows = computed(() => mappingRows.value.filter((row) => row.mapping))
+const selectedMappingCount = computed(() => selectedMappingRows.value.length)
 const visibleSelectedMappingCount = computed(
   () => filteredMappingRows.value.filter((row) => row.mapping).length,
 )
@@ -345,7 +342,6 @@ function assignForm(provider: Provider | null, mappings: MappingDraft[] = []) {
 
 function resetMappingFilters() {
   mappingQuery.value = ''
-  onlySelectedMappings.value = false
 }
 
 function addProxyHeader() {
@@ -1914,113 +1910,150 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
           tabindex="0"
         >
           <header class="mapping-editor-head">
-            <div>
-              <p>{{ t('providers.mappingHint') }}</p>
-            </div>
-            <span v-if="availableMappingModels.length" class="mapping-selection-count">
-              {{
-                t('providers.mappingSelectionCount', {
-                  count: selectedMappingCount,
-                  total: availableMappingModels.length,
-                })
-              }}
-            </span>
+            <p>{{ t('providers.mappingHint') }}</p>
           </header>
-          <div v-if="availableMappingModels.length" class="mapping-toolbar">
-            <div class="mapping-search-box">
-              <input
-                id="provider-mapping-search"
-                v-model="mappingQuery"
-                type="search"
-                :aria-label="t('providers.mappingSearch')"
-                :placeholder="t('providers.mappingSearchPlaceholder')"
-                :disabled="busy"
-              />
-              <button
-                v-if="mappingQuery"
-                type="button"
-                class="mapping-search-clear"
-                :aria-label="t('providers.clearMappingSearch')"
-                :disabled="busy"
-                @click="mappingQuery = ''"
-              >
-                <Icon name="close" :size="14" />
-              </button>
-            </div>
-            <button
-              type="button"
-              class="mapping-selected-filter"
-              :class="{ active: onlySelectedMappings }"
-              :aria-pressed="onlySelectedMappings"
-              :disabled="busy"
-              @click="onlySelectedMappings = !onlySelectedMappings"
+          <div v-if="availableMappingModels.length" class="mapping-workspace">
+            <section
+              class="mapping-pane mapping-catalog-pane"
+              aria-labelledby="mapping-catalog-title"
             >
-              <span class="mapping-filter-indicator"><Icon name="check" :size="12" /></span>
-              {{ t('providers.onlySelectedMappings') }}
-            </button>
-          </div>
-          <div v-if="mappingFilterActive" class="mapping-filter-summary">
-            {{ t('providers.filteredMappingCount', { count: filteredMappingRows.length }) }}
-          </div>
-          <div
-            v-if="availableMappingModels.length && filteredMappingRows.length"
-            class="mapping-list"
-          >
-            <div class="mapping-grid mapping-grid-head">
-              <label class="mapping-check mapping-select-all">
-                <input
-                  type="checkbox"
-                  :checked="allMappingsSelected"
-                  :indeterminate="someMappingsSelected"
-                  :disabled="busy"
-                  :aria-label="
-                    t(
-                      mappingFilterActive
-                        ? 'providers.selectFilteredMappings'
-                        : 'providers.selectAllMappings',
-                    )
-                  "
-                  @change="toggleAllMappings"
-                />
-              </label>
-              <span>{{ t('providers.logicalModel') }}</span>
-              <span>{{ t('providers.upstreamModelCode') }}</span>
-            </div>
-            <div
-              v-for="row in filteredMappingRows"
-              :key="row.model.id"
-              class="mapping-grid mapping-row"
-              :class="{ 'is-selected': row.mapping }"
+              <header class="mapping-pane-head">
+                <strong id="mapping-catalog-title">{{ t('providers.mappingCatalogTitle') }}</strong>
+                <span>{{ availableMappingModels.length }}</span>
+              </header>
+              <div class="mapping-toolbar">
+                <div class="mapping-search-box">
+                  <input
+                    id="provider-mapping-search"
+                    v-model="mappingQuery"
+                    type="search"
+                    :aria-label="t('providers.mappingSearch')"
+                    :placeholder="t('providers.mappingSearchPlaceholder')"
+                    :disabled="busy"
+                  />
+                  <button
+                    v-if="mappingQuery"
+                    type="button"
+                    class="mapping-search-clear"
+                    :aria-label="t('providers.clearMappingSearch')"
+                    :disabled="busy"
+                    @click="mappingQuery = ''"
+                  >
+                    <Icon name="close" :size="14" />
+                  </button>
+                </div>
+              </div>
+              <div v-if="mappingFilterActive" class="mapping-filter-summary">
+                {{ t('providers.filteredMappingCount', { count: filteredMappingRows.length }) }}
+              </div>
+              <div v-if="filteredMappingRows.length" class="mapping-catalog-list">
+                <div class="mapping-catalog-grid mapping-catalog-head">
+                  <label class="mapping-check mapping-select-all">
+                    <input
+                      type="checkbox"
+                      :checked="allMappingsSelected"
+                      :indeterminate="someMappingsSelected"
+                      :disabled="busy"
+                      :aria-label="
+                        t(
+                          mappingFilterActive
+                            ? 'providers.selectFilteredMappings'
+                            : 'providers.selectAllMappings',
+                        )
+                      "
+                      @change="toggleAllMappings"
+                    />
+                  </label>
+                  <span>{{ t('providers.logicalModel') }}</span>
+                </div>
+                <div
+                  v-for="row in filteredMappingRows"
+                  :key="row.model.id"
+                  class="mapping-catalog-grid mapping-catalog-row"
+                  :class="{ 'is-selected': row.mapping }"
+                >
+                  <label class="mapping-check">
+                    <input
+                      type="checkbox"
+                      :checked="Boolean(row.mapping)"
+                      :disabled="busy"
+                      :aria-label="t('providers.mappingSelectionFor', { name: row.model.name })"
+                      @change="toggleMapping(row.model)"
+                    />
+                  </label>
+                  <span class="mapping-model-summary">
+                    <strong class="mapping-model-name model-name-regular">{{
+                      row.model.name
+                    }}</strong>
+                    <span>{{ row.model.code }}</span>
+                  </span>
+                </div>
+              </div>
+              <p v-else class="mapping-empty mapping-filter-empty">
+                {{ t('providers.noMatchingMappings') }}
+                <button type="button" class="text-button" @click="resetMappingFilters">
+                  {{ t('providers.clearMappingFilters') }}
+                </button>
+              </p>
+            </section>
+            <section
+              class="mapping-pane mapping-selected-pane"
+              aria-labelledby="selected-mappings-title"
             >
-              <label class="mapping-check">
-                <input
-                  type="checkbox"
-                  :checked="Boolean(row.mapping)"
-                  :disabled="busy"
-                  :aria-label="t('providers.mappingSelectionFor', { name: row.model.name })"
-                  @change="toggleMapping(row.model)"
-                />
-              </label>
-              <strong class="mapping-model-name model-name-regular">{{ row.model.name }}</strong>
-              <label class="mapping-control">
-                <span>{{ t('providers.upstreamModelCode') }}</span>
-                <input
-                  :value="row.mapping?.upstreamModelCode ?? ''"
-                  spellcheck="false"
-                  :disabled="busy || !row.mapping"
-                  :placeholder="t('providers.upstreamModelPlaceholder', { code: row.model.code })"
-                  :aria-label="t('providers.mappingCodeFor', { name: row.model.name })"
-                  @input="updateUpstreamModelCode(row.model.id, $event)"
-                />
-              </label>
-            </div>
+              <header class="mapping-pane-head">
+                <strong id="selected-mappings-title">{{
+                  t('providers.selectedMappingsTitle')
+                }}</strong>
+                <span>
+                  {{
+                    t('providers.mappingSelectionCount', {
+                      count: selectedMappingCount,
+                      total: availableMappingModels.length,
+                    })
+                  }}
+                </span>
+              </header>
+              <div v-if="selectedMappingRows.length" class="mapping-selected-list">
+                <div
+                  v-for="row in selectedMappingRows"
+                  :key="row.model.id"
+                  class="mapping-selected-row"
+                >
+                  <span class="mapping-model-summary mapping-selected-model">
+                    <strong class="mapping-model-name model-name-regular">{{
+                      row.model.name
+                    }}</strong>
+                    <span>{{ row.model.code }}</span>
+                  </span>
+                  <label class="mapping-control">
+                    <span>{{ t('providers.upstreamModelCode') }}</span>
+                    <input
+                      :value="row.mapping?.upstreamModelCode ?? ''"
+                      spellcheck="false"
+                      :disabled="busy"
+                      :placeholder="
+                        t('providers.upstreamModelPlaceholder', { code: row.model.code })
+                      "
+                      :aria-label="t('providers.mappingCodeFor', { name: row.model.name })"
+                      @input="updateUpstreamModelCode(row.model.id, $event)"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    class="mapping-remove"
+                    :disabled="busy"
+                    :aria-label="t('providers.removeMappingFor', { name: row.model.name })"
+                    @click="toggleMapping(row.model)"
+                  >
+                    <Icon name="close" :size="15" />
+                  </button>
+                </div>
+              </div>
+              <p v-else class="mapping-empty mapping-selected-empty">
+                {{ t('providers.selectedMappingsEmpty') }}
+              </p>
+            </section>
           </div>
-          <p v-else-if="availableMappingModels.length" class="mapping-empty mapping-filter-empty">
-            {{ t('providers.noMatchingMappings') }}
-            <button type="button" class="text-button" @click="resetMappingFilters">
-              {{ t('providers.clearMappingFilters') }}
-            </button>
-          </p>
           <p v-else class="mapping-empty">
             {{ t('providers.noModels') }}
           </p>
@@ -4179,22 +4212,55 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
 .proxy-header-remove:hover:not(:disabled) {
   color: #8f2f35;
 }
-.mapping-selection-count {
-  flex: none;
-  padding-top: 2px;
-  color: #60788d;
+.mapping-workspace {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  gap: 14px;
+  grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 1.1fr);
+}
+.mapping-pane {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: #fff;
+}
+.mapping-catalog-pane {
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+}
+.mapping-selected-pane {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.mapping-pane-head {
+  display: flex;
+  min-width: 0;
+  min-height: 42px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  border-bottom: 1px solid #e5ebf1;
+  background: #f8fafc;
+}
+.mapping-pane-head strong {
+  color: var(--color-text);
   font-size: 12px;
+}
+.mapping-pane-head span {
+  flex: none;
+  color: #60788d;
+  font-size: 11px;
   white-space: nowrap;
 }
 .mapping-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
+  min-width: 0;
+  padding: 10px 10px 8px;
 }
 .mapping-search-box {
   position: relative;
-  flex: 1 1 320px;
   min-width: 0;
   color: #92a0af;
 }
@@ -4226,93 +4292,64 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   color: var(--color-text);
   background: #e9eff6;
 }
-.mapping-selected-filter {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 7px;
-  min-height: 36px;
-  padding: 7px 11px;
-  color: var(--color-text-secondary);
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-control);
-  font-size: 12px;
-  cursor: pointer;
-}
-.mapping-selected-filter:hover {
-  border-color: #b8c6d5;
-  background: #f8fafc;
-}
-.mapping-selected-filter.active {
-  color: var(--color-primary-hover);
-  background: var(--color-primary-soft);
-  border-color: #bfdbfe;
-}
-.mapping-filter-indicator {
-  display: grid;
-  width: 16px;
-  height: 16px;
-  place-items: center;
-  color: transparent;
-  background: var(--color-surface);
-  border: 1px solid #b8c6d5;
-  border-radius: 4px;
-}
-.mapping-selected-filter.active .mapping-filter-indicator {
-  color: #fff;
-  background: var(--color-primary);
-  border-color: var(--color-primary);
-}
 .mapping-filter-summary {
   grid-row: 3;
-  margin: -2px 2px 6px;
+  padding: 0 12px 8px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
 }
-.mapping-list {
-  grid-row: 4;
-  min-height: 0;
+.mapping-catalog-list,
+.mapping-selected-list {
   min-width: 0;
+  min-height: 0;
   overflow-x: clip;
   overflow-y: scroll;
   overscroll-behavior: contain;
   scrollbar-color: #94a3b8 #f1f5f9;
   scrollbar-gutter: stable;
   scrollbar-width: auto;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-control);
 }
-.mapping-list::-webkit-scrollbar {
+.mapping-catalog-list {
+  grid-row: 4;
+}
+.mapping-selected-list {
+  grid-row: 2;
+}
+.mapping-catalog-list::-webkit-scrollbar,
+.mapping-selected-list::-webkit-scrollbar {
   width: 12px;
 }
-.mapping-list::-webkit-scrollbar-track {
+.mapping-catalog-list::-webkit-scrollbar-track,
+.mapping-selected-list::-webkit-scrollbar-track {
   background: #f1f5f9;
 }
-.mapping-list::-webkit-scrollbar-thumb {
+.mapping-catalog-list::-webkit-scrollbar-thumb,
+.mapping-selected-list::-webkit-scrollbar-thumb {
   min-height: 40px;
   border: 3px solid #f1f5f9;
   border-radius: 999px;
   background: #94a3b8;
 }
-.mapping-list::-webkit-scrollbar-thumb:hover {
+.mapping-catalog-list::-webkit-scrollbar-thumb:hover,
+.mapping-selected-list::-webkit-scrollbar-thumb:hover {
   background: #64748b;
 }
 .mapping-editor {
   display: grid;
   overflow: hidden;
   padding-bottom: 16px;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
 }
-.mapping-grid {
+.mapping-catalog-grid {
   display: grid;
-  grid-template-columns: 46px minmax(200px, 0.8fr) minmax(300px, 1.4fr);
+  min-width: 0;
+  grid-template-columns: 42px minmax(0, 1fr);
   align-items: center;
-  gap: 12px;
-  padding: 4px 10px;
+  gap: 10px;
+  padding: 5px 10px;
   border-top: 1px solid #f1f5f9;
 }
-.mapping-grid-head {
+.mapping-catalog-head {
   position: sticky;
   z-index: 1;
   top: 0;
@@ -4324,12 +4361,12 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   font-size: 11px;
   font-weight: 600;
 }
-.mapping-row {
-  min-height: 44px;
+.mapping-catalog-row {
+  min-height: 52px;
   background: #fff;
 }
-.mapping-row.is-selected {
-  background: #fff;
+.mapping-catalog-row.is-selected {
+  background: var(--color-primary-soft);
   box-shadow: inset 3px 0 var(--color-primary);
 }
 .mapping-check {
@@ -4350,6 +4387,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   min-height: 24px;
 }
 .mapping-model-name {
+  display: block;
   min-width: 0;
   overflow: hidden;
   color: var(--color-text);
@@ -4357,13 +4395,44 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.mapping-model-summary {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+.mapping-model-summary > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mapping-selected-row {
+  display: grid;
+  min-height: 66px;
+  grid-template-columns: minmax(130px, 0.8fr) minmax(180px, 1.2fr) 32px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 8px 12px;
+  border-top: 1px solid #f1f5f9;
+  background: #fff;
+}
+.mapping-selected-row:first-child {
+  border-top: 0;
+}
 .mapping-control {
   display: block;
   min-width: 0;
   margin: 0;
 }
 .mapping-control > span {
-  display: none;
+  display: block;
+  margin-bottom: 4px;
+  color: #60788d;
+  font-size: 10px;
+  font-weight: 600;
 }
 .mapping-control input {
   width: 100%;
@@ -4371,26 +4440,42 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   margin: 0;
   padding: 5px 10px;
 }
-.mapping-row:not(.is-selected) .mapping-control input {
-  border-color: var(--color-border);
-  background: #f8fafc;
-  color: var(--color-text-muted);
+.mapping-remove {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  place-items: center;
+  color: var(--muted);
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+.mapping-remove:hover:not(:disabled) {
+  color: var(--danger);
+  background: #fef2f2;
 }
 .mapping-empty {
-  grid-row: 4;
   margin: 0;
-  padding: 18px 0;
-  border-top: 1px solid #e5ebf1;
+  padding: 18px 14px;
   color: var(--muted);
   font-size: 12px;
   text-align: center;
 }
 .mapping-filter-empty {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-control);
+  grid-row: 4;
+  align-self: start;
+  border-top: 1px solid #e5ebf1;
 }
 .mapping-filter-empty .text-button {
   margin-left: 6px;
+}
+.mapping-selected-empty {
+  display: grid;
+  min-height: 0;
+  place-items: center;
+  line-height: 1.6;
 }
 @media (max-width: 760px) {
   .credential-test-option {
@@ -4568,11 +4653,6 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
     align-items: stretch;
     flex-direction: column;
   }
-  .mapping-editor-head > div {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 2px;
-  }
   .proxy-header-row {
     grid-column: 1;
     grid-template-columns: minmax(0, 1fr) 36px;
@@ -4585,36 +4665,30 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
     grid-row: 1 / span 2;
     align-self: center;
   }
-  .mapping-selection-count {
-    padding-top: 0;
+  .mapping-editor {
+    overflow-y: auto;
+    padding-right: 4px;
+    grid-template-rows: auto auto;
   }
-  .mapping-toolbar {
-    align-items: stretch;
-    flex-direction: column;
+  .mapping-workspace {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: repeat(2, minmax(260px, 38vh));
   }
-  .mapping-search-box {
-    flex-basis: auto;
+  .mapping-pane {
+    min-height: 260px;
   }
-  .mapping-selected-filter {
-    justify-content: center;
+  .mapping-selected-row {
+    grid-template-columns: minmax(0, 1fr) 32px;
+    align-items: start;
   }
-  .mapping-grid-head {
-    display: none;
-  }
-  .mapping-grid {
-    grid-template-columns: 32px minmax(0, 1fr);
-    gap: 12px;
-    padding: 14px;
-  }
+  .mapping-selected-model,
   .mapping-control {
-    grid-column: 1 / -1;
+    grid-column: 1;
   }
-  .mapping-control > span {
-    display: block;
-    margin-bottom: 6px;
-    color: #60788d;
-    font-size: 11px;
-    font-weight: 600;
+  .mapping-remove {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: center;
   }
 }
 </style>
