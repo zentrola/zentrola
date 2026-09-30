@@ -4272,6 +4272,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
 }
 .mapping-list {
   grid-row: 4;
+  max-height: min(46dvh, 420px);
   min-height: 0;
   min-width: 0;
   overflow-x: clip;

@@ -2142,6 +2142,41 @@ test('没有服务商时操作引导只显示添加服务商', async ({ page }) 
   await expect(page.locator('#provider-guide-create')).toHaveClass(/initialization-tour-target/)
 })
 
+test('服务商编辑模型列表在大量模型时可独立滚动', async ({ page }) => {
+  const state = await fixture(page)
+  state.models.push(
+    ...Array.from({ length: 30 }, (_, index) => ({
+      id: String(1000 + index),
+      code: `deepseek-history-${index}`,
+      name: `DeepSeek History ${index}`,
+      status: 'DISABLED',
+      inputModalities: ['TEXT'],
+      outputModalities: ['TEXT'],
+      remark: '',
+      publisherProviderId: '81',
+      publisherProviderName: 'DeepSeek',
+      createdAt: stamp,
+      updatedAt: stamp,
+    })),
+  )
+  await signIn(page)
+  await page.setViewportSize({ width: 1200, height: 900 })
+  await page.getByRole('link', { name: '服务商', exact: true }).click()
+  const providerRow = page.getByRole('row').filter({ hasText: 'DeepSeek' })
+  await providerRow.getByRole('button', { name: '编辑', exact: true }).click()
+
+  const mappingList = modal(page).locator('.mapping-list')
+  await expect(mappingList).toBeVisible()
+  const dimensions = await mappingList.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+  }))
+  expect(dimensions.scrollHeight).toBeGreaterThan(dimensions.clientHeight)
+  await mappingList.hover()
+  await page.mouse.wheel(0, 600)
+  await expect.poll(() => mappingList.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
+})
+
 test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => {
   const state = await fixture(page)
   state.models.push({
@@ -2396,7 +2431,6 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await selectAllMappings.uncheck()
   await expect(mappingCheckbox).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   await expect(mappingCheckbox).toHaveCSS('border-top-style', 'none')
-  await expect(dialog.locator('.mapping-list')).toHaveCSS('max-height', 'none')
   const mappingList = dialog.locator('.mapping-list')
   await expect(mappingList).toHaveCSS('overflow-y', 'scroll')
   expect(
