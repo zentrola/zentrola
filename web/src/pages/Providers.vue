@@ -4207,6 +4207,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   min-width: 0;
   min-height: 0;
   gap: 14px;
+  margin-bottom: 16px;
   grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 1.1fr);
 }
 .mapping-pane {
@@ -4333,7 +4334,6 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
 .mapping-editor {
   display: grid;
   overflow: hidden;
-  padding-bottom: 16px;
   grid-template-rows: auto minmax(0, 1fr);
 }
 .mapping-catalog-grid {

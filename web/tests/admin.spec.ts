@@ -2195,6 +2195,14 @@ test('服务商编辑模型列表在大量模型时可独立滚动', async ({ pa
   })
   expect(bottomGap).toBeGreaterThanOrEqual(16)
 
+  await page.setViewportSize({ width: 1200, height: 600 })
+  const desktopWorkspace = modal(page).locator('.mapping-workspace')
+  const desktopBottomGap = await desktopWorkspace.evaluate((element) => {
+    const editor = element.closest<HTMLElement>('.mapping-editor')!
+    return editor.getBoundingClientRect().bottom - element.getBoundingClientRect().bottom
+  })
+  expect(desktopBottomGap).toBeGreaterThanOrEqual(16)
+
   await page.setViewportSize({ width: 700, height: 800 })
   const mappingWorkspace = modal(page).locator('.mapping-workspace')
   await expect(mappingWorkspace).toHaveCSS('grid-template-columns', /^\S+$/)
