@@ -273,10 +273,14 @@ const {
   visible: searchVisible,
   search: searchKeyword,
   reset: resetKeyword,
+  searching,
+  searchingAll,
 } = useListSearch(
   items,
   (provider) =>
     `${provider.name} ${provider.code} ${provider.website ?? ''} ${provider.endpoints.map((endpoint) => endpoint.baseUrl).join(' ')}`,
+  () => '/providers',
+  loading,
 )
 
 function validURL(value: string, endpoint = false, networkScope: ProviderNetworkScope = 'PUBLIC') {
@@ -710,8 +714,8 @@ function syncRuntimeFilterQuery(value: RuntimeFilter) {
 }
 
 function search() {
-  searchKeyword()
   appliedRuntimeFilter.value = runtimeFilter.value
+  void searchKeyword(Boolean(appliedRuntimeFilter.value))
   syncRuntimeFilterQuery(runtimeFilter.value)
 }
 
@@ -1442,6 +1446,7 @@ function changeStatus(provider: Provider) {
 onMounted(() => {
   void load()
   void loadResources()
+  if (appliedRuntimeFilter.value) void searchKeyword(true)
   document.addEventListener('pointerdown', onCreateMenuOutside)
 })
 onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutside))
@@ -1456,7 +1461,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   <section class="panel">
     <ListSearch
       v-model="keyword"
-      :loading="loading"
+      :loading="loading || searching"
       :label="t('providers.searchLabel')"
       :placeholder="t('providers.searchPlaceholder')"
       @search="search"
@@ -1767,6 +1772,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
       </button>
     </div>
     <ListFooter
+      v-if="!searchingAll"
       :cursor="cursor"
       :page="page"
       :page-size="pageSize"

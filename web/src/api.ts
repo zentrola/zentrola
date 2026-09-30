@@ -111,6 +111,46 @@ export class ApiError extends Error {
     super(code)
   }
 }
+
+type ApiEnvelope = {
+  code?: string
+  requestId?: string
+  data?: unknown
+}
+
+function responseErrorCode(status: number) {
+  if (status === 401) return 'UNAUTHENTICATED'
+  if (status === 408 || status === 504) return 'TIMEOUT'
+  if (status >= 500) return 'SERVICE_UNAVAILABLE'
+  return 'UNKNOWN'
+}
+
+async function readEnvelope(response: Response): Promise<ApiEnvelope | null> {
+  const contentType = response.headers.get('Content-Type')?.toLowerCase() ?? ''
+  if (!contentType.includes('application/json') && !contentType.includes('+json')) return null
+  try {
+    const value: unknown = await response.json()
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as ApiEnvelope)
+      : null
+  } catch {
+    return null
+  }
+}
+
+function errorDetails(data: unknown) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return {}
+  const details = data as { retryAfterSeconds?: unknown; field?: unknown }
+  return {
+    retryAfterSeconds:
+      typeof details.retryAfterSeconds === 'number' &&
+      Number.isFinite(details.retryAfterSeconds) &&
+      details.retryAfterSeconds > 0
+        ? Math.ceil(details.retryAfterSeconds)
+        : 0,
+    field: typeof details.field === 'string' ? details.field : '',
+  }
+}
 export function errorText(error: unknown) {
   const code = error instanceof ApiError ? error.code : 'UNKNOWN'
   const key = i18n.global.te(`errors.${code}`) ? `errors.${code}` : 'errors.UNKNOWN'
@@ -137,19 +177,17 @@ export async function api<T>(path: string, method = 'GET', body?: unknown): Prom
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     })
-    const data = await response.json()
+    const data = await readEnvelope(response)
     if (epoch !== generation) throw new ApiError('UNAUTHENTICATED')
-    if (!response.ok || data.code !== 'OK') {
+    if (response.status === 204 && response.ok) return undefined as T
+    if (!data || !response.ok || data.code !== 'OK') {
       if (response.status === 401 && token.value) clearSession(true)
+      const details = errorDetails(data?.data)
       throw new ApiError(
-        data.code || 'UNKNOWN',
-        data.requestId || response.headers.get('X-Request-ID') || '',
-        typeof data.data?.retryAfterSeconds === 'number' &&
-        Number.isFinite(data.data.retryAfterSeconds) &&
-        data.data.retryAfterSeconds > 0
-          ? Math.ceil(data.data.retryAfterSeconds)
-          : 0,
-        typeof data.data?.field === 'string' ? data.data.field : '',
+        data?.code || responseErrorCode(response.status),
+        data?.requestId || response.headers.get('X-Request-ID') || '',
+        details.retryAfterSeconds,
+        details.field,
       )
     }
     return data.data as T
@@ -244,6 +282,7 @@ export async function logout() {
 }
 export async function all<T>(path: string): Promise<T[]> {
   const items: T[] = []
+  const cursors = new Set<string>()
   let after: string | null = null
   do {
     const url = new URL(path, 'http://zentrola.local')
@@ -252,7 +291,8 @@ export async function all<T>(path: string): Promise<T[]> {
     else url.searchParams.delete('after')
     const page: Page<T> = await api(`${url.pathname}?${url.searchParams}`)
     items.push(...page.items)
-    if (page.nextCursor === after && after !== null) throw new ApiError('UNKNOWN')
+    if (page.nextCursor && cursors.has(page.nextCursor)) throw new ApiError('UNKNOWN')
+    if (page.nextCursor) cursors.add(page.nextCursor)
     after = page.nextCursor
   } while (after)
   return items

@@ -36,11 +36,7 @@ function changePageSize(event: Event) {
       </span>
       <span class="pagination-divider" aria-hidden="true"></span>
       <span class="pagination-buttons">
-        <button
-          class="pagination-button"
-          :disabled="loading || page <= 1"
-          @click="$emit('first')"
-        >
+        <button class="pagination-button" :disabled="loading || page <= 1" @click="$emit('first')">
           {{ t('common.firstPage') }}
         </button>
         <button
