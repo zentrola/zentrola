@@ -88,10 +88,14 @@ const {
   visible: searchVisible,
   search: searchKeyword,
   reset: resetKeyword,
+  searching,
+  searchingAll,
 } = useListSearch(
   items,
   (model) =>
     `${model.name} ${model.code} ${model.id} ${model.publisherProviderName ?? ''} ${model.remark ?? ''} ${[...(model.inputModalities ?? []), ...(model.outputModalities ?? [])].map((value) => t(`models.${value}`)).join(' ')}`,
+  () => '/models',
+  loading,
 )
 const visible = computed(() =>
   searchVisible.value.filter(
@@ -101,8 +105,8 @@ const visible = computed(() =>
   ),
 )
 function search() {
-  searchKeyword()
   appliedPublisherProviderId.value = publisherProviderId.value
+  void searchKeyword(Boolean(appliedPublisherProviderId.value))
 }
 function reset() {
   resetKeyword()
@@ -161,7 +165,7 @@ function deleteModel() {
   <section class="panel">
     <ListSearch
       v-model="keyword"
-      :loading="loading"
+      :loading="loading || searching"
       :label="t('models.searchLabel')"
       :placeholder="t('models.searchPlaceholder')"
       @search="search"
@@ -274,6 +278,7 @@ function deleteModel() {
       </p>
     </div>
     <ListFooter
+      v-if="!searchingAll"
       :cursor="cursor"
       :page="page"
       :page-size="pageSize"

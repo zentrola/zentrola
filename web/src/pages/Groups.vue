@@ -44,9 +44,11 @@ const selected = ref<Group | null>(null),
   relationReady = ref(false),
   statusTarget = ref<Group | null>(null),
   deleteTarget = ref<Group | null>(null)
-const { keyword, query, visible, search, reset } = useListSearch(
+const { keyword, query, visible, search, reset, searching, searchingAll } = useListSearch(
   items,
   (g) => `${g.name} ${g.id} ${g.remark || ''}`,
+  () => '/groups',
+  loading,
 )
 const grantedModelIDs = computed(() => new Set(grantedModels.value.map((model) => model.id)))
 const createSelectableModelIDs = computed(() =>
@@ -179,7 +181,7 @@ function deleteGroup() {
   <section class="panel">
     <ListSearch
       v-model="keyword"
-      :loading="loading"
+      :loading="loading || searching"
       :label="t('groups.searchLabel')"
       :placeholder="t('groups.searchPlaceholder')"
       @search="search"
@@ -244,10 +246,15 @@ function deleteGroup() {
     </TableScroll>
     <div v-if="!visible.length" class="empty-state">
       <Icon name="groups" :size="32" />
-      <h3>{{ t(loading ? 'common.loading' : query ? 'common.noResults' : 'common.empty') }}</h3>
-      <p v-if="!loading && !query">{{ t('groups.empty') }}</p>
+      <h3>
+        {{
+          t(loading || searching ? 'common.loading' : query ? 'common.noResults' : 'common.empty')
+        }}
+      </h3>
+      <p v-if="!loading && !searching && !query">{{ t('groups.empty') }}</p>
     </div>
     <ListFooter
+      v-if="!searchingAll"
       :cursor="cursor"
       :page="page"
       :page-size="pageSize"

@@ -29,10 +29,12 @@ function errorLabel(value: string) {
 function showSnapshot(row: Operation) {
   return row.type !== 'LOGIN_SUCCESS' && row.type !== 'LOGIN_FAILED'
 }
-const { keyword, query, visible, search, reset } = useListSearch(
+const { keyword, query, visible, search, reset, searching, searchingAll } = useListSearch(
   items,
   (row) =>
     `${row.operatorName} ${row.type} ${operationLabel(row.type)} ${row.targetType} ${targetLabel(row.targetType)} ${row.targetName || ''} ${row.targetId} ${row.requestId || ''} ${row.result} ${t(`state.${row.result}`)}`,
+  () => '/operation-logs',
+  loading,
 )
 onMounted(() => load())
 </script>
@@ -41,7 +43,7 @@ onMounted(() => load())
   <section class="panel">
     <ListSearch
       v-model="keyword"
-      :loading="loading"
+      :loading="loading || searching"
       :placeholder="t('operations.searchPlaceholder')"
       @search="search"
       @reset="reset"
@@ -105,6 +107,7 @@ onMounted(() => load())
       </button>
     </div>
     <ListFooter
+      v-if="!searchingAll"
       :cursor="cursor"
       :page="page"
       :page-size="pageSize"

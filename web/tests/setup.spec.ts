@@ -23,8 +23,7 @@ test('空系统创建首位管理员，校验确认密码后切换为登录', as
         token: 'setup-test-token',
         expiresAt: new Date(Date.now() + 3600000).toISOString(),
       })
-    if (path.endsWith('/me'))
-      return reply({ id: '1', username: 'owner', displayName: 'owner' })
+    if (path.endsWith('/me')) return reply({ id: '1', username: 'owner', displayName: 'owner' })
     return reply({ items: [], nextCursor: null, total: 0 })
   })
   await page.goto('/')
@@ -148,4 +147,17 @@ test('初始化状态失败不开放注册，其他页面抢先完成后关闭�
   await page.getByRole('button', { name: '创建管理员', exact: true }).click()
   await expect(page.getByRole('heading', { name: '欢迎回来' })).toBeVisible()
   await expect(page.getByRole('alert')).toContainText('系统已完成管理员初始化')
+})
+
+test('非 JSON 服务端错误保留 HTTP 错误语义', async ({ page }) => {
+  await page.route('**/api/v1/auth/setup', (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: 'text/html',
+      body: '<html><body>Service Unavailable</body></html>',
+    }),
+  )
+  await page.goto('/')
+  await expect(page.getByRole('alert')).toContainText('服务暂时不可用')
+  await expect(page.getByRole('alert')).not.toContainText('无法连接服务')
 })

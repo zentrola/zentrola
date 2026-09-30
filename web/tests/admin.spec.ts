@@ -1745,7 +1745,7 @@ test('模型新增编辑、模态校验、冲突恢复和窄屏表单', async ({
   const modelQueryCount = state.modelQueries.length
   await modelSearch.fill('图文理解用途')
   await page.getByRole('button', { name: '搜索', exact: true }).click()
-  expect(state.modelQueries).toHaveLength(modelQueryCount)
+  expect(state.modelQueries).toHaveLength(modelQueryCount + 1)
   await expect(page.getByRole('row').filter({ hasText: 'official-test-v2' })).toHaveCount(1)
   await page.screenshot({ path: '../.cache/web-visual/model-catalog-desktop.png' })
   const updatedRow = page.getByRole('row').filter({ hasText: 'official-test-v2' })
@@ -4469,4 +4469,43 @@ test('成员列表按 ID 倒序前后翻页，保持长 ID 并拒绝无效用量
   await page.getByRole('button', { name: '选择起止日期', exact: true }).click()
   await page.getByRole('button', { name: '重置', exact: true }).click()
   await expect(page.getByRole('alert')).toHaveCount(0)
+})
+
+test('列表搜索覆盖全部分页并安全传递不透明游标', async ({ page }) => {
+  await fixture(page)
+  const opaqueCursor = 'cursor&segment=two'
+  const searchRequests: URL[] = []
+  await page.route('**/api/v1/members?**', async (route) => {
+    const url = new URL(route.request().url())
+    const limit = Number(url.searchParams.get('limit'))
+    const after = url.searchParams.get('after')
+    if (limit === 100) searchRequests.push(url)
+    const item = {
+      id: after === opaqueCursor ? '90071992547409929' : longID,
+      name: after === opaqueCursor ? '跨页目标成员' : '第一页成员',
+      remark: '',
+      status: 'ACTIVE',
+      createdAt: stamp,
+    }
+    await route.fulfill({
+      json: {
+        code: 'OK',
+        data: {
+          items: [item],
+          nextCursor: limit === 100 && !after ? opaqueCursor : null,
+          total: 2,
+        },
+      },
+    })
+  })
+  await signIn(page)
+  await expect(page.getByText('跨页目标成员', { exact: true })).toHaveCount(0)
+  await page.getByRole('searchbox', { name: '用户名' }).fill('跨页目标成员')
+  await page.getByRole('button', { name: '搜索', exact: true }).click()
+  await expect(page.getByText('跨页目标成员', { exact: true })).toBeVisible()
+  await expect(page.getByLabel('分页')).toHaveCount(0)
+  expect(searchRequests).toHaveLength(2)
+  expect(searchRequests[1].searchParams.get('after')).toBe(opaqueCursor)
+  await page.getByRole('button', { name: '重置', exact: true }).click()
+  await expect(page.getByLabel('分页')).toBeVisible()
 })

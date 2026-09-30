@@ -44,9 +44,11 @@ const statusTarget = ref<Member | null>(null),
 const keyName = ref(''),
   expires = ref(''),
   createdKey = ref<CreatedKey | null>(null)
-const { keyword, query, visible, search, reset } = useListSearch(
+const { keyword, query, visible, search, reset, searching, searchingAll } = useListSearch(
   items,
   (m) => `${m.name} ${m.id} ${m.remark || ''}`,
+  () => '/members',
+  loading,
 )
 const originalGroupIDSet = computed(() => new Set(originalGroupIDs.value))
 onMounted(() => load())
@@ -195,7 +197,7 @@ async function copyKey() {
   <section class="panel">
     <ListSearch
       v-model="keyword"
-      :loading="loading"
+      :loading="loading || searching"
       :label="t('members.member')"
       :placeholder="t('members.searchPlaceholder')"
       @search="search"
@@ -281,10 +283,15 @@ async function copyKey() {
     </TableScroll>
     <div v-if="!visible.length" class="empty-state">
       <Icon name="members" :size="32" />
-      <h3>{{ t(loading ? 'common.loading' : query ? 'common.noResults' : 'common.empty') }}</h3>
-      <p v-if="!loading && !query">{{ t('members.empty') }}</p>
+      <h3>
+        {{
+          t(loading || searching ? 'common.loading' : query ? 'common.noResults' : 'common.empty')
+        }}
+      </h3>
+      <p v-if="!loading && !searching && !query">{{ t('members.empty') }}</p>
     </div>
     <ListFooter
+      v-if="!searchingAll"
       :cursor="cursor"
       :page="page"
       :page-size="pageSize"

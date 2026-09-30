@@ -1,23 +1,68 @@
-import { computed, ref, onBeforeUnmount, type Ref } from 'vue'
-import { api, errorText } from './api'
+import { computed, ref, onBeforeUnmount, watch, type Ref } from 'vue'
+import { all, api, errorText } from './api'
 import type { Page } from './types'
 import { activeLocale, t } from './i18n'
 import { showErrorToast } from './toast'
 
-export function useListSearch<T>(items: Ref<T[]>, text: (item: T) => string) {
+export function useListSearch<T>(
+  items: Ref<T[]>,
+  text: (item: T) => string,
+  path?: () => string,
+  sourceLoading: Ref<boolean> = ref(false),
+) {
   const keyword = ref(''),
-    query = ref('')
+    query = ref(''),
+    allItems = ref<T[] | null>(null) as Ref<T[] | null>,
+    searching = ref(false)
+  let revision = 0
+  const source = computed(() => allItems.value ?? items.value)
   const visible = computed(() =>
-    items.value.filter((item) => text(item).toLowerCase().includes(query.value)),
+    source.value.filter((item) => text(item).toLocaleLowerCase().includes(query.value)),
   )
-  function search() {
-    query.value = keyword.value.trim().toLowerCase()
+  async function loadAll() {
+    if (!path) return
+    const current = ++revision
+    allItems.value = []
+    searching.value = true
+    try {
+      const result = await all<T>(path())
+      if (current === revision) allItems.value = result
+    } catch (error) {
+      if (current === revision) showErrorToast(errorText(error))
+    } finally {
+      if (current === revision) searching.value = false
+    }
+  }
+  async function search(forceAll = false) {
+    query.value = keyword.value.trim().toLocaleLowerCase()
+    if (!path || (!query.value && !forceAll)) {
+      revision++
+      allItems.value = null
+      searching.value = false
+      return
+    }
+    await loadAll()
   }
   function reset() {
+    revision++
     keyword.value = ''
     query.value = ''
+    allItems.value = null
+    searching.value = false
   }
-  return { keyword, query, visible, search, reset }
+  watch([items, sourceLoading], ([, loading]) => {
+    if (allItems.value && !searching.value && !loading) void loadAll()
+  })
+  onBeforeUnmount(() => revision++)
+  return {
+    keyword,
+    query,
+    visible,
+    search,
+    reset,
+    searching,
+    searchingAll: computed(() => allItems.value !== null),
+  }
 }
 
 export function useCollection<T>(path: () => string) {
@@ -46,10 +91,11 @@ export function useCollection<T>(path: () => string) {
       pageStarts = [null]
     }
     try {
-      const route = path()
-      const result = await api<Page<T>>(
-        `${route}${route.includes('?') ? '&' : '?'}limit=${pageSize.value}${after ? `&after=${after}` : ''}`,
-      )
+      const route = new URL(path(), 'http://zentrola.local')
+      route.searchParams.set('limit', String(pageSize.value))
+      if (after) route.searchParams.set('after', after)
+      else route.searchParams.delete('after')
+      const result = await api<Page<T>>(`${route.pathname}?${route.searchParams}`)
       if (current !== revision) return
       pageStarts[targetPage - 1] = after
       pageStarts.length = targetPage
