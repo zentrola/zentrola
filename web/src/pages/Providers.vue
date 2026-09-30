@@ -4301,6 +4301,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
 .mapping-editor {
   display: grid;
   overflow: hidden;
+  padding-bottom: 16px;
   grid-template-rows: auto auto auto minmax(0, 1fr);
 }
 .mapping-grid {
