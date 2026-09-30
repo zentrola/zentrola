@@ -259,17 +259,6 @@ const filteredMappingRows = computed(() => {
 })
 const mappingFilterActive = computed(() => Boolean(mappingQuery.value.trim()))
 const selectedMappingRows = computed(() => mappingRows.value.filter((row) => row.mapping))
-const visibleSelectedMappingCount = computed(
-  () => filteredMappingRows.value.filter((row) => row.mapping).length,
-)
-const allMappingsSelected = computed(
-  () =>
-    filteredMappingRows.value.length > 0 &&
-    visibleSelectedMappingCount.value === filteredMappingRows.value.length,
-)
-const someMappingsSelected = computed(
-  () => visibleSelectedMappingCount.value > 0 && !allMappingsSelected.value,
-)
 const route = useRoute()
 const router = useRouter()
 type RuntimeFilter = '' | 'HEALTHY' | 'ABNORMAL'
@@ -534,20 +523,17 @@ function toggleMapping(model: Model) {
   }
 }
 
-function toggleAllMappings(event: Event) {
-  const checked = (event.target as HTMLInputElement).checked
+function selectAllMappings() {
   const visibleModels = filteredMappingRows.value.map((row) => row.model)
-  const visibleModelIDs = new Set(visibleModels.map((model) => model.id))
-  if (checked) {
-    for (const model of visibleModels) {
-      if (!form.mappings.some((mapping) => mapping.modelId === model.id)) {
-        form.mappings.push({ modelId: model.id, upstreamModelCode: '' })
-      }
+  for (const model of visibleModels) {
+    if (!form.mappings.some((mapping) => mapping.modelId === model.id)) {
+      form.mappings.push({ modelId: model.id, upstreamModelCode: '' })
     }
-    return
   }
-  const remaining = form.mappings.filter((mapping) => !visibleModelIDs.has(mapping.modelId))
-  form.mappings.splice(0, form.mappings.length, ...remaining)
+}
+
+function invertMappingSelection() {
+  for (const row of filteredMappingRows.value) toggleMapping(row.model)
 }
 
 function updateUpstreamModelCode(modelId: string, event: Event) {
@@ -2015,8 +2001,35 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
               aria-labelledby="mapping-catalog-title"
             >
               <header class="mapping-pane-head">
-                <strong id="mapping-catalog-title">{{ t('providers.mappingCatalogTitle') }}</strong>
-                <span>{{ availableMappingModels.length }}</span>
+                <span class="mapping-pane-title">
+                  <strong id="mapping-catalog-title">{{ t('providers.mappingListTitle') }}</strong>
+                  <span class="mapping-count-tag">{{
+                    mappingFilterActive
+                      ? t('providers.filteredMappingCount', {
+                          count: filteredMappingRows.length,
+                        })
+                      : availableMappingModels.length
+                  }}</span>
+                </span>
+                <span class="mapping-bulk-actions">
+                  <button
+                    type="button"
+                    class="text-button mapping-bulk-button"
+                    :disabled="busy || !filteredMappingRows.length"
+                    @click="selectAllMappings"
+                  >
+                    {{ t('providers.selectAll') }}
+                  </button>
+                  <span class="mapping-action-separator" aria-hidden="true">/</span>
+                  <button
+                    type="button"
+                    class="text-button mapping-bulk-button"
+                    :disabled="busy || !filteredMappingRows.length"
+                    @click="invertMappingSelection"
+                  >
+                    {{ t('providers.invertSelection') }}
+                  </button>
+                </span>
               </header>
               <div class="mapping-toolbar">
                 <div class="mapping-search-box">
@@ -2040,29 +2053,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
                   </button>
                 </div>
               </div>
-              <div v-if="mappingFilterActive" class="mapping-filter-summary">
-                {{ t('providers.filteredMappingCount', { count: filteredMappingRows.length }) }}
-              </div>
               <div v-if="filteredMappingRows.length" class="mapping-catalog-list">
-                <div class="mapping-catalog-grid mapping-catalog-head">
-                  <label class="mapping-check mapping-select-all">
-                    <input
-                      type="checkbox"
-                      :checked="allMappingsSelected"
-                      :indeterminate="someMappingsSelected"
-                      :disabled="busy"
-                      :aria-label="
-                        t(
-                          mappingFilterActive
-                            ? 'providers.selectFilteredMappings'
-                            : 'providers.selectAllMappings',
-                        )
-                      "
-                      @change="toggleAllMappings"
-                    />
-                  </label>
-                  <span>{{ t('providers.logicalModel') }}</span>
-                </div>
                 <div
                   v-for="row in filteredMappingRows"
                   :key="row.model.id"
@@ -4358,7 +4349,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   background: #fff;
 }
 .mapping-catalog-pane {
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
 }
 .mapping-selected-pane {
   grid-template-rows: auto minmax(0, 1fr);
@@ -4378,11 +4369,42 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   color: var(--color-text);
   font-size: 12px;
 }
-.mapping-pane-head span {
+.mapping-pane-head .mapping-pane-title {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+.mapping-count-tag {
+  display: inline-flex;
   flex: none;
-  color: #60788d;
-  font-size: 11px;
+  min-height: 20px;
+  align-items: center;
+  padding: 1px 7px;
+  color: var(--color-primary-hover);
+  background: var(--color-primary-soft);
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 18px;
   white-space: nowrap;
+}
+.mapping-bulk-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+.mapping-bulk-button {
+  min-height: 24px;
+  padding: 2px 4px;
+  font-size: 11px;
+}
+.mapping-action-separator {
+  color: #94a3b8;
+  font-size: 11px;
 }
 .mapping-selected-head {
   display: grid;
@@ -4427,12 +4449,6 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   color: var(--color-text);
   background: #e9eff6;
 }
-.mapping-filter-summary {
-  grid-row: 3;
-  padding: 0 12px 8px;
-  color: var(--muted);
-  font-size: 11px;
-}
 .mapping-catalog-list,
 .mapping-selected-list {
   min-width: 0;
@@ -4445,7 +4461,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   scrollbar-width: auto;
 }
 .mapping-catalog-list {
-  grid-row: 4;
+  grid-row: 3;
 }
 .mapping-selected-list {
   grid-row: 2;
@@ -4483,18 +4499,6 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   padding: 5px 10px;
   border-top: 1px solid #f1f5f9;
 }
-.mapping-catalog-head {
-  position: sticky;
-  z-index: 1;
-  top: 0;
-  padding-top: 6px;
-  padding-bottom: 6px;
-  border-top: 0;
-  background: #fff;
-  color: #60788d;
-  font-size: 11px;
-  font-weight: 600;
-}
 .mapping-catalog-row {
   min-height: 52px;
   background: #fff;
@@ -4516,9 +4520,6 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   padding: 0;
   accent-color: var(--blue);
   cursor: pointer;
-}
-.mapping-select-all {
-  min-height: 24px;
 }
 .mapping-model-name {
   display: block;

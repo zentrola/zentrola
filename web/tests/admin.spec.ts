@@ -2414,9 +2414,9 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
     modal(page).getByRole('checkbox', { name: '启用 DeepSeek V3 Legacy 映射' }),
   ).not.toBeChecked()
   await expect(modal(page).getByLabel('DeepSeek V3 Legacy 的服务商模型编码')).toHaveCount(0)
-  await expect(modal(page).getByText('模型目录', { exact: true })).toBeVisible()
+  await expect(modal(page).getByText('模型列表', { exact: true })).toBeVisible()
   await expect(modal(page).getByText('已启用模型映射', { exact: true })).toHaveCount(0)
-  await expect(modal(page).getByText('模型名称', { exact: true })).toHaveCount(2)
+  await expect(modal(page).getByText('模型名称', { exact: true })).toHaveCount(1)
   await expect(modal(page).getByText('服务商编码', { exact: true })).toBeVisible()
   await expect(modal(page).locator('.mapping-control > span')).toHaveCount(0)
   const editDialog = modal(page)
@@ -2484,14 +2484,25 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   )
   await expect(dialog.getByRole('button', { name: '添加映射', exact: true })).toHaveCount(0)
   await expect(dialog.getByText('模型映射', { exact: true })).toHaveCount(0)
-  const selectAllMappings = dialog.getByRole('checkbox', { name: '全选系统模型', exact: true })
+  const mappingCatalogHead = dialog.locator('.mapping-catalog-pane .mapping-pane-head')
+  const selectAllMappings = mappingCatalogHead.getByRole('button', {
+    name: '全选',
+    exact: true,
+  })
+  const invertMappings = mappingCatalogHead.getByRole('button', {
+    name: '反选',
+    exact: true,
+  })
+  await expect(mappingCatalogHead.getByText('模型列表', { exact: true })).toBeVisible()
+  await expect(mappingCatalogHead.locator('.mapping-count-tag')).toHaveText(/\d+/)
+  await expect(mappingCatalogHead.locator('.mapping-action-separator')).toHaveText('/')
   const mappingCheckbox = dialog.getByRole('checkbox', {
     name: '启用 DeepSeek V4 Flash 映射',
   })
   const claudeMappingCheckbox = dialog.getByRole('checkbox', {
     name: '启用 Claude Sonnet 映射',
   })
-  await expect(dialog.getByText('尚未启用模型，请从左侧模型目录中勾选。')).toBeVisible()
+  await expect(dialog.getByText('尚未启用模型，请从左侧模型列表中勾选。')).toBeVisible()
   const mappingSearch = dialog.getByRole('searchbox', { name: '搜索模型映射' })
   await expect(mappingSearch).toHaveAttribute(
     'placeholder',
@@ -2507,17 +2518,12 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await dialog.getByRole('button', { name: '清除筛选', exact: true }).click()
   await expect(mappingSearch).toHaveValue('')
   await mappingSearch.fill('DeepSeek V4 Flash')
-  const selectFilteredMappings = dialog.getByRole('checkbox', {
-    name: '全选当前筛选结果',
-    exact: true,
-  })
-  await selectFilteredMappings.check()
+  await selectAllMappings.click()
   await expect(mappingCheckbox).toBeChecked()
   await expect(claudeMappingCheckbox).toHaveCount(0)
   await dialog.getByRole('button', { name: '清空模型映射搜索', exact: true }).click()
   await expect(claudeMappingCheckbox).toBeVisible()
   await expect(claudeMappingCheckbox).not.toBeChecked()
-  await selectAllMappings.uncheck()
   await expect(mappingCheckbox).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   await expect(mappingCheckbox).toHaveCSS('border-top-style', 'none')
   const mappingList = dialog.locator('.mapping-catalog-list')
@@ -2528,17 +2534,18 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await expect(dialog.locator('.modal-body')).toHaveCSS('overflow-y', 'hidden')
   await expect(dialog.locator('.mapping-catalog-row').first()).toHaveCSS('min-height', '52px')
   const providerModelCode = dialog.getByLabel('DeepSeek V4 Flash 的服务商模型编码')
-  await selectAllMappings.check()
+  await selectAllMappings.click()
   await expect(mappingCheckbox).toBeChecked()
   await expect(claudeMappingCheckbox).toBeChecked()
-  await selectAllMappings.uncheck()
+  await invertMappings.click()
   await expect(mappingCheckbox).not.toBeChecked()
   await expect(claudeMappingCheckbox).not.toBeChecked()
   await expect(providerModelCode).toHaveCount(0)
   await mappingCheckbox.check()
   await expect(mappingCheckbox).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   await expect(mappingCheckbox).toHaveCSS('border-top-style', 'none')
-  await expect(selectAllMappings).toHaveJSProperty('indeterminate', true)
+  await expect(selectAllMappings).toBeEnabled()
+  await expect(invertMappings).toBeEnabled()
   await expect(mappingCheckbox).toBeVisible()
   await expect(claudeMappingCheckbox).toBeVisible()
   await expect(providerModelCode).toBeEnabled()
@@ -3462,28 +3469,34 @@ test('分组编辑表单与创建一致、失败恢复及停用授权限制', as
   await expect(createDialog.getByLabel('备注', { exact: true })).toBeVisible()
   await expect(createDialog.getByText('DeepSeek V4 Flash', { exact: true })).toBeVisible()
   await expect(createDialog.getByText('Claude Sonnet', { exact: true })).toHaveCount(0)
-  await expect(createDialog.getByText('已选择 0 / 共 1 个模型')).toBeVisible()
+  const createSelectedPane = createDialog.locator('.group-model-selected')
+  await expect(createSelectedPane.locator('.group-model-pane-head > span')).toHaveText('0')
+  await expect(createSelectedPane).toContainText('尚未选择模型，请从模型列表中勾选。')
   const createModelSearch = createDialog.getByRole('searchbox', { name: '搜索模型' })
   await expect(createModelSearch).toHaveAttribute('placeholder', '搜索模型名称、编码或厂商')
-  await expect(createDialog.locator('.model-search-box > svg')).toHaveCount(0)
+  await expect(createDialog.locator('.group-model-search-box > svg')).toHaveCount(0)
   await createModelSearch.fill('deepseek-v4-flash')
   await expect(createDialog.getByText('显示 1 个', { exact: true })).toBeVisible()
   await expect(createDialog.getByText('DeepSeek V4 Flash', { exact: true })).toBeVisible()
   await createModelSearch.fill('不存在的模型')
   await expect(createDialog.getByText('显示 0 个', { exact: true })).toBeVisible()
-  await expect(createDialog.locator('.model-filter-empty')).toContainText('没有匹配的模型。')
+  await expect(createDialog.locator('.group-model-filter-empty')).toContainText('没有匹配的模型。')
   await createDialog.getByRole('button', { name: '清除筛选', exact: true }).click()
   await expect(createModelSearch).toHaveValue('')
-  await expect(createDialog.getByRole('columnheader')).toHaveText([
-    '请选择',
-    '名称',
-    '输入类型',
-    '输出类型',
-  ])
-  await expect(createDialog.getByText('deepseek-v4-flash', { exact: true })).toHaveCount(0)
-  const createModelRow = createDialog.getByRole('row').filter({ hasText: 'DeepSeek V4 Flash' })
-  await expect(createModelRow.getByRole('cell').nth(2)).toHaveText('文本')
-  await expect(createModelRow.getByRole('cell').nth(3)).toHaveText('文本')
+  const createCatalogHead = createDialog.locator('.group-model-catalog .group-model-pane-head')
+  await expect(createCatalogHead.getByText('模型列表', { exact: true })).toBeVisible()
+  await expect(createCatalogHead.locator('.group-model-count-tag')).toHaveText('1')
+  const createBulkActions = createCatalogHead.locator('.group-model-bulk-actions')
+  await expect(createBulkActions.getByRole('button', { name: '全选', exact: true })).toBeVisible()
+  await expect(createBulkActions.locator('.group-model-action-separator')).toHaveText('/')
+  await expect(createBulkActions.getByRole('button', { name: '反选', exact: true })).toBeVisible()
+  await expect(createCatalogHead.getByText('名称', { exact: true })).toHaveCount(0)
+  await expect(createDialog.locator('.group-model-catalog .group-model-list-head')).toHaveCount(0)
+  await expect(createDialog.getByText('deepseek-v4-flash', { exact: true })).toBeVisible()
+  const createModelRow = createDialog
+    .locator('.group-model-catalog-row')
+    .filter({ hasText: 'DeepSeek V4 Flash' })
+  await expect(createModelRow.locator('.modality-tag')).toHaveText(['输入：文本', '输出：文本'])
   await createDialog.getByLabel('名称', { exact: true }).fill('必填校验分组')
   await createDialog.getByRole('button', { name: '创建', exact: true }).click()
   await expect(page.locator('.toast')).toContainText('必须选择至少一个访问模型')
@@ -3491,9 +3504,13 @@ test('分组编辑表单与创建一致、失败恢复及停用授权限制', as
   await createDialog.getByRole('button', { name: '关闭', exact: true }).click()
   state.models[1].status = 'ACTIVE'
   await page.getByRole('button', { name: '创建分组' }).click()
-  const multimodalRow = modal(page).getByRole('row').filter({ hasText: 'Claude Sonnet' })
-  await expect(multimodalRow.getByRole('cell').nth(2)).toHaveText('文本图片')
-  await expect(multimodalRow.getByRole('cell').nth(3)).toHaveText('文本')
+  const multimodalRow = modal(page)
+    .locator('.group-model-catalog-row')
+    .filter({ hasText: 'Claude Sonnet' })
+  await expect(multimodalRow.locator('.modality-tag')).toHaveText([
+    '输入：文本 / 图片',
+    '输出：文本',
+  ])
   await modal(page).getByRole('button', { name: '关闭', exact: true }).click()
   state.models[1].status = 'DISABLED'
   await page.getByRole('button', { name: '编辑', exact: true }).click()
@@ -3528,13 +3545,12 @@ test('分组编辑表单与创建一致、失败恢复及停用授权限制', as
   await expect(active).toBeChecked()
   await editModelSearch.fill('没有匹配项')
   await expect(active).toHaveCount(0)
-  await expect(dialog.getByText('已选择 1 / 共 1 个模型')).toBeVisible()
+  const editSelectedPane = dialog.locator('.group-model-selected')
+  await expect(editSelectedPane.locator('.group-model-pane-head > span')).toHaveText('1')
+  await expect(editSelectedPane.getByText('DeepSeek V4 Flash', { exact: true })).toBeVisible()
   await dialog.getByRole('button', { name: '清空模型搜索', exact: true }).click()
   await expect(active).toBeVisible()
-  const selectedOnly = dialog.getByRole('button', { name: '仅看已选', exact: true })
-  await selectedOnly.click()
-  await expect(selectedOnly).toHaveAttribute('aria-pressed', 'true')
-  await expect(active).toBeVisible()
+  await expect(dialog.getByRole('button', { name: '移除 DeepSeek V4 Flash' })).toBeVisible()
   await mkdir('../.cache/web-visual', { recursive: true })
   await dialog.screenshot({ path: '../.cache/web-visual/group-model-checklist.png' })
   await dialog.getByRole('button', { name: '关闭', exact: true }).click()
@@ -3553,6 +3569,87 @@ test('分组编辑表单与创建一致、失败恢复及停用授权限制', as
   await expect(active).not.toBeChecked()
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   expect(state.relationships.get('groups/51/models')?.has('71')).toBe(false)
+})
+
+test('访问模型支持对当前筛选结果全选和反选', async ({ page }) => {
+  const state = await fixture(page)
+  state.groups.push({
+    id: '51',
+    code: 'engineering',
+    name: '研发组',
+    status: 'ACTIVE',
+    createdAt: stamp,
+  })
+  state.relationships.set('groups/51/models', new Set(['71']))
+  await signIn(page)
+  await page.getByRole('link', { name: '用户分组', exact: true }).click()
+
+  await page.getByRole('button', { name: '创建分组', exact: true }).click()
+  const createDialog = modal(page)
+  const createCatalog = createDialog.locator('.group-model-catalog')
+  const createSelectAll = createCatalog.getByRole('button', { name: '全选', exact: true })
+  const createInvertSelection = createCatalog.getByRole('button', {
+    name: '反选',
+    exact: true,
+  })
+  const createSearch = createDialog.getByRole('searchbox', { name: '搜索模型' })
+  const createSelectedPane = createDialog.locator('.group-model-selected')
+  await expect(createDialog.locator('.group-model-workspace')).toHaveCSS(
+    'grid-template-columns',
+    /\S+ \S+/,
+  )
+  const deepSeek = createDialog.getByRole('checkbox', {
+    name: '授权 DeepSeek V4 Flash',
+    exact: true,
+  })
+  const claude = createDialog.getByRole('checkbox', { name: '授权 Claude Sonnet', exact: true })
+  await createSelectAll.click()
+  await expect(deepSeek).toBeChecked()
+  await expect(claude).toBeChecked()
+  await expect(createSelectedPane.locator('.group-model-pane-head > span')).toHaveText('2')
+  await expect(createSelectedPane.locator('.group-model-list-head')).toHaveCount(0)
+  await createInvertSelection.click()
+  await expect(deepSeek).not.toBeChecked()
+  await expect(claude).not.toBeChecked()
+
+  await createSearch.fill('DeepSeek')
+  await createSelectAll.click()
+  await expect(deepSeek).toBeChecked()
+  await createSearch.fill('Claude')
+  await createSelectAll.click()
+  await expect(claude).toBeChecked()
+  await createSearch.fill('DeepSeek')
+  await createInvertSelection.click()
+  await expect(deepSeek).not.toBeChecked()
+  await expect(createSelectedPane.locator('.group-model-pane-head > span')).toHaveText('1')
+  await createSearch.fill('')
+  await expect(claude).toBeChecked()
+  await createSelectedPane.getByRole('button', { name: '移除 Claude Sonnet' }).click()
+  await expect(claude).not.toBeChecked()
+  await expect(createSelectedPane.locator('.group-model-pane-head > span')).toHaveText('0')
+  await createDialog.getByRole('button', { name: '关闭', exact: true }).click()
+
+  await page.getByRole('button', { name: '编辑', exact: true }).click()
+  const editDialog = modal(page)
+  const editCatalog = editDialog.locator('.group-model-catalog')
+  const editSelectAll = editCatalog.getByRole('button', { name: '全选', exact: true })
+  const editInvertSelection = editCatalog.getByRole('button', { name: '反选', exact: true })
+  const editDeepSeek = editDialog.getByRole('checkbox', {
+    name: '授权 DeepSeek V4 Flash',
+    exact: true,
+  })
+  const editClaude = editDialog.getByRole('checkbox', {
+    name: '授权 Claude Sonnet',
+    exact: true,
+  })
+  await expect(editDeepSeek).toBeChecked()
+  await expect(editClaude).not.toBeChecked()
+  await editSelectAll.click()
+  await expect(editDeepSeek).toBeChecked()
+  await expect(editClaude).toBeChecked()
+  await editInvertSelection.click()
+  await expect(editDeepSeek).not.toBeChecked()
+  await expect(editClaude).not.toBeChecked()
 })
 
 test('没有模型时提示先添加模型且不打开创建分组弹窗', async ({ page }) => {
@@ -3726,7 +3823,9 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
   })
   await expect(createGrant).toBeEnabled()
   await createGrant.check()
-  await expect(modal(page).getByText('已选择 1 / 共 2 个模型')).toBeVisible()
+  await expect(
+    modal(page).locator('.group-model-selected .group-model-pane-head > span'),
+  ).toHaveText('1')
   state.conflict(true)
   await modal(page).getByRole('button', { name: '创建', exact: true }).click()
   await expect(page.locator('.toast')).toContainText('操作冲突')
@@ -3745,7 +3844,7 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
   await expect(
     modal(page).getByRole('checkbox', { name: '授权 DeepSeek V4 Flash', exact: true }),
   ).toBeChecked()
-  await expect(modal(page).getByText('DeepSeek V4 Flash', { exact: true })).toBeVisible()
+  await expect(modal(page).getByText('DeepSeek V4 Flash', { exact: true })).toHaveCount(2)
   await modal(page).getByRole('button', { name: '关闭', exact: true }).click()
 
   await page.getByRole('link', { name: '模型', exact: true }).click()
@@ -4151,9 +4250,9 @@ test('高密度表格在常用桌面分辨率保持稳定列宽和单行技术�
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
 })
 
-test('有操作列表固定首尾列，无操作列表只固定首列', async ({ page }) => {
+test('有操作列表固定首尾列，分组模型选择器按可用宽度改为上下结构', async ({ page }) => {
   await fixture(page)
-  await page.setViewportSize({ width: 760, height: 768 })
+  await page.setViewportSize({ width: 800, height: 768 })
   await signIn(page, 'home')
   await page.goto('/#/usage?view=records')
   await expect(page.getByRole('heading', { name: '用量分析', exact: true })).toBeVisible()
@@ -4193,28 +4292,20 @@ test('有操作列表固定首尾列，无操作列表只固定首列', async ({
   await expect(page.getByRole('heading', { name: '用户分组', exact: true })).toBeVisible()
   await page.getByRole('button', { name: '创建分组', exact: true }).click()
 
-  const selectionScroll = modal(page).locator('.create-model-list')
-  await expect(selectionScroll).toHaveClass(/is-overflowing/)
-  await expect(selectionScroll).not.toHaveClass(/table-scroll--actions/)
-  const selectionFirstHeader = selectionScroll.getByRole('columnheader').first()
-  const selectionStart = await Promise.all([
-    selectionScroll.boundingBox(),
-    selectionFirstHeader.boundingBox(),
+  const selectionWorkspace = modal(page).locator('.group-model-workspace')
+  const catalogPane = selectionWorkspace.locator('.group-model-catalog')
+  const selectedPane = selectionWorkspace.locator('.group-model-selected')
+  await expect(selectionWorkspace).toHaveCSS('grid-template-columns', /\S+/)
+  const [catalogBox, selectedBox] = await Promise.all([
+    catalogPane.boundingBox(),
+    selectedPane.boundingBox(),
   ])
-  expect(selectionStart.every(Boolean)).toBe(true)
-  expect(Math.abs(selectionStart[1]!.x - selectionStart[0]!.x)).toBeLessThanOrEqual(1)
-
-  await selectionScroll.evaluate((element) => {
-    element.scrollLeft = element.scrollWidth - element.clientWidth
-  })
-  await expect(selectionScroll).not.toHaveClass(/is-at-start/)
-  const selectionEnd = await Promise.all([
-    selectionScroll.boundingBox(),
-    selectionFirstHeader.boundingBox(),
-  ])
-  expect(selectionEnd.every(Boolean)).toBe(true)
-  expect(Math.abs(selectionEnd[1]!.x - selectionEnd[0]!.x)).toBeLessThanOrEqual(1)
-  await expect(selectionFirstHeader).not.toHaveCSS('box-shadow', 'none')
+  expect(catalogBox).not.toBeNull()
+  expect(selectedBox).not.toBeNull()
+  expect(selectedBox!.y).toBeGreaterThan(catalogBox!.y + catalogBox!.height - 1)
+  expect(
+    await selectionWorkspace.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+  ).toBe(true)
 })
 
 test('桌面侧栏可手动折叠和展开', async ({ page }) => {
