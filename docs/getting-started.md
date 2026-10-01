@@ -26,13 +26,18 @@ zentrola.exe          # Backend on Windows
 zentrola-web          # Admin Web server on macOS/Linux
 zentrola-web.exe      # Admin Web server on Windows
 .env.example
+VERSION
+LICENSE
+NOTICE
+THIRD_PARTY_NOTICES.md
+third_party_licenses/
 dist/
   index.html
   config.js
   assets/
 ```
 
-Only the executables for the selected operating system are included. When running a release bundle directly, rename `.env.example` to `.env` in the same directory. The repository's Compose stack does not require this file.
+Only the executables for the selected operating system are included. Keep the license and notice files with redistributed bundles. When running a release bundle directly, rename `.env.example` to `.env` in the same directory. The repository's Compose stack does not require this file.
 
 ## 3. Configure the Backend
 

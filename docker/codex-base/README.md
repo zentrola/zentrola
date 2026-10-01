@@ -13,6 +13,8 @@ Docker Buildx；`--load` 不能将多平台 manifest 加载到本地 Docker 镜�
 docker buildx build `
   --platform linux/amd64,linux/arm64 `
   -f docker/codex-base/Dockerfile `
+  --build-arg VCS_REF=(git rev-parse HEAD) `
+  --build-arg BUILD_DATE=(Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') `
   -t longjianghu/zentrola-codex-base:0.154.0 `
   --push `
   .
@@ -24,6 +26,8 @@ docker buildx build `
 docker buildx build `
   --platform linux/amd64,linux/arm64 `
   -f docker/codex-base/Dockerfile `
+  --build-arg VCS_REF=(git rev-parse HEAD) `
+  --build-arg BUILD_DATE=(Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') `
   -t longjianghu/zentrola-codex-base:0.154.0 `
   --output "type=oci,dest=dist/zentrola-codex-base-0.154.0.tar" `
   .
@@ -34,5 +38,8 @@ docker buildx build `
 ```powershell
 docker build `
   --build-arg BASE_IMAGE=longjianghu/zentrola-codex-base:0.154.0 `
+  --build-arg APP_VERSION=(Get-Content VERSION -Raw).Trim() `
+  --build-arg VCS_REF=(git rev-parse HEAD) `
+  --build-arg BUILD_DATE=(Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') `
   -t longjianghu/zentrola:1.0.0 .
 ```

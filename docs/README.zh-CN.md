@@ -14,8 +14,13 @@
 ## 项目文档
 
 - [参与贡献](../CONTRIBUTING.zh-CN.md)
+- [社区行为准则](../CODE_OF_CONDUCT.md)
 - [安全策略](../SECURITY.zh-CN.md)
+- [获取支持](../SUPPORT.md)
+- [变更记录](../CHANGELOG.md)
+- [发布流程](../RELEASING.md)
 - [Apache License 2.0](../LICENSE)
+- [第三方软件声明](../THIRD_PARTY_NOTICES.md)
 - [项目介绍](../README.zh-CN.md)
 
 公开文档只描述已经发布的行为。设计草案、阶段报告、真实凭据测试记录和实现清单必须保留在 `../dev-docs` 中。

@@ -7,6 +7,7 @@ Thank you for helping improve Zentrola. Keep each change focused, preserve the s
 ## Before you start
 
 - Search existing issues before opening a new one.
+- Follow the [Code of Conduct](CODE_OF_CONDUCT.md) in all project spaces.
 - Discuss large behavior, schema, protocol, or compatibility changes before implementation.
 - Report security vulnerabilities privately according to [SECURITY.md](SECURITY.md), not in a public issue.
 - Keep one pull request focused on one complete change.
@@ -113,6 +114,14 @@ cd web
 npm run build
 npm test
 ```
+
+When dependencies change, refresh and review the distributable license inventory:
+
+```powershell
+./scripts/Sync-ThirdPartyLicenses.ps1
+```
+
+CI also verifies that `sqlc generate` and the license inventory leave the working tree unchanged.
 
 PostgreSQL integration tests require `ZENTROLA_INTEGRATION=1`. Default Playwright tests use mocked APIs and must not contact real providers.
 

@@ -14,8 +14,13 @@ This directory contains user-facing documentation for installing, configuring, a
 ## Project documents
 
 - [Contributing](../CONTRIBUTING.md)
+- [Code of conduct](../CODE_OF_CONDUCT.md)
 - [Security policy](../SECURITY.md)
+- [Support](../SUPPORT.md)
+- [Changelog](../CHANGELOG.md)
+- [Release process](../RELEASING.md)
 - [Apache License 2.0](../LICENSE)
+- [Third-party notices](../THIRD_PARTY_NOTICES.md)
 - [Project overview](../README.md)
 
 Documentation should describe released behavior. Design proposals, phase reports, real-credential test notes, and implementation checklists must stay outside this directory.

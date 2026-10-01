@@ -7,6 +7,7 @@
 ## 开始之前
 
 - 新建 Issue 前先搜索是否已有相同问题。
+- 在所有项目协作空间遵守[社区行为准则](CODE_OF_CONDUCT.md)。
 - 大型行为变更、数据库结构调整、协议变更或兼容性调整应先讨论再实现。
 - 安全漏洞必须按照 [SECURITY.zh-CN.md](SECURITY.zh-CN.md) 私下报告，不要提交公开 Issue。
 - 每个 Pull Request 只包含一项完整变更。
@@ -113,6 +114,14 @@ cd web
 npm run build
 npm test
 ```
+
+依赖变化后，应刷新并检查随发布包分发的许可证清单：
+
+```powershell
+./scripts/Sync-ThirdPartyLicenses.ps1
+```
+
+CI 还会验证 `sqlc generate` 和许可证清单同步不会产生未提交差异。
 
 PostgreSQL 集成测试需要设置 `ZENTROLA_INTEGRATION=1`。默认 Playwright 测试使用模拟 API，不得访问真实 Provider。
 

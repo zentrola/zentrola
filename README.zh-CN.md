@@ -2,6 +2,8 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
+[![CI](https://github.com/zentrola/zentrola/actions/workflows/ci.yml/badge.svg)](https://github.com/zentrola/zentrola/actions/workflows/ci.yml)
+[![Security](https://github.com/zentrola/zentrola/actions/workflows/security.yml/badge.svg)](https://github.com/zentrola/zentrola/actions/workflows/security.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 Zentrola 是面向研发团队的企业 AI Coding 能力治理平台（AI Coding Control Plane）。
@@ -72,7 +74,7 @@ Codex / Claude Code / OpenAI 兼容客户端
 - PostgreSQL 17
 - 推荐使用 Redis 保存 Gateway 缓存和路由冷却状态；Redis 暂时不可用时，Gateway 会回退到 PostgreSQL
 
-如果 [GitHub Releases](https://github.com/zentrola/zentrola/releases) 已提供目标操作系统和 CPU 架构的发布包，请优先使用。发布包包含 Backend、Admin Web、静态资源和 `.env.example`。
+如果 [GitHub Releases](https://github.com/zentrola/zentrola/releases) 已提供目标操作系统和 CPU 架构的发布包，请优先使用。发布包包含 Backend、Admin Web、静态资源、`.env.example`、项目许可证和第三方许可证声明。
 
 如果目标平台暂时没有发布包，请参考 [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md) 从源代码构建相同结构的发布包。
 
@@ -172,7 +174,12 @@ Anthropic 兼容客户端使用 `http://127.0.0.1:9527/anthropic` 作为 Base UR
 - [部署与运维](docs/operations.zh-CN.md)
 - [环境变量参考](.env.example)
 - [参与贡献](CONTRIBUTING.zh-CN.md)
+- [社区行为准则](CODE_OF_CONDUCT.md)
 - [安全策略](SECURITY.zh-CN.md)
+- [获取支持](SUPPORT.md)
+- [变更记录](CHANGELOG.md)
+- [发布流程](RELEASING.md)
+- [第三方软件声明](THIRD_PARTY_NOTICES.md)
 - [English documentation index](docs/README.md)
 
 在 `dev` 和 `test` 环境中，Backend 还会在 `/swagger/index.html` 提供 Swagger UI；`prod` 环境不会注册 Swagger 路由。
@@ -199,4 +206,4 @@ Anthropic 兼容客户端使用 `http://127.0.0.1:9527/anthropic` 作为 Base UR
 
 ## License
 
-Copyright 2026 longjianghu。本项目使用 [Apache License 2.0](LICENSE) 开源许可证，归属信息见 [NOTICE](NOTICE)。
+Copyright 2026 longjianghu。本项目使用 [Apache License 2.0](LICENSE) 开源许可证，归属信息见 [NOTICE](NOTICE) 和[第三方软件声明](THIRD_PARTY_NOTICES.md)。

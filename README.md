@@ -2,6 +2,8 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
+[![CI](https://github.com/zentrola/zentrola/actions/workflows/ci.yml/badge.svg)](https://github.com/zentrola/zentrola/actions/workflows/ci.yml)
+[![Security](https://github.com/zentrola/zentrola/actions/workflows/security.yml/badge.svg)](https://github.com/zentrola/zentrola/actions/workflows/security.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 Zentrola is an enterprise AI coding control plane for governing and delivering models to development teams.
@@ -72,7 +74,7 @@ Model-catalog synchronization currently has dedicated adapters for OpenAI, Googl
 - PostgreSQL 17
 - Redis is recommended for gateway caches and route cooldown state; gateway routing falls back to PostgreSQL when Redis is temporarily unavailable
 
-Use a published bundle for your operating system and architecture from [GitHub Releases](https://github.com/zentrola/zentrola/releases) when one is available. A bundle contains the Backend, Admin Web, static assets, and `.env.example`.
+Use a published bundle for your operating system and architecture from [GitHub Releases](https://github.com/zentrola/zentrola/releases) when one is available. A bundle contains the Backend, Admin Web, static assets, `.env.example`, project license files, and third-party license notices.
 
 If a release bundle is not available for the target platform, see [CONTRIBUTING.md](CONTRIBUTING.md) to build the same bundle from source.
 
@@ -172,7 +174,12 @@ For Anthropic-compatible clients, use `http://127.0.0.1:9527/anthropic` as the b
 - [Deployment and operations](docs/operations.md)
 - [Environment variable reference](.env.example)
 - [Contributing](CONTRIBUTING.md)
+- [Code of conduct](CODE_OF_CONDUCT.md)
 - [Security policy](SECURITY.md)
+- [Support](SUPPORT.md)
+- [Changelog](CHANGELOG.md)
+- [Release process](RELEASING.md)
+- [Third-party notices](THIRD_PARTY_NOTICES.md)
 - [简体中文文档索引](docs/README.zh-CN.md)
 
 In `dev` and `test` environments, the Backend also exposes Swagger UI at `/swagger/index.html`. Swagger routes are disabled in `prod`.
@@ -199,4 +206,4 @@ Do not publish credentials, Virtual Keys, administrator sessions, prompts, or mo
 
 ## License
 
-Copyright 2026 longjianghu. Licensed under the [Apache License 2.0](LICENSE); see [NOTICE](NOTICE) for attribution information.
+Copyright 2026 longjianghu. Licensed under the [Apache License 2.0](LICENSE); see [NOTICE](NOTICE) and [Third-Party Notices](THIRD_PARTY_NOTICES.md) for attribution information.
