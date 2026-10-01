@@ -1,0 +1,52 @@
+name: Bug report / 缺陷报告
+description: Report a reproducible problem without including sensitive data. / 报告可复现问题，请勿包含敏感数据。
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not submit credentials, Virtual Keys, JWTs, private logs, prompts, model responses, or personal data. Security vulnerabilities must follow SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit / 版本或 commit
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment / 部署方式
+      options:
+        - Docker Compose
+        - Release bundle / 发布包
+        - Source / 源代码
+        - Other / 其他
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description / 问题说明
+      description: Include expected and actual behavior. / 请说明预期行为和实际行为。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction / 复现步骤
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs / 脱敏日志
+      render: shell
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Confirmation / 确认
+      options:
+        - label: I removed all secrets and personal data. / 我已删除所有秘密和个人信息。
+          required: true
+        - label: This is not a security vulnerability. / 这不是安全漏洞。
+          required: true

@@ -1,0 +1,118 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      value: ${{ steps.version.outputs.value }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Verify version metadata
+        shell: pwsh
+        run: ./scripts/Verify-Version.ps1
+      - id: version
+        shell: bash
+        run: |
+          version="$(tr -d '\r\n' < VERSION)"
+          tag="${GITHUB_REF_NAME#v}"
+          test "$tag" = "$version"
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+  bundles:
+    needs: version
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target_os: linux
+            architecture: amd64
+            format: tar
+          - target_os: linux
+            architecture: arm64
+            format: tar
+          - target_os: windows
+            architecture: amd64
+            format: zip
+          - target_os: macos
+            architecture: amd64
+            format: tar
+          - target_os: macos
+            architecture: arm64
+            format: tar
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - name: Build bundle
+        run: >-
+          go run ./cmd/release
+          -target-os ${{ matrix.target_os }}
+          -architecture ${{ matrix.architecture }}
+          -skip-npm-install
+      - name: Package bundle
+        shell: bash
+        run: |
+          base="zentrola-${{ needs.version.outputs.value }}-${{ matrix.target_os }}-${{ matrix.architecture }}"
+          source="dist/${{ matrix.target_os }}/${{ matrix.architecture }}"
+          if [ "${{ matrix.format }}" = zip ]; then
+            (cd "$source" && zip -qr "$GITHUB_WORKSPACE/$base.zip" .)
+          else
+            tar -C "$source" -czf "$base.tar.gz" .
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ matrix.target_os }}-${{ matrix.architecture }}
+          path: zentrola-${{ needs.version.outputs.value }}-${{ matrix.target_os }}-${{ matrix.architecture }}.*
+          if-no-files-found: error
+
+  publish:
+    needs: [version, bundles]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: bundle-*
+          path: artifacts
+          merge-multiple: true
+      - uses: anchore/sbom-action@v0
+        with:
+          path: artifacts
+          format: cyclonedx-json
+          output-file: artifacts/zentrola-${{ needs.version.outputs.value }}-sbom.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Create checksums
+        working-directory: artifacts
+        run: sha256sum zentrola-* > SHA256SUMS
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME"
+          artifacts/*
+          --verify-tag
+          --generate-notes
+          --title "Zentrola ${{ needs.version.outputs.value }}"

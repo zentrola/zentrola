@@ -26,13 +26,18 @@ zentrola.exe          # Windows Backend
 zentrola-web          # macOS/Linux Admin Web
 zentrola-web.exe      # Windows Admin Web
 .env.example
+VERSION
+LICENSE
+NOTICE
+THIRD_PARTY_NOTICES.md
+third_party_licenses/
 dist/
   index.html
   config.js
   assets/
 ```
 
-实际发布包只包含目标操作系统对应的可执行文件。直接运行发布包时，请将同目录的 `.env.example` 重命名为 `.env`；使用仓库 Compose 服务栈时不需要此文件。
+实际发布包只包含目标操作系统对应的可执行文件。重新分发发布包时必须保留许可证和声明文件。直接运行发布包时，请将同目录的 `.env.example` 重命名为 `.env`；使用仓库 Compose 服务栈时不需要此文件。
 
 ## 3. 配置 Backend
 

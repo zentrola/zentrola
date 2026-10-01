@@ -26,6 +26,14 @@ type releaseTarget struct {
 	goarch string
 }
 
+var releaseMetadataFiles = []string{
+	".env.example",
+	"VERSION",
+	"LICENSE",
+	"NOTICE",
+	"THIRD_PARTY_NOTICES.md",
+}
+
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, "release build failed:", err)
@@ -77,8 +85,13 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 	defer func() { _ = os.RemoveAll(stagingRoot) }()
 
-	if err := copyFile(filepath.Join(projectRoot, ".env.example"), filepath.Join(stagingRoot, ".env.example")); err != nil {
-		return err
+	for _, name := range releaseMetadataFiles {
+		if err := copyFile(filepath.Join(projectRoot, name), filepath.Join(stagingRoot, name)); err != nil {
+			return err
+		}
+	}
+	if err := copyTree(filepath.Join(projectRoot, "third_party_licenses"), filepath.Join(stagingRoot, "third_party_licenses"), nil); err != nil {
+		return fmt.Errorf("copy third-party licenses: %w", err)
 	}
 
 	webRoot := filepath.Join(projectRoot, "web")
@@ -156,8 +169,20 @@ func publishRelease(stagingRoot, releaseRoot, component, executableSuffix string
 	if err := os.MkdirAll(releaseRoot, 0o755); err != nil {
 		return fmt.Errorf("create target release directory: %w", err)
 	}
-	if err := copyFile(filepath.Join(stagingRoot, ".env.example"), filepath.Join(releaseRoot, ".env.example")); err != nil {
+	for _, name := range releaseMetadataFiles {
+		if err := copyFile(filepath.Join(stagingRoot, name), filepath.Join(releaseRoot, name)); err != nil {
+			return err
+		}
+	}
+	thirdPartyDestination := filepath.Join(releaseRoot, "third_party_licenses")
+	if err := ensureChildPath(releaseRoot, thirdPartyDestination); err != nil {
 		return err
+	}
+	if err := os.RemoveAll(thirdPartyDestination); err != nil {
+		return fmt.Errorf("remove stale third-party licenses: %w", err)
+	}
+	if err := copyTree(filepath.Join(stagingRoot, "third_party_licenses"), thirdPartyDestination, nil); err != nil {
+		return fmt.Errorf("publish third-party licenses: %w", err)
 	}
 	if component != "web" {
 		if err := removeReleasePaths(releaseRoot, "zentrola", "zentrola.exe"); err != nil {

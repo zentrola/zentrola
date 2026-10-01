@@ -1,0 +1,28 @@
+name: Feature request / 功能建议
+description: Propose an improvement and explain the use case. / 提出改进建议并说明使用场景。
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / 要解决的问题
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal / 建议方案
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives / 替代方案
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope / 范围确认
+      options:
+        - label: I checked the current project scope and existing issues. / 我已检查当前项目范围和已有 Issue。
+          required: true

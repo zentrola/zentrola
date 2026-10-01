@@ -1,0 +1,125 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  version-metadata:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Verify version metadata
+        shell: pwsh
+        run: ./scripts/Verify-Version.ps1
+
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Check Go formatting
+        shell: bash
+        run: |
+          files="$(gofmt -l $(git ls-files '*.go'))"
+          test -z "$files" || { echo "$files"; exit 1; }
+      - name: Test, vet, and build Go components
+        run: |
+          go test ./...
+          go vet ./...
+          go build ./cmd/server ./cmd/web
+      - name: Verify sqlc output
+        run: |
+          go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0
+          sqlc generate
+          git diff --exit-code -- internal/infrastructure/postgres/dbgen
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm test
+
+  license-inventory:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - name: Verify third-party license inventory
+        shell: pwsh
+        run: |
+          ./scripts/Sync-ThirdPartyLicenses.ps1
+          git diff --exit-code -- THIRD_PARTY_NOTICES.md third_party_licenses
+
+  release-bundle:
+    needs: [version-metadata, backend, frontend, license-inventory]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - name: Build Linux release bundle
+        run: go run ./cmd/release -target-os linux -architecture amd64 -skip-npm-install
+      - name: Verify release metadata
+        run: |
+          test -x dist/linux/amd64/zentrola
+          test -x dist/linux/amd64/zentrola-web
+          test -f dist/linux/amd64/dist/index.html
+          test -f dist/linux/amd64/VERSION
+          test -f dist/linux/amd64/LICENSE
+          test -f dist/linux/amd64/NOTICE
+          test -f dist/linux/amd64/THIRD_PARTY_NOTICES.md
+          test -d dist/linux/amd64/third_party_licenses
+      - name: Build application image
+        run: |
+          docker build \
+            --build-arg TARGETARCH=amd64 \
+            --build-arg APP_VERSION="$(tr -d '\r\n' < VERSION)" \
+            --build-arg VCS_REF="$GITHUB_SHA" \
+            --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -t zentrola:ci .

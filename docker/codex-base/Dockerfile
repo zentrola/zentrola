@@ -7,6 +7,8 @@ FROM --platform=$BUILDPLATFORM alpine:${ALPINE_VERSION} AS codex-builder
 
 ARG TARGETARCH
 ARG CODEX_VERSION
+ARG VCS_REF=unknown
+ARG BUILD_DATE
 
 RUN apk add --no-cache ca-certificates nodejs npm tzdata
 
@@ -40,9 +42,14 @@ RUN set -eux; \
 FROM alpine:${ALPINE_VERSION}
 
 ARG CODEX_VERSION
+ARG VCS_REF=unknown
+ARG BUILD_DATE
 
 LABEL org.opencontainers.image.title="codex-runtime" \
       org.opencontainers.image.description="Codex native runtime on Alpine (no Node.js)" \
+      org.opencontainers.image.version="${CODEX_VERSION}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.source="https://github.com/zentrola/zentrola" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.authors="longjianghu <longjianghu1982@gmail.com>" \

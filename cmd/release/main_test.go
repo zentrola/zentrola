@@ -91,7 +91,7 @@ func TestPublishBackendPreservesWebRelease(t *testing.T) {
 	stagingRoot := filepath.Join(root, "staging")
 	releaseRoot := filepath.Join(root, "release")
 	writeTestFile(t, filepath.Join(stagingRoot, "zentrola.exe"), "new backend")
-	writeTestFile(t, filepath.Join(stagingRoot, ".env.example"), "new config")
+	writeReleaseMetadata(t, stagingRoot)
 	writeTestFile(t, filepath.Join(releaseRoot, "zentrola.exe"), "old backend")
 	writeTestFile(t, filepath.Join(releaseRoot, "zentrola-web.exe"), "keep web")
 	writeTestFile(t, filepath.Join(releaseRoot, "dist", "index.html"), "keep assets")
@@ -108,6 +108,7 @@ func TestPublishBackendPreservesWebRelease(t *testing.T) {
 	if data, err := os.ReadFile(filepath.Join(releaseRoot, "dist", "index.html")); err != nil || string(data) != "keep assets" {
 		t.Fatalf("web assets changed: data=%q err=%v", data, err)
 	}
+	assertReleaseMetadata(t, releaseRoot)
 }
 
 func TestPublishWebPreservesBackendRelease(t *testing.T) {
@@ -116,7 +117,7 @@ func TestPublishWebPreservesBackendRelease(t *testing.T) {
 	stagingRoot := filepath.Join(root, "staging")
 	releaseRoot := filepath.Join(root, "release")
 	writeTestFile(t, filepath.Join(stagingRoot, "zentrola-web"), "new web")
-	writeTestFile(t, filepath.Join(stagingRoot, ".env.example"), "new config")
+	writeReleaseMetadata(t, stagingRoot)
 	writeTestFile(t, filepath.Join(stagingRoot, "dist", "index.html"), "new assets")
 	writeTestFile(t, filepath.Join(releaseRoot, "zentrola"), "keep backend")
 	writeTestFile(t, filepath.Join(releaseRoot, "zentrola-web"), "old web")
@@ -133,6 +134,29 @@ func TestPublishWebPreservesBackendRelease(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(releaseRoot, "dist", "old.js")); !os.IsNotExist(err) {
 		t.Fatalf("stale web asset was not removed: %v", err)
+	}
+	assertReleaseMetadata(t, releaseRoot)
+}
+
+func writeReleaseMetadata(t *testing.T, root string) {
+	t.Helper()
+	for _, name := range releaseMetadataFiles {
+		writeTestFile(t, filepath.Join(root, name), "metadata: "+name)
+	}
+	writeTestFile(t, filepath.Join(root, "third_party_licenses", "example", "LICENSE"), "dependency license")
+}
+
+func assertReleaseMetadata(t *testing.T, root string) {
+	t.Helper()
+	for _, name := range releaseMetadataFiles {
+		data, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil || string(data) != "metadata: "+name {
+			t.Errorf("release metadata %s missing or changed: data=%q err=%v", name, data, err)
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(root, "third_party_licenses", "example", "LICENSE"))
+	if err != nil || string(data) != "dependency license" {
+		t.Errorf("third-party license missing or changed: data=%q err=%v", data, err)
 	}
 }
 
