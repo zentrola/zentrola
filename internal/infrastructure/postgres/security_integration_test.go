@@ -257,7 +257,7 @@ func TestStage2Integration(t *testing.T) {
 		resourceID, _ := ids.NextID(ctx)
 		owner := cryptosec.CredentialOwner{ProviderID: providerID, ResourceID: resourceID}
 		sealed, _ := c.Encrypt([]byte("test-provider-secret"), owner)
-		if _, err := pool.Exec(ctx, `INSERT INTO provider_credential (id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,created_by,updated_by,created_at,updated_at) VALUES ($1,$2,'Test Resource',$3,$4,$5,'ACTIVE','system','system',now(),now())`, resourceID, providerID, sealed.Ciphertext, sealed.Nonce, sealed.KeyVersion); err != nil {
+		if _, err := pool.Exec(ctx, `INSERT INTO provider_credential (id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,created_by,updated_by,created_at,updated_at) VALUES ($1,$2,'Test Resource',$3,$4,$5,'system','system',now(),now())`, resourceID, providerID, sealed.Ciphertext, sealed.Nonce, sealed.KeyVersion); err != nil {
 			t.Fatal(err)
 		}
 		if err := store.ValidateCredentials(ctx, c); err != nil {
@@ -292,7 +292,7 @@ func TestStage2Integration(t *testing.T) {
 				t.Fatal("secret leaked into audit or logs")
 			}
 		}
-		for _, event := range []string{"LOGIN_SUCCESS", "LOGIN_FAILED", "LOGIN_LOCKED", "ACCESS_KEY_CREATE", "ACCESS_KEY_REVOKE", "RESOURCE_STATUS_CHANGE"} {
+		for _, event := range []string{"LOGIN_SUCCESS", "LOGIN_FAILED", "LOGIN_LOCKED", "ACCESS_KEY_CREATE", "ACCESS_KEY_REVOKE"} {
 			if !strings.Contains(content, event) {
 				t.Fatalf("audit missing %s", event)
 			}

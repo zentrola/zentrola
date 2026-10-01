@@ -71,7 +71,7 @@ func (s resetCreditAdapterStub) ConsumeResetCredit(_ context.Context, _ []byte, 
 }
 
 func TestProviderCapabilitiesIncludeMatchingSubscriptionAdapter(t *testing.T) {
-	service := &Service{subscriptions: []SubscriptionAdapter{
+	service := &QueryService{subscriptions: []SubscriptionAdapter{
 		subscriptionAdapterStub{}, claudeSubscriptionAdapterStub{},
 	}}
 	openAI := service.withProviderCapabilities(Provider{Code: catalog.OpenAIOfficialCode})

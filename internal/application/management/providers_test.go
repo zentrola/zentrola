@@ -175,7 +175,7 @@ func TestReplaceProviderMappingsAllowsRemovingAllModels(t *testing.T) {
 		{ID: 10, ProviderID: 8, ModelID: 1, Priority: 100},
 		{ID: 11, ProviderID: 8, ModelID: 2, Priority: 100},
 	}}
-	service := &Service{}
+	service := &ProviderService{}
 	result, err := service.replaceProviderMappings(context.Background(), writer, Provider{ID: 8}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -190,7 +190,7 @@ func TestReplaceProviderMappingsLogicallyDeletesUncheckedModels(t *testing.T) {
 		{ID: 10, ProviderID: 8, ModelID: 1, UpstreamModelCode: "old-one", Priority: 100},
 		{ID: 11, ProviderID: 8, ModelID: 2, UpstreamModelCode: "old-two", Priority: 100},
 	}}
-	service := &Service{}
+	service := &ProviderService{}
 	result, err := service.replaceProviderMappings(context.Background(), writer, Provider{ID: 8}, []ProviderMappingInput{{
 		ModelID: 1,
 	}})
@@ -321,7 +321,7 @@ func TestNormalizeProxyURLMasksPassword(t *testing.T) {
 }
 
 func TestApplyProviderProxyRejectsSOCKS5Headers(t *testing.T) {
-	service := &Service{cipher: providerTestCipher{}}
+	service := &ProviderService{cipher: providerTestCipher{}}
 	for _, scheme := range []string{"socks5", "socks5h"} {
 		if _, err := service.applyProviderProxy(Provider{ID: 81}, ProviderInput{
 			ProxyEnabled: true,
@@ -334,7 +334,7 @@ func TestApplyProviderProxyRejectsSOCKS5Headers(t *testing.T) {
 }
 
 func TestApplyProviderProxyPreservesMaskedSecrets(t *testing.T) {
-	service := &Service{cipher: providerTestCipher{}}
+	service := &ProviderService{cipher: providerTestCipher{}}
 	created, err := service.applyProviderProxy(Provider{ID: 81}, ProviderInput{
 		ProxyEnabled: true,
 		ProxyURL:     "http://user:password@proxy.example.com:8080",
@@ -368,7 +368,7 @@ func TestApplyProviderProxyPreservesMaskedSecrets(t *testing.T) {
 }
 
 func TestApplyProviderProxyUpdatesCredentialsOnlyWhenRequested(t *testing.T) {
-	service := &Service{cipher: providerTestCipher{}}
+	service := &ProviderService{cipher: providerTestCipher{}}
 	created, err := service.applyProviderProxy(Provider{ID: 81}, ProviderInput{
 		ProxyEnabled: true,
 		ProxyURL:     "http://user:password@proxy.example.com:8080",

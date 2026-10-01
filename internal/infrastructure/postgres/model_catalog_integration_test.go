@@ -29,7 +29,7 @@ func TestModelModalitiesDatabaseConstraints(t *testing.T) {
 }
 
 func TestModelCatalogUpgradePreservesExistingModels(t *testing.T) {
-	ctx, pool, _ := integrationDatabase(t)
+	ctx, pool, _ := isolatedDatabase(t)
 	db := stdlib.OpenDBFromPool(pool)
 	defer db.Close()
 	source, _ := fs.Sub(migrations, "migrations")
@@ -37,7 +37,7 @@ func TestModelCatalogUpgradePreservesExistingModels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := provider.DownTo(ctx, 5); err != nil {
+	if _, err := provider.UpTo(ctx, 5); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO ai_model(id,model_code,display_name,model_type,status,created_by,updated_by,created_at,updated_at)
@@ -73,7 +73,7 @@ VALUES(1,'claude-sonnet','自定义显示名','CHAT','DISABLED','system','system
 }
 
 func TestOrganizationRemovalPreservesExistingCredential(t *testing.T) {
-	ctx, pool, _ := integrationDatabase(t)
+	ctx, pool, _ := isolatedDatabase(t)
 	db := stdlib.OpenDBFromPool(pool)
 	defer db.Close()
 	source, _ := fs.Sub(migrations, "migrations")
@@ -81,7 +81,7 @@ func TestOrganizationRemovalPreservesExistingCredential(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := provider.DownTo(ctx, 27); err != nil {
+	if _, err := provider.UpTo(ctx, 27); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `DELETE FROM organization`); err != nil {

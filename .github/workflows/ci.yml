@@ -39,14 +39,75 @@ jobs:
           test -z "$files" || { echo "$files"; exit 1; }
       - name: Test, vet, and build Go components
         run: |
-          go test ./...
+          go test -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out
           go vet ./...
           go build ./cmd/server ./cmd/web
+      - name: Check concurrent components for data races
+        env:
+          CGO_ENABLED: "1"
+        run: >-
+          go test -race -count=1
+          ./internal/application/usage
+          ./internal/infrastructure/gatewaycache
+          ./internal/infrastructure/logging
       - name: Verify sqlc output
         run: |
           go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0
           sqlc generate
           git diff --exit-code -- internal/infrastructure/postgres/dbgen
+
+  backend-integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.11-alpine
+        env:
+          POSTGRES_DB: zentrola
+          POSTGRES_USER: zentrola
+          POSTGRES_PASSWORD: integration-only
+          TZ: UTC
+          PGTZ: UTC
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U zentrola -d zentrola"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:7.4.11-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      ZENTROLA_INTEGRATION: "1"
+      ZENTROLA_REDIS_INTEGRATION: "1"
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: zentrola
+      POSTGRES_USER: zentrola
+      POSTGRES_PASSWORD: integration-only
+      POSTGRES_SSLMODE: disable
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: "6379"
+      REDIS_DB: "2"
+      REDIS_PASSWORD: ""
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run PostgreSQL and Redis integration tests
+        run: >-
+          go test -count=1
+          ./internal/infrastructure/postgres
+          ./internal/infrastructure/gatewaycache
 
   frontend:
     runs-on: ubuntu-latest
@@ -88,7 +149,7 @@ jobs:
           git diff --exit-code -- THIRD_PARTY_NOTICES.md third_party_licenses
 
   release-bundle:
-    needs: [version-metadata, backend, frontend, license-inventory]
+    needs: [version-metadata, backend, backend-integration, frontend, license-inventory]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

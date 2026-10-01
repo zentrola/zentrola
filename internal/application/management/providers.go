@@ -17,7 +17,40 @@ import (
 	"github.com/zentrola/zentrola/internal/domain/admin"
 	"github.com/zentrola/zentrola/internal/domain/catalog"
 	"github.com/zentrola/zentrola/internal/domain/operation"
+	"github.com/zentrola/zentrola/internal/domain/shared"
 )
+
+// ProviderService 聚合服务商配置、初始化和模型发现用例。
+type ProviderService struct {
+	store         Store
+	ids           shared.IDGenerator
+	cipher        Cipher
+	discoverer    ModelDiscoverer
+	subscriptions []SubscriptionAdapter
+}
+
+func (s *ProviderService) next(ctx context.Context) (int64, error) {
+	return nextID(ctx, s.ids)
+}
+
+func (s *ProviderService) withProviderCapabilities(provider Provider) Provider {
+	return addProviderCapabilities(provider, s.discoverer, s.subscriptions)
+}
+
+func addProviderCapabilities(provider Provider, discoverer ModelDiscoverer, subscriptions []SubscriptionAdapter) Provider {
+	provider.ModelSyncSupported = discoverer != nil && discoverer.Supports(provider.Code)
+	provider.AuthAdapters = []string{AuthAdapterAPIKey}
+	for _, adapter := range subscriptions {
+		if adapter.SupportsProvider(provider) {
+			provider.AuthAdapters = append(provider.AuthAdapters, adapter.Code())
+		}
+	}
+	return provider
+}
+
+func (s *ProviderService) decryptedProviderProxy(provider Provider) (*catalog.OutboundProxy, error) {
+	return decryptProviderProxy(s.cipher, provider)
+}
 
 var errInvalidProviderProxy = errors.New("invalid provider proxy")
 
@@ -227,7 +260,7 @@ func configuredProxyHeaders(headers map[string]string) []ProviderProxyHeader {
 	return result
 }
 
-func (s *Service) applyProviderProxy(current Provider, input ProviderInput) (Provider, error) {
+func (s *ProviderService) applyProviderProxy(current Provider, input ProviderInput) (Provider, error) {
 	if !input.ProxyEnabled {
 		current.ProxyEnabled = false
 		current.ProxyURL = nil
@@ -356,7 +389,7 @@ func validProviderMappings(_ Provider, mappings []ProviderMappingInput) bool {
 	return true
 }
 
-func (s *Service) replaceProviderMappings(ctx context.Context, w Writer, provider Provider, inputs []ProviderMappingInput) ([]ProviderMapping, error) {
+func (s *ProviderService) replaceProviderMappings(ctx context.Context, w Writer, provider Provider, inputs []ProviderMappingInput) ([]ProviderMapping, error) {
 	current, err := w.ProviderMappings(ctx, provider.ID)
 	if err != nil {
 		return nil, err
@@ -416,7 +449,7 @@ func (s *Service) replaceProviderMappings(ctx context.Context, w Writer, provide
 	return desired, nil
 }
 
-func (s *Service) CreateProvider(ctx context.Context, actor admin.Identity, input ProviderInput, meta appsec.RequestMeta) (Provider, error) {
+func (s *ProviderService) CreateProvider(ctx context.Context, actor admin.Identity, input ProviderInput, meta appsec.RequestMeta) (Provider, error) {
 	input.Normalize()
 	if !input.Valid() {
 		return Provider{}, appsec.ErrInvalidArgument
@@ -455,7 +488,7 @@ func (s *Service) CreateProvider(ctx context.Context, actor admin.Identity, inpu
 	return s.withProviderCapabilities(provider), err
 }
 
-func (s *Service) UpdateProvider(ctx context.Context, actor admin.Identity, id int64, input ProviderInput, meta appsec.RequestMeta) (Provider, error) {
+func (s *ProviderService) UpdateProvider(ctx context.Context, actor admin.Identity, id int64, input ProviderInput, meta appsec.RequestMeta) (Provider, error) {
 	input.Normalize()
 	if id <= 0 || !input.Valid() {
 		return Provider{}, appsec.ErrInvalidArgument
@@ -495,7 +528,7 @@ func (s *Service) UpdateProvider(ctx context.Context, actor admin.Identity, id i
 	return s.withProviderCapabilities(updated), err
 }
 
-func (s *Service) SetProviderStatus(ctx context.Context, actor admin.Identity, id int64, status string, meta appsec.RequestMeta) error {
+func (s *ProviderService) SetProviderStatus(ctx context.Context, actor admin.Identity, id int64, status string, meta appsec.RequestMeta) error {
 	if id <= 0 || !validStatus(status) {
 		return appsec.ErrInvalidArgument
 	}
@@ -534,7 +567,7 @@ func (s *Service) SetProviderStatus(ctx context.Context, actor admin.Identity, i
 	})
 }
 
-func (s *Service) DeleteProvider(ctx context.Context, actor admin.Identity, id int64, meta appsec.RequestMeta) error {
+func (s *ProviderService) DeleteProvider(ctx context.Context, actor admin.Identity, id int64, meta appsec.RequestMeta) error {
 	if id <= 0 {
 		return appsec.ErrInvalidArgument
 	}

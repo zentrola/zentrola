@@ -177,12 +177,12 @@ func TestMissingRequiredParameterReturnsField(t *testing.T) {
 		assertMissingParameter[UpdateStatusRequest](t, http.MethodPatch, "/api/v1/models/1/status", `{}`, "status")
 	})
 	t.Run("empty required collection", func(t *testing.T) {
-		assertMissingParameter[mgmt.ModelInput](t, http.MethodPost, "/api/v1/models",
+		assertMissingParameter[ModelRequest](t, http.MethodPost, "/api/v1/models",
 			`{"code":"model","name":"模型","inputModalities":[],"outputModalities":["TEXT"]}`,
 			"inputModalities")
 	})
 	t.Run("nested field", func(t *testing.T) {
-		assertMissingParameter[mgmt.ProviderInput](t, http.MethodPost, "/api/v1/providers",
+		assertMissingParameter[ProviderRequest](t, http.MethodPost, "/api/v1/providers",
 			`{"name":"服务商","endpoints":[{"protocolType":"OPENAI"}],"mappings":[{"modelId":"1","upstreamModelCode":"model"}]}`,
 			"endpoints[0].baseUrl")
 	})
@@ -195,14 +195,14 @@ func TestProviderProxyUpdateAllowsEmptyMappings(t *testing.T) {
 			const path = "/api/v1/providers/4"
 			recorder := httptest.NewRecorder()
 			request := httptest.NewRequest(method, path, strings.NewReader(`{`+fields+`,"mappings":[]}`))
-			input, ok := decodeRequest[mgmt.ProviderInput](recorder, request)
+			input, ok := decodeRequest[ProviderRequest](recorder, request)
 			if !ok || input.Mappings == nil || len(input.Mappings) != 0 || !input.ProxyEnabled {
 				t.Fatalf("proxy configuration with empty mappings rejected: status=%d body=%s", recorder.Code, recorder.Body.String())
 			}
 			for _, suffix := range []string{"", `,"mappings":null`} {
-				assertMissingParameter[mgmt.ProviderInput](t, method, path, `{`+fields+suffix+`}`, "mappings")
+				assertMissingParameter[ProviderRequest](t, method, path, `{`+fields+suffix+`}`, "mappings")
 			}
-			assertMissingParameter[mgmt.ProviderInput](t, method, path, `{`+fields+`,"mappings":[{}]}`, "mappings[0].modelId")
+			assertMissingParameter[ProviderRequest](t, method, path, `{`+fields+`,"mappings":[{}]}`, "mappings[0].modelId")
 		})
 	}
 }
@@ -229,7 +229,7 @@ func TestDecodeRequestNormalizesTextFields(t *testing.T) {
 	t.Run("model nested fields", func(t *testing.T) {
 		recorder := httptest.NewRecorder()
 		request := httptest.NewRequest(http.MethodPost, "/api/v1/models", strings.NewReader(`{"code":"  model-code  ","name":"  模型  ","inputModalities":[" TEXT "],"outputModalities":[" TEXT "],"remark":"  备注  "}`))
-		input, ok := decodeRequest[mgmt.ModelInput](recorder, request)
+		input, ok := decodeRequest[ModelRequest](recorder, request)
 		if !ok || input.Code != "model-code" || input.Name != "模型" || input.Remark != "备注" || input.InputModalities[0] != "TEXT" {
 			t.Fatalf("model normalization = %+v, ok=%v", input, ok)
 		}
