@@ -216,26 +216,14 @@ export async function download(path: string): Promise<Blob> {
     })
     if (epoch !== generation) throw new ApiError('UNAUTHENTICATED')
     if (!response.ok) {
-      let data: {
-        code?: string
-        requestId?: string
-        data?: { retryAfterSeconds?: number; field?: string }
-      } = {}
-      try {
-        data = await response.json()
-      } catch {
-        // 非 JSON 错误响应统一按 UNKNOWN 处理。
-      }
+      const data = await readEnvelope(response)
       if (response.status === 401 && token.value) clearSession(true)
+      const details = errorDetails(data?.data)
       throw new ApiError(
-        data.code || 'UNKNOWN',
-        data.requestId || response.headers.get('X-Request-ID') || '',
-        typeof data.data?.retryAfterSeconds === 'number' &&
-        Number.isFinite(data.data.retryAfterSeconds) &&
-        data.data.retryAfterSeconds > 0
-          ? Math.ceil(data.data.retryAfterSeconds)
-          : 0,
-        typeof data.data?.field === 'string' ? data.data.field : '',
+        data?.code || responseErrorCode(response.status),
+        data?.requestId || response.headers.get('X-Request-ID') || '',
+        details.retryAfterSeconds,
+        details.field,
       )
     }
     return await response.blob()
