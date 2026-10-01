@@ -3116,6 +3116,21 @@ test('服务商支持个人订阅优先并保留 API Key 兜底', async ({ page 
     expect.objectContaining({ authType: 'SUBSCRIPTION', authAdapter: 'OPENAI_CODEX' }),
   ])
 
+  await page.route(
+    '**/api/v1/resources/*/credential/export',
+    (route) =>
+      route.fulfill({
+        status: 503,
+        contentType: 'text/html',
+        body: '<html><body>Service Unavailable</body></html>',
+      }),
+    { times: 1 },
+  )
+  await subscriptionRow
+    .getByRole('button', { name: '导出 OpenAI 个人订阅 · ccount 的 auth.json', exact: true })
+    .click()
+  await expect(page.getByRole('alert')).toContainText('服务暂时不可用')
+
   const downloadPromise = page.waitForEvent('download')
   await subscriptionRow
     .getByRole('button', { name: '导出 OpenAI 个人订阅 · ccount 的 auth.json', exact: true })
