@@ -10,7 +10,54 @@ import (
 	"github.com/zentrola/zentrola/internal/domain/admin"
 	"github.com/zentrola/zentrola/internal/domain/catalog"
 	"github.com/zentrola/zentrola/internal/domain/operation"
+	"github.com/zentrola/zentrola/internal/domain/shared"
 )
+
+// ModelService 聚合逻辑模型用例，作为 Service 的嵌入式子服务保留现有调用 API。
+// 它只持有模型写入需要的依赖，为继续拆分 management facade 建立稳定边界。
+type ModelService struct {
+	store ModelStore
+	ids   shared.IDGenerator
+}
+
+type ModelLookup interface {
+	Model(context.Context, int64) (Model, error)
+}
+
+type ProviderLookup interface {
+	Provider(context.Context, int64) (Provider, error)
+}
+
+type ModelSession interface {
+	ModelLookup
+	ProviderLookup
+	CreateModel(context.Context, Model) error
+	UpdateModel(context.Context, Model) error
+	DeleteModel(context.Context, int64, time.Time) error
+	SetModelStatus(context.Context, int64, string) error
+	Audit(context.Context, Audit, appsec.RequestMeta) error
+}
+
+type ModelStore interface {
+	ReadModel(context.Context, admin.Identity, func(ModelLookup) error) error
+	WriteModel(context.Context, admin.Identity, func(ModelSession) error) error
+}
+
+// modelStoreAdapter 将共享事务会话收窄为模型用例实际需要的端口。
+// PostgreSQL 适配器无需为每个子服务复制事务管理代码。
+type modelStoreAdapter struct{ Store }
+
+func (s modelStoreAdapter) ReadModel(ctx context.Context, actor admin.Identity, fn func(ModelLookup) error) error {
+	return s.Read(ctx, actor, func(reader Reader) error { return fn(reader) })
+}
+
+func (s modelStoreAdapter) WriteModel(ctx context.Context, actor admin.Identity, fn func(ModelSession) error) error {
+	return s.Write(ctx, actor, func(writer Writer) error { return fn(writer) })
+}
+
+func (s *ModelService) next(ctx context.Context) (int64, error) {
+	return nextID(ctx, s.ids)
+}
 
 func (input *ModelInput) Normalize() {
 	input.Code = strings.TrimSpace(input.Code)
@@ -44,7 +91,7 @@ func applyModelInput(m Model, input ModelInput) Model {
 	return m
 }
 
-func hydrateModelPublisher(ctx context.Context, w Writer, model *Model) error {
+func hydrateModelPublisher(ctx context.Context, w ProviderLookup, model *Model) error {
 	if model.PublisherProviderID == nil {
 		return nil
 	}
@@ -57,7 +104,7 @@ func hydrateModelPublisher(ctx context.Context, w Writer, model *Model) error {
 	return nil
 }
 
-func (s *Service) CreateModel(ctx context.Context, actor admin.Identity, input ModelInput, meta appsec.RequestMeta) (Model, error) {
+func (s *ModelService) CreateModel(ctx context.Context, actor admin.Identity, input ModelInput, meta appsec.RequestMeta) (Model, error) {
 	input.Normalize()
 	if !input.Valid() {
 		return Model{}, appsec.ErrInvalidArgument
@@ -68,7 +115,7 @@ func (s *Service) CreateModel(ctx context.Context, actor admin.Identity, input M
 	}
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	model := applyModelInput(Model{ID: id, Status: "DISABLED", CreatedAt: now, UpdatedAt: now}, input)
-	err = s.store.Write(ctx, actor, func(w Writer) error {
+	err = s.store.WriteModel(ctx, actor, func(w ModelSession) error {
 		if err := hydrateModelPublisher(ctx, w, &model); err != nil {
 			return err
 		}
@@ -80,13 +127,13 @@ func (s *Service) CreateModel(ctx context.Context, actor admin.Identity, input M
 	return model, err
 }
 
-func (s *Service) UpdateModel(ctx context.Context, actor admin.Identity, id int64, input ModelInput, meta appsec.RequestMeta) (Model, error) {
+func (s *ModelService) UpdateModel(ctx context.Context, actor admin.Identity, id int64, input ModelInput, meta appsec.RequestMeta) (Model, error) {
 	input.Normalize()
 	if id <= 0 || !input.Valid() {
 		return Model{}, appsec.ErrInvalidArgument
 	}
 	var model Model
-	err := s.store.Write(ctx, actor, func(w Writer) error {
+	err := s.store.WriteModel(ctx, actor, func(w ModelSession) error {
 		before, err := w.Model(ctx, id)
 		if err != nil {
 			return err
@@ -104,11 +151,11 @@ func (s *Service) UpdateModel(ctx context.Context, actor admin.Identity, id int6
 	return model, err
 }
 
-func (s *Service) DeleteModel(ctx context.Context, actor admin.Identity, id int64, meta appsec.RequestMeta) error {
+func (s *ModelService) DeleteModel(ctx context.Context, actor admin.Identity, id int64, meta appsec.RequestMeta) error {
 	if id <= 0 {
 		return appsec.ErrInvalidArgument
 	}
-	return s.store.Write(ctx, actor, func(w Writer) error {
+	return s.store.WriteModel(ctx, actor, func(w ModelSession) error {
 		model, err := w.Model(ctx, id)
 		if err != nil {
 			return err
@@ -120,9 +167,38 @@ func (s *Service) DeleteModel(ctx context.Context, actor admin.Identity, id int6
 	})
 }
 
-func (s *Service) Model(ctx context.Context, actor admin.Identity, id int64) (Model, error) {
+func (s *ModelService) Model(ctx context.Context, actor admin.Identity, id int64) (Model, error) {
 	if id <= 0 {
 		return Model{}, appsec.ErrInvalidArgument
 	}
-	return read(ctx, s, actor, func(r Reader) (Model, error) { return r.Model(ctx, id) })
+	var model Model
+	err := s.store.ReadModel(ctx, actor, func(r ModelLookup) error {
+		var err error
+		model, err = r.Model(ctx, id)
+		return err
+	})
+	return model, err
+}
+
+func (s *ModelService) SetModelStatus(ctx context.Context, actor admin.Identity, id int64, status string, meta appsec.RequestMeta) error {
+	if id <= 0 || !validStatus(status) {
+		return appsec.ErrInvalidArgument
+	}
+	return s.store.WriteModel(ctx, actor, func(w ModelSession) error {
+		m, err := w.Model(ctx, id)
+		if err != nil {
+			return err
+		}
+		if m.Status == status {
+			return nil
+		}
+		if err := w.SetModelStatus(ctx, id, status); err != nil {
+			return err
+		}
+		return w.Audit(ctx, Audit{Event: operation.ModelStatusChange, Target: "MODEL", ID: id, Name: m.Name, Before: map[string]string{"status": m.Status}, After: map[string]string{"status": status}}, meta)
+	})
+}
+
+func owner(actor admin.Identity, r Resource) catalog.CredentialOwner {
+	return catalog.CredentialOwner{ProviderID: r.ProviderID, ResourceID: r.ID}
 }

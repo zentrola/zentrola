@@ -78,12 +78,12 @@ type Model struct {
 }
 
 type ModelInput struct {
-	Code                string   `json:"code" binding:"required"`
-	Name                string   `json:"name" binding:"required"`
-	PublisherProviderID *int64   `json:"publisherProviderId,string"`
-	InputModalities     []string `json:"inputModalities" binding:"required" enums:"TEXT,IMAGE,AUDIO,VIDEO"`
-	OutputModalities    []string `json:"outputModalities" binding:"required" enums:"TEXT,IMAGE,AUDIO,VIDEO"`
-	Remark              string   `json:"remark"`
+	Code                string
+	Name                string
+	PublisherProviderID *int64
+	InputModalities     []string
+	OutputModalities    []string
+	Remark              string
 }
 type Provider struct {
 	ID                 int64                    `json:"id,string"`
@@ -105,8 +105,8 @@ type Provider struct {
 	ProxyHeadersSealed catalog.SealedCredential `json:"-"`
 }
 type ProviderEndpoint struct {
-	ProtocolType string `json:"protocolType" binding:"required" enums:"OPENAI,ANTHROPIC"`
-	BaseURL      string `json:"baseUrl" binding:"required"`
+	ProtocolType string `json:"protocolType"`
+	BaseURL      string `json:"baseUrl"`
 	NetworkScope string `json:"networkScope" enums:"PUBLIC,PRIVATE"`
 }
 type ProviderProxyHeader struct {
@@ -114,25 +114,25 @@ type ProviderProxyHeader struct {
 	Configured bool   `json:"configured"`
 }
 type ProviderProxyHeaderInput struct {
-	Key   string `json:"key" binding:"required"`
-	Value string `json:"value"`
+	Key   string
+	Value string
 }
 type ProviderInput struct {
-	Name         string             `json:"name" binding:"required"`
-	Website      string             `json:"website"`
-	Endpoints    []ProviderEndpoint `json:"endpoints" binding:"required"`
-	ProxyEnabled bool               `json:"proxyEnabled"`
-	ProxyURL     string             `json:"proxyUrl"`
+	Name         string
+	Website      string
+	Endpoints    []ProviderEndpoint
+	ProxyEnabled bool
+	ProxyURL     string
 	// UpdateProxyCredentials 表示编辑服务商时使用 ProxyURL 中的新认证信息；
 	// 否则保留已加密保存的用户名和密码，只更新代理地址的其他部分。
-	UpdateProxyCredentials bool                       `json:"updateProxyCredentials"`
-	ProxyHeaders           []ProviderProxyHeaderInput `json:"proxyHeaders"`
-	Mappings               []ProviderMappingInput     `json:"mappings" binding:"required" allowempty:"true"`
+	UpdateProxyCredentials bool
+	ProxyHeaders           []ProviderProxyHeaderInput
+	Mappings               []ProviderMappingInput
 }
 type ProviderMappingInput struct {
-	ModelID           int64  `json:"modelId,string" binding:"required"`
-	UpstreamModelCode string `json:"upstreamModelCode"`
-	Priority          int32  `json:"priority,omitempty"`
+	ModelID           int64
+	UpstreamModelCode string
+	Priority          int32
 }
 type ProviderMapping struct {
 	ID                int64     `json:"id,string"`
@@ -149,8 +149,8 @@ type ProviderDetail struct {
 	Models   []Model           `json:"models"`
 }
 type ProviderInitializeInput struct {
-	Locale        string   `json:"locale" binding:"required" enums:"zh-CN,en-US"`
-	ProviderCodes []string `json:"providerCodes" binding:"required"`
+	Locale        string
+	ProviderCodes []string
 }
 type ProviderInitializeOption struct {
 	Code    string `json:"code"`
@@ -303,54 +303,89 @@ type Audit struct {
 	Before, After any
 	ErrorCode     string
 }
-type Reader interface {
+type MemberReader interface {
 	Members(context.Context, Page) ([]Member, error)
 	CountMembers(context.Context) (int64, error)
 	MemberSuggestions(context.Context, Page, string) ([]Member, error)
 	CountMemberSuggestions(context.Context, string) (int64, error)
 	Member(context.Context, int64) (Member, error)
+	MemberGroups(context.Context, int64, Page) ([]Group, error)
+	CountMemberGroups(context.Context, int64) (int64, error)
+	Keys(context.Context, int64, Page) ([]Key, error)
+	CountKeys(context.Context, int64) (int64, error)
+}
+
+type GroupReader interface {
 	Groups(context.Context, Page, string) ([]Group, error)
 	CountGroups(context.Context, string) (int64, error)
 	Group(context.Context, int64) (Group, error)
-	MemberGroups(context.Context, int64, Page) ([]Group, error)
-	CountMemberGroups(context.Context, int64) (int64, error)
 	GroupMembers(context.Context, int64, Page) ([]Member, error)
 	CountGroupMembers(context.Context, int64) (int64, error)
 	GroupModels(context.Context, int64, Page) ([]Model, error)
 	CountGroupModels(context.Context, int64) (int64, error)
+}
+
+type ModelReader interface {
 	Models(context.Context, Page, string) ([]Model, error)
 	CountModels(context.Context, string) (int64, error)
 	Model(context.Context, int64) (Model, error)
+}
+
+type ProviderReader interface {
 	Providers(context.Context, Page, string) ([]Provider, error)
 	CountProviders(context.Context, string) (int64, error)
 	Provider(context.Context, int64) (Provider, error)
 	ProviderMappings(context.Context, int64) ([]ProviderMapping, error)
 	ProviderCredentialConfigured(context.Context, int64) (bool, error)
+}
+
+type ResourceReader interface {
 	Resources(context.Context, Page) ([]Resource, error)
 	CountResources(context.Context) (int64, error)
 	Resource(context.Context, int64) (ResourceRecord, error)
 	ResourceQuotas(context.Context, int64) ([]ResourceQuota, error)
-	Keys(context.Context, int64, Page) ([]Key, error)
-	CountKeys(context.Context, int64) (int64, error)
+}
+
+type OperationReader interface {
 	Operations(context.Context, Page) ([]Operation, error)
 	CountOperations(context.Context) (int64, error)
 }
-type Writer interface {
-	Reader
+
+// Reader 组合管理用例所需的窄读端口。具体用例应优先依赖上面的最小接口，
+// 完整 Reader 仅用于共享事务会话和兼容现有 facade。
+type Reader interface {
+	MemberReader
+	GroupReader
+	ModelReader
+	ProviderReader
+	ResourceReader
+	OperationReader
+}
+
+type MemberWriter interface {
 	CreateMember(context.Context, Member) error
 	UpdateMember(context.Context, Member) error
 	SetMemberStatus(context.Context, int64, string) error
 	DeleteMember(context.Context, int64) error
+}
+
+type GroupWriter interface {
 	CreateGroup(context.Context, Group) error
 	UpdateGroup(context.Context, Group) error
 	SetGroupStatus(context.Context, int64, string) error
 	DeleteGroup(context.Context, int64) error
 	SetGroupMember(context.Context, int64, int64, bool) (bool, error)
 	SetGroupModel(context.Context, int64, int64, bool) (bool, error)
+}
+
+type ModelWriter interface {
 	SetModelStatus(context.Context, int64, string) error
 	CreateModel(context.Context, Model) error
 	UpdateModel(context.Context, Model) error
 	DeleteModel(context.Context, int64, time.Time) error
+}
+
+type ProviderWriter interface {
 	CreateProvider(context.Context, Provider) error
 	UpdateProvider(context.Context, Provider) error
 	DeleteProvider(context.Context, int64, time.Time) error
@@ -358,13 +393,30 @@ type Writer interface {
 	CreateProviderMapping(context.Context, ProviderMapping) error
 	UpdateProviderMapping(context.Context, ProviderMapping) error
 	DeleteProviderMapping(context.Context, int64, int64, time.Time) error
+}
+
+type ResourceWriter interface {
 	CreateResource(context.Context, ResourceRecord) error
 	UpdateResource(context.Context, ResourceRecord) error
 	BlockResourceRuntime(context.Context, int64, string, string, *int32, time.Time) error
 	RestoreResourceRuntime(context.Context, int64, time.Time) error
 	DeleteResource(context.Context, int64, time.Time) (bool, error)
 	ReplaceResourceQuotas(context.Context, int64, []ResourceQuota) error
+}
+
+type AuditWriter interface {
 	Audit(context.Context, Audit, appsec.RequestMeta) error
+}
+
+// Writer 保持事务适配器的完整能力，同时让各业务服务可以逐步收窄依赖。
+type Writer interface {
+	Reader
+	MemberWriter
+	GroupWriter
+	ModelWriter
+	ProviderWriter
+	ResourceWriter
+	AuditWriter
 }
 type Store interface {
 	Read(context.Context, admin.Identity, func(Reader) error) error

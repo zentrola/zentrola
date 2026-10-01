@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/joho/godotenv"
 	"github.com/zentrola/zentrola/internal/infrastructure/config"
 	"github.com/zentrola/zentrola/internal/infrastructure/postgres/dbgen"
 )
@@ -25,16 +26,27 @@ import (
 // 显式开启后仅在随机隔离 schema 中执行；不会清理或修改 public 中的业务表。
 func integrationDatabase(t *testing.T) (context.Context, *pgxpool.Pool, string) {
 	t.Helper()
+	ctx, pool, schema := isolatedDatabase(t)
+	if err := Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(ctx, pool); err != nil {
+		t.Fatal("migration is not idempotent:", err)
+	}
+	return ctx, pool, schema
+}
+
+// isolatedDatabase 为集成测试创建随机 schema。调用方可选择运行当前 baseline，
+// 也可从历史迁移链的指定版本启动升级测试。
+func isolatedDatabase(t *testing.T) (context.Context, *pgxpool.Pool, string) {
+	t.Helper()
 	if os.Getenv("ZENTROLA_INTEGRATION") != "1" {
 		t.Skip("set ZENTROLA_INTEGRATION=1 to run PostgreSQL integration tests")
 	}
-	cfg, err := config.Load("../../../.env")
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := integrationPostgresConfig(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	t.Cleanup(cancel)
-	base, err := Open(ctx, cfg.Postgres)
+	base, err := Open(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,13 +73,39 @@ func integrationDatabase(t *testing.T) (context.Context, *pgxpool.Pool, string) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := Migrate(ctx, pool); err != nil {
-		t.Fatal(err)
-	}
-	if err := Migrate(ctx, pool); err != nil {
-		t.Fatal("migration is not idempotent:", err)
-	}
 	return ctx, pool, schema
+}
+
+// integrationPostgresConfig 只从进程环境和本地 .env 读取数据库连接配置，避免测试
+// 被完整应用配置中的密钥、CORS 或网关设置阻塞。进程环境优先，CI 无需生成 .env。
+func integrationPostgresConfig(t *testing.T) config.Postgres {
+	t.Helper()
+	fileValues, err := godotenv.Read("../../../.env")
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("cannot read integration test database configuration")
+	}
+	value := func(key, fallback string) string {
+		if configured, ok := os.LookupEnv(key); ok {
+			return configured
+		}
+		if configured, ok := fileValues[key]; ok {
+			return configured
+		}
+		return fallback
+	}
+	port, err := strconv.Atoi(value("POSTGRES_PORT", "5432"))
+	if err != nil || port < 1 || port > 65535 {
+		t.Fatal("POSTGRES_PORT must be a valid port")
+	}
+	return config.Postgres{
+		Host:     value("POSTGRES_HOST", "127.0.0.1"),
+		Port:     port,
+		Database: value("POSTGRES_DB", "zentrola"),
+		User:     value("POSTGRES_USER", "postgres"),
+		Password: value("POSTGRES_PASSWORD", ""),
+		SSLMode:  value("POSTGRES_SSLMODE", "disable"),
+		MaxConns: 10,
+	}
 }
 
 func TestStage1Integration(t *testing.T) {
@@ -134,7 +172,7 @@ VALUES (64,40,'Another name',decode(repeat('99',32),'hex'),decode(repeat('aa',12
 			aead, _ := cipher.NewGCM(block)
 			plain := []byte("test-only-provider-credential")
 			sealed := aead.Seal(nil, nonce, plain, nil)
-			mustExec(t, ctx, tx, `INSERT INTO provider_credential (id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,created_by,updated_by,created_at,updated_at) VALUES (60,40,'Resource',$1,$2,7,'ACTIVE','system','system',now(),now())`, sealed, nonce)
+			mustExec(t, ctx, tx, `INSERT INTO provider_credential (id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,created_by,updated_by,created_at,updated_at) VALUES (60,40,'Resource',$1,$2,7,'system','system',now(),now())`, sealed, nonce)
 			row, err := dbgen.New(tx).GetResource(ctx, 60)
 			if err != nil {
 				t.Fatal(err)
@@ -158,7 +196,7 @@ VALUES (64,40,'Another name',decode(repeat('99',32),'hex'),decode(repeat('aa',12
 	})
 	t.Run("credential runtime block", func(t *testing.T) {
 		withFixture(t, ctx, pool, func(tx pgx.Tx) {
-			mustExec(t, ctx, tx, `INSERT INTO provider_credential (id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,status,created_by,updated_by,created_at,updated_at) VALUES (60,40,'Resource',decode(repeat('00',32),'hex'),decode(repeat('00',12),'hex'),1,'ACTIVE','system','system',now(),now())`)
+			mustExec(t, ctx, tx, `INSERT INTO provider_credential (id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,created_by,updated_by,created_at,updated_at) VALUES (60,40,'Resource',decode(repeat('00',32),'hex'),decode(repeat('00',12),'hex'),1,'system','system',now(),now())`)
 			now := time.Now().UTC().Truncate(time.Microsecond)
 			reason, code, status := "BILLING", "UPSTREAM_BILLING_BLOCKED", int32(402)
 			changed, err := dbgen.New(tx).BlockGatewayResource(ctx, dbgen.BlockGatewayResourceParams{
@@ -210,9 +248,10 @@ ORDER BY c.relname,a.attnum`, schema)
 		"provider":   "official_website,proxy_url_display,proxy_url_ciphertext,proxy_url_nonce,proxy_url_key_version,proxy_headers_ciphertext,proxy_headers_nonce,proxy_headers_key_version",
 		"model":      "publisher_provider_id",
 		"admin_user": "locked_until,last_login_at", "principal": "remark", "principal_access_key": "expires_at,last_used_at,revoked_at",
-		"principal_group": "remark", "provider_credential": "blocked_reason,blocked_at,last_error_at,last_http_status,last_error_code",
-		"usage_record":  "input_tokens,output_tokens,cached_input_tokens,error_type",
-		"operation_log": "operator_id,target_id,target_name,request_id,request_method,request_path,ip_address,user_agent,error_code,before_data,after_data,remark",
+		"principal_group": "remark", "provider_credential": "blocked_reason,blocked_at,last_error_at,last_http_status,last_error_code,subscription_type,plan_code,external_account_ref,effective_at,expires_at,quota_checked_at,quota_resets_at,credential_refreshed_at,credential_expires_at",
+		"provider_credential_quota": "quota_name,quota_unit,limit_value,used_value,remaining_value,used_percent,window_duration_seconds,resets_at,reached_type",
+		"usage_record":              "input_tokens,output_tokens,cached_input_tokens,error_type",
+		"operation_log":             "operator_id,target_id,target_name,request_id,request_method,request_path,ip_address,user_agent,error_code,before_data,after_data,remark",
 	}
 	tables := map[string]bool{}
 	columns := map[string][]string{}
@@ -258,7 +297,8 @@ ORDER BY c.relname,a.attnum`, schema)
 		"principal_access_key": true, "principal_group": true,
 		"principal_group_membership": true, "principal_group_model_permission": true,
 		"provider": true, "provider_endpoint": true, "provider_model": true,
-		"provider_credential": true, "model": true, "usage_record": true,
+		"provider_credential": true, "provider_credential_quota": true,
+		"model": true, "usage_record": true,
 		"operation_log": true,
 	}
 	for table := range expectedTables {
@@ -320,8 +360,11 @@ ORDER BY c.relname,a.attnum`, schema)
 		}
 	}
 	var count int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace WHERE n.nspname=$1 AND c.contype='f'`, schema).Scan(&count); err != nil || count != 0 {
-		t.Fatal("foreign key found", err)
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace WHERE n.nspname=$1 AND c.contype='f' AND c.conrelid='provider_credential_quota'::regclass AND c.confrelid='provider_credential'::regclass`, schema).Scan(&count); err != nil || count != 1 {
+		t.Fatal("provider credential quota foreign key is missing or unexpected", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace WHERE n.nspname=$1 AND c.contype='f'`, schema).Scan(&count); err != nil || count != 1 {
+		t.Fatal("unexpected foreign key count", err)
 	}
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.columns WHERE table_schema=$1 AND table_name<>'goose_db_version' AND column_name='id' AND (column_default IS NOT NULL OR is_identity='YES')`, schema).Scan(&count); err != nil || count != 0 {
 		t.Fatal("IDs must be generated by application", err)

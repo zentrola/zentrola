@@ -3132,7 +3132,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/management.ModelInput"
+                            "$ref": "#/definitions/http.ModelRequest"
                         }
                     }
                 ],
@@ -3281,7 +3281,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/management.ModelInput"
+                            "$ref": "#/definitions/http.ModelRequest"
                         }
                     }
                 ],
@@ -3695,7 +3695,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/management.ProviderInput"
+                            "$ref": "#/definitions/http.ProviderRequest"
                         }
                     }
                 ],
@@ -3770,7 +3770,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/management.ProviderInitializeInput"
+                            "$ref": "#/definitions/http.ProviderInitializeRequest"
                         }
                     }
                 ],
@@ -3990,7 +3990,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/management.ProviderInput"
+                            "$ref": "#/definitions/http.ProviderRequest"
                         }
                     }
                 ],
@@ -6438,6 +6438,54 @@
                 }
             }
         },
+        "http.ModelRequest": {
+            "type": "object",
+            "required": [
+                "code",
+                "inputModalities",
+                "name",
+                "outputModalities"
+            ],
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "inputModalities": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "TEXT",
+                            "IMAGE",
+                            "AUDIO",
+                            "VIDEO"
+                        ]
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "outputModalities": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "TEXT",
+                            "IMAGE",
+                            "AUDIO",
+                            "VIDEO"
+                        ]
+                    }
+                },
+                "publisherProviderId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "remark": {
+                    "type": "string"
+                }
+            }
+        },
         "http.OpenAIErrorResponse": {
             "type": "object",
             "properties": {
@@ -6626,6 +6674,129 @@
                 },
                 "total": {
                     "type": "integer"
+                }
+            }
+        },
+        "http.ProviderEndpointRequest": {
+            "type": "object",
+            "required": [
+                "baseUrl",
+                "protocolType"
+            ],
+            "properties": {
+                "baseUrl": {
+                    "type": "string"
+                },
+                "networkScope": {
+                    "type": "string",
+                    "enum": [
+                        "PUBLIC",
+                        "PRIVATE"
+                    ]
+                },
+                "protocolType": {
+                    "type": "string",
+                    "enum": [
+                        "OPENAI",
+                        "ANTHROPIC"
+                    ]
+                }
+            }
+        },
+        "http.ProviderInitializeRequest": {
+            "type": "object",
+            "required": [
+                "locale",
+                "providerCodes"
+            ],
+            "properties": {
+                "locale": {
+                    "type": "string",
+                    "enum": [
+                        "zh-CN",
+                        "en-US"
+                    ]
+                },
+                "providerCodes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "http.ProviderMappingRequest": {
+            "type": "object",
+            "required": [
+                "modelId"
+            ],
+            "properties": {
+                "modelId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "priority": {
+                    "type": "integer"
+                },
+                "upstreamModelCode": {
+                    "type": "string"
+                }
+            }
+        },
+        "http.ProviderProxyHeaderRequest": {
+            "type": "object",
+            "required": [
+                "key"
+            ],
+            "properties": {
+                "key": {
+                    "type": "string"
+                },
+                "value": {
+                    "type": "string"
+                }
+            }
+        },
+        "http.ProviderRequest": {
+            "type": "object",
+            "required": [
+                "endpoints",
+                "mappings",
+                "name"
+            ],
+            "properties": {
+                "endpoints": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/http.ProviderEndpointRequest"
+                    }
+                },
+                "mappings": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/http.ProviderMappingRequest"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "proxyEnabled": {
+                    "type": "boolean"
+                },
+                "proxyHeaders": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/http.ProviderProxyHeaderRequest"
+                    }
+                },
+                "proxyUrl": {
+                    "type": "string"
+                },
+                "updateProxyCredentials": {
+                    "type": "boolean"
+                },
+                "website": {
+                    "type": "string"
                 }
             }
         },
@@ -6893,54 +7064,6 @@
                 }
             }
         },
-        "management.ModelInput": {
-            "type": "object",
-            "required": [
-                "code",
-                "inputModalities",
-                "name",
-                "outputModalities"
-            ],
-            "properties": {
-                "code": {
-                    "type": "string"
-                },
-                "inputModalities": {
-                    "type": "array",
-                    "items": {
-                        "type": "string",
-                        "enum": [
-                            "TEXT",
-                            "IMAGE",
-                            "AUDIO",
-                            "VIDEO"
-                        ]
-                    }
-                },
-                "name": {
-                    "type": "string"
-                },
-                "outputModalities": {
-                    "type": "array",
-                    "items": {
-                        "type": "string",
-                        "enum": [
-                            "TEXT",
-                            "IMAGE",
-                            "AUDIO",
-                            "VIDEO"
-                        ]
-                    }
-                },
-                "publisherProviderId": {
-                    "type": "string",
-                    "example": "0"
-                },
-                "remark": {
-                    "type": "string"
-                }
-            }
-        },
         "management.ModelSyncResult": {
             "type": "object",
             "properties": {
@@ -7018,6 +7141,9 @@
                 "targetId": {
                     "type": "string",
                     "example": "0"
+                },
+                "targetName": {
+                    "type": "string"
                 },
                 "targetType": {
                     "type": "string"
@@ -7124,6 +7250,12 @@
                 "modelSyncSupported": {
                     "type": "boolean"
                 },
+                "models": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/management.Model"
+                    }
+                },
                 "name": {
                     "type": "string"
                 },
@@ -7155,10 +7287,6 @@
         },
         "management.ProviderEndpoint": {
             "type": "object",
-            "required": [
-                "baseUrl",
-                "protocolType"
-            ],
             "properties": {
                 "baseUrl": {
                     "type": "string"
@@ -7171,33 +7299,7 @@
                     ]
                 },
                 "protocolType": {
-                    "type": "string",
-                    "enum": [
-                        "OPENAI",
-                        "ANTHROPIC"
-                    ]
-                }
-            }
-        },
-        "management.ProviderInitializeInput": {
-            "type": "object",
-            "required": [
-                "locale",
-                "providerCodes"
-            ],
-            "properties": {
-                "locale": {
-                    "type": "string",
-                    "enum": [
-                        "zh-CN",
-                        "en-US"
-                    ]
-                },
-                "providerCodes": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
+                    "type": "string"
                 }
             }
         },
@@ -7232,50 +7334,6 @@
                 }
             }
         },
-        "management.ProviderInput": {
-            "type": "object",
-            "required": [
-                "endpoints",
-                "mappings",
-                "name"
-            ],
-            "properties": {
-                "endpoints": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/management.ProviderEndpoint"
-                    }
-                },
-                "mappings": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/management.ProviderMappingInput"
-                    }
-                },
-                "name": {
-                    "type": "string"
-                },
-                "proxyEnabled": {
-                    "type": "boolean"
-                },
-                "proxyHeaders": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/management.ProviderProxyHeaderInput"
-                    }
-                },
-                "proxyUrl": {
-                    "type": "string"
-                },
-                "updateProxyCredentials": {
-                    "description": "UpdateProxyCredentials 表示编辑服务商时使用 ProxyURL 中的新认证信息；\n否则保留已加密保存的用户名和密码，只更新代理地址的其他部分。",
-                    "type": "boolean"
-                },
-                "website": {
-                    "type": "string"
-                }
-            }
-        },
         "management.ProviderMapping": {
             "type": "object",
             "properties": {
@@ -7305,24 +7363,6 @@
                 }
             }
         },
-        "management.ProviderMappingInput": {
-            "type": "object",
-            "required": [
-                "modelId"
-            ],
-            "properties": {
-                "modelId": {
-                    "type": "string",
-                    "example": "0"
-                },
-                "priority": {
-                    "type": "integer"
-                },
-                "upstreamModelCode": {
-                    "type": "string"
-                }
-            }
-        },
         "management.ProviderProxyHeader": {
             "type": "object",
             "properties": {
@@ -7330,20 +7370,6 @@
                     "type": "boolean"
                 },
                 "key": {
-                    "type": "string"
-                }
-            }
-        },
-        "management.ProviderProxyHeaderInput": {
-            "type": "object",
-            "required": [
-                "key"
-            ],
-            "properties": {
-                "key": {
-                    "type": "string"
-                },
-                "value": {
                     "type": "string"
                 }
             }

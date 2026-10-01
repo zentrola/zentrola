@@ -36,7 +36,7 @@ func providerEndpoint(provider Provider, protocol string) (string, string, strin
 	return "", "", ""
 }
 
-func (s *Service) SyncProviderModels(ctx context.Context, actor admin.Identity, id int64, meta appsec.RequestMeta) (ModelSyncResult, error) {
+func (s *ProviderService) SyncProviderModels(ctx context.Context, actor admin.Identity, id int64, meta appsec.RequestMeta) (ModelSyncResult, error) {
 	if id <= 0 {
 		return ModelSyncResult{}, appsec.ErrInvalidArgument
 	}
@@ -90,7 +90,7 @@ func (s *Service) SyncProviderModels(ctx context.Context, actor admin.Identity, 
 	return ModelSyncResult{}, ErrModelSyncCredentialRequired
 }
 
-func (s *Service) SyncResourceModels(ctx context.Context, actor admin.Identity, id int64, meta appsec.RequestMeta) (ModelSyncResult, error) {
+func (s *ProviderService) SyncResourceModels(ctx context.Context, actor admin.Identity, id int64, meta appsec.RequestMeta) (ModelSyncResult, error) {
 	if id <= 0 {
 		return ModelSyncResult{}, appsec.ErrInvalidArgument
 	}
@@ -143,7 +143,7 @@ func (s *Service) SyncResourceModels(ctx context.Context, actor admin.Identity, 
 	return s.persistDiscoveredModels(ctx, actor, provider, &resource, discovered, result, meta)
 }
 
-func (s *Service) persistDiscoveredModels(ctx context.Context, actor admin.Identity, provider Provider, resource *ResourceRecord, discovered []DiscoveredModel, result ModelSyncResult, meta appsec.RequestMeta) (ModelSyncResult, error) {
+func (s *ProviderService) persistDiscoveredModels(ctx context.Context, actor admin.Identity, provider Provider, resource *ResourceRecord, discovered []DiscoveredModel, result ModelSyncResult, meta appsec.RequestMeta) (ModelSyncResult, error) {
 	err := s.store.Write(ctx, actor, func(writer Writer) error {
 		if resource != nil {
 			current, err := writer.Resource(ctx, resource.ID)
@@ -282,7 +282,7 @@ func readAllModels(ctx context.Context, reader Reader) ([]Model, error) {
 	}
 }
 
-func (s *Service) auditModelSync(ctx context.Context, actor admin.Identity, provider Provider, resource ResourceRecord, result ModelSyncResult, meta appsec.RequestMeta) error {
+func (s *ProviderService) auditModelSync(ctx context.Context, actor admin.Identity, provider Provider, resource ResourceRecord, result ModelSyncResult, meta appsec.RequestMeta) error {
 	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
 	return s.store.Write(auditCtx, actor, func(writer Writer) error {

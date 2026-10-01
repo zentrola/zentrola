@@ -146,11 +146,11 @@ func TestStage3Integration(t *testing.T) {
 	if len(models) != 0 || len(providers) != 0 {
 		t.Fatal("startup must not create models or providers")
 	}
-	model := stage3Data[mgmt.Model](t, request("POST", "/api/v1/models", mgmt.ModelInput{
+	model := stage3Data[mgmt.Model](t, request("POST", "/api/v1/models", httptransport.ModelRequest{
 		Code: "management-base-model", Name: "管理端基础模型", InputModalities: []string{"TEXT"}, OutputModalities: []string{"TEXT"},
 	}, 201))
 	request("PATCH", "/api/v1/models/"+sid(model.ID)+"/status", map[string]string{"status": "ACTIVE"}, 200)
-	mappedModel := stage3Data[mgmt.Model](t, request("POST", "/api/v1/models", mgmt.ModelInput{
+	mappedModel := stage3Data[mgmt.Model](t, request("POST", "/api/v1/models", httptransport.ModelRequest{
 		Code: "management-mapped-model", Name: "管理端映射模型", InputModalities: []string{"TEXT"}, OutputModalities: []string{"TEXT"},
 	}, 201))
 	customProviderInput := mgmt.ProviderInput{
@@ -161,7 +161,7 @@ func TestStage3Integration(t *testing.T) {
 			{ModelID: model.ID, UpstreamModelCode: "vendor-model-v2"},
 		},
 	}
-	customProvider := stage3Data[mgmt.Provider](t, request("POST", "/api/v1/providers", customProviderInput, 201))
+	customProvider := stage3Data[mgmt.Provider](t, request("POST", "/api/v1/providers", httptransport.NewProviderRequest(customProviderInput), 201))
 	providers = stage3Data[struct {
 		Items []mgmt.Provider `json:"items"`
 	}](t, request("GET", "/api/v1/providers", nil, 200)).Items
@@ -197,13 +197,14 @@ func TestStage3Integration(t *testing.T) {
 	mappingID := providerDetail.Mappings[0].ID
 	customProviderInput.Mappings[0].UpstreamModelCode = ""
 	customProviderInput.Mappings = customProviderInput.Mappings[:1]
-	stage3Data[mgmt.Provider](t, request("PUT", customProviderPath, customProviderInput, 200))
+	stage3Data[mgmt.Provider](t, request("PUT", customProviderPath, httptransport.NewProviderRequest(customProviderInput), 200))
 	providers = stage3Data[struct {
 		Items []mgmt.Provider `json:"items"`
 	}](t, request("GET", "/api/v1/providers", nil, 200)).Items
 	if len(providers) != 1 || providers[0].ModelCount != 0 {
 		t.Fatalf("provider model count=%+v, want zero active mapped models", providers)
 	}
+	request("PATCH", "/api/v1/models/"+sid(mappedModel.ID)+"/status", map[string]string{"status": "ACTIVE"}, 200)
 	providerDetail = stage3Data[mgmt.ProviderDetail](t, request("GET", customProviderPath, nil, 200))
 	if len(providerDetail.Mappings) != 1 || providerDetail.Mappings[0].ID != mappingID || providerDetail.Mappings[0].UpstreamModelCode != "" {
 		t.Fatalf("provider mapping update not preserved: %+v", providerDetail.Mappings)
@@ -712,13 +713,14 @@ func TestStage3Integration(t *testing.T) {
 	t.Run("official model creation editing validation and audit", func(t *testing.T) {
 		publisherProviderID := provider.ID
 		input := mgmt.ModelInput{Code: "official-model-test", Name: "官方模型测试", PublisherProviderID: &publisherProviderID, InputModalities: []string{"TEXT", "IMAGE"}, OutputModalities: []string{"TEXT"}, Remark: "用途说明"}
+		requestInput := httptransport.NewModelRequest(input)
 		savedToken := token
 		token = ""
-		request("POST", "/api/v1/models", input, 401)
-		request("PUT", "/api/v1/models/1", input, 401)
+		request("POST", "/api/v1/models", requestInput, 401)
+		request("PUT", "/api/v1/models/1", requestInput, 401)
 		request("DELETE", "/api/v1/models/1", nil, 401)
 		token = savedToken
-		created := stage3Data[mgmt.Model](t, request("POST", "/api/v1/models", input, 201))
+		created := stage3Data[mgmt.Model](t, request("POST", "/api/v1/models", requestInput, 201))
 		path := "/api/v1/models/" + sid(created.ID)
 		if created.Status != "DISABLED" || len(created.InputModalities) != 2 || created.Remark != input.Remark ||
 			created.PublisherProviderID == nil || *created.PublisherProviderID != provider.ID || created.PublisherProviderName == nil || *created.PublisherProviderName != provider.Name {
@@ -747,7 +749,7 @@ func TestStage3Integration(t *testing.T) {
 		}
 		request("GET", "/api/v1/models?status=UNKNOWN", nil, 400)
 		request("GET", "/api/v1/models?status=ACTIVE&status=DISABLED", nil, 400)
-		request("POST", "/api/v1/models", input, 409)
+		request("POST", "/api/v1/models", requestInput, 409)
 		for _, invalid := range []any{nil, []string{}, []string{"TEXT", "TEXT"}, []string{"IMAGE", "UNKNOWN"}, "TEXT", []any{"TEXT", nil}, []any{[]string{"TEXT"}}} {
 			for _, field := range []string{"inputModalities", "outputModalities"} {
 				payload := map[string]any{"code": "invalid-model", "name": "错误模型", "inputModalities": []string{"TEXT"}, "outputModalities": []string{"TEXT"}}
@@ -758,17 +760,17 @@ func TestStage3Integration(t *testing.T) {
 		}
 		request("GET", "/api/v1/models/bad", nil, 400)
 		request("GET", "/api/v1/models/1", nil, 404)
-		request("PUT", "/api/v1/models/1", input, 404)
+		request("PUT", "/api/v1/models/1", requestInput, 404)
 		request("DELETE", "/api/v1/models/1", nil, 404)
 		zeroPublisherID := int64(0)
 		invalidPublisher := input
 		invalidPublisher.PublisherProviderID = &zeroPublisherID
-		request("POST", "/api/v1/models", invalidPublisher, 400)
+		request("POST", "/api/v1/models", httptransport.NewModelRequest(invalidPublisher), 400)
 		missingPublisherID := int64(999999999999999)
 		missingPublisher := input
 		missingPublisher.Code = "missing-publisher-model"
 		missingPublisher.PublisherProviderID = &missingPublisherID
-		request("POST", "/api/v1/models", missingPublisher, 404)
+		request("POST", "/api/v1/models", httptransport.NewModelRequest(missingPublisher), 404)
 		request("PATCH", path+"/status", map[string]string{"status": "ACTIVE"}, 200)
 		activeModels = stage3Data[struct {
 			Items []mgmt.Model `json:"items"`
@@ -787,7 +789,7 @@ func TestStage3Integration(t *testing.T) {
 		request("PUT", grantPath+"/"+sid(created.ID), nil, 200)
 		input.Code, input.Name, input.Remark = "official-model-renamed", "官方模型新名称", "更新说明"
 		input.OutputModalities = []string{"TEXT", "AUDIO"}
-		updated := stage3Data[mgmt.Model](t, request("PUT", path, input, 200))
+		updated := stage3Data[mgmt.Model](t, request("PUT", path, httptransport.NewModelRequest(input), 200))
 		if updated.ID != created.ID || updated.Status != "ACTIVE" || updated.Code != input.Code || !updated.CreatedAt.Equal(created.CreatedAt) {
 			t.Fatal("edit changed model identity/status or failed to save")
 		}
@@ -803,7 +805,7 @@ func TestStage3Integration(t *testing.T) {
 		}
 		conflicting := input
 		conflicting.Code = model.Code
-		request("PUT", path, conflicting, 409)
+		request("PUT", path, httptransport.NewModelRequest(conflicting), 409)
 		broken := mgmt.New(NewManagementStore(pool, failedAuditIDs{}), ids, cipher, tester)
 		input.Code = "model-must-rollback"
 		if _, err := broken.CreateModel(ctx, actor, input, appsec.RequestMeta{}); !errors.Is(err, appsec.ErrUnavailable) {
@@ -820,11 +822,11 @@ func TestStage3Integration(t *testing.T) {
 			t.Fatal("model audit count incorrect")
 		}
 
-		deletionProvider := stage3Data[mgmt.Provider](t, request("POST", "/api/v1/providers", mgmt.ProviderInput{
+		deletionProvider := stage3Data[mgmt.Provider](t, request("POST", "/api/v1/providers", httptransport.NewProviderRequest(mgmt.ProviderInput{
 			Name:      "模型删除关联服务商",
 			Endpoints: []mgmt.ProviderEndpoint{{ProtocolType: "OPENAI", BaseURL: "https://model-delete.example.com/v1"}},
 			Mappings:  []mgmt.ProviderMappingInput{{ModelID: created.ID, UpstreamModelCode: "deleted-upstream-model"}},
-		}, 201))
+		}), 201))
 		if err := broken.DeleteModel(ctx, actor, created.ID, appsec.RequestMeta{}); !errors.Is(err, appsec.ErrUnavailable) {
 			t.Fatal("model deletion ignored audit failure")
 		}

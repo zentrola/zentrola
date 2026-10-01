@@ -80,6 +80,7 @@ func TestOpenAIIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	originalResourceID := resource.ID
 	if err := management.SetProviderStatus(ctx, actor, provider.ID, "ACTIVE", appsec.RequestMeta{}); err != nil {
 		t.Fatal(err)
 	}
@@ -310,10 +311,16 @@ func TestOpenAIIntegration(t *testing.T) {
 	for _, r := range page.Items {
 		byID[r.RequestID] = r
 	}
+	tokenValue := func(value *int64) any {
+		if value == nil {
+			return nil
+		}
+		return *value
+	}
 	for _, name := range []string{"normal", "stream", "tool", "tool_result"} {
 		r := byID[requestIDs[name]]
-		if r.ClientProtocol != "OPENAI_CHAT" || r.Status != "SUCCESS" || r.InputTokens == nil || *r.InputTokens != 12 || r.OutputTokens == nil || *r.OutputTokens != 7 || r.ResourceID != resource.ID {
-			t.Fatalf("OpenAI usage invalid: %+v", r)
+		if r.ClientProtocol != "OPENAI_CHAT" || r.Status != "SUCCESS" || r.InputTokens == nil || *r.InputTokens != 12 || r.OutputTokens == nil || *r.OutputTokens != 7 || r.ResourceID != originalResourceID {
+			t.Fatalf("OpenAI usage %s invalid: input=%v output=%v cached=%v row=%+v", name, tokenValue(r.InputTokens), tokenValue(r.OutputTokens), tokenValue(r.CachedInputTokens), r)
 		}
 	}
 	if r := byID[requestIDs["responses"]]; r.ClientProtocol != "OPENAI_RESPONSES" || r.ProviderModelID != byID[requestIDs["normal"]].ProviderModelID {

@@ -40,7 +40,7 @@ func (input ProviderInitializeInput) Valid() bool {
 }
 
 // OfficialProviderInitializationOptions 返回可供管理员选择的内置厂商。
-func (s *Service) OfficialProviderInitializationOptions(locale string) ([]ProviderInitializeOption, error) {
+func (s *ProviderService) OfficialProviderInitializationOptions(locale string) ([]ProviderInitializeOption, error) {
 	locale = strings.TrimSpace(locale)
 	if locale != "zh-CN" && locale != "en-US" {
 		return nil, appsec.ErrInvalidArgument
@@ -56,7 +56,7 @@ func (s *Service) OfficialProviderInitializationOptions(locale string) ([]Provid
 }
 
 // InitializeOfficialProviders 创建选定且缺失的内置厂商，并同步已有内置厂商的本地化名称和官方网站。
-func (s *Service) InitializeOfficialProviders(ctx context.Context, actor admin.Identity, input ProviderInitializeInput, meta appsec.RequestMeta) (ProviderInitializeResult, error) {
+func (s *ProviderService) InitializeOfficialProviders(ctx context.Context, actor admin.Identity, input ProviderInitializeInput, meta appsec.RequestMeta) (ProviderInitializeResult, error) {
 	input.Normalize()
 	if !input.Valid() {
 		return ProviderInitializeResult{}, appsec.ErrInvalidArgument
