@@ -2,10 +2,11 @@ package management
 
 import (
 	"context"
+	"strconv"
+
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	"github.com/zentrola/zentrola/internal/domain/admin"
 	"github.com/zentrola/zentrola/internal/domain/catalog"
-	"strconv"
 )
 
 // QueryService 承载管理面的只读查询，不持有写入、加密或上游连接依赖。

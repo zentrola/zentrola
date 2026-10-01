@@ -3,7 +3,7 @@ package postgres
 import (
 	"context"
 	"embed"
-	"errors"
+	"fmt"
 	"io/fs"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -31,7 +31,7 @@ SELECT EXISTS (
     FROM information_schema.tables
     WHERE table_schema = current_schema() AND table_name = 'goose_db_version'
 )`).Scan(&hasMigrationTable); err != nil {
-		return errors.New("cannot inspect migration state")
+		return fmt.Errorf("cannot inspect migration state: %w", err)
 	}
 	if !hasMigrationTable {
 		source, err := fs.Sub(baselineMigrations, "baseline")
@@ -45,10 +45,10 @@ SELECT EXISTS (
 		provider, err := goose.NewProvider(goose.DialectPostgres, db, source,
 			goose.WithSessionLocker(locker), goose.WithDisableGlobalRegistry(true))
 		if err != nil {
-			return errors.New("cannot initialize migrations")
+			return fmt.Errorf("cannot initialize migrations: %w", err)
 		}
 		if _, err := provider.Up(ctx); err != nil {
-			return errors.New("PostgreSQL migration failed")
+			return fmt.Errorf("PostgreSQL migration failed: %w", err)
 		}
 		return nil
 	}
@@ -68,7 +68,7 @@ SELECT EXISTS (
 	// 后续执行必须排除 00001–00041，避免 Goose 将它们识别为缺失的乱序迁移。
 	var currentVersion int64
 	if err := pool.QueryRow(ctx, `SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version WHERE is_applied`).Scan(&currentVersion); err != nil {
-		return errors.New("cannot inspect migration version")
+		return fmt.Errorf("cannot inspect migration version: %w", err)
 	}
 	if currentVersion >= 41 {
 		excluded := make([]int64, 41)
@@ -79,10 +79,10 @@ SELECT EXISTS (
 	}
 	provider, err := goose.NewProvider(goose.DialectPostgres, db, source, providerOptions...)
 	if err != nil {
-		return errors.New("cannot initialize migrations")
+		return fmt.Errorf("cannot initialize migrations: %w", err)
 	}
 	if _, err := provider.Up(ctx); err != nil {
-		return errors.New("PostgreSQL migration failed")
+		return fmt.Errorf("PostgreSQL migration failed: %w", err)
 	}
 	return nil
 }

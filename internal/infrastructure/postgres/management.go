@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strconv"
+	"io"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	mgmt "github.com/zentrola/zentrola/internal/application/management"
 	appsec "github.com/zentrola/zentrola/internal/application/security"
@@ -21,13 +21,18 @@ import (
 )
 
 type ManagementStore struct {
-	pool  *pgxpool.Pool
-	ids   shared.IDGenerator
-	audit *SecurityStore
+	pool   *pgxpool.Pool
+	ids    shared.IDGenerator
+	audit  *SecurityStore
+	logger *slog.Logger
 }
 
-func NewManagementStore(pool *pgxpool.Pool, ids shared.IDGenerator) *ManagementStore {
-	return &ManagementStore{pool: pool, ids: ids, audit: NewSecurityStore(pool, ids)}
+func NewManagementStore(pool *pgxpool.Pool, ids shared.IDGenerator, loggers ...*slog.Logger) *ManagementStore {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if len(loggers) > 0 && loggers[0] != nil {
+		logger = loggers[0]
+	}
+	return &ManagementStore{pool: pool, ids: ids, audit: NewSecurityStore(pool, ids), logger: logger}
 }
 
 type managementSession struct {
@@ -49,7 +54,7 @@ func (s *ManagementStore) run(ctx context.Context, a admin.Identity, write bool,
 	}
 	tx, err := s.pool.BeginTx(ctx, opts)
 	if err != nil {
-		return appsec.ErrUnavailable
+		return s.managementError(ctx, "begin_transaction", err)
 	}
 	defer tx.Rollback(context.Background())
 	ctx = idgen.WithQuerier(ctx, tx)
@@ -57,17 +62,28 @@ func (s *ManagementStore) run(ctx context.Context, a admin.Identity, write bool,
 	if write {
 		// 单一私有部署内的管理写入串行化；不在此事务中执行上游网络请求。
 		if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(829314004)"); err != nil {
-			return appsec.ErrUnavailable
+			return s.managementError(ctx, "acquire_management_lock", err)
 		}
 	}
 	err = validateActor(ctx, q, a)
 	if err != nil {
-		return managementError(err)
+		return s.managementError(ctx, "validate_actor", err)
 	}
 	if err = fn(&managementSession{q: q, actor: a, store: s}); err != nil {
-		return managementError(err)
+		return s.managementError(ctx, "execute_callback", err)
 	}
-	return managementError(tx.Commit(ctx))
+	return s.managementError(ctx, "commit_transaction", tx.Commit(ctx))
+}
+
+func (s *ManagementStore) managementError(ctx context.Context, operation string, err error) error {
+	mapped := managementError(err)
+	if err != nil && errors.Is(mapped, appsec.ErrUnavailable) && !errors.Is(err, appsec.ErrUnavailable) {
+		s.logger.ErrorContext(ctx, "PostgreSQL management operation failed",
+			"operation", operation,
+			"error", err,
+		)
+	}
+	return mapped
 }
 func managementError(err error) error {
 	if err == nil {
@@ -120,69 +136,6 @@ func (s *managementSession) Audit(ctx context.Context, a mgmt.Audit, meta appsec
 	}
 	return s.store.audit.appendLog(ctx, s.q, s.actor, module, a.Event, a.Target, a.ID, a.Name, result, a.ErrorCode, meta, before, after, "")
 }
-func memberView(r dbgen.Principal) mgmt.Member {
-	return mgmt.Member{ID: r.ID, Name: r.Name, Remark: r.Remark, Status: r.Status, CreatedAt: r.CreatedAt.Time.UTC()}
-}
-func groupView(r dbgen.PrincipalGroup) mgmt.Group {
-	return mgmt.Group{ID: r.ID, Code: r.GroupCode, Name: r.GroupName, Remark: r.Remark, Status: r.Status, CreatedAt: r.CreatedAt.Time.UTC()}
-}
-func modelView(id int64, code, name, status string, inputJSON, outputJSON []byte, remark string, publisherProviderID *int64, publisherProviderName *string, createdAt, updatedAt time.Time) mgmt.Model {
-	// 数组格式由数据库 CHECK 保证；响应只暴露业务字段。
-	input, output := []string{}, []string{}
-	_ = json.Unmarshal(inputJSON, &input)
-	_ = json.Unmarshal(outputJSON, &output)
-	return mgmt.Model{
-		ID: id, Code: code, Name: name, Status: status,
-		InputModalities: input, OutputModalities: output, Remark: remark,
-		PublisherProviderID: publisherProviderID, PublisherProviderName: publisherProviderName,
-		CreatedAt: createdAt.UTC(), UpdatedAt: updatedAt.UTC(),
-	}
-}
-func providerView(r dbgen.Provider) mgmt.Provider {
-	names := []string{}
-	_ = json.Unmarshal(r.ProxyHeaderNames, &names)
-	headers := make([]mgmt.ProviderProxyHeader, 0, len(names))
-	for _, name := range names {
-		headers = append(headers, mgmt.ProviderProxyHeader{Key: name, Configured: true})
-	}
-	provider := mgmt.Provider{
-		ID: r.ID, Code: r.ProviderCode, Name: r.ProviderName, Type: r.ProviderType,
-		Website: r.OfficialWebsite, Endpoints: []mgmt.ProviderEndpoint{},
-		ProxyEnabled: r.ProxyEnabled, ProxyURL: r.ProxyUrlDisplay, ProxyHeaders: headers,
-		Status: r.Status, CreatedAt: r.CreatedAt.Time.UTC(), UpdatedAt: r.UpdatedAt.Time.UTC(),
-	}
-	if r.ProxyUrlKeyVersion != nil {
-		provider.ProxyURLSealed = catalog.SealedCredential{Ciphertext: r.ProxyUrlCiphertext, Nonce: r.ProxyUrlNonce, KeyVersion: *r.ProxyUrlKeyVersion}
-	}
-	if r.ProxyHeadersKeyVersion != nil {
-		provider.ProxyHeadersSealed = catalog.SealedCredential{Ciphertext: r.ProxyHeadersCiphertext, Nonce: r.ProxyHeadersNonce, KeyVersion: *r.ProxyHeadersKeyVersion}
-	}
-	return provider
-}
-
-func providerHeaderNames(p mgmt.Provider) ([]byte, error) {
-	names := make([]string, 0, len(p.ProxyHeaders))
-	for _, header := range p.ProxyHeaders {
-		names = append(names, header.Key)
-	}
-	return json.Marshal(names)
-}
-
-func sealedVersion(sealed catalog.SealedCredential) *int32 {
-	if sealed.KeyVersion <= 0 {
-		return nil
-	}
-	version := sealed.KeyVersion
-	return &version
-}
-func providerMappingView(r dbgen.ProviderModel) mgmt.ProviderMapping {
-	return mgmt.ProviderMapping{ID: r.ID, ProviderID: r.ProviderID, ModelID: r.ModelID, UpstreamModelCode: r.UpstreamModelCode, Priority: r.Priority, CreatedAt: r.CreatedAt.Time.UTC(), UpdatedAt: r.UpdatedAt.Time.UTC()}
-}
-
-func endpointView(r dbgen.ProviderEndpoint) mgmt.ProviderEndpoint {
-	return mgmt.ProviderEndpoint{ProtocolType: r.ProtocolType, BaseURL: r.BaseUrl, NetworkScope: r.NetworkScope}
-}
-
 func (s *managementSession) providerEndpoints(ctx context.Context, providerID int64) ([]mgmt.ProviderEndpoint, error) {
 	rows, err := s.q.ManageProviderEndpoints(ctx, providerID)
 	if err != nil {
@@ -193,32 +146,6 @@ func (s *managementSession) providerEndpoints(ctx context.Context, providerID in
 		result = append(result, endpointView(row))
 	}
 	return result, nil
-}
-func resourceView(r dbgen.ManageResourcesRow) mgmt.Resource {
-	return mgmt.Resource{
-		ID: r.ID, ProviderID: r.ProviderID, Name: r.ResourceName,
-		AuthType: r.AuthType, AuthAdapter: r.AuthAdapter, SubscriptionType: r.SubscriptionType,
-		PlanCode: r.PlanCode, ExternalAccountRef: r.ExternalAccountRef, Priority: r.Priority,
-		EffectiveAt: timePointer(r.EffectiveAt), ExpiresAt: timePointer(r.ExpiresAt),
-		QuotaStatus: r.QuotaStatus, QuotaCheckedAt: timePointer(r.QuotaCheckedAt), QuotaResetsAt: timePointer(r.QuotaResetsAt),
-		CredentialRefreshedAt: timePointer(r.CredentialRefreshedAt), CredentialExpiresAt: timePointer(r.CredentialExpiresAt),
-		RuntimeStatus: r.RuntimeStatus, BlockedReason: r.BlockedReason,
-		BlockedAt: timePointer(r.BlockedAt), LastErrorAt: timePointer(r.LastErrorAt),
-		LastHTTPStatus: r.LastHttpStatus, LastErrorCode: r.LastErrorCode,
-		CredentialConfigured: true, CreatedAt: r.CreatedAt.Time.UTC(), UpdatedAt: r.UpdatedAt.Time.UTC(),
-	}
-}
-func keyView(r dbgen.ManageKeysRow) mgmt.Key {
-	return mgmt.Key{ID: r.ID, Name: r.Name, MaskedKey: r.MaskedKey, Status: r.Status, ExpiresAt: timePointer(r.ExpiresAt), RevokedAt: timePointer(r.RevokedAt), CreatedAt: r.CreatedAt.Time.UTC()}
-}
-func operationView(r dbgen.ManageOperationsRow) mgmt.Operation {
-	return mgmt.Operation{ID: r.ID, OperatorName: r.OperatorName, Type: r.OperationType, TargetType: r.TargetType, TargetID: r.TargetID, TargetName: r.TargetName, RequestID: r.RequestID, Result: r.Result, ErrorCode: r.ErrorCode, Before: r.BeforeData, After: r.AfterData, CreatedAt: r.CreatedAt.Time.UTC()}
-}
-func managementPageLimit(p mgmt.Page) int32 {
-	if p.ProbeNext {
-		return p.Limit + 1
-	}
-	return p.Limit
 }
 func (s *managementSession) Members(ctx context.Context, p mgmt.Page) ([]mgmt.Member, error) {
 	rows, err := s.q.ManageMembers(ctx, dbgen.ManageMembersParams{ID: p.After, Limit: managementPageLimit(p)})
@@ -718,50 +645,4 @@ func (s *managementSession) BlockResourceRuntime(ctx context.Context, id int64, 
 		ID: id, BlockedReason: &reason, BlockedAt: pgTime(at), LastHttpStatus: status,
 		LastErrorCode: &code, UpdatedBy: actorRef(s.actor.ID),
 	})
-}
-
-func pgNumeric(value *string) pgtype.Numeric {
-	if value == nil {
-		return pgtype.Numeric{}
-	}
-	var numeric pgtype.Numeric
-	if numeric.Scan(*value) != nil {
-		return pgtype.Numeric{}
-	}
-	return numeric
-}
-
-func numericString(value pgtype.Numeric) *string {
-	if !value.Valid {
-		return nil
-	}
-	raw, err := value.Value()
-	if err != nil {
-		return nil
-	}
-	text, ok := raw.(string)
-	if !ok {
-		return nil
-	}
-	return &text
-}
-
-func pgFloat(value *float64) pgtype.Numeric {
-	if value == nil {
-		return pgtype.Numeric{}
-	}
-	text := strconv.FormatFloat(*value, 'f', -1, 64)
-	return pgNumeric(&text)
-}
-
-func numericFloat(value pgtype.Numeric) *float64 {
-	text := numericString(value)
-	if text == nil {
-		return nil
-	}
-	parsed, err := strconv.ParseFloat(*text, 64)
-	if err != nil {
-		return nil
-	}
-	return &parsed
 }

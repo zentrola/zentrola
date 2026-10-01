@@ -3,6 +3,7 @@ package management
 import (
 	"context"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	appsec "github.com/zentrola/zentrola/internal/application/security"
@@ -16,49 +17,67 @@ type Service struct {
 	ProviderService
 	QueryService
 	ResourceService
-	store         Store
-	ids           shared.IDGenerator
-	cipher        Cipher
-	tester        ConnectionTester
-	discoverer    ModelDiscoverer
-	subscriptions []SubscriptionAdapter
 }
 
-type Option func(*Service)
+type serviceOptions struct {
+	discoverer    ModelDiscoverer
+	subscriptions []SubscriptionAdapter
+	now           func() time.Time
+}
+
+type Option func(*serviceOptions)
 
 func WithModelDiscoverer(discoverer ModelDiscoverer) Option {
-	return func(service *Service) { service.discoverer = discoverer }
+	return func(options *serviceOptions) { options.discoverer = discoverer }
 }
 
 func WithSubscriptionAdapter(adapter SubscriptionAdapter) Option {
-	return func(service *Service) {
+	return func(options *serviceOptions) {
 		if adapter != nil {
-			service.subscriptions = append(service.subscriptions, adapter)
+			options.subscriptions = append(options.subscriptions, adapter)
 		}
 	}
 }
 
+// WithClock 注入业务时间，测试可使用固定时钟；所有结果统一规范化为 UTC 微秒精度。
+func WithClock(now func() time.Time) Option {
+	return func(options *serviceOptions) {
+		if now != nil {
+			options.now = now
+		}
+	}
+}
+
+func businessTime(now func() time.Time) time.Time {
+	if now == nil {
+		now = time.Now
+	}
+	return now().UTC().Truncate(time.Microsecond)
+}
+
 func New(store Store, ids shared.IDGenerator, cipher Cipher, tester ConnectionTester, options ...Option) *Service {
-	service := &Service{store: store, ids: ids, cipher: cipher, tester: tester}
-	service.MemberService = MemberService{store: store, ids: ids}
-	service.GroupService = GroupService{store: store, ids: ids}
-	service.ModelService = ModelService{store: modelStoreAdapter{Store: store}, ids: ids}
+	configuration := serviceOptions{now: time.Now}
 	for _, option := range options {
-		option(service)
+		option(&configuration)
 	}
-	service.ProviderService = ProviderService{
-		store: service.store, ids: service.ids, cipher: service.cipher,
-		discoverer: service.discoverer, subscriptions: append([]SubscriptionAdapter(nil), service.subscriptions...),
+	now := func() time.Time { return businessTime(configuration.now) }
+	subscriptions := append([]SubscriptionAdapter(nil), configuration.subscriptions...)
+	return &Service{
+		MemberService: MemberService{store: memberStoreAdapter{Store: store}, ids: ids, now: now},
+		GroupService:  GroupService{store: groupStoreAdapter{Store: store}, ids: ids, now: now},
+		ModelService:  ModelService{store: modelStoreAdapter{Store: store}, ids: ids, now: now},
+		ProviderService: ProviderService{
+			store: providerStoreAdapter{Store: store}, ids: ids, cipher: cipher, now: now,
+			discoverer: configuration.discoverer, subscriptions: subscriptions,
+		},
+		ResourceService: ResourceService{
+			store: resourceStoreAdapter{Store: store}, ids: ids, cipher: cipher, tester: tester, now: now,
+			subscriptions: subscriptions,
+		},
+		QueryService: QueryService{
+			store: store, discoverer: configuration.discoverer, subscriptions: subscriptions,
+		},
 	}
-	service.ResourceService = ResourceService{
-		store: service.store, ids: service.ids, cipher: service.cipher, tester: service.tester,
-		subscriptions: append([]SubscriptionAdapter(nil), service.subscriptions...),
-	}
-	service.QueryService = QueryService{
-		store: service.store, discoverer: service.discoverer,
-		subscriptions: append([]SubscriptionAdapter(nil), service.subscriptions...),
-	}
-	return service
 }
 
 func validText(s string, max int) bool {
@@ -88,6 +107,9 @@ func validSubscriptionCredential(s string) bool {
 	return len(s) > 0 && len(s) <= 64<<10 && utf8.ValidString(s) && !strings.ContainsRune(s, 0)
 }
 func nextID(ctx context.Context, ids shared.IDGenerator) (int64, error) {
+	if ids == nil {
+		return 0, appsec.ErrUnavailable
+	}
 	id, err := ids.NextID(ctx)
 	if err != nil {
 		return 0, appsec.ErrUnavailable
