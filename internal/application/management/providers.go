@@ -22,11 +22,40 @@ import (
 
 // ProviderService 聚合服务商配置、初始化和模型发现用例。
 type ProviderService struct {
-	store         Store
+	store         ProviderStore
 	ids           shared.IDGenerator
 	cipher        Cipher
+	now           func() time.Time
 	discoverer    ModelDiscoverer
 	subscriptions []SubscriptionAdapter
+}
+
+type ProviderReadSession interface {
+	ProviderReader
+	ResourceReader
+}
+
+type ProviderSession interface {
+	ProviderReadSession
+	ModelReader
+	ProviderWriter
+	ModelWriter
+	AuditWriter
+}
+
+type ProviderStore interface {
+	ReadProvider(context.Context, admin.Identity, func(ProviderReadSession) error) error
+	WriteProvider(context.Context, admin.Identity, func(ProviderSession) error) error
+}
+
+type providerStoreAdapter struct{ Store }
+
+func (s providerStoreAdapter) ReadProvider(ctx context.Context, actor admin.Identity, fn func(ProviderReadSession) error) error {
+	return s.Read(ctx, actor, func(reader Reader) error { return fn(reader) })
+}
+
+func (s providerStoreAdapter) WriteProvider(ctx context.Context, actor admin.Identity, fn func(ProviderSession) error) error {
+	return s.Write(ctx, actor, func(writer Writer) error { return fn(writer) })
 }
 
 func (s *ProviderService) next(ctx context.Context) (int64, error) {
@@ -389,7 +418,7 @@ func validProviderMappings(_ Provider, mappings []ProviderMappingInput) bool {
 	return true
 }
 
-func (s *ProviderService) replaceProviderMappings(ctx context.Context, w Writer, provider Provider, inputs []ProviderMappingInput) ([]ProviderMapping, error) {
+func (s *ProviderService) replaceProviderMappings(ctx context.Context, w ProviderSession, provider Provider, inputs []ProviderMappingInput) ([]ProviderMapping, error) {
 	current, err := w.ProviderMappings(ctx, provider.ID)
 	if err != nil {
 		return nil, err
@@ -399,7 +428,7 @@ func (s *ProviderService) replaceProviderMappings(ctx context.Context, w Writer,
 		currentByModel[mapping.ModelID] = mapping
 	}
 
-	now := time.Now().UTC().Truncate(time.Microsecond)
+	now := businessTime(s.now)
 	desired := make([]ProviderMapping, 0, len(inputs))
 	retained := make(map[int64]struct{}, len(inputs))
 	validatedModels := make(map[int64]struct{}, len(inputs))
@@ -463,7 +492,7 @@ func (s *ProviderService) CreateProvider(ctx context.Context, actor admin.Identi
 	if err != nil {
 		return Provider{}, err
 	}
-	now := time.Now().UTC().Truncate(time.Microsecond)
+	now := businessTime(s.now)
 	provider, ok := providerFromInput(Provider{ID: id, Code: "provider-" + strconv.FormatInt(id, 10), Type: "CUSTOM", Status: "DISABLED", CreatedAt: now, UpdatedAt: now}, input)
 	if !ok || !validProviderMappings(provider, input.Mappings) {
 		return Provider{}, appsec.ErrInvalidArgument
@@ -475,7 +504,7 @@ func (s *ProviderService) CreateProvider(ctx context.Context, actor admin.Identi
 	if err != nil {
 		return Provider{}, appsec.ErrUnavailable
 	}
-	err = s.store.Write(ctx, actor, func(w Writer) error {
+	err = s.store.WriteProvider(ctx, actor, func(w ProviderSession) error {
 		if err := w.CreateProvider(ctx, provider); err != nil {
 			return err
 		}
@@ -494,7 +523,7 @@ func (s *ProviderService) UpdateProvider(ctx context.Context, actor admin.Identi
 		return Provider{}, appsec.ErrInvalidArgument
 	}
 	var updated Provider
-	err := s.store.Write(ctx, actor, func(w Writer) error {
+	err := s.store.WriteProvider(ctx, actor, func(w ProviderSession) error {
 		current, err := w.Provider(ctx, id)
 		if err != nil {
 			return err
@@ -515,7 +544,7 @@ func (s *ProviderService) UpdateProvider(ctx context.Context, actor admin.Identi
 		if err != nil {
 			return err
 		}
-		updated.UpdatedAt = time.Now().UTC().Truncate(time.Microsecond)
+		updated.UpdatedAt = businessTime(s.now)
 		if err := w.UpdateProvider(ctx, updated); err != nil {
 			return err
 		}
@@ -532,7 +561,7 @@ func (s *ProviderService) SetProviderStatus(ctx context.Context, actor admin.Ide
 	if id <= 0 || !validStatus(status) {
 		return appsec.ErrInvalidArgument
 	}
-	return s.store.Write(ctx, actor, func(w Writer) error {
+	return s.store.WriteProvider(ctx, actor, func(w ProviderSession) error {
 		provider, err := w.Provider(ctx, id)
 		if err != nil {
 			return err
@@ -571,7 +600,7 @@ func (s *ProviderService) DeleteProvider(ctx context.Context, actor admin.Identi
 	if id <= 0 {
 		return appsec.ErrInvalidArgument
 	}
-	return s.store.Write(ctx, actor, func(w Writer) error {
+	return s.store.WriteProvider(ctx, actor, func(w ProviderSession) error {
 		provider, err := w.Provider(ctx, id)
 		if err != nil {
 			return err
@@ -581,7 +610,7 @@ func (s *ProviderService) DeleteProvider(ctx context.Context, actor admin.Identi
 			return err
 		}
 		before := providerSnapshot(provider, mappings)
-		if err := w.DeleteProvider(ctx, id, time.Now().UTC().Truncate(time.Microsecond)); err != nil {
+		if err := w.DeleteProvider(ctx, id, businessTime(s.now)); err != nil {
 			return err
 		}
 		return w.Audit(ctx, Audit{Event: operation.ProviderDelete, Target: "PROVIDER", ID: id, Name: provider.Name, Before: before, After: map[string]bool{"deleted": true}}, meta)

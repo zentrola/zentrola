@@ -12,8 +12,32 @@ import (
 )
 
 type MemberService struct {
-	store Store
+	store MemberStore
 	ids   shared.IDGenerator
+	now   func() time.Time
+}
+
+type MemberSession interface {
+	Member(context.Context, int64) (Member, error)
+	Group(context.Context, int64) (Group, error)
+	MemberGroups(context.Context, int64, Page) ([]Group, error)
+	Keys(context.Context, int64, Page) ([]Key, error)
+	CreateMember(context.Context, Member) error
+	UpdateMember(context.Context, Member) error
+	SetMemberStatus(context.Context, int64, string) error
+	DeleteMember(context.Context, int64) error
+	SetGroupMember(context.Context, int64, int64, bool) (bool, error)
+	Audit(context.Context, Audit, appsec.RequestMeta) error
+}
+
+type MemberStore interface {
+	WriteMember(context.Context, admin.Identity, func(MemberSession) error) error
+}
+
+type memberStoreAdapter struct{ Store }
+
+func (s memberStoreAdapter) WriteMember(ctx context.Context, actor admin.Identity, fn func(MemberSession) error) error {
+	return s.Write(ctx, actor, func(writer Writer) error { return fn(writer) })
 }
 
 func (s *MemberService) next(ctx context.Context) (int64, error) {
@@ -21,8 +45,33 @@ func (s *MemberService) next(ctx context.Context) (int64, error) {
 }
 
 type GroupService struct {
-	store Store
+	store GroupStore
 	ids   shared.IDGenerator
+	now   func() time.Time
+}
+
+type GroupSession interface {
+	Group(context.Context, int64) (Group, error)
+	Member(context.Context, int64) (Member, error)
+	Model(context.Context, int64) (Model, error)
+	GroupModels(context.Context, int64, Page) ([]Model, error)
+	CreateGroup(context.Context, Group) error
+	UpdateGroup(context.Context, Group) error
+	SetGroupStatus(context.Context, int64, string) error
+	DeleteGroup(context.Context, int64) error
+	SetGroupMember(context.Context, int64, int64, bool) (bool, error)
+	SetGroupModel(context.Context, int64, int64, bool) (bool, error)
+	Audit(context.Context, Audit, appsec.RequestMeta) error
+}
+
+type GroupStore interface {
+	WriteGroup(context.Context, admin.Identity, func(GroupSession) error) error
+}
+
+type groupStoreAdapter struct{ Store }
+
+func (s groupStoreAdapter) WriteGroup(ctx context.Context, actor admin.Identity, fn func(GroupSession) error) error {
+	return s.Write(ctx, actor, func(writer Writer) error { return fn(writer) })
 }
 
 func (s *GroupService) next(ctx context.Context) (int64, error) {
@@ -40,8 +89,8 @@ func (s *MemberService) CreateMemberWithGroups(ctx context.Context, actor admin.
 	if err != nil {
 		return Member{}, err
 	}
-	m := Member{ID: id, Name: name, Remark: remark(note), Status: "DISABLED", CreatedAt: time.Now().UTC()}
-	err = s.store.Write(ctx, actor, func(w Writer) error {
+	m := Member{ID: id, Name: name, Remark: remark(note), Status: "DISABLED", CreatedAt: businessTime(s.now)}
+	err = s.store.WriteMember(ctx, actor, func(w MemberSession) error {
 		groups := make(map[int64]Group, len(groupIDs))
 		for _, groupID := range groupIDs {
 			group, err := w.Group(ctx, groupID)
@@ -81,7 +130,7 @@ func (s *MemberService) UpdateMemberWithGroups(ctx context.Context, actor admin.
 		return Member{}, appsec.ErrInvalidArgument
 	}
 	var updated Member
-	err := s.store.Write(ctx, actor, func(w Writer) error {
+	err := s.store.WriteMember(ctx, actor, func(w MemberSession) error {
 		current, err := w.Member(ctx, id)
 		if err != nil {
 			return err
@@ -154,7 +203,7 @@ func (s *MemberService) SetMemberStatus(ctx context.Context, actor admin.Identit
 	if id <= 0 || !validStatus(status) {
 		return appsec.ErrInvalidArgument
 	}
-	return s.store.Write(ctx, actor, func(w Writer) error {
+	return s.store.WriteMember(ctx, actor, func(w MemberSession) error {
 		m, err := w.Member(ctx, id)
 		if err != nil {
 			return err
@@ -181,7 +230,7 @@ func (s *MemberService) DeleteMember(ctx context.Context, actor admin.Identity, 
 	if id <= 0 {
 		return appsec.ErrInvalidArgument
 	}
-	return s.store.Write(ctx, actor, func(w Writer) error {
+	return s.store.WriteMember(ctx, actor, func(w MemberSession) error {
 		m, err := w.Member(ctx, id)
 		if err != nil {
 			return err
@@ -209,8 +258,8 @@ func (s *GroupService) createGroup(ctx context.Context, actor admin.Identity, co
 	if code == "" {
 		code = "group-" + strconv.FormatInt(id, 10)
 	}
-	g := Group{ID: id, Code: code, Name: name, Remark: remark(note), Status: "ACTIVE", CreatedAt: time.Now().UTC()}
-	err = s.store.Write(ctx, actor, func(w Writer) error {
+	g := Group{ID: id, Code: code, Name: name, Remark: remark(note), Status: "ACTIVE", CreatedAt: businessTime(s.now)}
+	err = s.store.WriteGroup(ctx, actor, func(w GroupSession) error {
 		for _, modelID := range modelIDs {
 			model, err := w.Model(ctx, modelID)
 			if err != nil {
@@ -260,7 +309,7 @@ func (s *GroupService) UpdateGroupWithModels(ctx context.Context, actor admin.Id
 		return Group{}, appsec.ErrInvalidArgument
 	}
 	var updated Group
-	err := s.store.Write(ctx, actor, func(w Writer) error {
+	err := s.store.WriteGroup(ctx, actor, func(w GroupSession) error {
 		current, err := w.Group(ctx, id)
 		if err != nil {
 			return err
@@ -327,7 +376,7 @@ func (s *GroupService) SetGroupStatus(ctx context.Context, actor admin.Identity,
 	if id <= 0 || !validStatus(status) {
 		return appsec.ErrInvalidArgument
 	}
-	return s.store.Write(ctx, actor, func(w Writer) error {
+	return s.store.WriteGroup(ctx, actor, func(w GroupSession) error {
 		group, err := w.Group(ctx, id)
 		if err != nil {
 			return err
@@ -345,7 +394,7 @@ func (s *GroupService) DeleteGroup(ctx context.Context, actor admin.Identity, id
 	if id <= 0 {
 		return appsec.ErrInvalidArgument
 	}
-	return s.store.Write(ctx, actor, func(w Writer) error {
+	return s.store.WriteGroup(ctx, actor, func(w GroupSession) error {
 		group, err := w.Group(ctx, id)
 		if err != nil {
 			return err
@@ -360,7 +409,7 @@ func (s *GroupService) SetGroupMember(ctx context.Context, actor admin.Identity,
 	if groupID <= 0 || memberID <= 0 {
 		return appsec.ErrInvalidArgument
 	}
-	return s.store.Write(ctx, actor, func(w Writer) error {
+	return s.store.WriteGroup(ctx, actor, func(w GroupSession) error {
 		g, err := w.Group(ctx, groupID)
 		if err != nil {
 			return err
@@ -386,7 +435,7 @@ func (s *GroupService) SetGroupModel(ctx context.Context, actor admin.Identity, 
 	if groupID <= 0 || modelID <= 0 {
 		return appsec.ErrInvalidArgument
 	}
-	return s.store.Write(ctx, actor, func(w Writer) error {
+	return s.store.WriteGroup(ctx, actor, func(w GroupSession) error {
 		g, err := w.Group(ctx, groupID)
 		if err != nil {
 			return err

@@ -61,24 +61,122 @@ func writeGatewayError(w http.ResponseWriter, failure *gw.Failure) {
 	}
 	writeProtocolError(w, failure.Status, failure.Type, message)
 }
-func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/anthropic")
-	protocol := gw.AnthropicProtocol
-	inferencePath := "/v1/messages"
-	if g.protocol == gw.OpenAIProtocol {
-		path = r.URL.Path
-		switch path {
-		case "/v1/responses":
-			protocol = gw.OpenAIResponsesProtocol
-			inferencePath = "/v1/responses"
-		case "/v1/images/generations":
-			protocol = gw.OpenAIImagesProtocol
-			inferencePath = "/v1/images/generations"
-		default:
-			protocol = gw.OpenAIProtocol
-			inferencePath = "/v1/chat/completions"
+
+type gatewayRoute struct {
+	path          string
+	protocol      string
+	inferencePath string
+}
+
+func (g *GatewayHandler) resolveRoute(r *http.Request) gatewayRoute {
+	route := gatewayRoute{
+		path: strings.TrimPrefix(r.URL.Path, "/anthropic"), protocol: gw.AnthropicProtocol, inferencePath: "/v1/messages",
+	}
+	if g.protocol != gw.OpenAIProtocol {
+		return route
+	}
+	route.path = r.URL.Path
+	switch route.path {
+	case "/v1/responses":
+		route.protocol, route.inferencePath = gw.OpenAIResponsesProtocol, "/v1/responses"
+	case "/v1/images/generations":
+		route.protocol, route.inferencePath = gw.OpenAIImagesProtocol, "/v1/images/generations"
+	default:
+		route.protocol, route.inferencePath = gw.OpenAIProtocol, "/v1/chat/completions"
+	}
+	return route
+}
+
+func (g *GatewayHandler) serveModelList(
+	w http.ResponseWriter,
+	r *http.Request,
+	identity appsec.PrincipalIdentity,
+	route gatewayRoute,
+	reject func(*gw.Failure),
+) bool {
+	if !gw.IsOpenAIProtocol(route.protocol) || route.path != "/v1/models" {
+		return false
+	}
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		reject(&gw.Failure{Code: "METHOD_NOT_ALLOWED", Type: "invalid_request_error", Message: "Method not allowed.", Status: 405})
+		return true
+	}
+	if r.URL.RawQuery != "" {
+		reject(gw.ErrInvalid)
+		return true
+	}
+	g.logger.InfoContext(r.Context(), "gateway model list request started",
+		"protocol", route.protocol, "principal_id", identity.ID, "access_key_id", identity.AccessKeyID)
+	models, err := g.service.Models(r.Context(), identity)
+	if err != nil {
+		failure := gw.ErrUnavailable
+		var known *gw.Failure
+		if errors.As(err, &known) {
+			failure = known
+		}
+		reject(failure)
+		return true
+	}
+	g.logger.InfoContext(r.Context(), "gateway model list request completed",
+		"protocol", route.protocol, "principal_id", identity.ID, "access_key_id", identity.AccessKeyID,
+		"model_count", len(models))
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": models})
+	return true
+}
+
+type parsedGatewayRequest struct {
+	version       string
+	beta          string
+	betaQuery     bool
+	body          []byte
+	nativeHeaders map[string][]string
+}
+
+func (g *GatewayHandler) parseForwardRequest(w http.ResponseWriter, r *http.Request, protocol string) (parsedGatewayRequest, *gw.Failure) {
+	media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || media != "application/json" || (r.Header.Get("Content-Encoding") != "" && r.Header.Get("Content-Encoding") != "identity") {
+		return parsedGatewayRequest{}, &gw.Failure{Code: "UNSUPPORTED_MEDIA_TYPE", Type: "invalid_request_error", Message: "Use uncompressed application/json.", Status: 415}
+	}
+	request := parsedGatewayRequest{nativeHeaders: make(map[string][]string)}
+	if protocol == gw.AnthropicProtocol {
+		request.version, request.beta, err = protocolHeaders(r)
+	}
+	if err != nil {
+		return parsedGatewayRequest{}, gw.ErrInvalid
+	}
+	for name, values := range r.Header {
+		if protocol == gw.AnthropicProtocol && strings.HasPrefix(strings.ToLower(name), "anthropic-") {
+			request.nativeHeaders[name] = append([]string(nil), values...)
 		}
 	}
+	if protocol == gw.AnthropicProtocol {
+		request.betaQuery, err = parseBetaQuery(r)
+	} else if r.URL.RawQuery != "" {
+		err = gw.ErrInvalid
+	}
+	if err != nil {
+		return parsedGatewayRequest{}, gw.ErrInvalid
+	}
+	controller := http.NewResponseController(w)
+	_ = controller.SetReadDeadline(time.Now().Add(g.cfg.BodyReadTimeout))
+	request.body, err = io.ReadAll(http.MaxBytesReader(w, r.Body, g.cfg.MaxBodyBytes))
+	_ = controller.SetReadDeadline(time.Time{})
+	if err == nil {
+		return request, nil
+	}
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		return parsedGatewayRequest{}, &gw.Failure{Code: "REQUEST_TOO_LARGE", Type: "request_too_large", Message: "Request body too large.", Status: 413}
+	}
+	return parsedGatewayRequest{}, gw.ErrInvalid
+}
+
+func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	route := g.resolveRoute(r)
+	path, protocol, inferencePath := route.path, route.protocol, route.inferencePath
 	identity, _ := r.Context().Value(principalIdentityKey{}).(appsec.PrincipalIdentity)
 	var trace *usage.Event
 	var observer *gw.UsageObserver
@@ -121,34 +219,7 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if gw.IsOpenAIProtocol(protocol) && path == "/v1/models" {
-		if r.Method != http.MethodGet {
-			w.Header().Set("Allow", "GET")
-			reject(&gw.Failure{Code: "METHOD_NOT_ALLOWED", Type: "invalid_request_error", Message: "Method not allowed.", Status: 405})
-			return
-		}
-		if r.URL.RawQuery != "" {
-			reject(gw.ErrInvalid)
-			return
-		}
-		g.logger.InfoContext(r.Context(), "gateway model list request started",
-			"protocol", protocol, "principal_id", identity.ID, "access_key_id", identity.AccessKeyID)
-		models, err := g.service.Models(r.Context(), identity)
-		if err != nil {
-			failure := gw.ErrUnavailable
-			var known *gw.Failure
-			if errors.As(err, &known) {
-				failure = known
-			}
-			reject(failure)
-			return
-		}
-		g.logger.InfoContext(r.Context(), "gateway model list request completed",
-			"protocol", protocol, "principal_id", identity.ID, "access_key_id", identity.AccessKeyID,
-			"model_count", len(models))
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Cache-Control", "no-store")
-		_ = json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": models})
+	if g.serveModelList(w, r, identity, route, reject) {
 		return
 	}
 	if (protocol == gw.AnthropicProtocol && path != "/v1/messages" && path != "/v1/messages/count_tokens") ||
@@ -161,48 +232,13 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		reject(&gw.Failure{Code: "METHOD_NOT_ALLOWED", Type: "invalid_request_error", Message: "Method not allowed.", Status: 405})
 		return
 	}
-	media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if err != nil || media != "application/json" || (r.Header.Get("Content-Encoding") != "" && r.Header.Get("Content-Encoding") != "identity") {
-		reject(&gw.Failure{Code: "UNSUPPORTED_MEDIA_TYPE", Type: "invalid_request_error", Message: "Use uncompressed application/json.", Status: 415})
+	parsed, failure := g.parseForwardRequest(w, r, protocol)
+	if failure != nil {
+		reject(failure)
 		return
 	}
-	version, beta := "", ""
-	if protocol == gw.AnthropicProtocol {
-		version, beta, err = protocolHeaders(r)
-	}
-	if err != nil {
-		reject(gw.ErrInvalid)
-		return
-	}
-	nativeHeaders := make(map[string][]string)
-	for name, values := range r.Header {
-		if protocol == gw.AnthropicProtocol && strings.HasPrefix(strings.ToLower(name), "anthropic-") {
-			nativeHeaders[name] = append([]string(nil), values...)
-		}
-	}
-	query := false
-	if protocol == gw.AnthropicProtocol {
-		query, err = parseBetaQuery(r)
-	} else if r.URL.RawQuery != "" {
-		err = gw.ErrInvalid
-	}
-	if err != nil {
-		reject(gw.ErrInvalid)
-		return
-	}
+	version, beta, query, body, nativeHeaders := parsed.version, parsed.beta, parsed.betaQuery, parsed.body, parsed.nativeHeaders
 	controller := http.NewResponseController(w)
-	_ = controller.SetReadDeadline(time.Now().Add(g.cfg.BodyReadTimeout))
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, g.cfg.MaxBodyBytes))
-	_ = controller.SetReadDeadline(time.Time{})
-	if err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			reject(&gw.Failure{Code: "REQUEST_TOO_LARGE", Type: "request_too_large", Message: "Request body too large.", Status: 413})
-		} else {
-			reject(gw.ErrInvalid)
-		}
-		return
-	}
 	// Responses 客户端可能在收到工具调用后立即关闭下游连接，而最终 usage
 	// 位于紧随其后的 response.completed。上游上下文因此不能被客户端取消
 	// 直接截断；响应尚未打开时仍立即取消，打开后只保留一个很短的收尾窗口。

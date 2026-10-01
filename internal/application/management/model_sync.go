@@ -43,7 +43,7 @@ func (s *ProviderService) SyncProviderModels(ctx context.Context, actor admin.Id
 
 	var provider Provider
 	var resourceID int64
-	err := s.store.Read(ctx, actor, func(reader Reader) error {
+	err := s.store.ReadProvider(ctx, actor, func(reader ProviderReadSession) error {
 		var err error
 		provider, err = reader.Provider(ctx, id)
 		if err != nil {
@@ -100,7 +100,7 @@ func (s *ProviderService) SyncResourceModels(ctx context.Context, actor admin.Id
 
 	var resource ResourceRecord
 	var provider Provider
-	err := s.store.Read(ctx, actor, func(reader Reader) error {
+	err := s.store.ReadProvider(ctx, actor, func(reader ProviderReadSession) error {
 		var err error
 		resource, err = reader.Resource(ctx, id)
 		if err != nil {
@@ -144,7 +144,7 @@ func (s *ProviderService) SyncResourceModels(ctx context.Context, actor admin.Id
 }
 
 func (s *ProviderService) persistDiscoveredModels(ctx context.Context, actor admin.Identity, provider Provider, resource *ResourceRecord, discovered []DiscoveredModel, result ModelSyncResult, meta appsec.RequestMeta) (ModelSyncResult, error) {
-	err := s.store.Write(ctx, actor, func(writer Writer) error {
+	err := s.store.WriteProvider(ctx, actor, func(writer ProviderSession) error {
 		if resource != nil {
 			current, err := writer.Resource(ctx, resource.ID)
 			if err != nil {
@@ -172,7 +172,7 @@ func (s *ProviderService) persistDiscoveredModels(ctx context.Context, actor adm
 			mappedModels[mapping.ModelID] = struct{}{}
 		}
 
-		now := time.Now().UTC().Truncate(time.Microsecond)
+		now := businessTime(s.now)
 		publisherProviderID := provider.ID
 		publisherProviderName := provider.Name
 		seen := make(map[string]struct{}, len(discovered))
@@ -262,7 +262,11 @@ func modelDisplayName(code string) string {
 	return string(runes)
 }
 
-func readAllModels(ctx context.Context, reader Reader) ([]Model, error) {
+type modelLister interface {
+	Models(context.Context, Page, string) ([]Model, error)
+}
+
+func readAllModels(ctx context.Context, reader modelLister) ([]Model, error) {
 	models := make([]Model, 0)
 	var after int64
 	for {
@@ -285,7 +289,7 @@ func readAllModels(ctx context.Context, reader Reader) ([]Model, error) {
 func (s *ProviderService) auditModelSync(ctx context.Context, actor admin.Identity, provider Provider, resource ResourceRecord, result ModelSyncResult, meta appsec.RequestMeta) error {
 	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
-	return s.store.Write(auditCtx, actor, func(writer Writer) error {
+	return s.store.WriteProvider(auditCtx, actor, func(writer ProviderSession) error {
 		current, err := writer.Resource(auditCtx, resource.ID)
 		if err != nil {
 			return err

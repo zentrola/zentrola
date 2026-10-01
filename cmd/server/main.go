@@ -299,7 +299,7 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 	)
 	claudeSubscription := anthropicclaude.New()
 	managementService := management.New(
-		gatewaycache.NewManagementStore(postgres.NewManagementStore(pool, ids), gatewayCache, logger), ids, credentials, connectionTester,
+		gatewaycache.NewManagementStore(postgres.NewManagementStore(pool, ids, logger), gatewayCache, logger), ids, credentials, connectionTester,
 		management.WithModelDiscoverer(modelcatalog.NewDiscoverer(logger)),
 		management.WithSubscriptionAdapter(codexSubscription),
 		management.WithSubscriptionAdapter(claudeSubscription),

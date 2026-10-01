@@ -14,11 +14,39 @@ import (
 )
 
 type ResourceService struct {
-	store         Store
+	store         ResourceStore
 	ids           shared.IDGenerator
 	cipher        Cipher
 	tester        ConnectionTester
+	now           func() time.Time
 	subscriptions []SubscriptionAdapter
+}
+
+type ResourceReadSession interface {
+	ProviderReader
+	ResourceReader
+	modelLister
+}
+
+type ResourceSession interface {
+	ResourceReadSession
+	ResourceWriter
+	AuditWriter
+}
+
+type ResourceStore interface {
+	ReadResource(context.Context, admin.Identity, func(ResourceReadSession) error) error
+	WriteResource(context.Context, admin.Identity, func(ResourceSession) error) error
+}
+
+type resourceStoreAdapter struct{ Store }
+
+func (s resourceStoreAdapter) ReadResource(ctx context.Context, actor admin.Identity, fn func(ResourceReadSession) error) error {
+	return s.Read(ctx, actor, func(reader Reader) error { return fn(reader) })
+}
+
+func (s resourceStoreAdapter) WriteResource(ctx context.Context, actor admin.Identity, fn func(ResourceSession) error) error {
+	return s.Write(ctx, actor, func(writer Writer) error { return fn(writer) })
 }
 
 func (s *ResourceService) next(ctx context.Context) (int64, error) {
@@ -105,7 +133,7 @@ func (s *ResourceService) CreateAuthenticationResource(ctx context.Context, acto
 			return Resource{}, appsec.ErrInvalidArgument
 		}
 		var provider Provider
-		if err := s.store.Read(ctx, actor, func(r Reader) error {
+		if err := s.store.ReadResource(ctx, actor, func(r ResourceReadSession) error {
 			var err error
 			provider, err = r.Provider(ctx, input.ProviderID)
 			return err
@@ -130,7 +158,7 @@ func (s *ResourceService) CreateAuthenticationResource(ctx context.Context, acto
 	if err != nil {
 		return Resource{}, err
 	}
-	now := time.Now().UTC().Truncate(time.Microsecond)
+	now := businessTime(s.now)
 	resource := Resource{
 		ID: id, ProviderID: input.ProviderID, Name: input.Name,
 		AuthType: input.AuthType, AuthAdapter: input.AuthAdapter, Priority: input.Priority,
@@ -152,7 +180,7 @@ func (s *ResourceService) CreateAuthenticationResource(ctx context.Context, acto
 	if err != nil {
 		return Resource{}, appsec.ErrUnavailable
 	}
-	err = s.store.Write(ctx, actor, func(w Writer) error {
+	err = s.store.WriteResource(ctx, actor, func(w ResourceSession) error {
 		if _, err := w.Provider(ctx, input.ProviderID); err != nil {
 			return err
 		}
@@ -220,7 +248,7 @@ func (s *ResourceService) UpdateCredential(ctx context.Context, actor admin.Iden
 	}
 	var original ResourceRecord
 	var provider Provider
-	if err := s.store.Read(ctx, actor, func(r Reader) error {
+	if err := s.store.ReadResource(ctx, actor, func(r ResourceReadSession) error {
 		var err error
 		original, err = r.Resource(ctx, id)
 		if err != nil {
@@ -255,7 +283,7 @@ func (s *ResourceService) UpdateCredential(ctx context.Context, actor admin.Iden
 	if err != nil {
 		return appsec.ErrUnavailable
 	}
-	return s.store.Write(ctx, actor, func(w Writer) error {
+	return s.store.WriteResource(ctx, actor, func(w ResourceSession) error {
 		record, err := w.Resource(ctx, id)
 		if err != nil {
 			return err
@@ -282,7 +310,7 @@ func (s *ResourceService) UpdateCredential(ctx context.Context, actor admin.Iden
 			record.QuotaResetsAt = nil
 			record.QuotaCheckedAt = nil
 		}
-		record.UpdatedAt = time.Now().UTC().Truncate(time.Microsecond)
+		record.UpdatedAt = businessTime(s.now)
 		if err := w.UpdateResource(ctx, record); err != nil {
 			return err
 		}
@@ -304,7 +332,7 @@ func (s *ResourceService) ExportSubscriptionCredential(ctx context.Context, acto
 		return nil, appsec.ErrInvalidArgument
 	}
 	var credential []byte
-	err := s.store.Write(ctx, actor, func(w Writer) error {
+	err := s.store.WriteResource(ctx, actor, func(w ResourceSession) error {
 		resource, err := w.Resource(ctx, id)
 		if err != nil {
 			return err
@@ -347,12 +375,12 @@ func (s *ResourceService) DeleteResource(ctx context.Context, actor admin.Identi
 	if id <= 0 {
 		return appsec.ErrInvalidArgument
 	}
-	return s.store.Write(ctx, actor, func(w Writer) error {
+	return s.store.WriteResource(ctx, actor, func(w ResourceSession) error {
 		record, err := w.Resource(ctx, id)
 		if err != nil {
 			return err
 		}
-		deleted, err := w.DeleteResource(ctx, id, time.Now().UTC().Truncate(time.Microsecond))
+		deleted, err := w.DeleteResource(ctx, id, businessTime(s.now))
 		if err != nil {
 			return err
 		}

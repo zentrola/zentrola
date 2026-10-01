@@ -38,7 +38,7 @@ func (s *ResourceService) TestResourceSelection(ctx context.Context, actor admin
 	selectedMappingID := int64(0)
 	selectedModelID := int64(0)
 	upstreamModelCode := ""
-	err := s.store.Read(ctx, actor, func(r Reader) error {
+	err := s.store.ReadResource(ctx, actor, func(r ResourceReadSession) error {
 		var err error
 		resource, err = r.Resource(ctx, id)
 		if err != nil {
@@ -142,7 +142,7 @@ func (s *ResourceService) TestResourceSelection(ctx context.Context, actor admin
 					resource.ExpiresAt = probe.Inspection.ExpiresAt
 				}
 				resource.QuotaStatus, resource.QuotaResetsAt = aggregateQuota(probe.Quotas)
-				now := time.Now().UTC().Truncate(time.Microsecond)
+				now := businessTime(s.now)
 				resource.QuotaCheckedAt = &now
 				result.OK, result.Code = true, "OK"
 				if len(probe.Credential) > 0 {
@@ -189,7 +189,7 @@ func (s *ResourceService) TestResourceSelection(ctx context.Context, actor admin
 	// 网络调用不占有数据库事务；即使调用方取消，仍尽力保存有界审计记录。
 	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
-	err = s.store.Write(auditCtx, actor, func(w Writer) error {
+	err = s.store.WriteResource(auditCtx, actor, func(w ResourceSession) error {
 		current, err := w.Resource(auditCtx, id)
 		if err != nil {
 			return err
@@ -210,7 +210,7 @@ func (s *ResourceService) TestResourceSelection(ctx context.Context, actor admin
 			if refreshedSealed.KeyVersion != 0 {
 				current.Sealed = refreshedSealed
 			}
-			current.UpdatedAt = time.Now().UTC().Truncate(time.Microsecond)
+			current.UpdatedAt = businessTime(s.now)
 			if err := w.UpdateResource(auditCtx, current); err != nil {
 				return err
 			}
@@ -218,7 +218,7 @@ func (s *ResourceService) TestResourceSelection(ctx context.Context, actor admin
 				return err
 			}
 		}
-		now := time.Now().UTC().Truncate(time.Microsecond)
+		now := businessTime(s.now)
 		if result.OK {
 			if err := w.RestoreResourceRuntime(auditCtx, id, now); err != nil {
 				return err
@@ -293,7 +293,7 @@ func (s *ResourceService) ConsumeResourceResetCredit(ctx context.Context, actor 
 	}
 	var resource ResourceRecord
 	var provider Provider
-	if err := s.store.Read(ctx, actor, func(r Reader) error {
+	if err := s.store.ReadResource(ctx, actor, func(r ResourceReadSession) error {
 		var err error
 		resource, err = r.Resource(ctx, id)
 		if err != nil {
@@ -345,7 +345,7 @@ func (s *ResourceService) ConsumeResourceResetCredit(ctx context.Context, actor 
 		resource.ExpiresAt = consumed.Probe.Inspection.ExpiresAt
 	}
 	resource.QuotaStatus, resource.QuotaResetsAt = aggregateQuota(consumed.Probe.Quotas)
-	checkedAt := time.Now().UTC().Truncate(time.Microsecond)
+	checkedAt := businessTime(s.now)
 	resource.QuotaCheckedAt = &checkedAt
 	if refreshedSealed.KeyVersion != 0 {
 		resource.Sealed = refreshedSealed
@@ -354,7 +354,7 @@ func (s *ResourceService) ConsumeResourceResetCredit(ctx context.Context, actor 
 	result := ResetCreditConsumeResult{Outcome: consumed.Outcome, ResetCredits: consumed.Probe.ResetCredits}
 	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
-	err = s.store.Write(auditCtx, actor, func(w Writer) error {
+	err = s.store.WriteResource(auditCtx, actor, func(w ResourceSession) error {
 		current, err := w.Resource(auditCtx, id)
 		if err != nil {
 			return err
@@ -362,7 +362,7 @@ func (s *ResourceService) ConsumeResourceResetCredit(ctx context.Context, actor 
 		if !current.UpdatedAt.Equal(resource.UpdatedAt) {
 			return ErrConflict
 		}
-		resource.UpdatedAt = time.Now().UTC().Truncate(time.Microsecond)
+		resource.UpdatedAt = businessTime(s.now)
 		if err := w.UpdateResource(auditCtx, resource); err != nil {
 			return err
 		}

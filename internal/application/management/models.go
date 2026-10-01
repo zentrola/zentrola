@@ -18,6 +18,7 @@ import (
 type ModelService struct {
 	store ModelStore
 	ids   shared.IDGenerator
+	now   func() time.Time
 }
 
 type ModelLookup interface {
@@ -113,7 +114,7 @@ func (s *ModelService) CreateModel(ctx context.Context, actor admin.Identity, in
 	if err != nil {
 		return Model{}, err
 	}
-	now := time.Now().UTC().Truncate(time.Microsecond)
+	now := businessTime(s.now)
 	model := applyModelInput(Model{ID: id, Status: "DISABLED", CreatedAt: now, UpdatedAt: now}, input)
 	err = s.store.WriteModel(ctx, actor, func(w ModelSession) error {
 		if err := hydrateModelPublisher(ctx, w, &model); err != nil {
@@ -139,7 +140,7 @@ func (s *ModelService) UpdateModel(ctx context.Context, actor admin.Identity, id
 			return err
 		}
 		model = applyModelInput(before, input)
-		model.UpdatedAt = time.Now().UTC().Truncate(time.Microsecond)
+		model.UpdatedAt = businessTime(s.now)
 		if err := hydrateModelPublisher(ctx, w, &model); err != nil {
 			return err
 		}
@@ -160,7 +161,7 @@ func (s *ModelService) DeleteModel(ctx context.Context, actor admin.Identity, id
 		if err != nil {
 			return err
 		}
-		if err := w.DeleteModel(ctx, id, time.Now().UTC().Truncate(time.Microsecond)); err != nil {
+		if err := w.DeleteModel(ctx, id, businessTime(s.now)); err != nil {
 			return err
 		}
 		return w.Audit(ctx, Audit{Event: operation.ModelDelete, Target: "MODEL", ID: id, Name: model.Name, Before: model, After: map[string]bool{"deleted": true}}, meta)

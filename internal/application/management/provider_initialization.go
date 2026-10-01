@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"time"
 
 	"github.com/zentrola/zentrola/internal/application/bootstrap"
 	appsec "github.com/zentrola/zentrola/internal/application/security"
@@ -77,7 +76,7 @@ func (s *ProviderService) InitializeOfficialProviders(ctx context.Context, actor
 		return ProviderInitializeResult{}, appsec.ErrInvalidArgument
 	}
 	result := ProviderInitializeResult{Total: len(templates)}
-	err := s.store.Write(ctx, actor, func(writer Writer) error {
+	err := s.store.WriteProvider(ctx, actor, func(writer ProviderSession) error {
 		providers, err := readAllProviders(ctx, writer)
 		if err != nil {
 			return err
@@ -87,7 +86,7 @@ func (s *ProviderService) InitializeOfficialProviders(ctx context.Context, actor
 			existing[provider.Code] = provider
 		}
 
-		now := time.Now().UTC().Truncate(time.Microsecond)
+		now := businessTime(s.now)
 		for _, template := range templates {
 			name := template.LocalizedName(input.Locale)
 			if provider, ok := existing[template.Code]; ok {
@@ -137,7 +136,11 @@ func (s *ProviderService) InitializeOfficialProviders(ctx context.Context, actor
 	return result, err
 }
 
-func readAllProviders(ctx context.Context, reader Reader) ([]Provider, error) {
+type providerLister interface {
+	Providers(context.Context, Page, string) ([]Provider, error)
+}
+
+func readAllProviders(ctx context.Context, reader providerLister) ([]Provider, error) {
 	providers := make([]Provider, 0)
 	var after int64
 	for {
