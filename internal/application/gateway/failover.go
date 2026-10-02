@@ -224,6 +224,7 @@ func (s *Service) refreshCredential(ctx context.Context, route Route, credential
 		}
 		clear(credential)
 		credential = latest
+		route.Credential = sealed
 	}
 	updated, changed, err := refresh.RefreshIfNeeded(refreshCtx, credential, route.Proxy)
 	if err != nil {

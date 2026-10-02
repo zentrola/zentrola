@@ -386,17 +386,24 @@ SET credential_ciphertext=$1,credential_nonce=$2,
     key_version=$3,credential_refreshed_at=$4,
     credential_expires_at=$5,updated_by='system',updated_at=$6,version=version+1
 WHERE id=$7 AND provider_id=$8 AND NOT is_deleted
+  AND auth_type='SUBSCRIPTION'
+  AND credential_ciphertext=$9
+  AND credential_nonce=$10
+  AND key_version=$11
 `
 
 type UpdateGatewayResourceCredentialParams struct {
-	CredentialCiphertext  []byte
-	CredentialNonce       []byte
-	KeyVersion            int32
-	CredentialRefreshedAt pgtype.Timestamptz
-	CredentialExpiresAt   pgtype.Timestamptz
-	UpdatedAt             pgtype.Timestamptz
-	ResourceID            int64
-	ProviderID            int64
+	CredentialCiphertext         []byte
+	CredentialNonce              []byte
+	KeyVersion                   int32
+	CredentialRefreshedAt        pgtype.Timestamptz
+	CredentialExpiresAt          pgtype.Timestamptz
+	UpdatedAt                    pgtype.Timestamptz
+	ResourceID                   int64
+	ProviderID                   int64
+	ExpectedCredentialCiphertext []byte
+	ExpectedCredentialNonce      []byte
+	ExpectedKeyVersion           int32
 }
 
 func (q *Queries) UpdateGatewayResourceCredential(ctx context.Context, arg UpdateGatewayResourceCredentialParams) (int64, error) {
@@ -409,6 +416,9 @@ func (q *Queries) UpdateGatewayResourceCredential(ctx context.Context, arg Updat
 		arg.UpdatedAt,
 		arg.ResourceID,
 		arg.ProviderID,
+		arg.ExpectedCredentialCiphertext,
+		arg.ExpectedCredentialNonce,
+		arg.ExpectedKeyVersion,
 	)
 	if err != nil {
 		return 0, err
@@ -421,15 +431,21 @@ UPDATE provider_credential
 SET credential_refreshed_at=$1,
     credential_expires_at=$2,updated_by='system',updated_at=$3,version=version+1
 WHERE id=$4 AND provider_id=$5 AND NOT is_deleted
-  AND credential_expires_at IS NULL
+  AND auth_type='SUBSCRIPTION' AND credential_expires_at IS NULL
+  AND credential_ciphertext=$6
+  AND credential_nonce=$7
+  AND key_version=$8
 `
 
 type UpdateGatewayResourceCredentialRefreshMetadataParams struct {
-	CredentialRefreshedAt pgtype.Timestamptz
-	CredentialExpiresAt   pgtype.Timestamptz
-	UpdatedAt             pgtype.Timestamptz
-	ResourceID            int64
-	ProviderID            int64
+	CredentialRefreshedAt        pgtype.Timestamptz
+	CredentialExpiresAt          pgtype.Timestamptz
+	UpdatedAt                    pgtype.Timestamptz
+	ResourceID                   int64
+	ProviderID                   int64
+	ExpectedCredentialCiphertext []byte
+	ExpectedCredentialNonce      []byte
+	ExpectedKeyVersion           int32
 }
 
 func (q *Queries) UpdateGatewayResourceCredentialRefreshMetadata(ctx context.Context, arg UpdateGatewayResourceCredentialRefreshMetadataParams) (int64, error) {
@@ -439,6 +455,9 @@ func (q *Queries) UpdateGatewayResourceCredentialRefreshMetadata(ctx context.Con
 		arg.UpdatedAt,
 		arg.ResourceID,
 		arg.ProviderID,
+		arg.ExpectedCredentialCiphertext,
+		arg.ExpectedCredentialNonce,
+		arg.ExpectedKeyVersion,
 	)
 	if err != nil {
 		return 0, err

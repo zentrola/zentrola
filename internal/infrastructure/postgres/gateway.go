@@ -207,12 +207,13 @@ func (s *GatewayStore) blockResource(ctx context.Context, resourceID int64, bloc
 }
 
 func (s *GatewayStore) UpdateResourceCredential(ctx context.Context, route gw.Route, sealed catalog.SealedCredential) error {
-	if route.ResourceID <= 0 || route.ProviderID <= 0 || sealed.KeyVersion <= 0 {
+	if route.ResourceID <= 0 || route.ProviderID <= 0 || sealed.KeyVersion <= 0 || route.Credential.KeyVersion <= 0 || len(route.Credential.Ciphertext) == 0 || len(route.Credential.Nonce) == 0 {
 		return gw.ErrInvalid
 	}
 	updated, err := s.gatewayQueries(ctx).UpdateGatewayResourceCredential(ctx, dbgen.UpdateGatewayResourceCredentialParams{
 		ResourceID: route.ResourceID, ProviderID: route.ProviderID,
 		CredentialCiphertext: sealed.Ciphertext, CredentialNonce: sealed.Nonce, KeyVersion: sealed.KeyVersion,
+		ExpectedCredentialCiphertext: route.Credential.Ciphertext, ExpectedCredentialNonce: route.Credential.Nonce, ExpectedKeyVersion: route.Credential.KeyVersion,
 		CredentialRefreshedAt: nullableTime(route.CredentialRefreshedAt), CredentialExpiresAt: nullableTime(route.CredentialExpiresAt),
 		UpdatedAt: pgtype.Timestamptz{Time: time.Now().UTC().Truncate(time.Microsecond), Valid: true},
 	})
@@ -226,11 +227,12 @@ func (s *GatewayStore) UpdateResourceCredential(ctx context.Context, route gw.Ro
 }
 
 func (s *GatewayStore) UpdateResourceCredentialRefreshMetadata(ctx context.Context, route gw.Route) error {
-	if route.ResourceID <= 0 || route.ProviderID <= 0 || route.CredentialExpiresAt == nil {
+	if route.ResourceID <= 0 || route.ProviderID <= 0 || route.CredentialExpiresAt == nil || route.Credential.KeyVersion <= 0 || len(route.Credential.Ciphertext) == 0 || len(route.Credential.Nonce) == 0 {
 		return gw.ErrInvalid
 	}
 	updated, err := s.gatewayQueries(ctx).UpdateGatewayResourceCredentialRefreshMetadata(ctx, dbgen.UpdateGatewayResourceCredentialRefreshMetadataParams{
 		ResourceID: route.ResourceID, ProviderID: route.ProviderID,
+		ExpectedCredentialCiphertext: route.Credential.Ciphertext, ExpectedCredentialNonce: route.Credential.Nonce, ExpectedKeyVersion: route.Credential.KeyVersion,
 		CredentialRefreshedAt: nullableTime(route.CredentialRefreshedAt), CredentialExpiresAt: nullableTime(route.CredentialExpiresAt),
 		UpdatedAt: pgtype.Timestamptz{Time: time.Now().UTC().Truncate(time.Microsecond), Valid: true},
 	})

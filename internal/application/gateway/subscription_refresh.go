@@ -168,6 +168,7 @@ func (s *Service) refreshSubscriptionCandidate(parent context.Context, candidate
 	route := Route{
 		ProviderID: candidate.ProviderID, ResourceID: candidate.ResourceID,
 		AuthType: "SUBSCRIPTION", AuthAdapter: candidate.AuthAdapter,
+		Credential:            candidate.Credential,
 		CredentialRefreshedAt: candidate.CredentialRefreshedAt,
 		CredentialExpiresAt:   candidate.CredentialExpiresAt,
 		ProxyEnabled:          candidate.ProxyEnabled, ProxyURL: candidate.ProxyURL,
