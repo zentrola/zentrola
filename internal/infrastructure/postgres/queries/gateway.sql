@@ -54,14 +54,21 @@ UPDATE provider_credential
 SET credential_ciphertext=sqlc.arg(credential_ciphertext),credential_nonce=sqlc.arg(credential_nonce),
     key_version=sqlc.arg(key_version),credential_refreshed_at=sqlc.narg(credential_refreshed_at),
     credential_expires_at=sqlc.narg(credential_expires_at),updated_by='system',updated_at=sqlc.arg(updated_at),version=version+1
-WHERE id=sqlc.arg(resource_id) AND provider_id=sqlc.arg(provider_id) AND NOT is_deleted;
+WHERE id=sqlc.arg(resource_id) AND provider_id=sqlc.arg(provider_id) AND NOT is_deleted
+  AND auth_type='SUBSCRIPTION'
+  AND credential_ciphertext=sqlc.arg(expected_credential_ciphertext)
+  AND credential_nonce=sqlc.arg(expected_credential_nonce)
+  AND key_version=sqlc.arg(expected_key_version);
 
 -- name: UpdateGatewayResourceCredentialRefreshMetadata :execrows
 UPDATE provider_credential
 SET credential_refreshed_at=sqlc.narg(credential_refreshed_at),
     credential_expires_at=sqlc.narg(credential_expires_at),updated_by='system',updated_at=sqlc.arg(updated_at),version=version+1
 WHERE id=sqlc.arg(resource_id) AND provider_id=sqlc.arg(provider_id) AND NOT is_deleted
-  AND credential_expires_at IS NULL;
+  AND auth_type='SUBSCRIPTION' AND credential_expires_at IS NULL
+  AND credential_ciphertext=sqlc.arg(expected_credential_ciphertext)
+  AND credential_nonce=sqlc.arg(expected_credential_nonce)
+  AND key_version=sqlc.arg(expected_key_version);
 
 -- name: GatewayResourceCredential :one
 SELECT credential_ciphertext,credential_nonce,key_version

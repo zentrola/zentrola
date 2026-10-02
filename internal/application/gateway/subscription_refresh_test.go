@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -132,7 +133,7 @@ func (s *subscriptionRefreshStore) UpdateResourceCredential(ctx context.Context,
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	credential, ok := s.credentials[route.ResourceID]
-	if !ok {
+	if !ok || !sameSealedCredential(credential.Credential, route.Credential) {
 		return ErrUnavailable
 	}
 	credential.Credential = cloneSealedCredential(sealed)
@@ -147,7 +148,7 @@ func (s *subscriptionRefreshStore) UpdateResourceCredentialRefreshMetadata(_ con
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	credential, ok := s.credentials[route.ResourceID]
-	if !ok {
+	if !ok || !sameSealedCredential(credential.Credential, route.Credential) {
 		return ErrUnavailable
 	}
 	credential.CredentialRefreshedAt = route.CredentialRefreshedAt
@@ -170,6 +171,10 @@ func cloneSealedCredential(value catalog.SealedCredential) catalog.SealedCredent
 		Nonce:      append([]byte(nil), value.Nonce...),
 		KeyVersion: value.KeyVersion,
 	}
+}
+
+func sameSealedCredential(a, b catalog.SealedCredential) bool {
+	return a.KeyVersion == b.KeyVersion && bytes.Equal(a.Ciphertext, b.Ciphertext) && bytes.Equal(a.Nonce, b.Nonce)
 }
 
 type subscriptionRefreshCipher struct{}
