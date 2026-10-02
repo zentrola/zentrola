@@ -48,9 +48,11 @@ jobs:
           CGO_ENABLED: "1"
         run: >-
           go test -race -count=1
+          ./internal/application/gateway
           ./internal/application/usage
           ./internal/infrastructure/gatewaycache
           ./internal/infrastructure/logging
+          ./internal/transport/http
       - name: Verify sqlc output
         run: |
           go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0

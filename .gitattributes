@@ -1,6 +1,11 @@
 * text=auto
 *.go text eol=lf
 *.sql text eol=lf
+*.ts text eol=lf
+*.vue text eol=lf
+*.css text eol=lf
+*.json text eol=lf
+*.mjs text eol=lf
 *.sh text eol=lf
 Dockerfile text eol=lf
 third_party_licenses/** text eol=lf whitespace=-trailing-space

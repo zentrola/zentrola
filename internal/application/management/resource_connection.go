@@ -200,6 +200,7 @@ func (s *ResourceService) TestResourceSelection(ctx context.Context, actor admin
 			result.OK = false
 			result.Code = "RESOURCE_CHANGED"
 		}
+		expectedVersion := current.Version
 		if result.OK && subscriptionProbe != nil {
 			current.PlanCode = resource.PlanCode
 			current.ExternalAccountRef = resource.ExternalAccountRef
@@ -216,13 +217,14 @@ func (s *ResourceService) TestResourceSelection(ctx context.Context, actor admin
 			if err := w.UpdateResource(auditCtx, current); err != nil {
 				return err
 			}
+			expectedVersion++
 			if err := w.ReplaceResourceQuotas(auditCtx, id, subscriptionProbe.Quotas); err != nil {
 				return err
 			}
 		}
 		now := businessTime(s.now)
 		if result.OK {
-			if err := w.RestoreResourceRuntime(auditCtx, id, now); err != nil {
+			if err := w.RestoreResourceRuntime(auditCtx, id, expectedVersion, now); err != nil {
 				return err
 			}
 		} else if reason := connectionBlockReason(result.Code); reason != "" {
@@ -231,7 +233,7 @@ func (s *ResourceService) TestResourceSelection(ctx context.Context, actor admin
 				value := int32(result.HTTPStatus)
 				status = &value
 			}
-			if err := w.BlockResourceRuntime(auditCtx, id, reason, result.Code, status, now); err != nil {
+			if err := w.BlockResourceRuntime(auditCtx, id, expectedVersion, reason, result.Code, status, now); err != nil {
 				return err
 			}
 		}
@@ -371,7 +373,7 @@ func (s *ResourceService) ConsumeResourceResetCredit(ctx context.Context, actor 
 		if err := w.ReplaceResourceQuotas(auditCtx, id, consumed.Probe.Quotas); err != nil {
 			return err
 		}
-		if err := w.RestoreResourceRuntime(auditCtx, id, resource.UpdatedAt); err != nil {
+		if err := w.RestoreResourceRuntime(auditCtx, id, current.Version+1, resource.UpdatedAt); err != nil {
 			return err
 		}
 		available := 0

@@ -185,6 +185,10 @@ func (w *resourceTestWriter) Models(context.Context, Page, string) ([]Model, err
 	return []Model{}, nil
 }
 func (w *resourceTestWriter) UpdateResource(_ context.Context, resource ResourceRecord) error {
+	if resource.Version != w.resource.Version {
+		return ErrConflict
+	}
+	resource.Version++
 	w.updated = resource
 	w.resource = resource
 	return nil
@@ -193,12 +197,25 @@ func (w *resourceTestWriter) ReplaceResourceQuotas(_ context.Context, _ int64, q
 	w.quotas = append([]ResourceQuota(nil), quotas...)
 	return nil
 }
-func (w *resourceTestWriter) RestoreResourceRuntime(context.Context, int64, time.Time) error {
+func (w *resourceTestWriter) RestoreResourceRuntime(_ context.Context, _ int64, expectedVersion int64, at time.Time) error {
+	if w.resource.Version != expectedVersion {
+		return ErrConflict
+	}
+	if w.resource.RuntimeStatus == "BLOCKED" {
+		w.resource.RuntimeStatus = "HEALTHY"
+		w.resource.Version++
+		w.resource.UpdatedAt = at
+	}
+	w.updated = w.resource
 	w.restored = true
 	return nil
 }
-func (w *resourceTestWriter) BlockResourceRuntime(_ context.Context, _ int64, reason, code string, status *int32, at time.Time) error {
+func (w *resourceTestWriter) BlockResourceRuntime(_ context.Context, _ int64, expectedVersion int64, reason, code string, status *int32, at time.Time) error {
+	if w.resource.Version != expectedVersion {
+		return ErrConflict
+	}
 	w.resource.RuntimeStatus = "BLOCKED"
+	w.resource.Version++
 	w.resource.BlockedReason = stringPointer(reason)
 	w.resource.BlockedAt = &at
 	w.resource.LastErrorAt = &at
@@ -230,6 +247,59 @@ func (s versionConflictStore) Read(_ context.Context, _ admin.Identity, fn func(
 func (s versionConflictStore) Write(_ context.Context, _ admin.Identity, fn func(Writer) error) error {
 	s.writer.resource.Version++
 	return fn(s.writer)
+}
+
+type runtimeWriteRaceStore struct{ writer *resourceTestWriter }
+
+func (s runtimeWriteRaceStore) Read(_ context.Context, _ admin.Identity, fn func(Reader) error) error {
+	return fn(s.writer)
+}
+func (s runtimeWriteRaceStore) Write(_ context.Context, _ admin.Identity, fn func(Writer) error) error {
+	return fn(&runtimeWriteRaceWriter{resourceTestWriter: s.writer})
+}
+
+type runtimeWriteRaceWriter struct{ *resourceTestWriter }
+
+func (w *runtimeWriteRaceWriter) RestoreResourceRuntime(ctx context.Context, id, version int64, at time.Time) error {
+	w.resource.Version++ // 模拟版本检查后 gateway 更新资源。
+	return w.resourceTestWriter.RestoreResourceRuntime(ctx, id, version, at)
+}
+func (w *runtimeWriteRaceWriter) BlockResourceRuntime(ctx context.Context, id, version int64, reason, code string, status *int32, at time.Time) error {
+	w.resource.Version++
+	return w.resourceTestWriter.BlockResourceRuntime(ctx, id, version, reason, code, status, at)
+}
+
+func TestConnectionProbeRejectsRuntimeWriteAfterConcurrentChange(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		result ConnectionResult
+	}{
+		{name: "restore", result: ConnectionResult{OK: true, Code: "OK"}},
+		{name: "block", result: ConnectionResult{Code: "UPSTREAM_BILLING_BLOCKED"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			writer := &resourceTestWriter{
+				resource: ResourceRecord{Resource: Resource{
+					ID: 48, Version: 1, ProviderID: 40, Name: "API Key", AuthType: AuthTypeAPIKey,
+					AuthAdapter: AuthAdapterAPIKey, RuntimeStatus: "HEALTHY",
+				}, Sealed: catalog.SealedCredential{Ciphertext: []byte("provider-key"), KeyVersion: 1}},
+				provider: Provider{ID: 40, Code: "custom-provider", Endpoints: []ProviderEndpoint{
+					{ProtocolType: "OPENAI", BaseURL: "https://api.example.com/v1"},
+				}},
+				model:    Model{ID: 90, Code: "test-model", Status: "ACTIVE"},
+				mappings: []ProviderMapping{{ID: 1, ProviderID: 40, ModelID: 90}},
+			}
+			service := New(runtimeWriteRaceStore{writer: writer}, nil, providerTestCipher{}, connectionTesterFunc(
+				func(context.Context, ConnectionTarget, []byte, *catalog.OutboundProxy) ConnectionResult {
+					return test.result
+				},
+			))
+			_, err := service.TestResource(context.Background(), admin.Identity{ID: 1}, 48, appsec.RequestMeta{})
+			if !errors.Is(err, ErrConflict) || writer.resource.RuntimeStatus != "HEALTHY" || writer.audit.Event != "" {
+				t.Fatalf("stale runtime write accepted: status=%s audit=%s error=%v", writer.resource.RuntimeStatus, writer.audit.Event, err)
+			}
+		})
+	}
 }
 
 func TestUpdateCredentialRejectsConcurrentResourceVersion(t *testing.T) {
