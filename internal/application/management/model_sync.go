@@ -150,7 +150,7 @@ func (s *ProviderService) persistDiscoveredModels(ctx context.Context, actor adm
 			if err != nil {
 				return err
 			}
-			if !current.UpdatedAt.Equal(resource.UpdatedAt) {
+			if current.Version != resource.Version {
 				return ErrConflict
 			}
 		}
@@ -294,7 +294,7 @@ func (s *ProviderService) auditModelSync(ctx context.Context, actor admin.Identi
 		if err != nil {
 			return err
 		}
-		if !current.UpdatedAt.Equal(resource.UpdatedAt) {
+		if current.Version != resource.Version {
 			return ErrConflict
 		}
 		return writer.Audit(auditCtx, Audit{

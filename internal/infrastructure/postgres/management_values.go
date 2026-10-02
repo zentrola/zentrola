@@ -89,7 +89,8 @@ func resourceView(r dbgen.ManageResourcesRow) mgmt.Resource {
 		RuntimeStatus: r.RuntimeStatus, BlockedReason: r.BlockedReason,
 		BlockedAt: timePointer(r.BlockedAt), LastErrorAt: timePointer(r.LastErrorAt),
 		LastHTTPStatus: r.LastHttpStatus, LastErrorCode: r.LastErrorCode,
-		CredentialConfigured: true, CreatedAt: r.CreatedAt.Time.UTC(), UpdatedAt: r.UpdatedAt.Time.UTC(),
+		CredentialConfigured: true, Version: r.Version,
+		CreatedAt: r.CreatedAt.Time.UTC(), UpdatedAt: r.UpdatedAt.Time.UTC(),
 	}
 }
 

@@ -227,7 +227,7 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 	}
 	startup, cancel := context.WithTimeout(ctx, cfg.StartupTimeout)
 	defer cancel()
-	pool, err := postgres.Open(startup, cfg.Postgres)
+	pool, err := postgres.Open(startup, cfg.Postgres, logger)
 	if err != nil {
 		return err
 	}
@@ -247,7 +247,7 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 		if err != nil {
 			return err
 		}
-		reset := appsec.NewPasswordReset(postgres.NewSecurityStore(pool, ids), passwords)
+		reset := appsec.NewPasswordReset(postgres.NewSecurityStore(pool, ids, logger), passwords)
 		return resetPassword(startup, output, command.username, reset.Reset)
 	}
 	credentials, err := cryptosec.NewCredentials(master)
@@ -265,7 +265,7 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 	if err != nil {
 		return err
 	}
-	securityStore := postgres.NewSecurityStore(pool, ids)
+	securityStore := postgres.NewSecurityStore(pool, ids, logger)
 	adminService := appsec.NewAdmin(securityStore, passwords, tokens, admin.LoginPolicy{MaxFailures: cfg.Security.MaxLoginFailures, LockDuration: cfg.Security.LoginLockDuration})
 	setup, err := adminService.SetupStatus(startup)
 	if err != nil {
@@ -317,7 +317,7 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 	}
 	redisProbeCancel()
 	gatewayService := gateway.New(
-		gatewaycache.NewGatewayStore(postgres.NewGatewayStore(pool), gatewayCache, logger), credentials, compatibleUpstream,
+		gatewaycache.NewGatewayStore(postgres.NewGatewayStore(pool, logger), gatewayCache, logger), credentials, compatibleUpstream,
 		gateway.WithRouteState(routeState),
 		gateway.WithActiveRouteRecorder(gatewayCache),
 		gateway.WithSubscriptionRefreshCoordinator(routeState),
@@ -346,7 +346,7 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 			runErr = errors.Join(runErr, errors.New("cannot stop subscription refresh worker"))
 		}
 	}()
-	usageStore := postgres.NewUsageStore(pool)
+	usageStore := postgres.NewUsageStore(pool, logger)
 	usageWriter, err := usageapp.NewWriter(usageStore, logger, usageapp.Options{QueueSize: cfg.Usage.QueueSize, BatchSize: cfg.Usage.BatchSize, FlushInterval: cfg.Usage.FlushInterval, WriteTimeout: cfg.Usage.WriteTimeout})
 	if err != nil {
 		return err

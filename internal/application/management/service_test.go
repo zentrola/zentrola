@@ -70,6 +70,30 @@ func (s resetCreditAdapterStub) ConsumeResetCredit(_ context.Context, _ []byte, 
 	return s.consume, nil
 }
 
+func TestMissingManagementDependenciesFailClosed(t *testing.T) {
+	service := New(nil, fixedMemberID{id: 10}, nil, nil, nil)
+	ctx := context.Background()
+	actor := admin.Identity{ID: 1}
+	if _, err := service.Members(ctx, actor, Page{Limit: 10}); !errors.Is(err, appsec.ErrUnavailable) {
+		t.Fatalf("nil store must fail closed, got %v", err)
+	}
+	if _, err := service.CreateMember(ctx, actor, "member", "", appsec.RequestMeta{}); !errors.Is(err, appsec.ErrUnavailable) {
+		t.Fatalf("nil write store must fail closed, got %v", err)
+	}
+	if _, err := service.CreateResource(ctx, actor, 2, "resource", "secret", appsec.RequestMeta{}); !errors.Is(err, appsec.ErrUnavailable) {
+		t.Fatalf("nil cipher must fail closed, got %v", err)
+	}
+	var typedNilStore *resourceCreateStore
+	var typedNilCipher *providerTestCipher
+	typedNilService := New(typedNilStore, fixedMemberID{id: 10}, typedNilCipher, nil)
+	if _, err := typedNilService.Members(ctx, actor, Page{Limit: 10}); !errors.Is(err, appsec.ErrUnavailable) {
+		t.Fatalf("typed nil store must fail closed, got %v", err)
+	}
+	if _, err := typedNilService.CreateResource(ctx, actor, 2, "resource", "secret", appsec.RequestMeta{}); !errors.Is(err, appsec.ErrUnavailable) {
+		t.Fatalf("typed nil cipher must fail closed, got %v", err)
+	}
+}
+
 func TestProviderCapabilitiesIncludeMatchingSubscriptionAdapter(t *testing.T) {
 	service := &QueryService{subscriptions: []SubscriptionAdapter{
 		subscriptionAdapterStub{}, claudeSubscriptionAdapterStub{},
@@ -196,6 +220,32 @@ func (s resourceTestStore) Read(_ context.Context, _ admin.Identity, fn func(Rea
 }
 func (s resourceTestStore) Write(_ context.Context, _ admin.Identity, fn func(Writer) error) error {
 	return fn(s.writer)
+}
+
+type versionConflictStore struct{ writer *resourceTestWriter }
+
+func (s versionConflictStore) Read(_ context.Context, _ admin.Identity, fn func(Reader) error) error {
+	return fn(s.writer)
+}
+func (s versionConflictStore) Write(_ context.Context, _ admin.Identity, fn func(Writer) error) error {
+	s.writer.resource.Version++
+	return fn(s.writer)
+}
+
+func TestUpdateCredentialRejectsConcurrentResourceVersion(t *testing.T) {
+	now := time.Date(2026, 10, 2, 3, 4, 5, 0, time.UTC)
+	writer := &resourceTestWriter{resource: ResourceRecord{
+		Resource: Resource{ID: 48, Version: 3, ProviderID: 40, Name: "API Key", AuthType: AuthTypeAPIKey, AuthAdapter: AuthAdapterAPIKey, UpdatedAt: now},
+		Sealed:   catalog.SealedCredential{Ciphertext: []byte("old"), Nonce: make([]byte, 12), KeyVersion: 1},
+	}}
+	service := New(versionConflictStore{writer: writer}, fixedMemberID{id: 1}, providerTestCipher{}, nil)
+	err := service.UpdateCredential(context.Background(), admin.Identity{ID: 1}, 48, "new-secret", appsec.RequestMeta{})
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("expected concurrent version conflict, got %v", err)
+	}
+	if writer.updated.ID != 0 {
+		t.Fatal("conflicting update must not be persisted")
+	}
 }
 
 type memberCreateWriter struct {

@@ -234,6 +234,27 @@ VALUES (64,40,'Another name',decode(repeat('99',32),'hex'),decode(repeat('aa',12
 	})
 }
 
+func TestFreshDatabaseAppliesPostBaselineMigrationsOnFirstRun(t *testing.T) {
+	ctx, pool, schema := isolatedDatabase(t)
+	if err := Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	var version int64
+	if err := pool.QueryRow(ctx, `SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version WHERE is_applied`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version < 43 {
+		t.Fatalf("fresh database stopped at migration %d; want at least 43", version)
+	}
+	var exists bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=$1 AND table_name='provider_credential' AND column_name='version')`, schema).Scan(&exists); err != nil {
+		t.Fatal(err)
+	}
+	if !exists {
+		t.Fatal("provider_credential.version was not created on first migration run")
+	}
+}
+
 func checkSchema(t *testing.T, ctx context.Context, pool *pgxpool.Pool, schema string) {
 	t.Helper()
 	rows, err := pool.Query(ctx, `SELECT c.relname,a.attname,format_type(a.atttypid,a.atttypmod),a.attnotnull,coalesce(col_description(c.oid,a.attnum),''),coalesce(obj_description(c.oid),'')

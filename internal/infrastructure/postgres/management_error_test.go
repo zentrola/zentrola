@@ -45,3 +45,22 @@ func TestManagementStoreDoesNotLogKnownApplicationError(t *testing.T) {
 		t.Fatalf("error=%v log=%q", err, output.String())
 	}
 }
+
+func TestPostgresDiagnosticsIncludeSafeStructuredFields(t *testing.T) {
+	var output bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&output, nil))
+	cause := &pgconn.PgError{Code: "23505", ConstraintName: "safe_constraint", Detail: "sensitive SQL detail"}
+	public := errors.New("dependency unavailable")
+	if err := diagnosePostgresError(context.Background(), logger, "security", "create_key", cause, public); !errors.Is(err, public) {
+		t.Fatalf("error=%v; want public error", err)
+	}
+	line := output.String()
+	for _, expected := range []string{`"component":"security"`, `"operation":"create_key"`, `"sqlstate":"23505"`, `"constraint":"safe_constraint"`} {
+		if !strings.Contains(line, expected) {
+			t.Fatalf("diagnostic field %s missing from %s", expected, line)
+		}
+	}
+	if strings.Contains(line, "sensitive SQL detail") {
+		t.Fatalf("PostgreSQL detail leaked into diagnostic log: %s", line)
+	}
+}

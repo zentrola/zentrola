@@ -2,11 +2,13 @@ package management
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	appsec "github.com/zentrola/zentrola/internal/application/security"
+	"github.com/zentrola/zentrola/internal/domain/catalog"
 	"github.com/zentrola/zentrola/internal/domain/shared"
 )
 
@@ -58,7 +60,12 @@ func businessTime(now func() time.Time) time.Time {
 func New(store Store, ids shared.IDGenerator, cipher Cipher, tester ConnectionTester, options ...Option) *Service {
 	configuration := serviceOptions{now: time.Now}
 	for _, option := range options {
-		option(&configuration)
+		if option != nil {
+			option(&configuration)
+		}
+	}
+	if dependencyMissing(cipher) {
+		cipher = unavailableCipher{}
 	}
 	now := func() time.Time { return businessTime(configuration.now) }
 	subscriptions := append([]SubscriptionAdapter(nil), configuration.subscriptions...)
@@ -78,6 +85,34 @@ func New(store Store, ids shared.IDGenerator, cipher Cipher, tester ConnectionTe
 			store: store, discoverer: configuration.discoverer, subscriptions: subscriptions,
 		},
 	}
+}
+
+func dependencyMissing(value any) bool {
+	if value == nil {
+		return true
+	}
+	reflected := reflect.ValueOf(value)
+	switch reflected.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return reflected.IsNil()
+	default:
+		return false
+	}
+}
+
+type unavailableCipher struct{}
+
+func (unavailableCipher) Encrypt([]byte, catalog.CredentialOwner) (catalog.SealedCredential, error) {
+	return catalog.SealedCredential{}, appsec.ErrUnavailable
+}
+func (unavailableCipher) Decrypt(catalog.SealedCredential, catalog.CredentialOwner) ([]byte, error) {
+	return nil, appsec.ErrUnavailable
+}
+func (unavailableCipher) EncryptProviderProxy([]byte, catalog.ProviderProxyOwner) (catalog.SealedCredential, error) {
+	return catalog.SealedCredential{}, appsec.ErrUnavailable
+}
+func (unavailableCipher) DecryptProviderProxy(catalog.SealedCredential, catalog.ProviderProxyOwner) ([]byte, error) {
+	return nil, appsec.ErrUnavailable
 }
 
 func validText(s string, max int) bool {

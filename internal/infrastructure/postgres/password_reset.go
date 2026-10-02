@@ -16,7 +16,7 @@ import (
 func (s *SecurityStore) ResetPassword(ctx context.Context, username, hash string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return appsec.ErrUnavailable
+		return s.securityError(ctx, "begin_reset_password", err)
 	}
 	defer tx.Rollback(context.Background())
 	q := dbgen.New(tx)
@@ -26,7 +26,7 @@ func (s *SecurityStore) ResetPassword(ctx context.Context, username, hash string
 		return appsec.ErrNotFound
 	}
 	if err != nil {
-		return appsec.ErrUnavailable
+		return s.securityError(ctx, "get_admin_for_password_reset", err)
 	}
 	if row.Status != "ACTIVE" {
 		return appsec.ErrNotFound
@@ -35,17 +35,20 @@ func (s *SecurityStore) ResetPassword(ctx context.Context, username, hash string
 		UpdatedBy: "system", ID: row.ID, PasswordHash: hash, UpdatedAt: pgTime(time.Now().UTC()),
 	})
 	if err != nil || count != 1 {
-		return appsec.ErrUnavailable
+		if err == nil {
+			err = errors.New("password reset affected an unexpected number of rows")
+		}
+		return s.securityError(ctx, "reset_password", err)
 	}
 	before, _ := json.Marshal(map[string]any{"failedLoginCount": row.FailedLoginCount, "lockedUntil": timePointer(row.LockedUntil)})
 	after := []byte(`{"failedLoginCount":0,"lockedUntil":null}`)
 	actor := admin.Identity{DisplayName: "system"}
 	if err := s.appendLog(ctx, q, actor, "AUTH", operation.AdminPasswordReset, "ADMIN_USER", row.ID, row.Username,
 		"SUCCESS", "", appsec.RequestMeta{}, before, after, "CLI password reset"); err != nil {
-		return appsec.ErrUnavailable
+		return s.securityError(ctx, "audit_reset_password", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return appsec.ErrUnavailable
+		return s.securityError(ctx, "commit_reset_password", err)
 	}
 	return nil
 }

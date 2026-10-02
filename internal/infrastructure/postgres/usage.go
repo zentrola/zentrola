@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -16,9 +17,18 @@ import (
 	"github.com/zentrola/zentrola/internal/infrastructure/postgres/dbgen"
 )
 
-type UsageStore struct{ pool *pgxpool.Pool }
+type UsageStore struct {
+	pool   *pgxpool.Pool
+	logger *slog.Logger
+}
 
-func NewUsageStore(pool *pgxpool.Pool) *UsageStore { return &UsageStore{pool} }
+func NewUsageStore(pool *pgxpool.Pool, loggers ...*slog.Logger) *UsageStore {
+	return &UsageStore{pool: pool, logger: optionalLogger(loggers)}
+}
+
+func (s *UsageStore) usageError(ctx context.Context, operation string, err error) error {
+	return diagnosePostgresError(ctx, s.logger, "usage", operation, err, appsec.ErrUnavailable)
+}
 func (s *UsageStore) WriteBatch(ctx context.Context, events []domain.Event) error {
 	attempts := make([]map[string]any, 0, len(events))
 	optionalError := func(e string) any {
@@ -53,27 +63,31 @@ func (s *UsageStore) WriteBatch(ctx context.Context, events []domain.Event) erro
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return errors.New("usage database unavailable")
+		return diagnosePostgresError(ctx, s.logger, "usage", "begin_write_batch", err, errors.New("usage database unavailable"))
 	}
 	defer tx.Rollback(context.Background())
 	q := dbgen.New(tx)
 	if err = q.InsertUsageAttempts(ctx, rawAttempts); err != nil {
-		return errors.New("usage attempt insert failed")
+		return diagnosePostgresError(ctx, s.logger, "usage", "insert_usage_attempts", err, errors.New("usage attempt insert failed"))
 	}
 	if err = tx.Commit(ctx); err != nil {
-		return errors.New("usage transaction commit failed")
+		return diagnosePostgresError(ctx, s.logger, "usage", "commit_write_batch", err, errors.New("usage transaction commit failed"))
 	}
 	return nil
 }
 func (s *UsageStore) Query(ctx context.Context, actor admin.Identity, f app.Filter) (app.Page, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
-		return app.Page{}, appsec.ErrUnavailable
+		return app.Page{}, s.usageError(ctx, "begin_usage_query", err)
 	}
 	defer tx.Rollback(context.Background())
 	q := dbgen.New(tx)
 	if err = validateActor(ctx, q, actor); err != nil {
-		return app.Page{}, managementError(err)
+		mapped := managementError(err)
+		if errors.Is(mapped, appsec.ErrUnavailable) {
+			return app.Page{}, s.usageError(ctx, "validate_usage_actor", err)
+		}
+		return app.Page{}, mapped
 	}
 	ts := func(t time.Time) pgtype.Timestamptz { return pgtype.Timestamptz{Time: t, Valid: true} }
 	pageLimit := f.Limit
@@ -82,7 +96,7 @@ func (s *UsageStore) Query(ctx context.Context, actor admin.Identity, f app.Filt
 	}
 	rows, err := q.QueryUsage(ctx, dbgen.QueryUsageParams{AfterID: f.After, FromTime: ts(f.From), ToTime: ts(f.To), PrincipalID: f.PrincipalID, ModelID: f.ModelID, ProviderID: f.ProviderID, ResourceID: f.ResourceID, PageLimit: pageLimit})
 	if err != nil {
-		return app.Page{}, appsec.ErrUnavailable
+		return app.Page{}, s.usageError(ctx, "query_usage", err)
 	}
 	result := make([]app.Row, 0, len(rows))
 	for _, r := range rows {
@@ -90,10 +104,10 @@ func (s *UsageStore) Query(ctx context.Context, actor admin.Identity, f app.Filt
 	}
 	total, err := q.CountUsage(ctx, dbgen.CountUsageParams{FromTime: ts(f.From), ToTime: ts(f.To), PrincipalID: f.PrincipalID, ModelID: f.ModelID, ProviderID: f.ProviderID, ResourceID: f.ResourceID})
 	if err != nil {
-		return app.Page{}, appsec.ErrUnavailable
+		return app.Page{}, s.usageError(ctx, "count_usage", err)
 	}
 	if err = tx.Commit(ctx); err != nil {
-		return app.Page{}, appsec.ErrUnavailable
+		return app.Page{}, s.usageError(ctx, "commit_usage_query", err)
 	}
 	return app.Page{Items: result, Total: total}, nil
 }
@@ -106,7 +120,7 @@ func (s *UsageStore) TokenUsage(ctx context.Context, principalID int64, from, to
 		ToTime:      ts(to),
 	})
 	if err != nil {
-		return 0, appsec.ErrUnavailable
+		return 0, s.usageError(ctx, "get_principal_token_usage", err)
 	}
 	return tokens, nil
 }
@@ -114,12 +128,16 @@ func (s *UsageStore) TokenUsage(ctx context.Context, principalID int64, from, to
 func (s *UsageStore) Statistics(ctx context.Context, actor admin.Identity, f app.StatisticFilter) (app.StatisticPage, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
-		return app.StatisticPage{}, appsec.ErrUnavailable
+		return app.StatisticPage{}, s.usageError(ctx, "begin_usage_statistics", err)
 	}
 	defer tx.Rollback(context.Background())
 	q := dbgen.New(tx)
 	if err = validateActor(ctx, q, actor); err != nil {
-		return app.StatisticPage{}, managementError(err)
+		mapped := managementError(err)
+		if errors.Is(mapped, appsec.ErrUnavailable) {
+			return app.StatisticPage{}, s.usageError(ctx, "validate_statistics_actor", err)
+		}
+		return app.StatisticPage{}, mapped
 	}
 	ts := func(t time.Time) pgtype.Timestamptz { return pgtype.Timestamptz{Time: t, Valid: true} }
 	pageLimit := f.Limit
@@ -141,7 +159,7 @@ func (s *UsageStore) Statistics(ctx context.Context, actor admin.Identity, f app
 	case app.StatisticMember:
 		rows, queryErr := q.UsageMemberStatistics(ctx, dbgen.UsageMemberStatisticsParams{FromTime: ts(f.From), ToTime: ts(f.To), PageOffset: f.After, PageLimit: pageLimit})
 		if queryErr != nil {
-			return app.StatisticPage{}, appsec.ErrUnavailable
+			return app.StatisticPage{}, s.usageError(ctx, "query_member_statistics", queryErr)
 		}
 		for _, row := range rows {
 			appendRow(row.EntityID, row.Name, row.Code, row.MetricCount, row.Successful, row.InputTokens, row.OutputTokens, row.CachedInputTokens, row.Tokens, row.OverallTokens, row.AverageLatencyMs, row.TotalCount)
@@ -149,7 +167,7 @@ func (s *UsageStore) Statistics(ctx context.Context, actor admin.Identity, f app
 	case app.StatisticModel:
 		rows, queryErr := q.UsageModelStatistics(ctx, dbgen.UsageModelStatisticsParams{FromTime: ts(f.From), ToTime: ts(f.To), PageOffset: f.After, PageLimit: pageLimit})
 		if queryErr != nil {
-			return app.StatisticPage{}, appsec.ErrUnavailable
+			return app.StatisticPage{}, s.usageError(ctx, "query_model_statistics", queryErr)
 		}
 		for _, row := range rows {
 			appendRow(row.EntityID, row.Name, row.Code, row.MetricCount, row.Successful, row.InputTokens, row.OutputTokens, row.CachedInputTokens, row.Tokens, row.OverallTokens, row.AverageLatencyMs, row.TotalCount)
@@ -157,7 +175,7 @@ func (s *UsageStore) Statistics(ctx context.Context, actor admin.Identity, f app
 	case app.StatisticProvider:
 		rows, queryErr := q.UsageProviderStatistics(ctx, dbgen.UsageProviderStatisticsParams{FromTime: ts(f.From), ToTime: ts(f.To), PageOffset: f.After, PageLimit: pageLimit})
 		if queryErr != nil {
-			return app.StatisticPage{}, appsec.ErrUnavailable
+			return app.StatisticPage{}, s.usageError(ctx, "query_provider_statistics", queryErr)
 		}
 		for _, row := range rows {
 			appendRow(row.EntityID, row.Name, row.Code, row.MetricCount, row.Successful, row.InputTokens, row.OutputTokens, row.CachedInputTokens, row.Tokens, row.OverallTokens, row.AverageLatencyMs, row.TotalCount)
@@ -166,7 +184,7 @@ func (s *UsageStore) Statistics(ctx context.Context, actor admin.Identity, f app
 		return app.StatisticPage{}, appsec.ErrInvalidArgument
 	}
 	if err = tx.Commit(ctx); err != nil {
-		return app.StatisticPage{}, appsec.ErrUnavailable
+		return app.StatisticPage{}, s.usageError(ctx, "commit_usage_statistics", err)
 	}
 	return app.StatisticPage{Items: result, Total: total}, nil
 }
@@ -174,12 +192,16 @@ func (s *UsageStore) Statistics(ctx context.Context, actor admin.Identity, f app
 func (s *UsageStore) Dashboard(ctx context.Context, actor admin.Identity, from, to time.Time) (app.Dashboard, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
-		return app.Dashboard{}, appsec.ErrUnavailable
+		return app.Dashboard{}, s.usageError(ctx, "begin_usage_dashboard", err)
 	}
 	defer tx.Rollback(context.Background())
 	q := dbgen.New(tx)
 	if err = validateActor(ctx, q, actor); err != nil {
-		return app.Dashboard{}, managementError(err)
+		mapped := managementError(err)
+		if errors.Is(mapped, appsec.ErrUnavailable) {
+			return app.Dashboard{}, s.usageError(ctx, "validate_dashboard_actor", err)
+		}
+		return app.Dashboard{}, mapped
 	}
 	ts := func(t time.Time) pgtype.Timestamptz { return pgtype.Timestamptz{Time: t, Valid: true} }
 	params := dbgen.UsageDashboardCountsParams{
@@ -188,19 +210,19 @@ func (s *UsageStore) Dashboard(ctx context.Context, actor admin.Identity, from, 
 	}
 	counts, err := q.UsageDashboardCounts(ctx, params)
 	if err != nil {
-		return app.Dashboard{}, appsec.ErrUnavailable
+		return app.Dashboard{}, s.usageError(ctx, "query_dashboard_counts", err)
 	}
 	tokenRows, err := q.UsageTokenRanking(ctx, dbgen.UsageTokenRankingParams(params))
 	if err != nil {
-		return app.Dashboard{}, appsec.ErrUnavailable
+		return app.Dashboard{}, s.usageError(ctx, "query_token_ranking", err)
 	}
 	clientModelRows, err := q.UsageClientModelRanking(ctx, dbgen.UsageClientModelRankingParams(params))
 	if err != nil {
-		return app.Dashboard{}, appsec.ErrUnavailable
+		return app.Dashboard{}, s.usageError(ctx, "query_client_model_ranking", err)
 	}
 	providerRows, err := q.UsageProviderRanking(ctx, dbgen.UsageProviderRankingParams(params))
 	if err != nil {
-		return app.Dashboard{}, appsec.ErrUnavailable
+		return app.Dashboard{}, s.usageError(ctx, "query_provider_ranking", err)
 	}
 	result := app.Dashboard{
 		ActiveMemberCount:  counts.ActiveMemberCount,
@@ -236,7 +258,7 @@ func (s *UsageStore) Dashboard(ctx context.Context, actor admin.Identity, from, 
 		})
 	}
 	if err = tx.Commit(ctx); err != nil {
-		return app.Dashboard{}, appsec.ErrUnavailable
+		return app.Dashboard{}, s.usageError(ctx, "commit_usage_dashboard", err)
 	}
 	return result, nil
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"time"
 
@@ -28,11 +27,8 @@ type ManagementStore struct {
 }
 
 func NewManagementStore(pool *pgxpool.Pool, ids shared.IDGenerator, loggers ...*slog.Logger) *ManagementStore {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if len(loggers) > 0 && loggers[0] != nil {
-		logger = loggers[0]
-	}
-	return &ManagementStore{pool: pool, ids: ids, audit: NewSecurityStore(pool, ids), logger: logger}
+	logger := optionalLogger(loggers)
+	return &ManagementStore{pool: pool, ids: ids, audit: NewSecurityStore(pool, ids, logger), logger: logger}
 }
 
 type managementSession struct {
@@ -78,10 +74,7 @@ func (s *ManagementStore) run(ctx context.Context, a admin.Identity, write bool,
 func (s *ManagementStore) managementError(ctx context.Context, operation string, err error) error {
 	mapped := managementError(err)
 	if err != nil && errors.Is(mapped, appsec.ErrUnavailable) && !errors.Is(err, appsec.ErrUnavailable) {
-		s.logger.ErrorContext(ctx, "PostgreSQL management operation failed",
-			"operation", operation,
-			"error", err,
-		)
+		return diagnosePostgresError(ctx, s.logger, "management", operation, err, mapped)
 	}
 	return mapped
 }
@@ -104,10 +97,13 @@ func managementError(err error) error {
 			return appsec.ErrInvalidArgument
 		}
 	}
-	for _, known := range []error{appsec.ErrInvalidArgument, appsec.ErrUnauthenticated, appsec.ErrNotFound, appsec.ErrUnavailable, mgmt.ErrConflict, mgmt.ErrMemberAccessKeyRequired, mgmt.ErrSubscriptionAccountExists, mgmt.ErrCredential, mgmt.ErrProvider, mgmt.ErrProviderCredentialRequired, mgmt.ErrProviderModelMappingRequired, mgmt.ErrModelSyncCredentialRequired, mgmt.ErrCredentialExportUnsupported} {
+	for _, known := range []error{appsec.ErrInvalidArgument, appsec.ErrUnauthenticated, appsec.ErrNotFound, appsec.ErrUnavailable} {
 		if errors.Is(err, known) {
 			return known
 		}
+	}
+	if public, ok := mgmt.PublicError(err); ok {
+		return public
 	}
 	return appsec.ErrUnavailable
 }
@@ -382,7 +378,8 @@ func (s *managementSession) Resource(ctx context.Context, id int64) (mgmt.Resour
 		RuntimeStatus: r.RuntimeStatus, BlockedReason: r.BlockedReason,
 		BlockedAt: timePointer(r.BlockedAt), LastErrorAt: timePointer(r.LastErrorAt),
 		LastHTTPStatus: r.LastHttpStatus, LastErrorCode: r.LastErrorCode,
-		CredentialConfigured: true, CreatedAt: r.CreatedAt.Time.UTC(), UpdatedAt: r.UpdatedAt.Time.UTC(),
+		CredentialConfigured: true, Version: r.Version,
+		CreatedAt: r.CreatedAt.Time.UTC(), UpdatedAt: r.UpdatedAt.Time.UTC(),
 	}, Sealed: catalog.SealedCredential{Ciphertext: r.CredentialCiphertext, Nonce: r.CredentialNonce, KeyVersion: r.KeyVersion}}, err
 }
 func (s *managementSession) ResourceQuotas(ctx context.Context, id int64) ([]mgmt.ResourceQuota, error) {
@@ -603,7 +600,7 @@ func (s *managementSession) CreateResource(ctx context.Context, r mgmt.ResourceR
 	})
 }
 func (s *managementSession) UpdateResource(ctx context.Context, r mgmt.ResourceRecord) error {
-	return s.q.ManageUpdateResource(ctx, dbgen.ManageUpdateResourceParams{
+	updated, err := s.q.ManageUpdateResource(ctx, dbgen.ManageUpdateResourceParams{
 		ID: r.ID, ResourceName: r.Name, AuthType: r.AuthType, AuthAdapter: r.AuthAdapter,
 		SubscriptionType: r.SubscriptionType, PlanCode: r.PlanCode, ExternalAccountRef: r.ExternalAccountRef,
 		Priority: r.Priority, EffectiveAt: nullableTime(r.EffectiveAt), ExpiresAt: nullableTime(r.ExpiresAt),
@@ -611,7 +608,15 @@ func (s *managementSession) UpdateResource(ctx context.Context, r mgmt.ResourceR
 		CredentialRefreshedAt: nullableTime(r.CredentialRefreshedAt), CredentialExpiresAt: nullableTime(r.CredentialExpiresAt),
 		CredentialCiphertext: r.Sealed.Ciphertext, CredentialNonce: r.Sealed.Nonce,
 		KeyVersion: r.Sealed.KeyVersion, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(r.UpdatedAt),
+		Version: r.Version,
 	})
+	if err != nil {
+		return err
+	}
+	if updated != 1 {
+		return mgmt.ErrConflict
+	}
+	return nil
 }
 func (s *managementSession) DeleteResource(ctx context.Context, id int64, at time.Time) (bool, error) {
 	rows, err := s.q.ManageDeleteResource(ctx, dbgen.ManageDeleteResourceParams{ID: id, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(at)})

@@ -15,7 +15,7 @@ const blockGatewayResource = `-- name: BlockGatewayResource :execrows
 UPDATE provider_credential
 SET runtime_status='BLOCKED',blocked_reason=$1,blocked_at=$2,
     last_error_at=$2,last_http_status=$3,
-    last_error_code=$4,updated_by='system',updated_at=$2
+    last_error_code=$4,updated_by='system',updated_at=$2,version=version+1
 WHERE id=$5
   AND NOT is_deleted AND runtime_status='HEALTHY'
 `
@@ -384,7 +384,7 @@ const updateGatewayResourceCredential = `-- name: UpdateGatewayResourceCredentia
 UPDATE provider_credential
 SET credential_ciphertext=$1,credential_nonce=$2,
     key_version=$3,credential_refreshed_at=$4,
-    credential_expires_at=$5,updated_by='system',updated_at=$6
+    credential_expires_at=$5,updated_by='system',updated_at=$6,version=version+1
 WHERE id=$7 AND provider_id=$8 AND NOT is_deleted
 `
 
@@ -419,7 +419,7 @@ func (q *Queries) UpdateGatewayResourceCredential(ctx context.Context, arg Updat
 const updateGatewayResourceCredentialRefreshMetadata = `-- name: UpdateGatewayResourceCredentialRefreshMetadata :execrows
 UPDATE provider_credential
 SET credential_refreshed_at=$1,
-    credential_expires_at=$2,updated_by='system',updated_at=$3
+    credential_expires_at=$2,updated_by='system',updated_at=$3,version=version+1
 WHERE id=$4 AND provider_id=$5 AND NOT is_deleted
   AND credential_expires_at IS NULL
 `

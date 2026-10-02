@@ -342,6 +342,8 @@ type ProviderCredential struct {
 	CreatedAt pgtype.Timestamptz
 	// 更新时间，UTC
 	UpdatedAt pgtype.Timestamptz
+	// 乐观锁版本；每次资源状态、凭据或配置更新后递增
+	Version int64
 }
 
 // Provider 认证资源最近观测到的额度窗口；只保存当前状态，不作为 Usage 事实

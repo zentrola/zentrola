@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/netip"
 	"strconv"
 	"strings"
@@ -23,18 +24,25 @@ import (
 )
 
 type SecurityStore struct {
-	pool *pgxpool.Pool
-	ids  shared.IDGenerator
+	pool   *pgxpool.Pool
+	ids    shared.IDGenerator
+	logger *slog.Logger
 }
 
-func NewSecurityStore(pool *pgxpool.Pool, ids shared.IDGenerator) *SecurityStore {
-	return &SecurityStore{pool: pool, ids: ids}
+func NewSecurityStore(pool *pgxpool.Pool, ids shared.IDGenerator, loggers ...*slog.Logger) *SecurityStore {
+	return &SecurityStore{pool: pool, ids: ids, logger: optionalLogger(loggers)}
 }
 func (s *SecurityStore) HasAdmin(ctx context.Context) (bool, error) {
-	return dbgen.New(s.pool).HasActiveAdmin(ctx)
+	value, err := dbgen.New(s.pool).HasActiveAdmin(ctx)
+	return value, s.securityError(ctx, "has_active_admin", err)
 }
 func (s *SecurityStore) HasAnyAdmin(ctx context.Context) (bool, error) {
-	return dbgen.New(s.pool).HasAnyAdmin(ctx)
+	value, err := dbgen.New(s.pool).HasAnyAdmin(ctx)
+	return value, s.securityError(ctx, "has_any_admin", err)
+}
+
+func (s *SecurityStore) securityError(ctx context.Context, operation string, err error) error {
+	return diagnosePostgresError(ctx, s.logger, "security", operation, err, appsec.ErrUnavailable)
 }
 func (s *SecurityStore) EnsureInitial(ctx context.Context, username string, hash func() (string, error)) error {
 	return s.createInitial(ctx, username, hash, appsec.RequestMeta{}, true)
@@ -45,24 +53,24 @@ func (s *SecurityStore) CreateFirstAdmin(ctx context.Context, username string, h
 func (s *SecurityStore) createInitial(ctx context.Context, username string, hash func() (string, error), meta appsec.RequestMeta, idempotent bool) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return appsec.ErrUnavailable
+		return s.securityError(ctx, "begin_create_initial", err)
 	}
 	defer tx.Rollback(context.Background())
 	ctx = idgen.WithQuerier(ctx, tx)
 	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(829314003)"); err != nil {
-		return appsec.ErrUnavailable
+		return s.securityError(ctx, "lock_create_initial", err)
 	}
 	q := dbgen.New(tx)
 	exists, err := q.HasAnyAdmin(ctx)
 	if err != nil {
-		return appsec.ErrUnavailable
+		return s.securityError(ctx, "check_existing_admin", err)
 	}
 	if exists {
 		if !idempotent {
 			return appsec.ErrAlreadyInitialized
 		}
 		if err := tx.Commit(ctx); err != nil {
-			return appsec.ErrUnavailable
+			return s.securityError(ctx, "commit_existing_admin", err)
 		}
 		return nil
 	}
@@ -72,20 +80,20 @@ func (s *SecurityStore) createInitial(ctx context.Context, username string, hash
 	}
 	id, err := s.ids.NextID(ctx)
 	if err != nil {
-		return appsec.ErrUnavailable
+		return s.securityError(ctx, "generate_initial_admin_id", err)
 	}
 	if err := q.CreateInitialAdmin(ctx, dbgen.CreateInitialAdminParams{ID: id, Username: username, PasswordHash: passwordHash, CreatedAt: pgTime(time.Now().UTC())}); err != nil {
-		return appsec.ErrUnavailable
+		return s.securityError(ctx, "create_initial_admin", err)
 	}
 	if !idempotent {
 		actor := admin.Identity{DisplayName: "system"}
 		after, _ := json.Marshal(map[string]string{"username": username, "status": "ACTIVE"})
 		if err := s.appendLog(ctx, q, actor, "AUTH", operation.AdminInitialize, "ADMIN_USER", id, username, "SUCCESS", "", meta, nil, after, ""); err != nil {
-			return appsec.ErrUnavailable
+			return s.securityError(ctx, "audit_initial_admin", err)
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return appsec.ErrUnavailable
+		return s.securityError(ctx, "commit_create_initial", err)
 	}
 	return nil
 }
@@ -95,14 +103,14 @@ func (s *SecurityStore) GetActive(ctx context.Context, id int64) (admin.Identity
 		return admin.Identity{}, appsec.ErrUnauthenticated
 	}
 	if err != nil {
-		return admin.Identity{}, appsec.ErrUnavailable
+		return admin.Identity{}, s.securityError(ctx, "get_active_admin", err)
 	}
 	return admin.Identity{ID: row.ID, Username: row.Username, DisplayName: row.DisplayName, CredentialVersion: row.CredentialVersion}, nil
 }
 func (s *SecurityStore) Attempt(ctx context.Context, username string, meta appsec.RequestMeta, evaluate func(*admin.Account) admin.LoginDecision) (admin.Identity, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return admin.Identity{}, appsec.ErrUnavailable
+		return admin.Identity{}, s.securityError(ctx, "begin_login_attempt", err)
 	}
 	defer tx.Rollback(context.Background())
 	ctx = idgen.WithQuerier(ctx, tx)
@@ -113,7 +121,7 @@ func (s *SecurityStore) Attempt(ctx context.Context, username string, meta appse
 		return admin.Identity{}, appsec.ErrUnauthenticated
 	}
 	if err != nil {
-		return admin.Identity{}, appsec.ErrUnavailable
+		return admin.Identity{}, s.securityError(ctx, "get_admin_for_login", err)
 	}
 	account := admin.Account{Identity: admin.Identity{ID: row.ID, Username: row.Username, DisplayName: row.DisplayName, CredentialVersion: row.CredentialVersion}, PasswordHash: row.PasswordHash,
 		Active: row.Status == "ACTIVE", FailedLogins: row.FailedLoginCount, LockedUntil: timePointer(row.LockedUntil), LastLoginAt: timePointer(row.LastLoginAt)}
@@ -121,7 +129,7 @@ func (s *SecurityStore) Attempt(ctx context.Context, username string, meta appse
 	state := decision.State
 	now := time.Now().UTC()
 	if err := q.SaveAdminLoginState(ctx, dbgen.SaveAdminLoginStateParams{ID: row.ID, FailedLoginCount: state.FailedLogins, LockedUntil: nullableTime(state.LockedUntil), LastLoginAt: nullableTime(state.LastLoginAt), UpdatedBy: actorRef(row.ID), UpdatedAt: pgTime(now)}); err != nil {
-		return admin.Identity{}, appsec.ErrUnavailable
+		return admin.Identity{}, s.securityError(ctx, "save_admin_login_state", err)
 	}
 	before, _ := json.Marshal(map[string]any{"failedLoginCount": account.FailedLogins, "lockedUntil": account.LockedUntil})
 	after, _ := json.Marshal(map[string]any{"failedLoginCount": state.FailedLogins, "lockedUntil": state.LockedUntil})
@@ -131,11 +139,11 @@ func (s *SecurityStore) Attempt(ctx context.Context, username string, meta appse
 		code = ""
 	}
 	if err := s.appendLog(ctx, q, account.Identity, "AUTH", decision.Event, "ADMIN_USER", row.ID, row.Username, result, code, meta, before, after, ""); err != nil {
-		return admin.Identity{}, appsec.ErrUnavailable
+		return admin.Identity{}, s.securityError(ctx, "audit_login_attempt", err)
 	}
 	// 拒绝登录也必须提交失败计数和操作日志，不能因返回认证错误而回滚。
 	if err := tx.Commit(ctx); err != nil {
-		return admin.Identity{}, appsec.ErrUnavailable
+		return admin.Identity{}, s.securityError(ctx, "commit_login_attempt", err)
 	}
 	if !decision.Allowed {
 		if decision.Event == operation.LoginLocked && state.LockedUntil != nil {
@@ -150,64 +158,70 @@ func (s *SecurityStore) Attempt(ctx context.Context, username string, meta appse
 func (s *SecurityStore) Create(ctx context.Context, actor admin.Identity, key appsec.KeyRecord, meta appsec.RequestMeta) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return appsec.ErrUnavailable
+		return s.securityError(ctx, "begin_create_access_key", err)
 	}
 	defer tx.Rollback(context.Background())
 	ctx = idgen.WithQuerier(ctx, tx)
 	q := dbgen.New(tx)
 	if err := validateActor(ctx, q, actor); err != nil {
-		return err
+		if errors.Is(err, appsec.ErrUnauthenticated) {
+			return err
+		}
+		return s.securityError(ctx, "validate_access_key_actor", err)
 	}
 	if _, err := q.GetMemberForKey(ctx, key.PrincipalID); errors.Is(err, pgx.ErrNoRows) {
 		return appsec.ErrNotFound
 	} else if err != nil {
-		return appsec.ErrUnavailable
+		return s.securityError(ctx, "get_member_for_key", err)
 	}
 	if err := q.CreateAccessKey(ctx, dbgen.CreateAccessKeyParams{ID: key.ID, PrincipalID: key.PrincipalID, KeyHash: key.Hash, MaskedKey: key.MaskedKey, Name: key.Name, ExpiresAt: nullableTime(key.ExpiresAt), CreatedBy: actorRef(actor.ID), CreatedAt: pgTime(key.CreatedAt)}); err != nil {
-		return appsec.ErrUnavailable
+		return s.securityError(ctx, "create_access_key", err)
 	}
 	after, _ := json.Marshal(map[string]any{"status": "ACTIVE", "principalId": strconv.FormatInt(key.PrincipalID, 10), "maskedKey": key.MaskedKey})
 	if err := s.appendLog(ctx, q, actor, "ACCESS_KEY", operation.AccessKeyCreate, "ACCESS_KEY", key.ID, key.Name, "SUCCESS", "", meta, nil, after, ""); err != nil {
-		return appsec.ErrUnavailable
+		return s.securityError(ctx, "audit_create_access_key", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return appsec.ErrUnavailable
+		return s.securityError(ctx, "commit_create_access_key", err)
 	}
 	return nil
 }
 func (s *SecurityStore) Revoke(ctx context.Context, actor admin.Identity, keyID int64, meta appsec.RequestMeta) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return appsec.ErrUnavailable
+		return s.securityError(ctx, "begin_revoke_access_key", err)
 	}
 	defer tx.Rollback(context.Background())
 	ctx = idgen.WithQuerier(ctx, tx)
 	q := dbgen.New(tx)
 	if err := validateActor(ctx, q, actor); err != nil {
-		return err
+		if errors.Is(err, appsec.ErrUnauthenticated) {
+			return err
+		}
+		return s.securityError(ctx, "validate_revoke_actor", err)
 	}
 	row, err := q.GetKeyForRevoke(ctx, keyID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return appsec.ErrNotFound
 	}
 	if err != nil {
-		return appsec.ErrUnavailable
+		return s.securityError(ctx, "get_key_for_revoke", err)
 	}
 	if row.Status == "REVOKED" {
 		if err := tx.Commit(ctx); err != nil {
-			return appsec.ErrUnavailable
+			return s.securityError(ctx, "commit_already_revoked_key", err)
 		}
 		return nil
 	}
 	if err := q.RevokeAccessKey(ctx, dbgen.RevokeAccessKeyParams{ID: keyID, RevokedAt: pgTime(time.Now().UTC()), UpdatedBy: actorRef(actor.ID)}); err != nil {
-		return appsec.ErrUnavailable
+		return s.securityError(ctx, "revoke_access_key", err)
 	}
 	before, _ := json.Marshal(map[string]string{"status": row.Status})
 	if err := s.appendLog(ctx, q, actor, "ACCESS_KEY", operation.AccessKeyRevoke, "ACCESS_KEY", keyID, row.Name, "SUCCESS", "", meta, before, []byte(`{"status":"REVOKED"}`), ""); err != nil {
-		return appsec.ErrUnavailable
+		return s.securityError(ctx, "audit_revoke_access_key", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return appsec.ErrUnavailable
+		return s.securityError(ctx, "commit_revoke_access_key", err)
 	}
 	return nil
 }
@@ -217,7 +231,7 @@ func (s *SecurityStore) Authenticate(ctx context.Context, hash []byte, now time.
 		return appsec.PrincipalIdentity{}, appsec.ErrUnauthenticated
 	}
 	if err != nil {
-		return appsec.PrincipalIdentity{}, appsec.ErrUnavailable
+		return appsec.PrincipalIdentity{}, s.securityError(ctx, "authenticate_access_key", err)
 	}
 	return appsec.PrincipalIdentity{ID: row.PrincipalID, AccessKeyID: row.ID, ExpiresAt: timePointer(row.ExpiresAt)}, nil
 }
@@ -226,7 +240,7 @@ func (s *SecurityStore) Authenticate(ctx context.Context, hash []byte, now time.
 func (s *SecurityStore) ValidateCredentials(ctx context.Context, cipher *cryptosec.Credentials) error {
 	resources, err := dbgen.New(s.pool).ListResourcesForCredentialCheck(ctx)
 	if err != nil {
-		return appsec.ErrUnavailable
+		return s.securityError(ctx, "list_credentials_for_validation", err)
 	}
 	for _, r := range resources {
 		plain, err := cipher.Decrypt(cryptosec.SealedCredential{Ciphertext: r.CredentialCiphertext, Nonce: r.CredentialNonce, KeyVersion: r.KeyVersion}, cryptosec.CredentialOwner{ProviderID: r.ProviderID, ResourceID: r.ID})
@@ -244,7 +258,7 @@ func validateActor(ctx context.Context, q *dbgen.Queries, actor admin.Identity) 
 		return appsec.ErrUnauthenticated
 	}
 	if err != nil {
-		return appsec.ErrUnavailable
+		return err
 	}
 	return nil
 }

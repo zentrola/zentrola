@@ -174,6 +174,8 @@ func (s *ResourceService) TestResourceSelection(ctx context.Context, actor admin
 		}
 		if baseURL == "" {
 			result.Code = "PROVIDER_UNAVAILABLE"
+		} else if s.tester == nil {
+			return ConnectionResult{}, appsec.ErrUnavailable
 		} else {
 			proxy, proxyErr := s.decryptedProviderProxy(provider)
 			if proxyErr != nil {
@@ -194,7 +196,7 @@ func (s *ResourceService) TestResourceSelection(ctx context.Context, actor admin
 		if err != nil {
 			return err
 		}
-		if !current.UpdatedAt.Equal(resource.UpdatedAt) {
+		if current.Version != resource.Version {
 			result.OK = false
 			result.Code = "RESOURCE_CHANGED"
 		}
@@ -359,7 +361,7 @@ func (s *ResourceService) ConsumeResourceResetCredit(ctx context.Context, actor 
 		if err != nil {
 			return err
 		}
-		if !current.UpdatedAt.Equal(resource.UpdatedAt) {
+		if current.Version != resource.Version {
 			return ErrConflict
 		}
 		resource.UpdatedAt = businessTime(s.now)
