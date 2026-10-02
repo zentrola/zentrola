@@ -199,7 +199,7 @@ SELECT id,provider_id,resource_name,auth_type,auth_adapter,subscription_type,pla
        external_account_ref,priority,effective_at,expires_at,quota_status,quota_checked_at,
        quota_resets_at,credential_refreshed_at,credential_expires_at,
        runtime_status,blocked_reason,blocked_at,last_error_at,last_http_status,
-       last_error_code,created_at,updated_at FROM provider_credential
+       last_error_code,version,created_at,updated_at FROM provider_credential
 WHERE is_deleted=false AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2;
 -- name: ManageResource :one
 SELECT * FROM provider_credential WHERE id=$1 AND is_deleted=false;
@@ -210,7 +210,7 @@ INSERT INTO provider_credential(
     quota_resets_at,credential_refreshed_at,credential_expires_at,
     credential_ciphertext,credential_nonce,key_version,created_by,updated_by,created_at,updated_at)
 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$20,$21,$21);
--- name: ManageUpdateResource :exec
+-- name: ManageUpdateResource :execrows
 UPDATE provider_credential SET resource_name=$2,auth_type=$3,auth_adapter=$4,subscription_type=$5,
 plan_code=$6,external_account_ref=$7,priority=$8,effective_at=$9,expires_at=$10,
 quota_status=$11,quota_checked_at=$12,quota_resets_at=$13,
@@ -222,8 +222,8 @@ blocked_at=CASE WHEN credential_ciphertext IS DISTINCT FROM $16 THEN NULL ELSE b
 last_error_at=CASE WHEN credential_ciphertext IS DISTINCT FROM $16 THEN NULL ELSE last_error_at END,
 last_http_status=CASE WHEN credential_ciphertext IS DISTINCT FROM $16 THEN NULL ELSE last_http_status END,
 last_error_code=CASE WHEN credential_ciphertext IS DISTINCT FROM $16 THEN NULL ELSE last_error_code END,
-updated_by=$19,updated_at=$20
-WHERE id=$1 AND is_deleted=false;
+updated_by=$19,updated_at=$20,version=version+1
+WHERE id=$1 AND is_deleted=false AND version=$21;
 
 -- name: ManageDeleteResource :execrows
 UPDATE provider_credential
@@ -247,13 +247,13 @@ WHERE provider_credential_id=$1 ORDER BY quota_code;
 -- name: ManageRestoreResourceRuntime :execrows
 UPDATE provider_credential
 SET runtime_status='HEALTHY',blocked_reason=NULL,blocked_at=NULL,last_error_at=NULL,
-    last_http_status=NULL,last_error_code=NULL,updated_by=$2,updated_at=$3
+    last_http_status=NULL,last_error_code=NULL,updated_by=$2,updated_at=$3,version=version+1
 WHERE id=$1 AND is_deleted=false AND runtime_status='BLOCKED';
 
 -- name: ManageBlockResourceRuntime :exec
 UPDATE provider_credential
 SET runtime_status='BLOCKED',blocked_reason=$2,blocked_at=$3,last_error_at=$3,
-    last_http_status=$4,last_error_code=$5,updated_by=$6,updated_at=$3
+    last_http_status=$4,last_error_code=$5,updated_by=$6,updated_at=$3,version=version+1
 WHERE id=$1 AND is_deleted=false;
 
 -- name: ManageKeys :many

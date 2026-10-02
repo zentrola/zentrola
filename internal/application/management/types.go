@@ -26,6 +26,32 @@ var (
 	ErrResetCreditUnsupported       = errors.New("rate-limit reset credit unsupported")
 )
 
+var publicErrors = []error{
+	ErrConflict,
+	ErrMemberAccessKeyRequired,
+	ErrSubscriptionAccountExists,
+	ErrCredential,
+	ErrProvider,
+	ErrProviderCredentialRequired,
+	ErrProviderModelMappingRequired,
+	ErrModelSyncCredentialRequired,
+	ErrCredentialExportUnsupported,
+	ErrResetCreditUnsupported,
+}
+
+// PublicErrors 返回允许跨 adapter/transport 边界传播的稳定业务错误。
+func PublicErrors() []error { return append([]error(nil), publicErrors...) }
+
+// PublicError 将包装错误归一化为稳定业务错误，避免各 adapter 维护易漂移的白名单。
+func PublicError(err error) (error, bool) {
+	for _, public := range publicErrors {
+		if errors.Is(err, public) {
+			return public, true
+		}
+	}
+	return nil, false
+}
+
 const (
 	AuthTypeAPIKey         = "API_KEY"
 	AuthTypeSubscription   = "SUBSCRIPTION"
@@ -165,6 +191,7 @@ type ProviderInitializeResult struct {
 }
 type Resource struct {
 	ID                    int64      `json:"id,string"`
+	Version               int64      `json:"version,string" example:"1"`
 	ProviderID            int64      `json:"providerId,string"`
 	Name                  string     `json:"name"`
 	AuthType              string     `json:"authType"`

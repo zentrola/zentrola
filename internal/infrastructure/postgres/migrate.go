@@ -50,7 +50,8 @@ SELECT EXISTS (
 		if _, err := provider.Up(ctx); err != nil {
 			return fmt.Errorf("PostgreSQL migration failed: %w", err)
 		}
-		return nil
+		// baseline 仅代表 00001–00041；同一次启动继续执行 00042 及后续迁移，
+		// 避免全新数据库必须重启一次才能达到当前 schema。
 	}
 	source, err := fs.Sub(migrations, "migrations")
 	if err != nil {

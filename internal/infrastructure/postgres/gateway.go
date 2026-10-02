@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -16,11 +17,20 @@ import (
 	"github.com/zentrola/zentrola/internal/infrastructure/postgres/dbgen"
 )
 
-type GatewayStore struct{ pool *pgxpool.Pool }
+type GatewayStore struct {
+	pool   *pgxpool.Pool
+	logger *slog.Logger
+}
 
 type subscriptionRefreshConnectionKey struct{}
 
-func NewGatewayStore(pool *pgxpool.Pool) *GatewayStore { return &GatewayStore{pool: pool} }
+func NewGatewayStore(pool *pgxpool.Pool, loggers ...*slog.Logger) *GatewayStore {
+	return &GatewayStore{pool: pool, logger: optionalLogger(loggers)}
+}
+
+func (s *GatewayStore) gatewayError(ctx context.Context, operation string, err error) error {
+	return diagnosePostgresError(ctx, s.logger, "gateway", operation, err, gw.ErrUnavailable)
+}
 
 func (s *GatewayStore) gatewayQueries(ctx context.Context) *dbgen.Queries {
 	if conn, ok := ctx.Value(subscriptionRefreshConnectionKey{}).(*pgxpool.Conn); ok {
@@ -48,13 +58,13 @@ func (s *GatewayStore) ResolveCandidates(ctx context.Context, identity appsec.Pr
 	// 缓存未命中时使用一致性快照加载身份、授权与路由，不在网络转发期间占用连接。
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
-		return nil, gw.ErrUnavailable
+		return nil, s.gatewayError(ctx, "begin_resolve_candidates", err)
 	}
 	defer tx.Rollback(context.Background())
 	q := dbgen.New(tx)
 	active, err := q.GatewayIdentityActive(ctx, dbgen.GatewayIdentityActiveParams{AccessKeyID: identity.AccessKeyID, PrincipalID: identity.ID})
 	if err != nil {
-		return nil, gw.ErrUnavailable
+		return nil, s.gatewayError(ctx, "check_gateway_identity", err)
 	}
 	if !active {
 		return nil, gw.ErrAuthentication
@@ -64,14 +74,14 @@ func (s *GatewayStore) ResolveCandidates(ctx context.Context, identity appsec.Pr
 		return nil, gw.ErrModelUnknown
 	}
 	if err != nil {
-		return nil, gw.ErrUnavailable
+		return nil, s.gatewayError(ctx, "get_gateway_model", err)
 	}
 	if m.Status != "ACTIVE" {
 		return nil, gw.ErrModelDisabled
 	}
 	allowed, err := q.HasGroupModelPermission(ctx, dbgen.HasGroupModelPermissionParams{PrincipalID: identity.ID, ModelID: m.ID})
 	if err != nil {
-		return nil, gw.ErrUnavailable
+		return nil, s.gatewayError(ctx, "check_group_model_permission", err)
 	}
 	if !allowed {
 		return nil, gw.ErrPermission
@@ -80,12 +90,12 @@ func (s *GatewayStore) ResolveCandidates(ctx context.Context, identity appsec.Pr
 		ModelID: m.ID, PreferredProtocol: preferredProtocol,
 	})
 	if err != nil {
-		return nil, gw.ErrUnavailable
+		return nil, s.gatewayError(ctx, "query_gateway_candidates", err)
 	}
 	if len(rows) == 0 {
 		routeExists, availabilityErr := q.GatewayRouteExists(ctx, m.ID)
 		if availabilityErr != nil {
-			return nil, gw.ErrUnavailable
+			return nil, s.gatewayError(ctx, "check_gateway_route", availabilityErr)
 		}
 		if routeExists {
 			return nil, gw.ErrResource
@@ -134,7 +144,7 @@ func (s *GatewayStore) ResolveCandidates(ctx context.Context, identity appsec.Pr
 		routes = append(routes, route)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return nil, gw.ErrUnavailable
+		return nil, s.gatewayError(ctx, "commit_resolve_candidates", err)
 	}
 	if len(routes) == 0 {
 		return nil, gw.ErrRoute
@@ -191,7 +201,7 @@ func (s *GatewayStore) blockResource(ctx context.Context, resourceID int64, bloc
 		HttpStatus: httpStatus, ErrorCode: &code,
 	})
 	if err != nil {
-		return gw.ErrUnavailable
+		return s.gatewayError(ctx, "block_gateway_resource", err)
 	}
 	return nil
 }
@@ -207,7 +217,10 @@ func (s *GatewayStore) UpdateResourceCredential(ctx context.Context, route gw.Ro
 		UpdatedAt: pgtype.Timestamptz{Time: time.Now().UTC().Truncate(time.Microsecond), Valid: true},
 	})
 	if err != nil || updated != 1 {
-		return gw.ErrUnavailable
+		if err == nil {
+			err = errors.New("credential update affected an unexpected number of rows")
+		}
+		return s.gatewayError(ctx, "update_resource_credential", err)
 	}
 	return nil
 }
@@ -222,7 +235,10 @@ func (s *GatewayStore) UpdateResourceCredentialRefreshMetadata(ctx context.Conte
 		UpdatedAt: pgtype.Timestamptz{Time: time.Now().UTC().Truncate(time.Microsecond), Valid: true},
 	})
 	if err != nil || updated != 1 {
-		return gw.ErrUnavailable
+		if err == nil {
+			err = errors.New("credential metadata update affected an unexpected number of rows")
+		}
+		return s.gatewayError(ctx, "update_resource_credential_metadata", err)
 	}
 	return nil
 }
@@ -236,7 +252,7 @@ func (s *GatewayStore) LoadResourceCredential(ctx context.Context, route gw.Rout
 		ProviderID: route.ProviderID,
 	})
 	if err != nil {
-		return catalog.SealedCredential{}, gw.ErrUnavailable
+		return catalog.SealedCredential{}, s.gatewayError(ctx, "load_resource_credential", err)
 	}
 	return catalog.SealedCredential{
 		Ciphertext: row.CredentialCiphertext,
@@ -251,11 +267,11 @@ func (s *GatewayStore) LockSubscriptionRefresh(ctx context.Context, resourceID i
 	}
 	conn, err := s.pool.Acquire(ctx)
 	if err != nil {
-		return ctx, nil, gw.ErrUnavailable
+		return ctx, nil, s.gatewayError(ctx, "acquire_subscription_refresh_connection", err)
 	}
 	if _, err := dbgen.New(conn).LockGatewaySubscriptionRefresh(ctx, resourceID); err != nil {
 		conn.Release()
-		return ctx, nil, gw.ErrUnavailable
+		return ctx, nil, s.gatewayError(ctx, "lock_subscription_refresh", err)
 	}
 	var once sync.Once
 	lockedCtx := context.WithValue(ctx, subscriptionRefreshConnectionKey{}, conn)
@@ -268,11 +284,17 @@ func (s *GatewayStore) LockSubscriptionRefresh(ctx context.Context, resourceID i
 				conn.Release()
 				return
 			}
+			if unlockErr == nil {
+				unlockErr = errors.New("subscription refresh lock was not held")
+			}
+			_ = s.gatewayError(unlockCtx, "unlock_subscription_refresh", unlockErr)
 			// 不能把仍持有 session advisory lock 的连接放回连接池。
 			hijacked := conn.Hijack()
 			closeCtx, closeCancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer closeCancel()
-			_ = hijacked.Close(closeCtx)
+			if closeErr := hijacked.Close(closeCtx); closeErr != nil {
+				_ = s.gatewayError(closeCtx, "close_hijacked_subscription_connection", closeErr)
+			}
 		})
 	}, nil
 }
@@ -285,7 +307,7 @@ func (s *GatewayStore) ListSubscriptionCredentials(ctx context.Context, after in
 		AfterID: after, PageLimit: limit, RefreshBefore: pgTime(refreshBefore),
 	})
 	if err != nil {
-		return nil, gw.ErrUnavailable
+		return nil, s.gatewayError(ctx, "list_subscription_credentials", err)
 	}
 	result := make([]gw.SubscriptionCredential, 0, len(rows))
 	for _, row := range rows {
@@ -314,27 +336,27 @@ func (s *GatewayStore) ListSubscriptionCredentials(ctx context.Context, after in
 func (s *GatewayStore) Models(ctx context.Context, identity appsec.PrincipalIdentity) ([]gw.Model, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
-		return nil, gw.ErrUnavailable
+		return nil, s.gatewayError(ctx, "begin_list_models", err)
 	}
 	defer tx.Rollback(context.Background())
 	q := dbgen.New(tx)
 	active, err := q.GatewayIdentityActive(ctx, dbgen.GatewayIdentityActiveParams{AccessKeyID: identity.AccessKeyID, PrincipalID: identity.ID})
 	if err != nil {
-		return nil, gw.ErrUnavailable
+		return nil, s.gatewayError(ctx, "check_models_identity", err)
 	}
 	if !active {
 		return nil, gw.ErrAuthentication
 	}
 	rows, err := q.OpenAIModels(ctx, identity.ID)
 	if err != nil {
-		return nil, gw.ErrUnavailable
+		return nil, s.gatewayError(ctx, "query_openai_models", err)
 	}
 	result := make([]gw.Model, 0, len(rows))
 	for _, r := range rows {
 		result = append(result, gw.Model{ID: r.ModelCode, Object: "model", Created: r.CreatedAt.Time.Unix(), OwnedBy: r.ProviderCode})
 	}
-	if tx.Commit(ctx) != nil {
-		return nil, gw.ErrUnavailable
+	if err := tx.Commit(ctx); err != nil {
+		return nil, s.gatewayError(ctx, "commit_list_models", err)
 	}
 	return result, nil
 }

@@ -27,6 +27,9 @@ func (s *QueryService) withProviderCapabilities(provider Provider) Provider {
 func idString(id int64) string { return strconv.FormatInt(id, 10) }
 func validPage(p Page) bool    { return p.After >= 0 && p.Limit >= 1 && p.Limit <= 100 }
 func read[T any](ctx context.Context, s *QueryService, a admin.Identity, fn func(Reader) (T, error)) (result T, err error) {
+	if s == nil || dependencyMissing(s.store) {
+		return result, appsec.ErrUnavailable
+	}
 	err = s.store.Read(ctx, a, func(r Reader) error { var e error; result, e = fn(r); return e })
 	return
 }

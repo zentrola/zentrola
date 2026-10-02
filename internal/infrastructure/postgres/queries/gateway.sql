@@ -45,7 +45,7 @@ SELECT EXISTS(
 UPDATE provider_credential
 SET runtime_status='BLOCKED',blocked_reason=sqlc.arg(blocked_reason),blocked_at=sqlc.arg(blocked_at),
     last_error_at=sqlc.arg(blocked_at),last_http_status=sqlc.narg(http_status),
-    last_error_code=sqlc.arg(error_code),updated_by='system',updated_at=sqlc.arg(blocked_at)
+    last_error_code=sqlc.arg(error_code),updated_by='system',updated_at=sqlc.arg(blocked_at),version=version+1
 WHERE id=sqlc.arg(resource_id)
   AND NOT is_deleted AND runtime_status='HEALTHY';
 
@@ -53,13 +53,13 @@ WHERE id=sqlc.arg(resource_id)
 UPDATE provider_credential
 SET credential_ciphertext=sqlc.arg(credential_ciphertext),credential_nonce=sqlc.arg(credential_nonce),
     key_version=sqlc.arg(key_version),credential_refreshed_at=sqlc.narg(credential_refreshed_at),
-    credential_expires_at=sqlc.narg(credential_expires_at),updated_by='system',updated_at=sqlc.arg(updated_at)
+    credential_expires_at=sqlc.narg(credential_expires_at),updated_by='system',updated_at=sqlc.arg(updated_at),version=version+1
 WHERE id=sqlc.arg(resource_id) AND provider_id=sqlc.arg(provider_id) AND NOT is_deleted;
 
 -- name: UpdateGatewayResourceCredentialRefreshMetadata :execrows
 UPDATE provider_credential
 SET credential_refreshed_at=sqlc.narg(credential_refreshed_at),
-    credential_expires_at=sqlc.narg(credential_expires_at),updated_by='system',updated_at=sqlc.arg(updated_at)
+    credential_expires_at=sqlc.narg(credential_expires_at),updated_by='system',updated_at=sqlc.arg(updated_at),version=version+1
 WHERE id=sqlc.arg(resource_id) AND provider_id=sqlc.arg(provider_id) AND NOT is_deleted
   AND credential_expires_at IS NULL;
 

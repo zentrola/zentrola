@@ -49,10 +49,16 @@ type ModelStore interface {
 type modelStoreAdapter struct{ Store }
 
 func (s modelStoreAdapter) ReadModel(ctx context.Context, actor admin.Identity, fn func(ModelLookup) error) error {
+	if dependencyMissing(s.Store) {
+		return appsec.ErrUnavailable
+	}
 	return s.Read(ctx, actor, func(reader Reader) error { return fn(reader) })
 }
 
 func (s modelStoreAdapter) WriteModel(ctx context.Context, actor admin.Identity, fn func(ModelSession) error) error {
+	if dependencyMissing(s.Store) {
+		return appsec.ErrUnavailable
+	}
 	return s.Write(ctx, actor, func(writer Writer) error { return fn(writer) })
 }
 

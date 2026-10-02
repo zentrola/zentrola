@@ -37,6 +37,9 @@ type MemberStore interface {
 type memberStoreAdapter struct{ Store }
 
 func (s memberStoreAdapter) WriteMember(ctx context.Context, actor admin.Identity, fn func(MemberSession) error) error {
+	if dependencyMissing(s.Store) {
+		return appsec.ErrUnavailable
+	}
 	return s.Write(ctx, actor, func(writer Writer) error { return fn(writer) })
 }
 
@@ -71,6 +74,9 @@ type GroupStore interface {
 type groupStoreAdapter struct{ Store }
 
 func (s groupStoreAdapter) WriteGroup(ctx context.Context, actor admin.Identity, fn func(GroupSession) error) error {
+	if dependencyMissing(s.Store) {
+		return appsec.ErrUnavailable
+	}
 	return s.Write(ctx, actor, func(writer Writer) error { return fn(writer) })
 }
 

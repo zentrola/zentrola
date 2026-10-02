@@ -51,10 +51,16 @@ type ProviderStore interface {
 type providerStoreAdapter struct{ Store }
 
 func (s providerStoreAdapter) ReadProvider(ctx context.Context, actor admin.Identity, fn func(ProviderReadSession) error) error {
+	if dependencyMissing(s.Store) {
+		return appsec.ErrUnavailable
+	}
 	return s.Read(ctx, actor, func(reader Reader) error { return fn(reader) })
 }
 
 func (s providerStoreAdapter) WriteProvider(ctx context.Context, actor admin.Identity, fn func(ProviderSession) error) error {
+	if dependencyMissing(s.Store) {
+		return appsec.ErrUnavailable
+	}
 	return s.Write(ctx, actor, func(writer Writer) error { return fn(writer) })
 }
 

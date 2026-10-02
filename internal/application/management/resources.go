@@ -42,10 +42,16 @@ type ResourceStore interface {
 type resourceStoreAdapter struct{ Store }
 
 func (s resourceStoreAdapter) ReadResource(ctx context.Context, actor admin.Identity, fn func(ResourceReadSession) error) error {
+	if dependencyMissing(s.Store) {
+		return appsec.ErrUnavailable
+	}
 	return s.Read(ctx, actor, func(reader Reader) error { return fn(reader) })
 }
 
 func (s resourceStoreAdapter) WriteResource(ctx context.Context, actor admin.Identity, fn func(ResourceSession) error) error {
+	if dependencyMissing(s.Store) {
+		return appsec.ErrUnavailable
+	}
 	return s.Write(ctx, actor, func(writer Writer) error { return fn(writer) })
 }
 
@@ -160,7 +166,7 @@ func (s *ResourceService) CreateAuthenticationResource(ctx context.Context, acto
 	}
 	now := businessTime(s.now)
 	resource := Resource{
-		ID: id, ProviderID: input.ProviderID, Name: input.Name,
+		ID: id, Version: 1, ProviderID: input.ProviderID, Name: input.Name,
 		AuthType: input.AuthType, AuthAdapter: input.AuthAdapter, Priority: input.Priority,
 		EffectiveAt: input.EffectiveAt, ExpiresAt: input.ExpiresAt, QuotaStatus: QuotaUnknown,
 		RuntimeStatus: "HEALTHY", CredentialConfigured: true, CreatedAt: now, UpdatedAt: now,
@@ -288,7 +294,7 @@ func (s *ResourceService) UpdateCredential(ctx context.Context, actor admin.Iden
 		if err != nil {
 			return err
 		}
-		if !record.UpdatedAt.Equal(original.UpdatedAt) {
+		if record.Version != original.Version {
 			return ErrConflict
 		}
 		record.Sealed = sealed

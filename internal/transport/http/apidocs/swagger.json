@@ -7498,6 +7498,10 @@
                 },
                 "updatedAt": {
                     "type": "string"
+                },
+                "version": {
+                    "type": "string",
+                    "example": "1"
                 }
             }
         },
