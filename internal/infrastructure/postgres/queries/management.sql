@@ -247,14 +247,17 @@ WHERE provider_credential_id=$1 ORDER BY quota_code;
 -- name: ManageRestoreResourceRuntime :execrows
 UPDATE provider_credential
 SET runtime_status='HEALTHY',blocked_reason=NULL,blocked_at=NULL,last_error_at=NULL,
-    last_http_status=NULL,last_error_code=NULL,updated_by=$2,updated_at=$3,version=version+1
-WHERE id=$1 AND is_deleted=false AND runtime_status='BLOCKED';
+    last_http_status=NULL,last_error_code=NULL,
+    updated_by=CASE WHEN runtime_status='BLOCKED' THEN $2 ELSE updated_by END,
+    updated_at=CASE WHEN runtime_status='BLOCKED' THEN $3 ELSE updated_at END,
+    version=version+CASE WHEN runtime_status='BLOCKED' THEN 1 ELSE 0 END
+WHERE id=$1 AND is_deleted=false AND version=sqlc.arg(expected_version);
 
--- name: ManageBlockResourceRuntime :exec
+-- name: ManageBlockResourceRuntime :execrows
 UPDATE provider_credential
 SET runtime_status='BLOCKED',blocked_reason=$2,blocked_at=$3,last_error_at=$3,
     last_http_status=$4,last_error_code=$5,updated_by=$6,updated_at=$3,version=version+1
-WHERE id=$1 AND is_deleted=false;
+WHERE id=$1 AND is_deleted=false AND version=sqlc.arg(expected_version);
 
 -- name: ManageKeys :many
 SELECT id,name,masked_key,status,expires_at,revoked_at,created_at FROM principal_access_key

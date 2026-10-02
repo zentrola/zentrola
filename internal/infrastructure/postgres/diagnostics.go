@@ -41,8 +41,10 @@ func diagnosePostgresError(ctx context.Context, logger *slog.Logger, component, 
 			"sqlstate", pgErr.Code,
 			"constraint", pgErr.ConstraintName,
 		)
-	} else {
-		attributes = append(attributes, "cause", cause)
+	} else if errors.Is(cause, context.Canceled) {
+		attributes = append(attributes, "cause_code", "context_canceled")
+	} else if errors.Is(cause, context.DeadlineExceeded) {
+		attributes = append(attributes, "cause_code", "deadline_exceeded")
 	}
 	logger.ErrorContext(ctx, "PostgreSQL operation failed", attributes...)
 	return public

@@ -639,15 +639,28 @@ func (s *managementSession) ReplaceResourceQuotas(ctx context.Context, id int64,
 	}
 	return nil
 }
-func (s *managementSession) RestoreResourceRuntime(ctx context.Context, id int64, at time.Time) error {
-	_, err := s.q.ManageRestoreResourceRuntime(ctx, dbgen.ManageRestoreResourceRuntimeParams{
-		ID: id, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(at),
+func (s *managementSession) RestoreResourceRuntime(ctx context.Context, id, expectedVersion int64, at time.Time) error {
+	updated, err := s.q.ManageRestoreResourceRuntime(ctx, dbgen.ManageRestoreResourceRuntimeParams{
+		ID: id, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(at), ExpectedVersion: expectedVersion,
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	if updated != 1 {
+		return mgmt.ErrConflict
+	}
+	return nil
 }
-func (s *managementSession) BlockResourceRuntime(ctx context.Context, id int64, reason, code string, status *int32, at time.Time) error {
-	return s.q.ManageBlockResourceRuntime(ctx, dbgen.ManageBlockResourceRuntimeParams{
+func (s *managementSession) BlockResourceRuntime(ctx context.Context, id, expectedVersion int64, reason, code string, status *int32, at time.Time) error {
+	updated, err := s.q.ManageBlockResourceRuntime(ctx, dbgen.ManageBlockResourceRuntimeParams{
 		ID: id, BlockedReason: &reason, BlockedAt: pgTime(at), LastHttpStatus: status,
-		LastErrorCode: &code, UpdatedBy: actorRef(s.actor.ID),
+		LastErrorCode: &code, UpdatedBy: actorRef(s.actor.ID), ExpectedVersion: expectedVersion,
 	})
+	if err != nil {
+		return err
+	}
+	if updated != 1 {
+		return mgmt.ErrConflict
+	}
+	return nil
 }

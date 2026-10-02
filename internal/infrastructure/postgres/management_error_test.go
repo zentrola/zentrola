@@ -26,14 +26,17 @@ func TestManagementErrorIdentifiesDuplicateSubscriptionAccount(t *testing.T) {
 func TestManagementStoreLogsUnexpectedDatabaseError(t *testing.T) {
 	var output bytes.Buffer
 	store := &ManagementStore{logger: slog.New(slog.NewJSONHandler(&output, nil))}
-	cause := errors.New("connection reset")
+	cause := errors.New("connection reset: credential=secret-value")
 	err := store.managementError(context.Background(), "commit_transaction", cause)
 	if !errors.Is(err, appsec.ErrUnavailable) {
 		t.Fatalf("error=%v; want ErrUnavailable", err)
 	}
 	logLine := output.String()
-	if !strings.Contains(logLine, `"operation":"commit_transaction"`) || !strings.Contains(logLine, "connection reset") {
+	if !strings.Contains(logLine, `"operation":"commit_transaction"`) || !strings.Contains(logLine, `"cause_type":"*errors.errorString"`) {
 		t.Fatalf("unexpected diagnostic log: %s", logLine)
+	}
+	if strings.Contains(logLine, "secret-value") || strings.Contains(logLine, "connection reset") {
+		t.Fatalf("raw error text leaked into diagnostic log: %s", logLine)
 	}
 }
 

@@ -183,32 +183,37 @@ func (q *Queries) ManageAddMember(ctx context.Context, arg ManageAddMemberParams
 	return err
 }
 
-const manageBlockResourceRuntime = `-- name: ManageBlockResourceRuntime :exec
+const manageBlockResourceRuntime = `-- name: ManageBlockResourceRuntime :execrows
 UPDATE provider_credential
 SET runtime_status='BLOCKED',blocked_reason=$2,blocked_at=$3,last_error_at=$3,
     last_http_status=$4,last_error_code=$5,updated_by=$6,updated_at=$3,version=version+1
-WHERE id=$1 AND is_deleted=false
+WHERE id=$1 AND is_deleted=false AND version=$7
 `
 
 type ManageBlockResourceRuntimeParams struct {
-	ID             int64
-	BlockedReason  *string
-	BlockedAt      pgtype.Timestamptz
-	LastHttpStatus *int32
-	LastErrorCode  *string
-	UpdatedBy      string
+	ID              int64
+	BlockedReason   *string
+	BlockedAt       pgtype.Timestamptz
+	LastHttpStatus  *int32
+	LastErrorCode   *string
+	UpdatedBy       string
+	ExpectedVersion int64
 }
 
-func (q *Queries) ManageBlockResourceRuntime(ctx context.Context, arg ManageBlockResourceRuntimeParams) error {
-	_, err := q.db.Exec(ctx, manageBlockResourceRuntime,
+func (q *Queries) ManageBlockResourceRuntime(ctx context.Context, arg ManageBlockResourceRuntimeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, manageBlockResourceRuntime,
 		arg.ID,
 		arg.BlockedReason,
 		arg.BlockedAt,
 		arg.LastHttpStatus,
 		arg.LastErrorCode,
 		arg.UpdatedBy,
+		arg.ExpectedVersion,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const manageCreateGroup = `-- name: ManageCreateGroup :exec
@@ -1852,18 +1857,27 @@ func (q *Queries) ManageResources(ctx context.Context, arg ManageResourcesParams
 const manageRestoreResourceRuntime = `-- name: ManageRestoreResourceRuntime :execrows
 UPDATE provider_credential
 SET runtime_status='HEALTHY',blocked_reason=NULL,blocked_at=NULL,last_error_at=NULL,
-    last_http_status=NULL,last_error_code=NULL,updated_by=$2,updated_at=$3,version=version+1
-WHERE id=$1 AND is_deleted=false AND runtime_status='BLOCKED'
+    last_http_status=NULL,last_error_code=NULL,
+    updated_by=CASE WHEN runtime_status='BLOCKED' THEN $2 ELSE updated_by END,
+    updated_at=CASE WHEN runtime_status='BLOCKED' THEN $3 ELSE updated_at END,
+    version=version+CASE WHEN runtime_status='BLOCKED' THEN 1 ELSE 0 END
+WHERE id=$1 AND is_deleted=false AND version=$4
 `
 
 type ManageRestoreResourceRuntimeParams struct {
-	ID        int64
-	UpdatedBy string
-	UpdatedAt pgtype.Timestamptz
+	ID              int64
+	UpdatedBy       string
+	UpdatedAt       pgtype.Timestamptz
+	ExpectedVersion int64
 }
 
 func (q *Queries) ManageRestoreResourceRuntime(ctx context.Context, arg ManageRestoreResourceRuntimeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, manageRestoreResourceRuntime, arg.ID, arg.UpdatedBy, arg.UpdatedAt)
+	result, err := q.db.Exec(ctx, manageRestoreResourceRuntime,
+		arg.ID,
+		arg.UpdatedBy,
+		arg.UpdatedAt,
+		arg.ExpectedVersion,
+	)
 	if err != nil {
 		return 0, err
 	}
