@@ -16,7 +16,6 @@ import (
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	"github.com/zentrola/zentrola/internal/domain/catalog"
 	"github.com/zentrola/zentrola/internal/domain/usage"
-	"github.com/zentrola/zentrola/internal/infrastructure/config"
 )
 
 type completionStore struct{}
@@ -122,7 +121,7 @@ func TestAnthropicInvalidContentBlockStreamIsRejected(t *testing.T) {
 	})
 	state := &completionRouteState{}
 	service := gw.New(completionStore{}, completionCipher{}, upstream, gw.WithRouteState(state))
-	handler := NewGatewayHandler(service, config.Gateway{
+	handler := NewGatewayHandler(service, GatewayOptions{
 		MaxBodyBytes:    1 << 20,
 		RequestTimeout:  time.Second,
 		BodyReadTimeout: time.Second,
@@ -166,7 +165,7 @@ func TestAnthropicValidContentBlockStreamPassesThroughUnchanged(t *testing.T) {
 	})
 	state := &completionRouteState{}
 	service := gw.New(completionStore{}, completionCipher{}, upstream, gw.WithRouteState(state))
-	handler := NewGatewayHandler(service, config.Gateway{
+	handler := NewGatewayHandler(service, GatewayOptions{
 		MaxBodyBytes:    1 << 20,
 		RequestTimeout:  time.Second,
 		BodyReadTimeout: time.Second,
@@ -226,7 +225,7 @@ func TestOpenAIImageGenerationPassThrough(t *testing.T) {
 				return &gw.Response{Status: http.StatusOK, Headers: headers, Body: io.NopCloser(strings.NewReader(test.response))}, nil
 			})
 			service := gw.New(completionStore{}, completionCipher{}, upstream)
-			handler := NewOpenAIGatewayHandler(service, config.Gateway{
+			handler := NewOpenAIGatewayHandler(service, GatewayOptions{
 				MaxBodyBytes:    1 << 20,
 				RequestTimeout:  time.Second,
 				BodyReadTimeout: time.Second,
@@ -270,7 +269,7 @@ func TestOpenAIResponsesCompletionWinsFollowingClientCancellation(t *testing.T) 
 		}, nil
 	})
 	service := gw.New(completionStore{}, completionCipher{}, upstream)
-	handler := NewOpenAIGatewayHandler(service, config.Gateway{
+	handler := NewOpenAIGatewayHandler(service, GatewayOptions{
 		MaxBodyBytes:    1 << 20,
 		RequestTimeout:  time.Second,
 		BodyReadTimeout: time.Second,
@@ -309,7 +308,7 @@ func TestOpenAIResponsesPassesThroughOversizedImageGenerationEvent(t *testing.T)
 		}, nil
 	})
 	service := gw.New(completionStore{}, completionCipher{}, upstream)
-	handler := NewOpenAIGatewayHandler(service, config.Gateway{
+	handler := NewOpenAIGatewayHandler(service, GatewayOptions{
 		MaxBodyBytes:    1 << 20,
 		RequestTimeout:  time.Second,
 		BodyReadTimeout: time.Second,
@@ -348,7 +347,7 @@ func TestOpenAIResponsesInfersStreamWhenUpstreamOmitsContentType(t *testing.T) {
 	})
 	service := gw.New(completionStore{}, completionCipher{}, upstream)
 	var logs bytes.Buffer
-	handler := NewOpenAIGatewayHandler(service, config.Gateway{
+	handler := NewOpenAIGatewayHandler(service, GatewayOptions{
 		MaxBodyBytes:    1 << 20,
 		RequestTimeout:  time.Second,
 		BodyReadTimeout: time.Second,
@@ -402,7 +401,7 @@ func TestOpenAIResponsesAutoDetectsJSONWhenUpstreamOmitsContentType(t *testing.T
 	})
 	service := gw.New(completionStore{}, completionCipher{}, upstream)
 	var logs bytes.Buffer
-	handler := NewOpenAIGatewayHandler(service, config.Gateway{
+	handler := NewOpenAIGatewayHandler(service, GatewayOptions{
 		MaxBodyBytes:    1 << 20,
 		RequestTimeout:  time.Second,
 		BodyReadTimeout: time.Second,
@@ -455,7 +454,7 @@ func TestOpenAIResponsesDrainsCompletionAfterClientCancellation(t *testing.T) {
 	})
 	service := gw.New(completionStore{}, completionCipher{}, upstream)
 	var logs bytes.Buffer
-	handler := NewOpenAIGatewayHandler(service, config.Gateway{
+	handler := NewOpenAIGatewayHandler(service, GatewayOptions{
 		MaxBodyBytes:    1 << 20,
 		RequestTimeout:  time.Second,
 		BodyReadTimeout: time.Second,
@@ -507,7 +506,7 @@ func TestOpenAIResponsesCancelsUpstreamBeforeResponseOpens(t *testing.T) {
 		return nil, gw.ErrCancelled
 	})
 	service := gw.New(completionStore{}, completionCipher{}, upstream)
-	handler := NewOpenAIGatewayHandler(service, config.Gateway{
+	handler := NewOpenAIGatewayHandler(service, GatewayOptions{
 		MaxBodyBytes:    1 << 20,
 		RequestTimeout:  time.Second,
 		BodyReadTimeout: time.Second,

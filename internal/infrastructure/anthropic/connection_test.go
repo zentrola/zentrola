@@ -66,6 +66,21 @@ func TestAnthropicConnectionUsesRealInference(t *testing.T) {
 	}
 }
 
+func TestConnectionTestReportsProxyAuthenticationRejection(t *testing.T) {
+	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusProxyAuthRequired)
+	}))
+	defer proxyServer.Close()
+	proxyURL := strings.Replace(proxyServer.URL, "://", "://user:wrong-password@", 1)
+	tester := NewConnectionTester()
+	result := tester.Test(context.Background(), mgmt.ConnectionTarget{
+		Protocol: "ANTHROPIC", BaseURL: "https://api.anthropic.com", UpstreamModelCode: "claude-test", AuthType: mgmt.AuthTypeAPIKey,
+	}, []byte("provider-secret"), &catalog.OutboundProxy{URL: proxyURL})
+	if result.OK || result.Code != "PROXY_AUTH_REJECTED" {
+		t.Fatalf("proxy authentication rejection was not reported: %+v", result)
+	}
+}
+
 func TestClaudeSubscriptionConnectionUsesOAuthBearer(t *testing.T) {
 	tester := NewConnectionTester()
 	tester.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {

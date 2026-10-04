@@ -31,7 +31,6 @@ import (
 	"github.com/zentrola/zentrola/internal/infrastructure/openai"
 	"github.com/zentrola/zentrola/internal/infrastructure/openaicodex"
 	"github.com/zentrola/zentrola/internal/infrastructure/postgres"
-	"github.com/zentrola/zentrola/internal/infrastructure/provider"
 	"github.com/zentrola/zentrola/internal/infrastructure/redisstate"
 	cryptosec "github.com/zentrola/zentrola/internal/infrastructure/security"
 	"github.com/zentrola/zentrola/internal/infrastructure/telemetry"
@@ -136,7 +135,6 @@ func run(args []string, output io.Writer) (runErr error) {
 }
 
 func runService(command commandOptions, selection configSelection, cfg config.Config, managed *managedProcess, output io.Writer) (runErr error) {
-	provider.ConfigureLogEnvironment(cfg.Environment)
 	mode := command.name
 	// 显式指定配置后，配置中的相对运行路径必须稳定。
 	if selection.pinned {
@@ -360,8 +358,13 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 		m := usageWriter.Metrics()
 		logger.Info("usage writer stopped", "persisted", m.Persisted, "failed", m.Failed, "pending", m.Pending)
 	}()
-	gatewayHandler := httptransport.NewGatewayHandler(gatewayService, cfg.Gateway, logger, usageWriter)
-	openaiHandler := httptransport.NewOpenAIGatewayHandler(gatewayService, cfg.Gateway, logger, usageWriter)
+	gatewayOptions := httptransport.GatewayOptions{
+		MaxBodyBytes: cfg.Gateway.MaxBodyBytes, RequestTimeout: cfg.Gateway.RequestTimeout,
+		BodyReadTimeout: cfg.Gateway.BodyReadTimeout, WriteTimeout: cfg.Gateway.WriteTimeout,
+		Development: cfg.Gateway.Development,
+	}
+	gatewayHandler := httptransport.NewGatewayHandler(gatewayService, gatewayOptions, logger, usageWriter)
+	openaiHandler := httptransport.NewOpenAIGatewayHandler(gatewayService, gatewayOptions, logger, usageWriter)
 	cancel()
 
 	readiness := health.New(
@@ -372,7 +375,7 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 	var active sync.WaitGroup
 	var admission sync.Mutex
 	stopping := false
-	router := httptransport.NewRouter(logger, readiness, cfg.CORS, cfg.HealthTimeout, cfg.Environment, &httptransport.SecurityHandlers{Admin: adminService, Keys: keyService, Management: managementService, Gateway: gatewayHandler, OpenAI: openaiHandler, ActiveModels: gatewayCache, Usage: usageapp.NewQuery(usageStore), UsageWriter: usageWriter, BodyReadTimeout: cfg.BodyReadTimeout})
+	router := httptransport.NewRouter(logger, readiness, httptransport.CORSOptions{Enabled: cfg.CORS.Enabled, Origins: cfg.CORS.Origins}, cfg.HealthTimeout, cfg.Environment, &httptransport.SecurityHandlers{Admin: adminService, Keys: keyService, Management: managementService, Gateway: gatewayHandler, OpenAI: openaiHandler, ActiveModels: gatewayCache, Usage: usageapp.NewQuery(usageStore), UsageWriter: usageWriter, BodyReadTimeout: cfg.BodyReadTimeout})
 	server := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

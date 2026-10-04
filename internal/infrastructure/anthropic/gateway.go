@@ -157,6 +157,9 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 		// 明确标记为代理服务器故障，避免用户误以为服务商本身不可用。
 		if route.Proxy != nil {
 			failure = gw.ErrProxyServer
+			if errors.Is(err, provider.ErrProxyAuthentication) {
+				failure = gw.ErrProxyAuth
+			}
 		}
 		var netErr net.Error
 		if route.Proxy == nil && (errors.Is(ctx.Err(), context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout())) {

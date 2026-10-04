@@ -21,17 +21,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-type requestIDKey struct{}
-
-func WithRequestID(ctx context.Context, id string) context.Context {
-	return context.WithValue(ctx, requestIDKey{}, id)
-}
-
-func RequestID(ctx context.Context) string {
-	id, _ := ctx.Value(requestIDKey{}).(string)
-	return id
-}
-
 func TraceIDs(ctx context.Context) (traceID, spanID string) {
 	spanContext := trace.SpanContextFromContext(ctx)
 	if !spanContext.IsValid() {

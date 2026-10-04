@@ -19,7 +19,6 @@ import (
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	usageapp "github.com/zentrola/zentrola/internal/application/usage"
 	"github.com/zentrola/zentrola/internal/domain/admin"
-	"github.com/zentrola/zentrola/internal/infrastructure/logging"
 )
 
 type SecurityHandlers struct {
@@ -282,6 +281,7 @@ func (s *SecurityHandlers) gatewayAuth(next http.Handler) http.Handler {
 			}
 			logger.WarnContext(r.Context(), "gateway authentication failed",
 				"gateway_protocol", "anthropic", "credential_source", credentialSource,
+				"request_id", requestIDFromContext(r.Context()),
 				"error_code", errorCode)
 			if errors.Is(err, appsec.ErrUnauthenticated) {
 				writeGatewayError(w, gw.ErrAuthentication)
@@ -316,6 +316,7 @@ func (s *SecurityHandlers) openaiAuth(next http.Handler) http.Handler {
 			}
 			logger.WarnContext(r.Context(), "gateway authentication failed",
 				"gateway_protocol", "openai", "credential_source", credentialSource,
+				"request_id", requestIDFromContext(r.Context()),
 				"error_code", failure.Code)
 			writeOpenAIError(w, failure)
 			return
@@ -390,7 +391,7 @@ func bearer(r *http.Request) string {
 }
 func requestMeta(r *http.Request) appsec.RequestMeta {
 	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
-	return appsec.RequestMeta{RequestID: logging.RequestID(r.Context()), Method: r.Method, Path: r.URL.Path, IP: ip, UserAgent: r.UserAgent()}
+	return appsec.RequestMeta{RequestID: requestIDFromContext(r.Context()), Method: r.Method, Path: r.URL.Path, IP: ip, UserAgent: r.UserAgent()}
 }
 
 type requestPayload interface {

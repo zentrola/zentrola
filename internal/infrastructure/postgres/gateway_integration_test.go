@@ -23,7 +23,6 @@ import (
 	mgmt "github.com/zentrola/zentrola/internal/application/management"
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	"github.com/zentrola/zentrola/internal/domain/admin"
-	"github.com/zentrola/zentrola/internal/infrastructure/config"
 	"github.com/zentrola/zentrola/internal/infrastructure/idgen"
 	"github.com/zentrola/zentrola/internal/infrastructure/logging"
 	cryptosec "github.com/zentrola/zentrola/internal/infrastructure/security"
@@ -202,9 +201,9 @@ func TestStage4Integration(t *testing.T) {
 	service := gw.New(NewGatewayStore(pool), cipher, upstream)
 	var logs synchronizedLogs
 	logger := logging.New(&logs, "json", slog.LevelInfo)
-	cfg := config.Gateway{MaxBodyBytes: 4096, RequestTimeout: 5 * time.Second, HeaderTimeout: time.Second, BodyReadTimeout: time.Second, WriteTimeout: time.Second}
-	makeRouter := func(cfg config.Gateway) http.Handler {
-		return httptransport.NewRouter(logger, health.New(), config.CORS{}, time.Second, "prod", &httptransport.SecurityHandlers{Admin: admins, Keys: keys, Management: management, Gateway: httptransport.NewGatewayHandler(service, cfg, logger)})
+	cfg := httptransport.GatewayOptions{MaxBodyBytes: 4096, RequestTimeout: 5 * time.Second, BodyReadTimeout: time.Second, WriteTimeout: time.Second}
+	makeRouter := func(cfg httptransport.GatewayOptions) http.Handler {
+		return httptransport.NewRouter(logger, health.New(), httptransport.CORSOptions{}, time.Second, "prod", &httptransport.SecurityHandlers{Admin: admins, Keys: keys, Management: management, Gateway: httptransport.NewGatewayHandler(service, cfg, logger)})
 	}
 	server := httptest.NewServer(makeRouter(cfg))
 	defer server.Close()

@@ -21,7 +21,6 @@ import (
 	app "github.com/zentrola/zentrola/internal/application/usage"
 	"github.com/zentrola/zentrola/internal/domain/admin"
 	domain "github.com/zentrola/zentrola/internal/domain/usage"
-	"github.com/zentrola/zentrola/internal/infrastructure/config"
 	"github.com/zentrola/zentrola/internal/infrastructure/idgen"
 	cryptosec "github.com/zentrola/zentrola/internal/infrastructure/security"
 	httptransport "github.com/zentrola/zentrola/internal/transport/http"
@@ -154,9 +153,9 @@ func TestStage5Integration(t *testing.T) {
 		}
 		return &gw.Response{Status: status, Headers: map[string][]string{"Content-Type": {media}}, Body: reader}, nil
 	})
-	cfg := config.Gateway{MaxBodyBytes: 1 << 20, RequestTimeout: 200 * time.Millisecond, BodyReadTimeout: time.Second, WriteTimeout: time.Second}
+	cfg := httptransport.GatewayOptions{MaxBodyBytes: 1 << 20, RequestTimeout: 200 * time.Millisecond, BodyReadTimeout: time.Second, WriteTimeout: time.Second}
 	handler := httptransport.NewGatewayHandler(gw.New(NewGatewayStore(pool), cipher, upstream), cfg, logger, writer)
-	server := httptest.NewServer(httptransport.NewRouter(logger, health.New(), config.CORS{}, time.Second, "prod", &httptransport.SecurityHandlers{Admin: admins, Keys: keys, Management: management, Gateway: handler, Usage: app.NewQuery(store), UsageWriter: writer}))
+	server := httptest.NewServer(httptransport.NewRouter(logger, health.New(), httptransport.CORSOptions{}, time.Second, "prod", &httptransport.SecurityHandlers{Admin: admins, Keys: keys, Management: management, Gateway: handler, Usage: app.NewQuery(store), UsageWriter: writer}))
 	defer server.Close()
 	requestIDs := map[string]string{}
 	call := func(name, body, path string, want int) {

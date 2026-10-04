@@ -15,7 +15,6 @@ import (
 
 	gw "github.com/zentrola/zentrola/internal/application/gateway"
 	"github.com/zentrola/zentrola/internal/application/health"
-	"github.com/zentrola/zentrola/internal/infrastructure/config"
 	"github.com/zentrola/zentrola/internal/infrastructure/logging"
 	"github.com/zentrola/zentrola/internal/infrastructure/telemetry"
 )
@@ -61,7 +60,7 @@ func TestHealthAndRequestCorrelation(t *testing.T) {
 		health.Check{Name: "postgres", Run: func(context.Context) error { return errors.New("database-secret") }},
 		health.Check{Name: "master_key", Run: health.Pending},
 	)
-	router := NewRouter(logging.New(&logs, "json", slog.LevelInfo), service, config.CORS{}, time.Second, "prod")
+	router := NewRouter(logging.New(&logs, "json", slog.LevelInfo), service, CORSOptions{}, time.Second, "prod")
 	seen := map[string]bool{}
 	for path, want := range map[string]int{"/health/live": 200, "/health/ready": 503, "/missing": 404} {
 		req := httptest.NewRequest("GET", path+"?token=query-secret", nil)
@@ -102,7 +101,7 @@ func TestHealthAndRequestCorrelation(t *testing.T) {
 func TestRequestIDDistinguishesServerSpansWithinTrace(t *testing.T) {
 	provider := telemetry.Setup()
 	t.Cleanup(func() { _ = telemetry.Shutdown(context.Background(), provider) })
-	router := NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), health.New(), config.CORS{}, time.Second, "prod")
+	router := NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), health.New(), CORSOptions{}, time.Second, "prod")
 	const traceID = "4bf92f3577b34da6a3ce929d0e0e4736"
 	const traceparent = "00-" + traceID + "-00f067aa0ba902b7-01"
 
@@ -131,7 +130,7 @@ func TestRequestIDDistinguishesServerSpansWithinTrace(t *testing.T) {
 }
 
 func TestRootReturnsReadyMessage(t *testing.T) {
-	router := NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), health.New(), config.CORS{}, time.Second, "prod")
+	router := NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), health.New(), CORSOptions{}, time.Second, "prod")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 
@@ -154,7 +153,7 @@ func TestIncomingTraceparentContinuesTraceWithNewServerSpan(t *testing.T) {
 	t.Cleanup(func() { _ = telemetry.Shutdown(context.Background(), provider) })
 	const traceID = "4bf92f3577b34da6a3ce929d0e0e4736"
 	const parentSpanID = "00f067aa0ba902b7"
-	router := NewRouter(slog.New(slog.NewJSONHandler(io.Discard, nil)), health.New(), config.CORS{}, time.Second, "prod")
+	router := NewRouter(slog.New(slog.NewJSONHandler(io.Discard, nil)), health.New(), CORSOptions{}, time.Second, "prod")
 	req := httptest.NewRequest(http.MethodGet, "/health/live", nil)
 	req.Header.Set("traceparent", "00-"+traceID+"-"+parentSpanID+"-01")
 	rec := httptest.NewRecorder()
@@ -169,7 +168,7 @@ func TestIncomingTraceparentContinuesTraceWithNewServerSpan(t *testing.T) {
 
 func TestReadyWhenAllDependenciesReady(t *testing.T) {
 	service := health.New(health.Check{Name: "postgres", Run: func(context.Context) error { return nil }})
-	router := NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), service, config.CORS{}, time.Second, "prod")
+	router := NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), service, CORSOptions{}, time.Second, "prod")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest("GET", "/health/ready", nil))
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"status":"READY"`) {
@@ -179,7 +178,7 @@ func TestReadyWhenAllDependenciesReady(t *testing.T) {
 
 func TestCORSAllowlist(t *testing.T) {
 	router := NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), health.New(),
-		config.CORS{Enabled: true, Origins: []string{"http://127.0.0.1:3000"}}, time.Second, "prod")
+		CORSOptions{Enabled: true, Origins: []string{"http://127.0.0.1:3000"}}, time.Second, "prod")
 	for _, tt := range []struct {
 		name, origin, method, headers string
 		allowed                       bool
@@ -215,7 +214,7 @@ func TestMiddlewarePreservesStreamingAndCancellation(t *testing.T) {
 		if !errors.Is(r.Context().Err(), context.Canceled) {
 			t.Fatal("cancellation lost")
 		}
-		if logging.RequestID(r.Context()) == "" {
+		if requestIDFromContext(r.Context()) == "" {
 			t.Fatal("request context missing ID")
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -231,14 +230,14 @@ func TestMiddlewarePreservesStreamingAndCancellation(t *testing.T) {
 	}
 }
 
-func TestNonProductionAccessLogCapturesBodiesWithSensitiveDataRedacted(t *testing.T) {
+func TestAccessLogRedactsBodiesInEveryEnvironment(t *testing.T) {
 	provider := telemetry.Setup()
 	t.Cleanup(func() { _ = telemetry.Shutdown(context.Background(), provider) })
-	for _, environment := range []string{"dev", "test"} {
+	for _, environment := range []string{"dev", "test", "prod"} {
 		t.Run(environment, func(t *testing.T) {
 			var logs bytes.Buffer
 			logger := logging.New(&logs, "json", slog.LevelInfo)
-			handler := requestID(accessLog(logger, environment)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			handler := requestID(accessLog(logger)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				_, _ = io.Copy(io.Discard, r.Body)
 				w.Header().Set("Content-Type", "application/json")
 				w.Header().Set("X-Debug-Response", "response-header-value")
@@ -255,16 +254,17 @@ func TestNonProductionAccessLogCapturesBodiesWithSensitiveDataRedacted(t *testin
 			output := logs.String()
 			for _, required := range []string{
 				"time", "trace_id", "span_id", "duration_ms", "request", "response", "method", "url", "status",
-				"headers", "body", "bytes", "claude-sonnet",
-				"MODEL_PERMISSION_DENIED", "private-prompt", "future-schema-secret", "unknown-content-secret", "query-secret",
-				"request-header-value", "response-header-value",
-				"******",
+				"headers", "body", "bytes", "******", rec.Header().Get("X-Request-ID"),
 			} {
 				if !strings.Contains(output, required) {
 					t.Fatalf("non-production access log missing %s: %s", required, output)
 				}
 			}
-			for _, secret := range []string{"request-secret", "response-secret", "development-access-key"} {
+			for _, secret := range []string{
+				"request-secret", "response-secret", "development-access-key", "private-prompt",
+				"future-schema-secret", "unknown-content-secret", "query-secret",
+				"request-header-value", "response-header-value",
+			} {
 				if strings.Contains(output, secret) {
 					t.Fatalf("non-production access log leaked %s: %s", secret, output)
 				}
@@ -272,21 +272,18 @@ func TestNonProductionAccessLogCapturesBodiesWithSensitiveDataRedacted(t *testin
 			if strings.Count(output, `"trace_id"`) != 1 || strings.Count(output, `"span_id"`) != 1 {
 				t.Fatalf("trace and span IDs must each appear once: %s", output)
 			}
-			if strings.Contains(output, `\"model\"`) || strings.Contains(output, `\"error\"`) {
-				t.Fatalf("JSON bodies must be nested objects instead of escaped strings: %s", output)
-			}
 		})
 	}
 }
 
-func TestNonProductionAccessLogBoundsLargeBodies(t *testing.T) {
+func TestAccessLogOmitsLargeBodies(t *testing.T) {
 	requestBody := `{"prompt":"` + strings.Repeat("large-private-prompt-", 10_000) + `"}`
 	responseBody := "event: response.completed\ndata: private-stream-response\n\n"
 	for _, environment := range []string{"dev", "test"} {
 		t.Run(environment, func(t *testing.T) {
 			var logs bytes.Buffer
 			logger := logging.New(&logs, "json", slog.LevelInfo)
-			handler := accessLog(logger, environment)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			handler := accessLog(logger)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				_, _ = io.Copy(io.Discard, r.Body)
 				w.Header().Set("Content-Type", "text/event-stream")
 				_, _ = io.WriteString(w, responseBody)
@@ -301,9 +298,52 @@ func TestNonProductionAccessLogBoundsLargeBodies(t *testing.T) {
 			}
 			request, requestOK := record["request"].(map[string]any)
 			response, responseOK := record["response"].(map[string]any)
-			body, bodyOK := request["body"].(string)
-			if !requestOK || !responseOK || !bodyOK || len(body) > accessLogBodyLimit || request["body_truncated"] != true || response["body"] != responseBody || response["body_truncated"] == true {
-				t.Fatalf("%s access log body capture was not bounded correctly", environment)
+			if !requestOK || !responseOK || request["body"] != "******" || response["body"] != "******" ||
+				request["bytes"] != float64(len(requestBody)) || response["bytes"] != float64(len(responseBody)) ||
+				strings.Contains(logs.String(), "large-private-prompt") || strings.Contains(logs.String(), "private-stream-response") {
+				t.Fatalf("%s access log exposed a body or lost byte counts: %s", environment, logs.String())
+			}
+		})
+	}
+}
+
+func TestAccessLogCountsBytesReadFromUnknownLengthBody(t *testing.T) {
+	const body = "private-request-body"
+	for _, test := range []struct {
+		name string
+		read int64
+		want int64
+	}{
+		{name: "entire_body", want: int64(len(body))},
+		{name: "partial_body", read: 7, want: 7},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			handler := accessLog(logging.New(&logs, "json", slog.LevelInfo))(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var err error
+				if test.read > 0 {
+					_, err = io.CopyN(io.Discard, r.Body, test.read)
+				} else {
+					_, err = io.Copy(io.Discard, r.Body)
+				}
+				if err != nil {
+					t.Errorf("read request body: %v", err)
+				}
+			}))
+			request := httptest.NewRequest(http.MethodPost, "/v1/responses", io.NopCloser(strings.NewReader(body)))
+			request.ContentLength = -1
+			handler.ServeHTTP(httptest.NewRecorder(), request)
+			var record struct {
+				Request struct {
+					Bytes int64  `json:"bytes"`
+					Body  string `json:"body"`
+				} `json:"request"`
+			}
+			if err := json.Unmarshal(logs.Bytes(), &record); err != nil {
+				t.Fatal(err)
+			}
+			if record.Request.Bytes != test.want || record.Request.Body != "******" || strings.Contains(logs.String(), body) {
+				t.Fatalf("unexpected request log: bytes=%d body=%q log=%s", record.Request.Bytes, record.Request.Body, logs.String())
 			}
 		})
 	}
@@ -315,7 +355,7 @@ func TestNonProductionAccessLogOmitsResponsesSSEBody(t *testing.T) {
 		t.Run(environment, func(t *testing.T) {
 			var logs bytes.Buffer
 			logger := logging.New(&logs, "json", slog.LevelInfo)
-			handler := accessLog(logger, environment)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			handler := accessLog(logger)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 				_, _ = io.WriteString(w, responseBody)
 			}))
@@ -331,7 +371,7 @@ func TestNonProductionAccessLogOmitsResponsesSSEBody(t *testing.T) {
 			if !ok || response["bytes"] != float64(len(responseBody)) {
 				t.Fatalf("%s Responses SSE metadata missing: %v", environment, record)
 			}
-			if _, logged := response["body"]; logged || strings.Contains(logs.String(), "private-stream-response") {
+			if response["body"] != "******" || strings.Contains(logs.String(), "private-stream-response") {
 				t.Fatalf("%s Responses SSE body was logged: %s", environment, logs.String())
 			}
 		})
@@ -341,7 +381,7 @@ func TestNonProductionAccessLogOmitsResponsesSSEBody(t *testing.T) {
 func TestProductionAccessLogMasksBodies(t *testing.T) {
 	var logs bytes.Buffer
 	logger := logging.New(&logs, "json", slog.LevelInfo)
-	handler := requestID(accessLog(logger, "prod")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := requestID(accessLog(logger)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)
 		w.Header().Set("Set-Cookie", "session=response-cookie")
 		_, _ = io.WriteString(w, `{"value":"response-value"}`)

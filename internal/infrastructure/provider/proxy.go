@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/zentrola/zentrola/internal/domain/catalog"
@@ -24,10 +23,12 @@ type ProxyRequestLog struct {
 	Protocol     string
 }
 
-var redactProviderLogSecrets atomic.Bool
+// ErrProxyAuthentication 表示代理明确拒绝凭据，不能据此断定仅密码有误。
+var ErrProxyAuthentication = errors.New("proxy authentication rejected")
 
 type publicTargetTransport struct {
-	transport *http.Transport
+	transport   *http.Transport
+	proxyScheme string
 }
 
 func (t *publicTargetTransport) RoundTrip(request *http.Request) (*http.Response, error) {
@@ -39,7 +40,7 @@ func (t *publicTargetTransport) RoundTrip(request *http.Request) (*http.Response
 	if err := nonPublicLiteralError(request.URL.Hostname()); err != nil {
 		return nil, err
 	}
-	return t.transport.RoundTrip(request)
+	return proxyRoundTrip(t.transport, request, t.proxyScheme)
 }
 
 func (t *publicTargetTransport) CloseIdleConnections() { t.transport.CloseIdleConnections() }
@@ -56,6 +57,7 @@ func nonPublicLiteralError(host string) error {
 type scopedTargetTransport struct {
 	transport    *http.Transport
 	networkScope string
+	proxyScheme  string
 }
 
 func (t *scopedTargetTransport) RoundTrip(request *http.Request) (*http.Response, error) {
@@ -65,7 +67,20 @@ func (t *scopedTargetTransport) RoundTrip(request *http.Request) (*http.Response
 	if err := endpointLiteralError(request.URL.Hostname(), t.networkScope); err != nil {
 		return nil, err
 	}
-	return t.transport.RoundTrip(request)
+	return proxyRoundTrip(t.transport, request, t.proxyScheme)
+}
+
+func proxyRoundTrip(transport *http.Transport, request *http.Request, proxyScheme string) (*http.Response, error) {
+	response, err := transport.RoundTrip(request)
+	// HTTP 目标的 407 无法可靠区分代理自身响应与代理转发的上游响应；
+	// 只在 HTTPS CONNECT 回调或 SOCKS5 握手明确拒绝时归类为代理认证失败。
+	// net/http 的 SOCKS5 实现没有导出类型化的认证错误；只匹配其明确的
+	// 握手拒绝文本，不把一般代理连接错误误判为密码错误。
+	if err != nil && catalog.SOCKSProxyScheme(proxyScheme) && (strings.Contains(err.Error(), "username/password authentication failed") ||
+		strings.Contains(err.Error(), "no acceptable authentication methods")) {
+		return nil, ErrProxyAuthentication
+	}
+	return response, err
 }
 
 func endpointLiteralError(host, networkScope string) error {
@@ -76,18 +91,6 @@ func endpointLiteralError(host, networkScope string) error {
 }
 
 func (t *scopedTargetTransport) CloseIdleConnections() { t.transport.CloseIdleConnections() }
-
-func init() {
-	// 未显式配置运行环境时采用生产环境策略，避免测试工具或独立调用意外输出凭据。
-	redactProviderLogSecrets.Store(true)
-}
-
-// ConfigureLogEnvironment 配置进程级 Provider 日志策略。只有明确的 dev/test 环境
-// 输出完整诊断信息，prod 或未知环境均脱敏。
-func ConfigureLogEnvironment(environment string) {
-	environment = strings.ToLower(strings.TrimSpace(environment))
-	redactProviderLogSecrets.Store(environment != "dev" && environment != "test")
-}
 
 func parseProxyURL(proxy *catalog.OutboundProxy) (*url.URL, error) {
 	if proxy == nil {
@@ -101,8 +104,8 @@ func parseProxyURL(proxy *catalog.OutboundProxy) (*url.URL, error) {
 	return proxyURL, nil
 }
 
-func proxyLogURL(proxyURL *url.URL, redact bool) string {
-	if !redact || proxyURL.User == nil {
+func proxyLogURL(proxyURL *url.URL) string {
+	if proxyURL.User == nil {
 		return proxyURL.String()
 	}
 	safe := *proxyURL
@@ -115,13 +118,10 @@ func proxyLogURL(proxyURL *url.URL, redact bool) string {
 	return strings.ReplaceAll(safe.String(), "%2A", "*")
 }
 
-func proxyLogHeaders(headers map[string]string, redact bool) map[string]string {
+func proxyLogHeaders(headers map[string]string) map[string]string {
 	result := make(map[string]string, len(headers))
-	for name, value := range headers {
-		if redact {
-			value = "******"
-		}
-		result[http.CanonicalHeaderKey(name)] = value
+	for name := range headers {
+		result[http.CanonicalHeaderKey(name)] = "******"
 	}
 	return result
 }
@@ -131,13 +131,12 @@ func logProxyRequest(ctx context.Context, proxyURL *url.URL, headers map[string]
 	if logger == nil {
 		logger = slog.Default()
 	}
-	redact := redactProviderLogSecrets.Load()
 	attributes := []any{
 		"proxy", true,
-		"proxy_url", proxyLogURL(proxyURL, redact),
+		"proxy_url", proxyLogURL(proxyURL),
 		"proxy_auth", proxyURL.User != nil,
-		"proxy_headers", proxyLogHeaders(headers, redact),
-		"proxy_redacted", redact,
+		"proxy_headers", proxyLogHeaders(headers),
+		"proxy_redacted", true,
 	}
 	if details.Operation != "" {
 		attributes = append(attributes, "operation", details.Operation)
@@ -183,6 +182,16 @@ func ClientWithProxyForScope(ctx context.Context, base *http.Client, proxy *cata
 	}
 	transport := baseTransport.Clone()
 	transport.Proxy = http.ProxyURL(proxyURL)
+	previousConnectResponse := transport.OnProxyConnectResponse
+	transport.OnProxyConnectResponse = func(ctx context.Context, proxyURL *url.URL, request *http.Request, response *http.Response) error {
+		if response.StatusCode == http.StatusProxyAuthRequired {
+			return ErrProxyAuthentication
+		}
+		if previousConnectResponse != nil {
+			return previousConnectResponse(ctx, proxyURL, request, response)
+		}
+		return nil
+	}
 	// 代理地址是管理员显式配置的网络出口，允许使用内网代理；字面量目标
 	// 仍按 Endpoint 网络范围校验，域名目标交由代理端解析。
 	transport.DialContext = (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext
@@ -192,9 +201,9 @@ func ClientWithProxyForScope(ctx context.Context, base *http.Client, proxy *cata
 	}
 	client := *base
 	if networkScope == catalog.NetworkScopePublic {
-		client.Transport = &publicTargetTransport{transport: transport}
+		client.Transport = &publicTargetTransport{transport: transport, proxyScheme: proxyURL.Scheme}
 	} else {
-		client.Transport = &scopedTargetTransport{transport: transport, networkScope: networkScope}
+		client.Transport = &scopedTargetTransport{transport: transport, networkScope: networkScope, proxyScheme: proxyURL.Scheme}
 	}
 	logProxyRequest(ctx, proxyURL, proxy.Headers, details)
 	return &client, transport.CloseIdleConnections, nil

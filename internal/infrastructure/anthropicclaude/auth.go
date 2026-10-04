@@ -212,7 +212,9 @@ func (a *Adapter) readUsage(ctx context.Context, token string, proxy *catalog.Ou
 	response, err := client.Do(request)
 	if err != nil {
 		code := "SUBSCRIPTION_UNAVAILABLE"
-		if proxy != nil {
+		if errors.Is(err, provider.ErrProxyAuthentication) {
+			code = "PROXY_AUTH_REJECTED"
+		} else if proxy != nil {
 			code = "PROXY_SERVER_UNAVAILABLE"
 		} else if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			code = "UPSTREAM_TIMEOUT"

@@ -8,36 +8,7 @@ import (
 	"testing"
 )
 
-func TestProviderDiagnosticsKeepDevelopmentDetails(t *testing.T) {
-	ConfigureLogEnvironment("dev")
-	t.Cleanup(func() { ConfigureLogEnvironment("prod") })
-
-	raw := "https://user:password@example.com/redirect?token=redirect-secret"
-	diagnostic := DiagnoseNetworkError(&url.Error{Op: "Post", URL: raw, Err: errors.New("credential=network-secret")})
-	if diagnostic.Redacted || !strings.Contains(diagnostic.Detail, "network-secret") ||
-		!strings.Contains(diagnostic.Detail, "redirect-secret") || diagnostic.Operation != "Post" {
-		t.Fatalf("development diagnostic lost details: %+v", diagnostic)
-	}
-	location, redacted := RedirectLocationForLog(raw)
-	if redacted || location != raw {
-		t.Fatalf("development redirect was changed: location=%q redacted=%v", location, redacted)
-	}
-	headers := HeadersForLog(http.Header{
-		"Authorization":      {"Bearer authorization-secret"},
-		"ChatGPT-Account-Id": {"account-secret"},
-		"X-Api-Key":          {"api-key-secret"},
-		"X-Credential-Id":    {"credential-secret"},
-		"X-Custom-Context":   {"custom-secret"},
-	})
-	if headers.Get("Authorization") != "Bearer authorization-secret" || headers.Get("ChatGPT-Account-Id") != "account-secret" ||
-		headers.Get("X-Api-Key") != "api-key-secret" ||
-		headers.Get("X-Credential-Id") != "credential-secret" || headers.Get("X-Custom-Context") != "custom-secret" {
-		t.Fatalf("development headers were redacted: %+v", headers)
-	}
-}
-
-func TestProviderDiagnosticsRedactProductionSecrets(t *testing.T) {
-	ConfigureLogEnvironment("prod")
+func TestProviderDiagnosticsRedactSecrets(t *testing.T) {
 
 	raw := "https://user:password@example.com/redirect?token=redirect-secret"
 	diagnostic := DiagnoseNetworkError(&url.Error{Op: "Post", URL: raw, Err: errors.New("credential=network-secret")})

@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"time"
-
-	"github.com/zentrola/zentrola/internal/infrastructure/logging"
 )
 
 type response struct {
@@ -45,7 +43,7 @@ type LiveResponse struct {
 
 // writeJSON 仅用于管理面及健康检查。未来 Gateway 不得复用此包装。
 func writeJSON(w http.ResponseWriter, r *http.Request, status int, body response) {
-	body.RequestID = logging.RequestID(r.Context())
+	body.RequestID = requestIDFromContext(r.Context())
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)

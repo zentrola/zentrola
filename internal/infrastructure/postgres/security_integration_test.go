@@ -18,7 +18,6 @@ import (
 	"github.com/zentrola/zentrola/internal/application/health"
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	"github.com/zentrola/zentrola/internal/domain/admin"
-	"github.com/zentrola/zentrola/internal/infrastructure/config"
 	"github.com/zentrola/zentrola/internal/infrastructure/idgen"
 	"github.com/zentrola/zentrola/internal/infrastructure/logging"
 	"github.com/zentrola/zentrola/internal/infrastructure/postgres/dbgen"
@@ -51,7 +50,7 @@ func TestStage2Integration(t *testing.T) {
 	}
 	keys := appsec.NewKeys(store, ids)
 	var logs bytes.Buffer
-	router := httptransport.NewRouter(logging.New(&logs, "json", slog.LevelInfo), health.New(), config.CORS{}, time.Second, "prod", &httptransport.SecurityHandlers{Admin: admins, Keys: keys})
+	router := httptransport.NewRouter(logging.New(&logs, "json", slog.LevelInfo), health.New(), httptransport.CORSOptions{}, time.Second, "prod", &httptransport.SecurityHandlers{Admin: admins, Keys: keys})
 	request := func(method, path, token, key string, body any) *httptest.ResponseRecorder {
 		data, _ := json.Marshal(body)
 		req := httptest.NewRequest(method, path, bytes.NewReader(data))

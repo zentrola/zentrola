@@ -18,21 +18,27 @@ import (
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	usageapp "github.com/zentrola/zentrola/internal/application/usage"
 	"github.com/zentrola/zentrola/internal/domain/usage"
-	"github.com/zentrola/zentrola/internal/infrastructure/config"
-	"github.com/zentrola/zentrola/internal/infrastructure/logging"
 )
 
 const openAICompletionDrainLimit = 2 * time.Second
 
 type GatewayHandler struct {
 	service  *gw.Service
-	cfg      config.Gateway
+	cfg      GatewayOptions
 	logger   *slog.Logger
 	writer   *usageapp.Writer
 	protocol string
 }
 
-func NewOpenAIGatewayHandler(service *gw.Service, cfg config.Gateway, logger *slog.Logger, writer *usageapp.Writer) *GatewayHandler {
+type GatewayOptions struct {
+	MaxBodyBytes    int64
+	RequestTimeout  time.Duration
+	BodyReadTimeout time.Duration
+	WriteTimeout    time.Duration
+	Development     bool
+}
+
+func NewOpenAIGatewayHandler(service *gw.Service, cfg GatewayOptions, logger *slog.Logger, writer *usageapp.Writer) *GatewayHandler {
 	h := NewGatewayHandler(service, cfg, logger, writer)
 	h.protocol = gw.OpenAIProtocol
 	return h
@@ -45,7 +51,7 @@ func writeOpenAIError(w http.ResponseWriter, f *gw.Failure) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"message": f.Message, "type": f.Type, "param": nil, "code": f.Code}})
 }
 
-func NewGatewayHandler(service *gw.Service, cfg config.Gateway, logger *slog.Logger, writers ...*usageapp.Writer) *GatewayHandler {
+func NewGatewayHandler(service *gw.Service, cfg GatewayOptions, logger *slog.Logger, writers ...*usageapp.Writer) *GatewayHandler {
 	h := &GatewayHandler{service: service, cfg: cfg, logger: logger}
 	if len(writers) > 0 {
 		h.writer = writers[0]
@@ -180,8 +186,8 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var trace *usage.Event
 	var observer *gw.UsageObserver
 	if path == inferencePath && r.Method == http.MethodPost && identity.ID > 0 {
-		traceID, spanID := logging.TraceIDs(r.Context())
-		trace = &usage.Event{PrincipalID: identity.ID, RequestID: logging.RequestID(r.Context()), TraceID: traceID, SpanID: spanID, RequestAt: time.Now().UTC(), Status: usage.Failed, ErrorType: "INVALID_REQUEST"}
+		traceID, spanID := traceIDs(r.Context())
+		trace = &usage.Event{PrincipalID: identity.ID, RequestID: requestIDFromContext(r.Context()), TraceID: traceID, SpanID: spanID, RequestAt: time.Now().UTC(), Status: usage.Failed, ErrorType: "INVALID_REQUEST"}
 		trace.ClientProtocol = protocol
 		defer func() {
 			trace.CompletedAt = time.Now().UTC()
@@ -283,7 +289,7 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"protocol", protocol, "path", path,
 		"principal_id", identity.ID, "access_key_id", identity.AccessKeyID)
 	upstreamStarted := time.Now()
-	upstream, err := g.service.Forward(ctx, identity, gw.Request{Path: path, Version: version, Beta: beta, BetaQuery: query, Development: g.cfg.Development, Body: body, RequestID: logging.RequestID(r.Context()), ProtocolHeaders: nativeHeaders, Trace: trace, Protocol: protocol})
+	upstream, err := g.service.Forward(ctx, identity, gw.Request{Path: path, Version: version, Beta: beta, BetaQuery: query, Development: g.cfg.Development, Body: body, RequestID: requestIDFromContext(r.Context()), ProtocolHeaders: nativeHeaders, Trace: trace, Protocol: protocol})
 	if retainOpenAICompletion && err == nil && upstream != nil {
 		upstreamOpened.Store(true)
 	}
@@ -349,7 +355,7 @@ func (g *GatewayHandler) logOpenAIResponsesDiagnostic(ctx context.Context, level
 		return
 	}
 	attributes := []any{
-		"request_id", logging.RequestID(ctx),
+		"request_id", requestIDFromContext(ctx),
 		"stage", stage,
 		"observer_enabled", observer != nil,
 	}
