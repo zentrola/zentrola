@@ -14,7 +14,7 @@
     "format:check": "prettier --check \"src/**/*.{ts,vue,css}\" \"tests/**/*.{ts,mjs}\" \"*.{ts,json}\""
   },
   "dependencies": {
-    "vue": "3.5.42",
+    "vue": "3.5.43",
     "vue-i18n": "11.4.10",
     "vue-router": "4.6.4"
   },
