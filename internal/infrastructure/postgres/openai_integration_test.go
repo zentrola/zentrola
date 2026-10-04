@@ -20,7 +20,6 @@ import (
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	usageapp "github.com/zentrola/zentrola/internal/application/usage"
 	"github.com/zentrola/zentrola/internal/domain/admin"
-	"github.com/zentrola/zentrola/internal/infrastructure/config"
 	"github.com/zentrola/zentrola/internal/infrastructure/idgen"
 	cryptosec "github.com/zentrola/zentrola/internal/infrastructure/security"
 	httptransport "github.com/zentrola/zentrola/internal/transport/http"
@@ -183,9 +182,9 @@ func TestOpenAIIntegration(t *testing.T) {
 		}
 		return &gw.Response{Status: status, Headers: map[string][]string{"Content-Type": {media}, "Retry-After": {"2"}}, Body: reader}, nil
 	})
-	cfg := config.Gateway{MaxBodyBytes: 1 << 20, RequestTimeout: 200 * time.Millisecond, BodyReadTimeout: time.Second, WriteTimeout: time.Second}
+	cfg := httptransport.GatewayOptions{MaxBodyBytes: 1 << 20, RequestTimeout: 200 * time.Millisecond, BodyReadTimeout: time.Second, WriteTimeout: time.Second}
 	service := gw.New(NewGatewayStore(pool), cipher, gw.NewCompatibleUpstream(upstream, upstream))
-	server := httptest.NewServer(httptransport.NewRouter(logger, health.New(), config.CORS{}, time.Second, "prod", &httptransport.SecurityHandlers{Admin: admins, Keys: keys, Management: management, Gateway: httptransport.NewGatewayHandler(service, cfg, logger, writer), OpenAI: httptransport.NewOpenAIGatewayHandler(service, cfg, logger, writer), Usage: usageapp.NewQuery(usageStore), UsageWriter: writer}))
+	server := httptest.NewServer(httptransport.NewRouter(logger, health.New(), httptransport.CORSOptions{}, time.Second, "prod", &httptransport.SecurityHandlers{Admin: admins, Keys: keys, Management: management, Gateway: httptransport.NewGatewayHandler(service, cfg, logger, writer), OpenAI: httptransport.NewOpenAIGatewayHandler(service, cfg, logger, writer), Usage: usageapp.NewQuery(usageStore), UsageWriter: writer}))
 	defer server.Close()
 	requestIDs := map[string]string{}
 	call := func(name, method, path, body, credential string, want int) []byte {

@@ -14,7 +14,6 @@ import (
 	gw "github.com/zentrola/zentrola/internal/application/gateway"
 	"github.com/zentrola/zentrola/internal/application/health"
 	appsec "github.com/zentrola/zentrola/internal/application/security"
-	"github.com/zentrola/zentrola/internal/infrastructure/config"
 )
 
 type selfProviderStore struct {
@@ -35,8 +34,8 @@ func selfProviderRouter(store *selfProviderStore) http.Handler {
 	keys := appsec.NewKeys(&selfUsageKeyStore{identity: appsec.PrincipalIdentity{ID: 42, AccessKeyID: 7}}, nil)
 	service := gw.New(store, nil, nil)
 	return NewRouter(
-		logger, health.New(), config.CORS{}, time.Second, "prod",
-		&SecurityHandlers{Keys: keys, Gateway: NewGatewayHandler(service, config.Gateway{}, logger)},
+		logger, health.New(), CORSOptions{}, time.Second, "prod",
+		&SecurityHandlers{Keys: keys, Gateway: NewGatewayHandler(service, GatewayOptions{}, logger)},
 	)
 }
 

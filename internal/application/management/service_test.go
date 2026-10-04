@@ -3,6 +3,7 @@ package management
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -91,6 +92,19 @@ func TestMissingManagementDependenciesFailClosed(t *testing.T) {
 	}
 	if _, err := typedNilService.CreateResource(ctx, actor, 2, "resource", "secret", appsec.RequestMeta{}); !errors.Is(err, appsec.ErrUnavailable) {
 		t.Fatalf("typed nil cipher must fail closed, got %v", err)
+	}
+}
+
+func TestSubscriptionNameValidationPrecedesStoreRead(t *testing.T) {
+	service := New(nil, nil, nil, nil, WithSubscriptionAdapter(subscriptionAdapterStub{
+		inspection: SubscriptionInspection{AccountRef: "account-123456"},
+	}))
+	_, err := service.CreateAuthenticationResource(context.Background(), admin.Identity{ID: 1}, CreateResourceInput{
+		ProviderID: 40, Name: "resource-" + strings.Repeat("x", 120), Credential: "imported-auth-cache",
+		AuthType: AuthTypeSubscription, AuthAdapter: AuthAdapterOpenAICodex,
+	}, appsec.RequestMeta{})
+	if !errors.Is(err, appsec.ErrInvalidArgument) {
+		t.Fatalf("derived invalid name must be rejected before store read: %v", err)
 	}
 }
 

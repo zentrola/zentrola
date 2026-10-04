@@ -11,13 +11,17 @@ import (
 	"github.com/rs/cors"
 	gw "github.com/zentrola/zentrola/internal/application/gateway"
 	"github.com/zentrola/zentrola/internal/application/health"
-	"github.com/zentrola/zentrola/internal/infrastructure/config"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
-func NewRouter(logger *slog.Logger, readiness *health.Service, corsConfig config.CORS, healthTimeout time.Duration, environment string, security ...*SecurityHandlers) http.Handler {
+type CORSOptions struct {
+	Enabled bool
+	Origins []string
+}
+
+func NewRouter(logger *slog.Logger, readiness *health.Service, corsConfig CORSOptions, healthTimeout time.Duration, environment string, security ...*SecurityHandlers) http.Handler {
 	r := chi.NewRouter()
-	r.Use(otelhttp.NewMiddleware("zentrola.http.server"), requestID, accessLog(logger, environment), recoverPanic(logger))
+	r.Use(otelhttp.NewMiddleware("zentrola.http.server"), requestID, accessLog(logger), recoverPanic(logger))
 	if corsConfig.Enabled {
 		r.Use(cors.New(cors.Options{
 			AllowedOrigins: corsConfig.Origins,

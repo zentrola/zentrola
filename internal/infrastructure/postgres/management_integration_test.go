@@ -20,7 +20,6 @@ import (
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	"github.com/zentrola/zentrola/internal/domain/admin"
 	"github.com/zentrola/zentrola/internal/domain/catalog"
-	"github.com/zentrola/zentrola/internal/infrastructure/config"
 	"github.com/zentrola/zentrola/internal/infrastructure/idgen"
 	"github.com/zentrola/zentrola/internal/infrastructure/logging"
 	"github.com/zentrola/zentrola/internal/infrastructure/postgres/dbgen"
@@ -98,7 +97,7 @@ func TestStage3Integration(t *testing.T) {
 	service := mgmt.New(NewManagementStore(pool, ids), ids, cipher, tester)
 	keys := appsec.NewKeys(securityStore, ids)
 	var logs synchronizedLogs
-	router := httptransport.NewRouter(logging.New(&logs, "json", slog.LevelInfo), health.New(), config.CORS{}, time.Second, "prod", &httptransport.SecurityHandlers{Admin: admins, Keys: keys, Management: service})
+	router := httptransport.NewRouter(logging.New(&logs, "json", slog.LevelInfo), health.New(), httptransport.CORSOptions{}, time.Second, "prod", &httptransport.SecurityHandlers{Admin: admins, Keys: keys, Management: service})
 	token := ""
 	request := func(method, path string, body any, want int) *httptest.ResponseRecorder {
 		t.Helper()

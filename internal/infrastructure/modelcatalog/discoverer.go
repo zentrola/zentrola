@@ -225,6 +225,9 @@ func connectionErrorCode(ctx context.Context, err error, proxy *catalog.Outbound
 	if errors.Is(ctx.Err(), context.Canceled) {
 		return "REQUEST_CANCELLED"
 	}
+	if errors.Is(err, provider.ErrProxyAuthentication) {
+		return "PROXY_AUTH_REJECTED"
+	}
 	if proxy != nil {
 		return "PROXY_SERVER_UNAVAILABLE"
 	}

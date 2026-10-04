@@ -17,7 +17,6 @@ import (
 	"github.com/zentrola/zentrola/internal/application/health"
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	"github.com/zentrola/zentrola/internal/domain/admin"
-	"github.com/zentrola/zentrola/internal/infrastructure/config"
 	"github.com/zentrola/zentrola/internal/infrastructure/idgen"
 	cryptosec "github.com/zentrola/zentrola/internal/infrastructure/security"
 	httptransport "github.com/zentrola/zentrola/internal/transport/http"
@@ -31,7 +30,7 @@ func TestFirstAdminSetupIntegration(t *testing.T) {
 	_, _ = rand.Read(entropy[:])
 	tokens, _ := cryptosec.NewJWT(base64.StdEncoding.EncodeToString(entropy[:]))
 	service := appsec.NewAdmin(NewSecurityStore(pool, ids), passwords, tokens, admin.LoginPolicy{MaxFailures: 5, LockDuration: time.Minute})
-	router := httptransport.NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), health.New(health.Check{Name: "admin", Run: service.Check}), config.CORS{}, time.Second, "prod", &httptransport.SecurityHandlers{Admin: service})
+	router := httptransport.NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), health.New(health.Check{Name: "admin", Run: service.Check}), httptransport.CORSOptions{}, time.Second, "prod", &httptransport.SecurityHandlers{Admin: service})
 	request := func(method, path, contentType string, body any) *httptest.ResponseRecorder {
 		data, _ := json.Marshal(body)
 		req := httptest.NewRequest(method, path, bytes.NewReader(data))

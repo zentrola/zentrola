@@ -15,7 +15,6 @@ import (
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	usageapp "github.com/zentrola/zentrola/internal/application/usage"
 	"github.com/zentrola/zentrola/internal/domain/admin"
-	"github.com/zentrola/zentrola/internal/infrastructure/config"
 )
 
 type selfUsageKeyStore struct {
@@ -59,7 +58,7 @@ func TestSelfUsageAuthenticatesAccessKeyAndReturnsOwnTokens(t *testing.T) {
 	router := NewRouter(
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		health.New(),
-		config.CORS{},
+		CORSOptions{},
 		time.Second,
 		"prod",
 		&SecurityHandlers{Keys: keys, Usage: usageapp.NewQuery(store)},
@@ -111,7 +110,7 @@ func TestSelfUsageAcceptsExplicitRange(t *testing.T) {
 	store := &selfUsageQueryStore{tokens: 42000}
 	keys := appsec.NewKeys(&selfUsageKeyStore{identity: appsec.PrincipalIdentity{ID: 42}}, nil)
 	router := NewRouter(
-		slog.New(slog.NewTextHandler(io.Discard, nil)), health.New(), config.CORS{}, time.Second, "prod",
+		slog.New(slog.NewTextHandler(io.Discard, nil)), health.New(), CORSOptions{}, time.Second, "prod",
 		&SecurityHandlers{Keys: keys, Usage: usageapp.NewQuery(store)},
 	)
 	key := "vk-" + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
@@ -134,7 +133,7 @@ func TestSelfUsageRejectsMissingAmbiguousOrInvalidInput(t *testing.T) {
 	store := &selfUsageQueryStore{}
 	keys := appsec.NewKeys(&selfUsageKeyStore{identity: appsec.PrincipalIdentity{ID: 42}}, nil)
 	router := NewRouter(
-		slog.New(slog.NewTextHandler(io.Discard, nil)), health.New(), config.CORS{}, time.Second, "prod",
+		slog.New(slog.NewTextHandler(io.Discard, nil)), health.New(), CORSOptions{}, time.Second, "prod",
 		&SecurityHandlers{Keys: keys, Usage: usageapp.NewQuery(store)},
 	)
 	key := "vk-" + base64.RawURLEncoding.EncodeToString(make([]byte, 32))

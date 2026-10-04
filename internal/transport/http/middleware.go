@@ -1,11 +1,9 @@
 package http
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -13,11 +11,11 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	gw "github.com/zentrola/zentrola/internal/application/gateway"
-	"github.com/zentrola/zentrola/internal/infrastructure/logging"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -38,25 +36,11 @@ func requestID(next http.Handler) http.Handler {
 			w.Header().Set("X-Trace-ID", spanContext.TraceID().String())
 			w.Header().Set("X-Span-ID", spanContext.SpanID().String())
 		}
-		next.ServeHTTP(w, r.WithContext(logging.WithRequestID(r.Context(), id)))
+		next.ServeHTTP(w, r.WithContext(withRequestID(r.Context(), id)))
 	})
 }
 
 const accessLogHeaderValueLimit = 256
-
-const accessLogBodyLimit = 64 << 10
-
-var sensitiveAccessLogHeaders = map[string]struct{}{
-	"authorization":       {},
-	"cookie":              {},
-	"proxy-authorization": {},
-	"set-cookie":          {},
-	"x-api-key":           {},
-	"x-auth-token":        {},
-	"x-access-token":      {},
-	"x-goog-api-key":      {},
-	"api-key":             {},
-}
 
 var requestHeaderAllowlist = []string{
 	"Accept",
@@ -105,14 +89,7 @@ func accessLogHeaders(headers http.Header, allowlist []string) map[string]string
 	return result
 }
 
-func accessLogHeadersForEnvironment(headers http.Header, allowlist []string, full bool) map[string]string {
-	if full {
-		result := make(map[string]string, len(headers))
-		for name, values := range headers {
-			result[strings.ToLower(name)] = accessLogHeaderValue(name, values)
-		}
-		return result
-	}
+func safeAccessLogHeaders(headers http.Header, allowlist []string) map[string]string {
 	result := accessLogHeaders(headers, allowlist)
 	for name := range headers {
 		key := strings.ToLower(name)
@@ -121,24 +98,6 @@ func accessLogHeadersForEnvironment(headers http.Header, allowlist []string, ful
 		}
 	}
 	return result
-}
-
-func accessLogHeaderValue(name string, values []string) string {
-	if _, sensitive := sensitiveAccessLogHeaders[strings.ToLower(name)]; sensitive {
-		return "******"
-	}
-	value := strings.TrimSpace(strings.Join(values, ","))
-	value = strings.Map(func(character rune) rune {
-		if character < 32 || character == 127 {
-			return -1
-		}
-		return character
-	}, value)
-	characters := []rune(value)
-	if len(characters) > accessLogHeaderValueLimit {
-		value = string(characters[:accessLogHeaderValueLimit]) + "..."
-	}
-	return value
 }
 
 func accessLogURL(requestURL *url.URL, redact bool) string {
@@ -210,124 +169,46 @@ func accessLogExtraFields(ctx context.Context) []any {
 	return result
 }
 
-type bodyCapture struct {
-	data      bytes.Buffer
-	total     int64
-	truncated bool
+type accessLogRequest struct {
+	Method  string            `json:"method"`
+	URL     string            `json:"url"`
+	Headers map[string]string `json:"headers"`
+	Body    any               `json:"body,omitempty"`
+	Bytes   int64             `json:"bytes"`
 }
 
-func (c *bodyCapture) Write(p []byte) (int, error) {
-	originalLength := len(p)
-	c.total += int64(len(p))
-	remaining := accessLogBodyLimit - c.data.Len()
-	if remaining <= 0 {
-		c.truncated = true
-		return originalLength, nil
-	}
-	if len(p) > remaining {
-		p = p[:remaining]
-		c.truncated = true
-	}
-	_, _ = c.data.Write(p)
-	return originalLength, nil
+type accessLogResponse struct {
+	Status  int               `json:"status"`
+	Headers map[string]string `json:"headers"`
+	Body    any               `json:"body,omitempty"`
+	Bytes   int               `json:"bytes"`
 }
 
-type captureReadCloser struct {
+// countingReadCloser 只统计处理器实际读取的字节，不保留请求正文。
+type countingReadCloser struct {
 	io.ReadCloser
-	capture *bodyCapture
+	bytes atomic.Int64
 }
 
-func (r *captureReadCloser) Read(p []byte) (int, error) {
+func (r *countingReadCloser) Read(p []byte) (int, error) {
 	n, err := r.ReadCloser.Read(p)
 	if n > 0 {
-		_, _ = r.capture.Write(p[:n])
+		r.bytes.Add(int64(n))
 	}
 	return n, err
 }
 
-func bodyLogValue(capture *bodyCapture) any {
-	if capture == nil || capture.total == 0 {
-		return nil
-	}
-	data := capture.data.Bytes()
-	if json.Valid(data) {
-		var value any
-		decoder := json.NewDecoder(bytes.NewReader(data))
-		decoder.UseNumber()
-		if err := decoder.Decode(&value); err == nil {
-			if redacted, changed := redactAccessLogJSON(value); changed {
-				if encoded, err := json.Marshal(redacted); err == nil {
-					return json.RawMessage(encoded)
-				}
-			}
-		}
-		return json.RawMessage(append([]byte(nil), data...))
-	}
-	return capture.data.String()
-}
-
-func redactAccessLogJSON(value any) (any, bool) {
-	switch value := value.(type) {
-	case []any:
-		changed := false
-		for index, item := range value {
-			redacted, itemChanged := redactAccessLogJSON(item)
-			value[index], changed = redacted, changed || itemChanged
-		}
-		return value, changed
-	case map[string]any:
-		changed := false
-		for key, item := range value {
-			keyName := strings.ToLower(key)
-			if strings.Contains(keyName, "password") || strings.Contains(keyName, "credential") ||
-				strings.Contains(keyName, "token") || keyName == "proxyheaders" ||
-				keyName == "proxy_headers" || keyName == "proxy-headers" {
-				value[key] = "******"
-				changed = true
-				continue
-			}
-			redacted, itemChanged := redactAccessLogJSON(item)
-			value[key], changed = redacted, changed || itemChanged
-		}
-		return value, changed
-	default:
-		return value, false
-	}
-}
-
-type accessLogRequest struct {
-	Method        string            `json:"method"`
-	URL           string            `json:"url"`
-	Headers       map[string]string `json:"headers"`
-	Body          any               `json:"body,omitempty"`
-	BodyTruncated bool              `json:"body_truncated,omitempty"`
-	Bytes         int64             `json:"bytes"`
-}
-
-type accessLogResponse struct {
-	Status        int               `json:"status"`
-	Headers       map[string]string `json:"headers"`
-	Body          any               `json:"body,omitempty"`
-	BodyTruncated bool              `json:"body_truncated,omitempty"`
-	Bytes         int               `json:"bytes"`
-}
-
-func accessLog(logger *slog.Logger, environments ...string) func(http.Handler) http.Handler {
-	logDetails := len(environments) > 0 && (environments[0] == "dev" || environments[0] == "test")
+func accessLog(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
 			r = r.WithContext(withAccessLogDetails(r.Context(), start))
 			// chi 包装器保留 Flusher 等接口，避免影响后续 SSE。
 			wrapped := chimiddleware.NewWrapResponseWriter(w, r.ProtoMajor)
-			var requestBody, responseBody *bodyCapture
-			if logDetails {
-				requestBody = &bodyCapture{}
-				responseBody = &bodyCapture{}
-				if r.Body != nil {
-					r.Body = &captureReadCloser{ReadCloser: r.Body, capture: requestBody}
-				}
-				wrapped.Tee(responseBody)
+			var requestBody *countingReadCloser
+			if r.Body != nil {
+				requestBody = &countingReadCloser{ReadCloser: r.Body}
+				r.Body = requestBody
 			}
 			defer func() {
 				status := wrapped.Status()
@@ -336,34 +217,22 @@ func accessLog(logger *slog.Logger, environments ...string) func(http.Handler) h
 				}
 				request := accessLogRequest{
 					Method:  r.Method,
-					URL:     accessLogURL(r.URL, !logDetails),
-					Headers: accessLogHeadersForEnvironment(r.Header, requestHeaderAllowlist, logDetails),
-					Bytes:   r.ContentLength,
+					URL:     accessLogURL(r.URL, true),
+					Headers: safeAccessLogHeaders(r.Header, requestHeaderAllowlist),
+				}
+				if requestBody != nil {
+					request.Bytes = requestBody.bytes.Load()
 				}
 				response := accessLogResponse{
 					Status:  status,
-					Headers: accessLogHeadersForEnvironment(wrapped.Header(), responseHeaderAllowlist, logDetails),
+					Headers: safeAccessLogHeaders(wrapped.Header(), responseHeaderAllowlist),
 					Bytes:   wrapped.BytesWritten(),
 				}
-				if requestBody != nil {
-					request.Bytes = requestBody.total
+				if request.Bytes > 0 || r.ContentLength != 0 {
+					request.Body = "******"
 				}
-				if logDetails {
-					request.Body = bodyLogValue(requestBody)
-					request.BodyTruncated = requestBody.truncated
-					// Responses 的 SSE 可能包含完整 base64 图像；开发日志只保留
-					// 状态、响应头和字节数，不记录事件正文。
-					if r.URL.Path != "/v1/responses" || !strings.HasPrefix(strings.ToLower(wrapped.Header().Get("Content-Type")), "text/event-stream") {
-						response.Body = bodyLogValue(responseBody)
-						response.BodyTruncated = responseBody.truncated
-					}
-				} else {
-					if request.Bytes != 0 {
-						request.Body = "******"
-					}
-					if response.Bytes > 0 {
-						response.Body = "******"
-					}
+				if response.Bytes > 0 {
+					response.Body = "******"
 				}
 				attributes := []any{
 					"request", request,

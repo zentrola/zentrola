@@ -4,17 +4,20 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/zentrola/zentrola/internal/domain/catalog"
 )
 
 func TestClientWithProxyIsolatedTransport(t *testing.T) {
-	ConfigureLogEnvironment("dev")
-	t.Cleanup(func() { ConfigureLogEnvironment("prod") })
 	baseTransport := http.DefaultTransport.(*http.Transport).Clone()
 	baseTransport.Proxy = nil
 	base := &http.Client{Transport: baseTransport}
@@ -45,14 +48,17 @@ func TestClientWithProxyIsolatedTransport(t *testing.T) {
 		t.Fatalf("decode proxy log: %v", err)
 	}
 	if entry["msg"] != "provider outbound request using proxy" || entry["proxy"] != true ||
-		entry["proxy_url"] != "http://user:password@proxy.example.com:8080" || entry["proxy_auth"] != true ||
-		entry["proxy_redacted"] != false || entry["operation"] != "test" ||
+		entry["proxy_url"] != "http://******:******@proxy.example.com:8080" || entry["proxy_auth"] != true ||
+		entry["proxy_redacted"] != true || entry["operation"] != "test" ||
 		entry["provider_id"] != float64(12) || entry["protocol"] != "OPENAI" {
 		t.Fatalf("unexpected proxy log: %v", entry)
 	}
 	headers, ok := entry["proxy_headers"].(map[string]any)
-	if !ok || len(headers) != 1 || headers["X-Proxy-Token"] != "secret" {
+	if !ok || len(headers) != 1 || headers["X-Proxy-Token"] != "******" {
 		t.Fatalf("unexpected proxy headers in log: %v", entry["proxy_headers"])
+	}
+	if strings.Contains(logs.String(), "password") || strings.Contains(logs.String(), "secret") {
+		t.Fatalf("proxy credentials leaked: %s", logs.String())
 	}
 }
 
@@ -72,6 +78,140 @@ func TestClientWithSOCKS5Proxy(t *testing.T) {
 	proxyURL, err := transport.Proxy(request)
 	if err != nil || proxyURL.String() != "socks5h://user:password@proxy.example.com:1080" {
 		t.Fatalf("unexpected SOCKS5 proxy URL: %v, %v", proxyURL, err)
+	}
+}
+
+func TestProxyAuthenticationRejectionIsClassified(t *testing.T) {
+	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Proxy-Authenticate", `Basic realm="test"`)
+		w.WriteHeader(http.StatusProxyAuthRequired)
+	}))
+	defer proxyServer.Close()
+	proxyURL := strings.Replace(proxyServer.URL, "://", "://user:wrong-password@", 1)
+	base := &http.Client{Transport: http.DefaultTransport.(*http.Transport).Clone()}
+	var logs bytes.Buffer
+	client, cleanup, err := ClientWithProxy(context.Background(), base, &catalog.OutboundProxy{URL: proxyURL}, ProxyRequestLog{
+		Logger: slog.New(slog.NewJSONHandler(&logs, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	response, err := client.Get("https://api.example.com/v1")
+	if response != nil {
+		response.Body.Close()
+	}
+	if !errors.Is(err, ErrProxyAuthentication) {
+		t.Fatalf("proxy 407 was not classified: response=%v error=%v", response, err)
+	}
+	if strings.Contains(logs.String(), "wrong-password") {
+		t.Fatalf("proxy password leaked: %s", logs.String())
+	}
+}
+
+func TestHTTPProxy407RemainsAnAmbiguousResponse(t *testing.T) {
+	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Proxy-Authenticate", `Basic realm="test"`)
+		w.WriteHeader(http.StatusProxyAuthRequired)
+	}))
+	defer proxyServer.Close()
+	base := &http.Client{Transport: http.DefaultTransport.(*http.Transport).Clone()}
+	client, cleanup, err := ClientWithProxy(context.Background(), base, &catalog.OutboundProxy{
+		URL: proxyServer.URL,
+	}, ProxyRequestLog{Logger: slog.New(slog.NewJSONHandler(io.Discard, nil))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	response, err := client.Get("http://api.example.com/v1")
+	if err != nil {
+		t.Fatalf("ambiguous HTTP 407 became a proxy error: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusProxyAuthRequired {
+		t.Fatalf("HTTP status = %d, want 407", response.StatusCode)
+	}
+}
+
+func TestUpstreamHTTPS407IsNotProxyAuthentication(t *testing.T) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusProxyAuthRequired)
+	}))
+	defer upstream.Close()
+	transport := upstream.Client().Transport.(*http.Transport).Clone()
+	defer transport.CloseIdleConnections()
+	request, err := http.NewRequest(http.MethodGet, upstream.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := proxyRoundTrip(transport, request, "http")
+	if err != nil {
+		t.Fatalf("upstream 407 became a transport error: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusProxyAuthRequired {
+		t.Fatalf("upstream status = %d, want 407", response.StatusCode)
+	}
+}
+
+func TestSOCKS5AuthenticationRejectionIsClassified(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	served := make(chan error, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			served <- err
+			return
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+		var greeting [2]byte
+		if _, err = io.ReadFull(conn, greeting[:]); err == nil {
+			_, err = io.CopyN(io.Discard, conn, int64(greeting[1]))
+		}
+		if err == nil {
+			_, err = conn.Write([]byte{5, 2})
+		}
+		var auth [2]byte
+		if err == nil {
+			_, err = io.ReadFull(conn, auth[:])
+		}
+		if err == nil {
+			_, err = io.CopyN(io.Discard, conn, int64(auth[1]))
+		}
+		var passwordLength [1]byte
+		if err == nil {
+			_, err = io.ReadFull(conn, passwordLength[:])
+		}
+		if err == nil {
+			_, err = io.CopyN(io.Discard, conn, int64(passwordLength[0]))
+		}
+		if err == nil {
+			_, err = conn.Write([]byte{1, 1})
+		}
+		served <- err
+	}()
+	base := &http.Client{Transport: http.DefaultTransport.(*http.Transport).Clone(), Timeout: 3 * time.Second}
+	client, cleanup, err := ClientWithProxy(context.Background(), base, &catalog.OutboundProxy{
+		URL: "socks5://user:wrong-password@" + listener.Addr().String(),
+	}, ProxyRequestLog{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	response, err := client.Get("https://api.example.com/v1")
+	if response != nil {
+		response.Body.Close()
+	}
+	if !errors.Is(err, ErrProxyAuthentication) {
+		t.Fatalf("SOCKS5 rejection was not classified: response=%v error=%v", response, err)
+	}
+	if err := <-served; err != nil {
+		t.Fatalf("SOCKS5 test proxy failed: %v", err)
 	}
 }
 
@@ -113,8 +253,6 @@ func TestNonPublicLiteralError(t *testing.T) {
 }
 
 func TestEnvironmentWithProxyOverridesInheritedProxyVariables(t *testing.T) {
-	ConfigureLogEnvironment("prod")
-	t.Cleanup(func() { ConfigureLogEnvironment("prod") })
 	var logs bytes.Buffer
 	got, err := EnvironmentWithProxy(context.Background(), []string{
 		"PATH=test", "http_proxy=http://old.example", "HTTPS_PROXY=http://old.example", "NO_PROXY=chatgpt.com", "ALL_PROXY=socks5://old.example",
@@ -152,8 +290,6 @@ func TestEnvironmentWithSOCKS5ProxySetsAllProxyVariables(t *testing.T) {
 }
 
 func TestProductionProxyLogMasksHeaderValues(t *testing.T) {
-	ConfigureLogEnvironment("prod")
-	t.Cleanup(func() { ConfigureLogEnvironment("prod") })
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logs, nil))
 	proxyURL, err := parseProxyURL(&catalog.OutboundProxy{URL: "http://proxy-user:proxy-password@proxy.example.com:8080"})

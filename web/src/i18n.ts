@@ -863,6 +863,7 @@ export const i18n = createI18n({
         PROVIDER_CREDENTIAL_REQUIRED: '请先配置服务商密钥，再启用服务商。',
         MODEL_SYNC_CREDENTIAL_REQUIRED: '请先配置服务商密钥，再同步模型。',
         PROXY_CONFIGURATION_UNRECOVERABLE: '代理配置无法解密，请重新保存服务商代理配置。',
+        PROXY_AUTH_REJECTED: '代理拒绝认证，请检查代理用户名、密码或访问规则。',
         PROXY_SERVER_UNAVAILABLE: '服务商代理服务器不可用，请检查代理服务器状态或配置后重试。',
         SERVICE_UNAVAILABLE: '服务暂时不可用，请稍后重试。',
         NETWORK: '无法连接服务，请检查后端是否已启动。写操作请刷新确认结果后再试。',

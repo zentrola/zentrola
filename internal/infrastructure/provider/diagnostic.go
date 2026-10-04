@@ -14,15 +14,14 @@ import (
 	"syscall"
 )
 
-// NetworkDiagnostic 是可写入日志的上游传输错误信息。dev/test 的 Detail
-// 保留原始错误，prod 或未知环境只保留稳定分类，避免错误字符串携带凭据。
+// NetworkDiagnostic 只包含可安全记录的上游传输错误分类，不复制原始错误。
 type NetworkDiagnostic struct {
 	Kind, Operation, Network, ErrorType, Detail string
 	Redacted                                    bool
 }
 
 func DiagnoseNetworkError(err error) NetworkDiagnostic {
-	diagnostic := NetworkDiagnostic{Kind: networkFailureKind(err), Detail: err.Error(), Redacted: redactProviderLogSecrets.Load()}
+	diagnostic := NetworkDiagnostic{Kind: networkFailureKind(err), Redacted: true}
 	var urlErr *url.Error
 	if errors.As(err, &urlErr) {
 		diagnostic.Operation = urlErr.Op
@@ -45,14 +44,14 @@ func DiagnoseNetworkError(err error) NetworkDiagnostic {
 	if root != nil {
 		diagnostic.ErrorType = reflect.TypeOf(root).String()
 	}
-	if diagnostic.Redacted {
-		diagnostic.Detail = redactedFailureDetail(diagnostic.Kind)
-	}
+	diagnostic.Detail = redactedFailureDetail(diagnostic.Kind)
 	return diagnostic
 }
 
 func networkFailureKind(err error) string {
 	switch {
+	case errors.Is(err, ErrProxyAuthentication):
+		return "proxy_auth"
 	case errors.Is(err, context.Canceled):
 		return "cancelled"
 	case errors.Is(err, context.DeadlineExceeded):
@@ -93,6 +92,8 @@ func networkFailureKind(err error) string {
 
 func redactedFailureDetail(kind string) string {
 	switch kind {
+	case "proxy_auth":
+		return "proxy authentication rejected"
 	case "cancelled":
 		return "upstream request cancelled"
 	case "timeout":
@@ -116,12 +117,8 @@ func redactedFailureDetail(kind string) string {
 	}
 }
 
-// RedirectLocationForLog 在 dev/test 返回完整 Location；prod 或未知环境只保留
-// scheme 和 host。相对地址及非法地址不暴露路径内容。
+// RedirectLocationForLog 只保留 scheme 和 host，不暴露凭据、路径或查询参数。
 func RedirectLocationForLog(raw string) (location string, redacted bool) {
-	if !redactProviderLogSecrets.Load() {
-		return raw, false
-	}
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", true
@@ -147,14 +144,12 @@ var productionHeaderAllowlist = map[string]struct{}{
 	"x-request-id":      {},
 }
 
-// HeadersForLog 在 dev/test 保留完整 Header；prod 或未知环境只保留明确安全的
-// Header Value，未知 Header 一律脱敏。
+// HeadersForLog 仅保留明确安全的 Header Value，未知 Header 一律脱敏。
 func HeadersForLog(headers http.Header) http.Header {
 	result := make(http.Header, len(headers))
-	redact := redactProviderLogSecrets.Load()
 	for name, values := range headers {
 		copied := append([]string(nil), values...)
-		if _, safe := productionHeaderAllowlist[strings.ToLower(name)]; redact && !safe {
+		if _, safe := productionHeaderAllowlist[strings.ToLower(name)]; !safe {
 			for index := range copied {
 				copied[index] = "******"
 			}

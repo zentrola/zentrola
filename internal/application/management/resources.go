@@ -138,6 +138,12 @@ func (s *ResourceService) CreateAuthenticationResource(ctx context.Context, acto
 		if err != nil {
 			return Resource{}, appsec.ErrInvalidArgument
 		}
+		if inspection.AccountRef != "" {
+			input.Name = subscriptionResourceName(input.Name, inspection.AccountRef)
+			if !validText(input.Name, 128) {
+				return Resource{}, appsec.ErrInvalidArgument
+			}
+		}
 		var provider Provider
 		if err := s.store.ReadResource(ctx, actor, func(r ResourceReadSession) error {
 			var err error
@@ -148,12 +154,6 @@ func (s *ResourceService) CreateAuthenticationResource(ctx context.Context, acto
 		}
 		if !subscription.SupportsProvider(provider) {
 			return Resource{}, appsec.ErrInvalidArgument
-		}
-		if inspection.AccountRef != "" {
-			input.Name = subscriptionResourceName(input.Name, inspection.AccountRef)
-			if !validText(input.Name, 128) {
-				return Resource{}, appsec.ErrInvalidArgument
-			}
 		}
 		// 保存只做本地校验；在线认证和额度读取由独立的测试连接负责。
 	default:

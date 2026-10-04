@@ -19,7 +19,6 @@ import (
 
 	gw "github.com/zentrola/zentrola/internal/application/gateway"
 	"github.com/zentrola/zentrola/internal/domain/catalog"
-	"github.com/zentrola/zentrola/internal/infrastructure/provider"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -261,18 +260,9 @@ func TestRedirectAndTimeout(t *testing.T) {
 	}
 }
 
-func TestGatewayTransportDiagnosticsRespectEnvironment(t *testing.T) {
-	for _, test := range []struct {
-		environment string
-		wantSecret  bool
-	}{
-		{environment: "dev", wantSecret: true},
-		{environment: "test", wantSecret: true},
-		{environment: "prod", wantSecret: false},
-	} {
-		t.Run(test.environment, func(t *testing.T) {
-			provider.ConfigureLogEnvironment(test.environment)
-			defer provider.ConfigureLogEnvironment("prod")
+func TestGatewayTransportDiagnosticsRedactSecrets(t *testing.T) {
+	for _, environment := range []string{"dev", "test", "prod"} {
+		t.Run(environment, func(t *testing.T) {
 			var logs bytes.Buffer
 			client := NewGatewayClient(time.Second, slog.New(slog.NewJSONHandler(&logs, nil)))
 			client.client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
@@ -292,16 +282,34 @@ func TestGatewayTransportDiagnosticsRespectEnvironment(t *testing.T) {
 					t.Fatalf("missing diagnostic %q: %s", expected, output)
 				}
 			}
-			hasSecret := strings.Contains(output, "network-secret") && strings.Contains(output, "provider-secret")
-			if hasSecret != test.wantSecret {
-				t.Fatalf("secret logging mismatch: want=%v output=%s", test.wantSecret, output)
-			}
-			if test.wantSecret && !strings.Contains(output, `"redacted":false`) {
-				t.Fatalf("development diagnostic was marked redacted: %s", output)
-			}
-			if !test.wantSecret && (!strings.Contains(output, `"redacted":true`) || !strings.Contains(output, "******")) {
-				t.Fatalf("production diagnostic was not redacted: %s", output)
+			if strings.Contains(output, "network-secret") || strings.Contains(output, "provider-secret") ||
+				!strings.Contains(output, `"redacted":true`) || !strings.Contains(output, "******") {
+				t.Fatalf("gateway diagnostic exposed a secret: %s", output)
 			}
 		})
+	}
+}
+
+func TestGatewayReportsProxyAuthenticationRejection(t *testing.T) {
+	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusProxyAuthRequired)
+	}))
+	defer proxyServer.Close()
+	proxyURL := strings.Replace(proxyServer.URL, "://", "://user:wrong-password@", 1)
+	var logs bytes.Buffer
+	client := NewGatewayClient(time.Second, slog.New(slog.NewJSONHandler(&logs, nil)))
+	defer client.CloseIdleConnections()
+	_, err := client.Open(context.Background(), gw.Route{
+		BaseURL: "https://api.example.com", ProviderID: 11, ResourceID: 22,
+		Proxy: &catalog.OutboundProxy{URL: proxyURL},
+	}, gw.Request{Protocol: gw.OpenAIProtocol, Path: "/v1/chat/completions", RequestID: "req_proxy_auth"}, []byte("provider-secret"))
+	if !errors.Is(err, gw.ErrProxyAuth) {
+		t.Fatalf("proxy authentication rejection was not reported: %v", err)
+	}
+	output := logs.String()
+	if !strings.Contains(output, `"error_code":"PROXY_AUTH_REJECTED"`) ||
+		!strings.Contains(output, `"failure_kind":"proxy_auth"`) ||
+		strings.Contains(output, "wrong-password") || strings.Contains(output, "provider-secret") {
+		t.Fatalf("unsafe or incomplete proxy diagnostic: %s", output)
 	}
 }

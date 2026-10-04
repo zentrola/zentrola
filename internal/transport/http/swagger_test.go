@@ -14,14 +14,13 @@ import (
 	"github.com/zentrola/zentrola/internal/application/health"
 	"github.com/zentrola/zentrola/internal/application/management"
 	"github.com/zentrola/zentrola/internal/application/usage"
-	"github.com/zentrola/zentrola/internal/infrastructure/config"
 )
 
 func TestSwaggerEnvironmentAndAssets(t *testing.T) {
 	for _, environment := range []string{"dev", "test", "prod", "", "unknown"} {
 		t.Run(environment, func(t *testing.T) {
 			router := NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), health.New(),
-				config.CORS{Enabled: true, Origins: []string{"http://localhost:5173"}}, time.Second, environment, &SecurityHandlers{})
+				CORSOptions{Enabled: true, Origins: []string{"http://localhost:5173"}}, time.Second, environment, &SecurityHandlers{})
 			enabled := environment == "dev" || environment == "test"
 			for path, content := range map[string]string{
 				"/swagger/index.html":                      "SwaggerUIBundle",
@@ -80,7 +79,7 @@ func TestSwaggerCoversRoutesAndResolvesSchemas(t *testing.T) {
 			t.Fatalf("missing security definition %s", name)
 		}
 	}
-	router := NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), health.New(), config.CORS{}, time.Second, "prod",
+	router := NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), health.New(), CORSOptions{}, time.Second, "prod",
 		&SecurityHandlers{Management: &management.Service{}, ActiveModels: &activeModelReaderStub{}, Usage: &usage.QueryService{}, UsageWriter: &usage.Writer{}})
 	expected := map[string]bool{}
 	err := chi.Walk(router.(chi.Routes), func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
