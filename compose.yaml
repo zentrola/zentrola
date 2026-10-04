@@ -59,7 +59,7 @@ services:
       retries: 10
 
   backend:
-    image: longjianghu/zentrola:1.0.1
+    image: longjianghu/zentrola:latest
     command: ["backend"]
     ports:
       - "9527:9527"
@@ -100,7 +100,7 @@ services:
     restart: unless-stopped
 
   web:
-    image: longjianghu/zentrola:1.0.1
+    image: longjianghu/zentrola:latest
     command:
       - web
       - --api
