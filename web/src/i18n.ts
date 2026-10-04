@@ -605,6 +605,7 @@ export const i18n = createI18n({
         emptyCredentialsHint: '点击“新增凭据”添加 API Key 或支持的订阅认证。',
         provider: '服务商',
         credential: '认证凭据',
+        protocol: '协议',
         baseUrl: 'Base URL',
         lastVerifiedAt: '最后验证时间',
         apiKey: 'API Key',

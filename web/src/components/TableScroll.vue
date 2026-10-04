@@ -24,10 +24,12 @@ function updateEdges() {
 
 onMounted(async () => {
   await nextTick()
+  const element = container.value
+  if (!element) return
   updateEdges()
   resizeObserver = new ResizeObserver(updateEdges)
-  resizeObserver.observe(container.value!)
-  const table = container.value?.querySelector('table')
+  resizeObserver.observe(element)
+  const table = element.querySelector('table')
   if (table) resizeObserver.observe(table)
 })
 

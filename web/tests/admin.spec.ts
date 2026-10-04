@@ -1982,6 +1982,7 @@ test('连接测试允许选择模型并显示实际测试模型', async ({ page 
 
   const result = page.getByRole('dialog', { name: 'Google / 连接测试结果' })
   await expect(result.getByRole('status')).toContainText('模型调用验证通过')
+  await expect(result.locator('dt').filter({ hasText: /^协议$/ })).toBeVisible()
   await expect(result.getByText('gemini-3.6-pro', { exact: true })).toBeVisible()
 })
 
@@ -4227,6 +4228,8 @@ test('14 寸屏幕默认展开侧栏并将横向溢出限制在表格内', async
 })
 
 test('高密度表格在常用桌面分辨率保持稳定列宽和单行技术字段', async ({ page }) => {
+  const pageErrors: string[] = []
+  page.on('pageerror', (error) => pageErrors.push(error.message))
   await fixture(page)
   await signIn(page, 'home')
   await page.getByRole('link', { name: '服务商', exact: true }).click()
@@ -4263,6 +4266,7 @@ test('高密度表格在常用桌面分辨率保持稳定列宽和单行技术�
   expect((await operationHeaders.nth(4).boundingBox())!.width).toBeGreaterThanOrEqual(108)
   expect((await operationHeaders.last().boundingBox())!.width).toBeGreaterThanOrEqual(88)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  expect(pageErrors).toEqual([])
 })
 
 test('有操作列表固定首尾列，分组模型选择器按可用宽度改为上下结构', async ({ page }) => {
