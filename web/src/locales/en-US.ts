@@ -593,6 +593,7 @@ export default {
     emptyCredentialsHint: 'Select Add credential to add an API key or supported subscription.',
     provider: 'Provider',
     credential: 'Credential',
+    protocol: 'Protocol',
     baseUrl: 'Base URL',
     lastVerifiedAt: 'Last verified',
     apiKey: 'API key',
