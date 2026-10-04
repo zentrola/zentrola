@@ -33,7 +33,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         if: matrix.language == 'javascript-typescript'
         with:
           node-version: 24
@@ -73,7 +73,7 @@ jobs:
           cache: true
       - name: Scan Go dependencies for vulnerabilities
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
