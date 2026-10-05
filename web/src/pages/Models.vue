@@ -13,6 +13,7 @@ import ListFooter from '../components/ListFooter.vue'
 import ListSearch from '../components/ListSearch.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import TableScroll from '../components/TableScroll.vue'
+import TechnicalValue from '../components/TechnicalValue.vue'
 const {
   items,
   cursor,
@@ -202,6 +203,7 @@ function deleteModel() {
       <table>
         <thead>
           <tr>
+            <th>{{ t('common.id') }}</th>
             <th>{{ t('models.name') }}</th>
             <th>{{ t('models.publisher') }}</th>
             <th>{{ t('common.enableStatus') }}</th>
@@ -213,6 +215,7 @@ function deleteModel() {
         </thead>
         <tbody>
           <tr v-for="model in visible" :key="model.id">
+            <td class="record-id-cell"><TechnicalValue :value="model.id" :copyable="false" /></td>
             <td>
               <div class="person">
                 <span class="avatar">{{ model.name.slice(0, 1) }}</span>

@@ -1554,6 +1554,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
     <TableScroll has-actions>
       <table class="providers-table">
         <colgroup>
+          <col class="provider-id-column" />
           <col class="provider-name-column" />
           <col class="provider-enable-column" />
           <col class="provider-runtime-column" />
@@ -1563,6 +1564,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
         </colgroup>
         <thead>
           <tr>
+            <th>{{ t('common.id') }}</th>
             <th>{{ t('providers.name') }}</th>
             <th>{{ t('common.enableStatus') }}</th>
             <th>{{ t('providers.runtimeStatus') }}</th>
@@ -1573,6 +1575,9 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
         </thead>
         <tbody>
           <tr v-for="provider in visible" :key="provider.id">
+            <td class="record-id-cell">
+              <TechnicalValue :value="provider.id" :copyable="false" />
+            </td>
             <td>
               <div class="person">
                 <span class="avatar">{{ provider.name.slice(0, 1) }}</span>
@@ -3107,7 +3112,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   font-size: 12px;
 }
 .providers-table {
-  min-width: 992px;
+  min-width: 1184px;
   table-layout: fixed;
 }
 .providers-table th,
@@ -3127,6 +3132,9 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
 .provider-name-column {
   width: 252px;
 }
+.provider-id-column {
+  width: 192px;
+}
 .provider-enable-column {
   width: 88px;
 }
@@ -3142,18 +3150,18 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
 .provider-action-column {
   width: 176px;
 }
-.providers-table th:nth-child(4),
-.providers-table td:nth-child(4) {
+.providers-table th:nth-child(5),
+.providers-table td:nth-child(5) {
   padding-left: 8px;
   padding-right: 8px;
 }
-.providers-table th:nth-child(2),
-.providers-table td:nth-child(2) {
+.providers-table th:nth-child(3),
+.providers-table td:nth-child(3) {
   padding-left: 12px;
   padding-right: 12px;
 }
-.providers-table th:nth-child(3),
-.providers-table td:nth-child(3) {
+.providers-table th:nth-child(4),
+.providers-table td:nth-child(4) {
   padding-left: 18px;
 }
 .provider-runtime-state {

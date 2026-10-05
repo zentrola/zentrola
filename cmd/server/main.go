@@ -296,8 +296,9 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 		openaicodex.WithRefreshAhead(cfg.Gateway.SubscriptionRefreshAhead),
 	)
 	claudeSubscription := anthropicclaude.New()
+	managementStore := gatewaycache.NewManagementStore(postgres.NewManagementStore(pool, ids, logger), gatewayCache, logger)
 	managementService := management.New(
-		gatewaycache.NewManagementStore(postgres.NewManagementStore(pool, ids, logger), gatewayCache, logger), ids, credentials, connectionTester,
+		managementStore, ids, credentials, connectionTester,
 		management.WithModelDiscoverer(modelcatalog.NewDiscoverer(logger)),
 		management.WithSubscriptionAdapter(codexSubscription),
 		management.WithSubscriptionAdapter(claudeSubscription),
@@ -375,7 +376,7 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 	var active sync.WaitGroup
 	var admission sync.Mutex
 	stopping := false
-	router := httptransport.NewRouter(logger, readiness, httptransport.CORSOptions{Enabled: cfg.CORS.Enabled, Origins: cfg.CORS.Origins}, cfg.HealthTimeout, cfg.Environment, &httptransport.SecurityHandlers{Admin: adminService, Keys: keyService, Management: managementService, Gateway: gatewayHandler, OpenAI: openaiHandler, ActiveModels: gatewayCache, Usage: usageapp.NewQuery(usageStore), UsageWriter: usageWriter, BodyReadTimeout: cfg.BodyReadTimeout})
+	router := httptransport.NewRouter(logger, readiness, httptransport.CORSOptions{Enabled: cfg.CORS.Enabled, Origins: cfg.CORS.Origins}, cfg.HealthTimeout, cfg.Environment, &httptransport.SecurityHandlers{Admin: adminService, Keys: keyService, Management: managementService, Applications: management.NewApplications(managementStore, ids), Gateway: gatewayHandler, OpenAI: openaiHandler, ActiveModels: gatewayCache, Usage: usageapp.NewQuery(usageStore), UsageWriter: usageWriter, BodyReadTimeout: cfg.BodyReadTimeout})
 	server := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

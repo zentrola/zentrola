@@ -13,6 +13,9 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 	s.mountManagementCatalogRoutes(r)
 	s.mountManagementQueryRoutes(r)
 	s.mountManagementCommandRoutes(r)
+	if s.Applications != nil {
+		s.mountApplicationRoutes(r)
+	}
 }
 
 func (s *SecurityHandlers) mountManagementCatalogRoutes(r chi.Router) {

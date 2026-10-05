@@ -21,6 +21,7 @@ type applicationErrorMapping struct {
 var managementErrorMappings = []applicationErrorMapping{
 	{mgmt.ErrConflict, http.StatusConflict, "CONFLICT", "The request conflicts with the current state."},
 	{mgmt.ErrMemberAccessKeyRequired, http.StatusConflict, "MEMBER_ACCESS_KEY_REQUIRED", "Create an access key before enabling the member."},
+	{mgmt.ErrApplicationKeyRequired, http.StatusConflict, "APPLICATION_KEY_REQUIRED", "Create an App Key before enabling the application."},
 	{mgmt.ErrSubscriptionAccountExists, http.StatusConflict, "SUBSCRIPTION_ACCOUNT_ALREADY_EXISTS", "A credential for this subscription account already exists."},
 	{mgmt.ErrCredential, http.StatusUnprocessableEntity, "CREDENTIAL_UNRECOVERABLE", "Replace the resource credential before enabling it."},
 	{mgmt.ErrProvider, http.StatusConflict, "PROVIDER_UNAVAILABLE", "Provider is unavailable."},

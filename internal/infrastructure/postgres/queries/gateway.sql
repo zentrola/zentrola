@@ -3,7 +3,7 @@ SELECT EXISTS (SELECT 1 FROM principal_access_key k
 JOIN principal p ON p.id=k.principal_id
 WHERE k.id=sqlc.arg(access_key_id) AND k.principal_id=sqlc.arg(principal_id)
 AND NOT k.is_deleted AND k.status='ACTIVE' AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>now())
-AND NOT p.is_deleted AND p.status='ACTIVE' AND p.principal_type='MEMBER');
+AND NOT p.is_deleted AND p.status='ACTIVE' AND p.principal_type IN ('MEMBER','APPLICATION'));
 
 -- name: GatewayModel :one
 SELECT id,model_code,display_name,status FROM model WHERE model_code=$1 AND NOT is_deleted;

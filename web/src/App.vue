@@ -410,6 +410,7 @@ async function signOut() {
           </p>
           <RouterLink
             :to="`/${item}`"
+            :class="{ 'router-link-active': item === 'members' && route.name === 'applications' }"
             :aria-label="t(`nav.${item}`)"
             :data-label="t(`nav.${item}`)"
             :id="'nav-' + item"

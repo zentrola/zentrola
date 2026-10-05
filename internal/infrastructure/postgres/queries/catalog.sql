@@ -37,7 +37,7 @@ SELECT EXISTS (
   JOIN principal_group_model_permission permission ON permission.group_id = g.id
   JOIN model m ON m.id = permission.model_id
   WHERE p.id = sqlc.arg(principal_id) AND m.id = sqlc.arg(model_id)
-    AND p.principal_type = 'MEMBER' AND p.status = 'ACTIVE' AND p.is_deleted = false
+    AND p.principal_type IN ('MEMBER','APPLICATION') AND p.status = 'ACTIVE' AND p.is_deleted = false
     AND pg.is_deleted = false AND g.status = 'ACTIVE' AND g.is_deleted = false
     AND permission.is_deleted = false AND m.status = 'ACTIVE' AND m.is_deleted = false
 );

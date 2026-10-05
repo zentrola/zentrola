@@ -25,6 +25,7 @@ type SecurityHandlers struct {
 	Admin           *appsec.AdminService
 	Keys            *appsec.Keys
 	Management      *mgmt.Service
+	Applications    *mgmt.ApplicationService
 	Gateway         *GatewayHandler
 	OpenAI          *GatewayHandler
 	ActiveModels    gw.ActiveModelReader
@@ -124,6 +125,18 @@ func (s *SecurityHandlers) mount(r chi.Router) {
 			// @Failure 422 {object} response
 			// @Router /api/v1/members/{id}/keys [post]
 			protected.Post("/members/{id}/keys", s.createKey)
+			// @Summary 签发应用 App Key
+			// @Tags 应用管理
+			// @Description 完整 App Key 仅在创建响应中展示一次；仅允许为 APPLICATION 签发。
+			// @Accept json
+			// @Produce json
+			// @Security AdminBearer
+			// @Param id path string true "应用 ID"
+			// @Param body body CreateKeyRequest true "请求参数"
+			// @Success 201 {object} response{data=appsec.CreatedKey}
+			// @Failure 400,401,404,503 {object} response
+			// @Router /api/v1/applications/{id}/keys [post]
+			protected.Post("/applications/{id}/keys", s.createApplicationKey)
 			// @Summary 撤销 Access Key
 			// @Tags 访问密钥
 			// @Produce json
@@ -253,6 +266,10 @@ func (s *SecurityHandlers) memberAuth(next http.Handler) http.Handler {
 			securityError(w, r, err)
 			return
 		}
+		if identity.Type != "MEMBER" {
+			securityError(w, r, appsec.ErrUnauthenticated)
+			return
+		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), principalIdentityKey{}, identity)))
 	})
 }
@@ -335,6 +352,12 @@ func (s *SecurityHandlers) gatewayLogger() *slog.Logger {
 	return slog.Default()
 }
 func (s *SecurityHandlers) createKey(w http.ResponseWriter, r *http.Request) {
+	s.createPrincipalKey(w, r, false)
+}
+func (s *SecurityHandlers) createApplicationKey(w http.ResponseWriter, r *http.Request) {
+	s.createPrincipalKey(w, r, true)
+}
+func (s *SecurityHandlers) createPrincipalKey(w http.ResponseWriter, r *http.Request, application bool) {
 	id, err := positiveID(chi.URLParam(r, "id"))
 	if err != nil {
 		securityError(w, r, err)
@@ -344,7 +367,12 @@ func (s *SecurityHandlers) createKey(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	created, err := s.Keys.Create(r.Context(), adminFrom(r), id, input.Name, input.ExpiresAt, requestMeta(r))
+	var created appsec.CreatedKey
+	if application {
+		created, err = s.Keys.CreateApplication(r.Context(), adminFrom(r), id, input.Name, input.ExpiresAt, requestMeta(r))
+	} else {
+		created, err = s.Keys.Create(r.Context(), adminFrom(r), id, input.Name, input.ExpiresAt, requestMeta(r))
+	}
 	if err != nil {
 		securityError(w, r, err)
 		return

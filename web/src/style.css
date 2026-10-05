@@ -784,6 +784,9 @@ label textarea {
   scrollbar-gutter: stable;
   isolation: isolate;
 }
+.record-id-cell {
+  min-width: 192px;
+}
 .table-scroll > table > thead > tr > th:first-child,
 .table-scroll > table > tbody > tr > td:first-child {
   position: sticky;
@@ -1311,7 +1314,7 @@ tbody tr:hover {
   margin: 0;
   overflow-wrap: anywhere;
 }
-.usage-view-tabs {
+.view-tabs {
   display: inline-flex;
   gap: 3px;
   margin: -10px 0 18px;
@@ -1320,7 +1323,7 @@ tbody tr:hover {
   border-radius: 8px;
   background: #f1f5f9;
 }
-.usage-view-tabs button {
+.view-tabs button {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -1333,7 +1336,7 @@ tbody tr:hover {
   font-size: 13px;
   font-weight: 600;
 }
-.usage-view-tabs button.selected {
+.view-tabs button.selected {
   color: var(--color-primary-hover);
   background: #fff;
   box-shadow: 0 1px 3px #17334d14;
@@ -1344,6 +1347,9 @@ tbody tr:hover {
   flex-wrap: wrap;
   align-items: center;
   gap: 12px 16px;
+}
+.usage-list-panel {
+  overflow: visible;
 }
 .usage-filters label,
 .usage-filters .filter-field {
@@ -1451,15 +1457,21 @@ tbody tr:hover {
 }
 .date-range-popover {
   position: absolute;
-  z-index: 12;
+  z-index: 25;
   top: calc(100% + 8px);
-  right: 0;
+  left: 0;
   width: min(590px, calc(100vw - 40px));
   padding: 16px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-card);
   background: #fff;
   box-shadow: 0 16px 40px rgb(15 23 42 / 14%);
+}
+@media (max-width: 800px) {
+  .date-range-popover {
+    right: 0;
+    left: auto;
+  }
 }
 .calendar-panels {
   display: grid;
@@ -3085,11 +3097,11 @@ tbody tr:hover {
   .usage-filters .filter-actions .button {
     flex: 1;
   }
-  .usage-view-tabs {
+  .view-tabs {
     display: flex;
     width: 100%;
   }
-  .usage-view-tabs button {
+  .view-tabs button {
     flex: 1;
     justify-content: center;
   }

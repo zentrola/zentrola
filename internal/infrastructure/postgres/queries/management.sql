@@ -10,6 +10,27 @@ ORDER BY id DESC
 LIMIT sqlc.arg(page_limit);
 -- name: ManageMember :one
 SELECT * FROM principal WHERE id=$1 AND is_deleted=false AND principal_type='MEMBER';
+-- name: ManageApplications :many
+SELECT * FROM principal WHERE is_deleted=false AND principal_type='APPLICATION' AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2;
+-- name: ManageApplication :one
+SELECT * FROM principal WHERE id=$1 AND is_deleted=false AND principal_type='APPLICATION';
+-- name: ManageApplicationSuggestions :many
+SELECT * FROM principal
+WHERE is_deleted=false AND principal_type='APPLICATION'
+  AND strpos(lower(name), lower(sqlc.arg(application_name)::text)) > 0
+  AND (id<sqlc.arg(after_id) OR sqlc.arg(after_id)=0)
+ORDER BY id DESC LIMIT sqlc.arg(page_limit);
+-- name: ManageCreateApplication :exec
+INSERT INTO principal(id,principal_type,name,remark,status,created_by,updated_by,created_at,updated_at)
+VALUES($1,'APPLICATION',$2,$3,'DISABLED',$4,$4,$5,$5);
+-- name: ManageUpdateApplication :exec
+UPDATE principal SET name=$2,remark=$3,updated_by=$4,updated_at=$5
+WHERE id=$1 AND is_deleted=false AND principal_type='APPLICATION';
+-- name: ManageApplicationStatus :exec
+UPDATE principal SET status=$2,updated_by=$3,updated_at=$4 WHERE id=$1 AND is_deleted=false AND principal_type='APPLICATION';
+-- name: ManageDeleteApplication :exec
+UPDATE principal SET is_deleted=true,status='DISABLED',updated_by=$2,updated_at=$3
+WHERE id=$1 AND is_deleted=false AND principal_type='APPLICATION';
 -- name: ManageCreateMember :exec
 INSERT INTO principal(id,principal_type,name,remark,status,created_by,updated_by,created_at,updated_at)
 VALUES($1,'MEMBER',$2,$3,'DISABLED',$4,$4,$5,$5);
@@ -59,6 +80,9 @@ WHERE group_id=$1 AND is_deleted=false;
 -- name: ManageGroupMembers :many
 SELECT p.* FROM principal p JOIN principal_group_membership g ON g.principal_id=p.id
 WHERE g.group_id=$1 AND g.is_deleted=false AND p.is_deleted=false AND p.principal_type='MEMBER' AND (p.id<$2 OR $2=0) ORDER BY p.id DESC LIMIT $3;
+-- name: ManageGroupApplications :many
+SELECT p.* FROM principal p JOIN principal_group_membership g ON g.principal_id=p.id
+WHERE g.group_id=$1 AND g.is_deleted=false AND p.is_deleted=false AND p.principal_type='APPLICATION' AND (p.id<$2 OR $2=0) ORDER BY p.id DESC LIMIT $3;
 -- name: ManageMemberGroups :many
 SELECT g.* FROM principal_group g JOIN principal_group_membership pg ON pg.group_id=g.id
 WHERE pg.principal_id=$1 AND pg.is_deleted=false AND g.is_deleted=false AND (g.id<$2 OR $2=0) ORDER BY g.id DESC LIMIT $3;
@@ -262,14 +286,32 @@ WHERE id=$1 AND is_deleted=false AND version=sqlc.arg(expected_version);
 -- name: ManageKeys :many
 SELECT id,name,masked_key,status,expires_at,revoked_at,created_at FROM principal_access_key
 WHERE principal_id=$1 AND is_deleted=false AND (id<$2 OR $2=0) ORDER BY id DESC LIMIT $3;
+-- name: ManageHasUsableApplicationKey :one
+SELECT EXISTS(SELECT 1 FROM principal_access_key
+WHERE principal_id=sqlc.arg(principal_id) AND is_deleted=false AND status='ACTIVE' AND revoked_at IS NULL
+  AND (expires_at IS NULL OR expires_at>sqlc.arg(now)::timestamptz));
 -- name: ManageOperations :many
 SELECT id,operator_name,operation_type,target_type,target_id,target_name,request_id,result,error_code,before_data,after_data,created_at
 FROM operation_log WHERE (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2;
+-- name: ManageApplicationOperations :many
+SELECT id,operator_name,operation_type,target_type,target_id,target_name,request_id,result,error_code,before_data,after_data,created_at
+FROM operation_log
+WHERE (id<sqlc.arg(after_id) OR sqlc.arg(after_id)=0)
+  AND ((target_type='APPLICATION' AND target_id=sqlc.arg(application_id))
+    OR (target_type='ACCESS_KEY' AND after_data->>'principalId'=sqlc.arg(application_id)::text)
+    OR (target_type='GROUP' AND after_data->>'applicationId'=sqlc.arg(application_id)::text))
+ORDER BY id DESC LIMIT sqlc.arg(page_limit);
 
 -- 分页总数不受 after cursor 影响；过滤口径必须与对应列表查询保持一致。
 -- name: CountManageMembers :one
 SELECT COUNT(*)::bigint FROM principal
 WHERE is_deleted=false AND principal_type='MEMBER';
+-- name: CountManageApplications :one
+SELECT COUNT(*)::bigint FROM principal WHERE is_deleted=false AND principal_type='APPLICATION';
+-- name: CountManageApplicationSuggestions :one
+SELECT COUNT(*)::bigint FROM principal
+WHERE is_deleted=false AND principal_type='APPLICATION'
+  AND strpos(lower(name), lower(sqlc.arg(application_name)::text)) > 0;
 
 -- name: CountManageMemberSuggestions :one
 SELECT COUNT(*)::bigint FROM principal
@@ -302,6 +344,11 @@ WHERE principal_id=$1 AND is_deleted=false;
 
 -- name: CountManageOperations :one
 SELECT COUNT(*)::bigint FROM operation_log;
+-- name: CountManageApplicationOperations :one
+SELECT COUNT(*)::bigint FROM operation_log
+WHERE (target_type='APPLICATION' AND target_id=sqlc.arg(application_id))
+   OR (target_type='ACCESS_KEY' AND after_data->>'principalId'=sqlc.arg(application_id)::text)
+   OR (target_type='GROUP' AND after_data->>'applicationId'=sqlc.arg(application_id)::text);
 
 -- name: CountManageGroupMembers :one
 SELECT COUNT(*)::bigint

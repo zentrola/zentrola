@@ -12,10 +12,16 @@ import ConfirmDialog from './ConfirmDialog.vue'
 import TableScroll from './TableScroll.vue'
 import TechnicalValue from './TechnicalValue.vue'
 
-const props = defineProps<{ member: Member }>()
+const props = withDefaults(defineProps<{ member: Member; kind?: 'member' | 'application' }>(), {
+  kind: 'member',
+})
+const local = (key: string, values: Record<string, string | number> = {}) =>
+  t(`${props.kind === 'application' ? 'applications' : 'members'}.${key}`, values)
 defineEmits<{ close: [] }>()
 const { items, cursor, page, pageSize, total, loading, error, load, previous, retry, setPageSize } =
-  useCollection<AccessKey>(() => `/members/${props.member.id}/keys`)
+  useCollection<AccessKey>(
+    () => `/${props.kind === 'application' ? 'applications' : 'members'}/${props.member.id}/keys`,
+  )
 const { busy, error: actionError, run } = useAction()
 const revokeTarget = ref<AccessKey | null>(null),
   now = ref(Date.now())
@@ -48,7 +54,7 @@ function canRevoke(key: AccessKey) {
 }
 function expiryDate(key: AccessKey) {
   const expiredAt = key.revokedAt ?? key.expiresAt
-  return expiredAt ? dateOnly(expiredAt) : t('members.noExpiry')
+  return expiredAt ? dateOnly(expiredAt) : local('noExpiry')
 }
 function openRevoke(key: AccessKey) {
   now.value = Date.now()
@@ -68,20 +74,20 @@ function revoke() {
     key.status = 'REVOKED'
     key.revokedAt = new Date().toISOString()
     revokeTarget.value = null
-    showSuccessToast(t('members.revoked'))
+    showSuccessToast(local('revoked'))
   })
 }
 </script>
 
 <template>
   <Modal
-    :title="t('members.keyListTitle', { name: member.name })"
+    :title="local('keyListTitle', { name: member.name })"
     :busy="busy"
     medium
     @close="$emit('close')"
   >
     <div class="context-note masked-key-note" role="note">
-      <Icon name="shield" :size="18" /><span>{{ t('members.maskedKeyHint') }}</span>
+      <Icon name="shield" :size="18" /><span>{{ local('maskedKeyHint') }}</span>
     </div>
     <div v-if="error" class="alert error" role="alert">
       {{ error }}
@@ -94,9 +100,9 @@ function revoke() {
       <table class="key-list">
         <thead>
           <tr>
-            <th>{{ t('members.keyDisplayName') }}</th>
-            <th>{{ t('members.assignedKeys') }}</th>
-            <th>{{ t('members.expiryDate') }}</th>
+            <th>{{ local('keyDisplayName') }}</th>
+            <th>{{ local('assignedKeys') }}</th>
+            <th>{{ local('expiryDate') }}</th>
             <th class="align-right">{{ t('common.actions') }}</th>
           </tr>
         </thead>
@@ -114,14 +120,14 @@ function revoke() {
                 :disabled="busy || loading"
                 @click="openRevoke(key)"
               >
-                {{ t('members.revoke') }}
+                {{ local('revoke') }}
               </button>
             </td>
           </tr>
         </tbody>
       </table>
     </TableScroll>
-    <p v-else-if="!loading && !error" class="muted">{{ t('members.noKeys') }}</p>
+    <p v-else-if="!loading && !error" class="muted">{{ local('noKeys') }}</p>
     <ListFooter
       v-if="!error && items.length"
       :cursor="cursor"
@@ -137,10 +143,10 @@ function revoke() {
   </Modal>
   <ConfirmDialog
     v-if="revokeTarget"
-    :title="t('members.revokeTitle')"
-    :message="t('members.revokeQuestion', { name: revokeTarget.name })"
-    :hint="t('members.revokeConsequence')"
-    :confirm-label="t('members.revoke')"
+    :title="local('revokeTitle')"
+    :message="local('revokeQuestion', { name: revokeTarget.name })"
+    :hint="local('revokeConsequence')"
+    :confirm-label="local('revoke')"
     :busy="busy"
     tone="danger"
     @close="revokeTarget = null"

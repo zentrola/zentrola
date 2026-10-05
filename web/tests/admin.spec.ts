@@ -915,6 +915,101 @@ async function signIn(page: Page, destination: 'home' | 'members' = 'members') {
   await expect(page.getByRole('heading', { name: '用户管理', exact: true })).toBeVisible()
 }
 const modal = (page: Page) => page.locator('dialog').last()
+test('应用管理签发仅展示一次的 App Key', async ({ page }) => {
+  const state = await fixture(page)
+  state.groups.push({
+    id: '51',
+    code: 'engineering',
+    name: '研发组',
+    status: 'ACTIVE',
+    createdAt: stamp,
+  })
+  const applications: any[] = []
+  await page.route('**/api/v1/applications**', async (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname.replace('/api/v1', '')
+    const reply = (data: unknown, status = 200) =>
+      route.fulfill({
+        status,
+        contentType: 'application/json',
+        body: JSON.stringify({ code: 'OK', data }),
+      })
+    if (path === '/applications' && request.method() === 'GET')
+      return reply({ items: applications, total: applications.length, nextCursor: null })
+    if (path === '/applications' && request.method() === 'POST') {
+      const input = request.postDataJSON()
+      const created = {
+        id: '71',
+        name: input.name,
+        remark: input.remark,
+        status: 'DISABLED',
+        createdAt: stamp,
+      }
+      applications.push(created)
+      return reply(created, 201)
+    }
+    if (path === '/applications/71/keys' && request.method() === 'POST')
+      return reply(
+        {
+          id: '81',
+          key: 'ak-once-only-secret',
+          maskedKey: 'ak-******',
+          name: request.postDataJSON().name,
+          expiresAt: null,
+        },
+        201,
+      )
+    return reply(null, 404)
+  })
+
+  await signIn(page, 'home')
+  await page.getByRole('link', { name: '用户管理', exact: true }).click()
+  await expect(page.getByRole('link', { name: '应用管理', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('tab', { name: '用户管理' })).toHaveAttribute('aria-selected', 'true')
+  await page.getByRole('tab', { name: '应用管理' }).click()
+  await expect(page).toHaveURL(/#\/applications$/)
+  await expect(page.getByRole('tab', { name: '应用管理' })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('link', { name: '用户管理', exact: true })).toHaveClass(
+    /router-link-active/,
+  )
+  await expect(page.getByRole('heading', { name: '应用管理', exact: true })).toBeVisible()
+  await expect(page.getByRole('columnheader').first()).toHaveText('ID')
+  await page.getByRole('button', { name: '创建应用' }).click()
+  const dialog = modal(page)
+  await dialog.getByLabel('应用名称').fill('自动化服务')
+  await dialog.getByRole('checkbox', { name: '选择分组 研发组' }).check()
+  await dialog.getByRole('button', { name: '创建', exact: true }).click()
+  const row = page.getByRole('row').filter({ hasText: '自动化服务' })
+  await expect(row).toBeVisible()
+  await expect(row.getByRole('cell').first().locator('code')).toHaveText('71')
+  await expect(row.getByRole('cell').first().locator('.technical-value-copy')).toHaveCount(0)
+  await mkdir('../.cache/web-visual', { recursive: true })
+  await page.screenshot({
+    path: '../.cache/web-visual/application-id-first.png',
+    animations: 'disabled',
+  })
+  await expect(row.getByRole('link', { name: '审计记录' })).toHaveCount(0)
+  await row.getByRole('button', { name: 'App Key', exact: true }).click()
+  await modal(page).getByLabel('Key 名称').fill('生产调用')
+  await modal(page).getByRole('button', { name: '签发 App Key' }).click()
+  await expect(modal(page).getByRole('textbox', { name: '完整 App Key 仅展示这一次' })).toHaveValue(
+    'ak-once-only-secret',
+  )
+  await modal(page).getByRole('button', { name: '我已保存，关闭' }).click()
+  await expect(page.getByText('ak-once-only-secret')).toHaveCount(0)
+  await page.getByRole('tab', { name: '用户管理' }).click()
+  await expect(page).toHaveURL(/#\/members$/)
+  await expect(page.getByRole('heading', { name: '用户管理', exact: true })).toBeVisible()
+  await page.goto('/#/applications')
+  await expect(page.getByRole('tab', { name: '应用管理' })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('row').filter({ hasText: '自动化服务' })).toBeVisible()
+  await page.setViewportSize({ width: 390, height: 844 })
+  const tabs = page.getByRole('tablist', { name: '用户管理 / 应用管理' })
+  await expect(tabs).toBeVisible()
+  await expect(page.locator('.workspace')).toHaveCSS('margin-left', '0px')
+  expect(await tabs.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+})
 test('仪表盘初始化向导依次高亮配置入口', async ({ page }) => {
   await fixture(page)
   await signIn(page, 'home')
@@ -1402,9 +1497,20 @@ test('成员列表按需查看 Key 并处理删除和失败恢复', async ({ pag
   )
   await signIn(page)
   const row = page.getByRole('row').filter({ hasText: '林知远' })
+  await expect(page.getByRole('columnheader').first()).toHaveText('ID')
   await expect(page.getByRole('button', { name: '管理 Key' })).toHaveCount(0)
   await expect(page.getByRole('columnheader', { name: '访问密钥', exact: true })).toHaveCount(0)
-  await expect(row.locator('code')).toHaveCount(0)
+  await expect(row.getByRole('cell').first().locator('code')).toHaveText(longID)
+  await expect(row.getByRole('cell').first().locator('.technical-value-copy')).toHaveCount(0)
+  expect(
+    await row
+      .getByRole('cell')
+      .first()
+      .locator('code')
+      .evaluate((element) => {
+        return element.scrollWidth <= element.clientWidth
+      }),
+  ).toBe(true)
   await expect(row).not.toContainText('vk-work1234')
   await expect(row).not.toContainText('zt_vk_temp')
   await expect(row.getByText('工作站', { exact: true })).toHaveCount(0)
@@ -1502,7 +1608,7 @@ test('成员列表按需查看 Key 并处理删除和失败恢复', async ({ pag
   await modal(page).getByRole('button', { name: '我已保存，关闭' }).click()
   await expect(page.locator('dialog')).toHaveCount(0)
   await expect(row).not.toContainText('vk-fixture1')
-  await expect(row.locator('code')).toHaveCount(0)
+  await expect(row.getByRole('cell').first().locator('code')).toHaveText(longID)
   await expect(row).not.toContainText('zt_vk_temp')
   await expect(row).not.toContainText('2020年1月1日')
   expect(state.keys).toHaveLength(3)
@@ -1648,6 +1754,7 @@ test('模型新增编辑、模态校验、冲突恢复和窄屏表单', async ({
   await page.getByRole('link', { name: '模型', exact: true }).click()
   await expect.poll(() => state.providerQueries.at(-1)?.get('type')).toBe('OFFICIAL')
   await expect(page.getByRole('columnheader')).toHaveText([
+    'ID',
     '模型名称',
     '模型厂商',
     '启用状态',
@@ -1659,8 +1766,12 @@ test('模型新增编辑、模态校验、冲突恢复和窄屏表单', async ({
   const existingModelRow = page.getByRole('row').filter({ hasText: 'DeepSeek V4 Flash' })
   await expect(existingModelRow.locator('.person strong')).toHaveText('DeepSeek V4 Flash')
   await expect(existingModelRow.locator('.person small')).toHaveText('deepseek-v4-flash')
-  await expect(existingModelRow.getByRole('cell')).toHaveCount(7)
-  await expect(existingModelRow.getByRole('cell').nth(1)).toHaveText('DeepSeek')
+  await expect(existingModelRow.getByRole('cell')).toHaveCount(8)
+  await expect(existingModelRow.getByRole('cell').first().locator('code')).toHaveText('71')
+  await expect(
+    existingModelRow.getByRole('cell').first().locator('.technical-value-copy'),
+  ).toHaveCount(0)
+  await expect(existingModelRow.getByRole('cell').nth(2)).toHaveText('DeepSeek')
   const publisherFilter = page.getByRole('combobox', { name: '模型厂商', exact: true })
   await expect(publisherFilter.locator('..')).toHaveCSS('flex-direction', 'row')
   await expect(publisherFilter.locator('option')).toHaveText(['全部', 'DeepSeek'])
@@ -1713,7 +1824,7 @@ test('模型新增编辑、模态校验、冲突恢复和窄屏表单', async ({
   expect(created.status).toBe('DISABLED')
   expect(created.publisherProviderId).toBe('81')
   expect(created.publisherProviderName).toBe('DeepSeek')
-  await expect(row.getByRole('cell').nth(1)).toHaveText('DeepSeek')
+  await expect(row.getByRole('cell').nth(2)).toHaveText('DeepSeek')
   await row.getByRole('button', { name: '编辑', exact: true }).click()
   await expect(dialog.getByLabel('发布方编码', { exact: true })).toHaveCount(0)
   await expect(dialog.getByLabel('模型厂商', { exact: true })).toHaveValue('81')
@@ -1749,7 +1860,7 @@ test('模型新增编辑、模态校验、冲突恢复和窄屏表单', async ({
   await expect(page.getByRole('row').filter({ hasText: 'official-test-v2' })).toHaveCount(1)
   await page.screenshot({ path: '../.cache/web-visual/model-catalog-desktop.png' })
   const updatedRow = page.getByRole('row').filter({ hasText: 'official-test-v2' })
-  await expect(updatedRow.getByRole('cell').nth(1)).toHaveText('-')
+  await expect(updatedRow.getByRole('cell').nth(2)).toHaveText('-')
   await updatedRow.getByRole('button', { name: '删除', exact: true }).click()
   const deleteDialog = modal(page)
   await expect(deleteDialog).toContainText('相关服务商映射和分组授权将同时失效')
@@ -1764,6 +1875,9 @@ test('服务商同步入口只由后端能力参数控制', async ({ page }) => 
   await page.getByRole('link', { name: '服务商', exact: true }).click()
 
   const row = page.getByRole('row').filter({ hasText: 'DeepSeek' })
+  await expect(page.getByRole('columnheader').first()).toHaveText('ID')
+  await expect(row.getByRole('cell').first().locator('code')).toHaveText('81')
+  await expect(row.getByRole('cell').first().locator('.technical-value-copy')).toHaveCount(0)
   const syncModelsButton = row.getByRole('button', {
     name: '同步 DeepSeek 的官方模型',
     exact: true,
@@ -2723,7 +2837,7 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
       upstreamModelCode: 'aliyun-deepseek-v4-flash',
     }),
   ])
-  const providerNameCellBox = await row.getByRole('cell').first().boundingBox()
+  const providerNameCellBox = await row.getByRole('cell').nth(1).boundingBox()
   expect(providerNameCellBox).not.toBeNull()
   expect(providerNameCellBox!.width).toBeGreaterThanOrEqual(245)
   const endpoint = row.locator('.endpoint')
@@ -2741,8 +2855,8 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await expect(row.getByText('OpenAI', { exact: true })).toBeVisible()
   await expect(row.locator('.endpoint-protocol')).toHaveText(['OpenAI'])
   await expect(row.getByText('Anthropic', { exact: true })).toHaveCount(0)
-  const proxyCellBox = await row.getByRole('cell').nth(3).boundingBox()
-  const endpointCellBox = await row.getByRole('cell').nth(4).boundingBox()
+  const proxyCellBox = await row.getByRole('cell').nth(4).boundingBox()
+  const endpointCellBox = await row.getByRole('cell').nth(5).boundingBox()
   expect(proxyCellBox).not.toBeNull()
   expect(endpointCellBox).not.toBeNull()
   expect(proxyCellBox!.width).toBeLessThan(80)
@@ -3704,6 +3818,7 @@ test('分组列表按最新记录倒序显示并提示输入分组名称', async
   await page.getByRole('link', { name: '用户分组', exact: true }).click()
 
   await expect(page.getByRole('columnheader')).toHaveText([
+    'ID',
     '名称',
     '启用状态',
     '创建时间',
@@ -3711,12 +3826,23 @@ test('分组列表按最新记录倒序显示并提示输入分组名称', async
     '操作',
   ])
   await expect(page.locator('tbody tr .person strong')).toHaveText(['最新分组', '较早分组'])
+  await expect(
+    page.getByRole('row').filter({ hasText: '最新分组' }).getByRole('cell').first().locator('code'),
+  ).toHaveText('52')
+  await expect(
+    page
+      .getByRole('row')
+      .filter({ hasText: '最新分组' })
+      .getByRole('cell')
+      .first()
+      .locator('.technical-value-copy'),
+  ).toHaveCount(0)
   await expect(page.locator('tbody tr .avatar')).toHaveText(['最', '较'])
   await expect(
-    page.getByRole('row').filter({ hasText: '最新分组' }).getByRole('cell').nth(3),
+    page.getByRole('row').filter({ hasText: '最新分组' }).getByRole('cell').nth(4),
   ).toHaveText('-')
   await expect(
-    page.getByRole('row').filter({ hasText: '较早分组' }).getByRole('cell').nth(3),
+    page.getByRole('row').filter({ hasText: '较早分组' }).getByRole('cell').nth(4),
   ).toHaveText('核心服务组')
   await expect(page.getByRole('searchbox', { name: '分组名称' })).toHaveAttribute(
     'placeholder',
@@ -3785,7 +3911,7 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
     errors: string[] = []
   page.on('pageerror', (e) => errors.push(e.message))
   await signIn(page)
-  await expect(page.getByText(longID, { exact: true })).toHaveCount(0)
+  await expect(page.getByText(longID, { exact: true })).toBeVisible()
   const memberSearch = page.getByRole('searchbox', { name: '用户名' })
   await expect(memberSearch).toHaveAttribute('placeholder', '请输入用户名')
   await expect(page.locator('.list-search-label')).toHaveText('用户名')
@@ -4239,12 +4365,12 @@ test('高密度表格在常用桌面分辨率保持稳定列宽和单行技术�
     await expect(page.getByRole('heading', { name: '服务商', exact: true })).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     const scroll = page.locator('.providers-table').locator('..')
-    expect(await scroll.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(
-      true,
+    expect(await scroll.evaluate((element) => element.scrollWidth > element.clientWidth + 1)).toBe(
+      width < 1920,
     )
     const headers = page.locator('.providers-table th')
-    expect((await headers.nth(2).boundingBox())!.width).toBeGreaterThanOrEqual(120)
-    expect((await headers.nth(5).boundingBox())!.width).toBeGreaterThanOrEqual(170)
+    expect((await headers.nth(3).boundingBox())!.width).toBeGreaterThanOrEqual(120)
+    expect((await headers.nth(6).boundingBox())!.width).toBeGreaterThanOrEqual(170)
   }
 
   const endpoint = page.locator('.providers-table .endpoint').first()

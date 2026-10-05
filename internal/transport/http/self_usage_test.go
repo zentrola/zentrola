@@ -54,7 +54,7 @@ func (s *selfUsageQueryStore) TokenUsage(_ context.Context, principalID int64, f
 
 func TestSelfUsageAuthenticatesAccessKeyAndReturnsOwnTokens(t *testing.T) {
 	store := &selfUsageQueryStore{tokens: 156000}
-	keys := appsec.NewKeys(&selfUsageKeyStore{identity: appsec.PrincipalIdentity{ID: 42, AccessKeyID: 7}}, nil)
+	keys := appsec.NewKeys(&selfUsageKeyStore{identity: appsec.PrincipalIdentity{ID: 42, AccessKeyID: 7, Type: "MEMBER"}}, nil)
 	router := NewRouter(
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		health.New(),
@@ -108,7 +108,7 @@ func TestSelfUsageAuthenticatesAccessKeyAndReturnsOwnTokens(t *testing.T) {
 
 func TestSelfUsageAcceptsExplicitRange(t *testing.T) {
 	store := &selfUsageQueryStore{tokens: 42000}
-	keys := appsec.NewKeys(&selfUsageKeyStore{identity: appsec.PrincipalIdentity{ID: 42}}, nil)
+	keys := appsec.NewKeys(&selfUsageKeyStore{identity: appsec.PrincipalIdentity{ID: 42, Type: "MEMBER"}}, nil)
 	router := NewRouter(
 		slog.New(slog.NewTextHandler(io.Discard, nil)), health.New(), CORSOptions{}, time.Second, "prod",
 		&SecurityHandlers{Keys: keys, Usage: usageapp.NewQuery(store)},
@@ -129,9 +129,26 @@ func TestSelfUsageAcceptsExplicitRange(t *testing.T) {
 	}
 }
 
+func TestApplicationKeyCannotUseMemberSelfUsage(t *testing.T) {
+	store := &selfUsageQueryStore{}
+	keys := appsec.NewKeys(&selfUsageKeyStore{identity: appsec.PrincipalIdentity{ID: 42, Type: "APPLICATION"}}, nil)
+	router := NewRouter(
+		slog.New(slog.NewTextHandler(io.Discard, nil)), health.New(), CORSOptions{}, time.Second, "prod",
+		&SecurityHandlers{Keys: keys, Usage: usageapp.NewQuery(store)},
+	)
+	key := "ak-" + base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/me/usage", nil)
+	request.Header.Set("Authorization", "Bearer "+key)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusUnauthorized || store.principalID != 0 {
+		t.Fatalf("application key accessed member self usage: status=%d principal=%d", recorder.Code, store.principalID)
+	}
+}
+
 func TestSelfUsageRejectsMissingAmbiguousOrInvalidInput(t *testing.T) {
 	store := &selfUsageQueryStore{}
-	keys := appsec.NewKeys(&selfUsageKeyStore{identity: appsec.PrincipalIdentity{ID: 42}}, nil)
+	keys := appsec.NewKeys(&selfUsageKeyStore{identity: appsec.PrincipalIdentity{ID: 42, Type: "MEMBER"}}, nil)
 	router := NewRouter(
 		slog.New(slog.NewTextHandler(io.Discard, nil)), health.New(), CORSOptions{}, time.Second, "prod",
 		&SecurityHandlers{Keys: keys, Usage: usageapp.NewQuery(store)},

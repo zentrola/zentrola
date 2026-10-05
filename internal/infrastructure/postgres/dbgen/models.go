@@ -124,7 +124,7 @@ type Principal struct {
 	IsDeleted bool
 	// 状态：ACTIVE=启用；DISABLED=停用
 	Status string
-	// 主体类型：MEMBER=成员；APPLICATION=应用，仅预留类型
+	// 主体类型：MEMBER=成员；APPLICATION=应用
 	PrincipalType string
 	// 主体名称
 	Name string

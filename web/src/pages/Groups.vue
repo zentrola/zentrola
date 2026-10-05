@@ -14,6 +14,7 @@ import ListSearch from '../components/ListSearch.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import GroupModelSelector from '../components/GroupModelSelector.vue'
 import TableScroll from '../components/TableScroll.vue'
+import TechnicalValue from '../components/TechnicalValue.vue'
 const {
   items,
   cursor,
@@ -202,6 +203,7 @@ function deleteGroup() {
       <table>
         <thead>
           <tr>
+            <th>{{ t('common.id') }}</th>
             <th>{{ t('common.name') }}</th>
             <th>{{ t('common.enableStatus') }}</th>
             <th>{{ t('common.created') }}</th>
@@ -211,6 +213,7 @@ function deleteGroup() {
         </thead>
         <tbody>
           <tr v-for="group in visible" :key="group.id">
+            <td class="record-id-cell"><TechnicalValue :value="group.id" :copyable="false" /></td>
             <td>
               <div class="person">
                 <span class="avatar">{{ group.name.slice(0, 1) }}</span>

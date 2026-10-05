@@ -179,6 +179,7 @@ export interface Usage {
   clientProtocol: string
   principalId: string
   principalName: string
+  principalType: 'MEMBER' | 'APPLICATION'
   modelId: string
   resourceId: string
   providerId: string

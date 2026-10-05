@@ -16,6 +16,7 @@ import (
 var (
 	ErrConflict                     = errors.New("conflict")
 	ErrMemberAccessKeyRequired      = errors.New("member access key required")
+	ErrApplicationKeyRequired       = errors.New("application app key required")
 	ErrSubscriptionAccountExists    = errors.New("subscription account already exists")
 	ErrCredential                   = errors.New("credential unrecoverable")
 	ErrProvider                     = errors.New("provider unavailable")
@@ -29,6 +30,7 @@ var (
 var publicErrors = []error{
 	ErrConflict,
 	ErrMemberAccessKeyRequired,
+	ErrApplicationKeyRequired,
 	ErrSubscriptionAccountExists,
 	ErrCredential,
 	ErrProvider,
@@ -81,6 +83,7 @@ type Member struct {
 	Status    string    `json:"status"`
 	CreatedAt time.Time `json:"createdAt"`
 }
+type Application Member
 type Group struct {
 	ID        int64     `json:"id,string"`
 	Code      string    `json:"code"`

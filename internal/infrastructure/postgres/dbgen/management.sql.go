@@ -11,6 +11,44 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countManageApplicationOperations = `-- name: CountManageApplicationOperations :one
+SELECT COUNT(*)::bigint FROM operation_log
+WHERE (target_type='APPLICATION' AND target_id=$1)
+   OR (target_type='ACCESS_KEY' AND after_data->>'principalId'=$1::text)
+   OR (target_type='GROUP' AND after_data->>'applicationId'=$1::text)
+`
+
+func (q *Queries) CountManageApplicationOperations(ctx context.Context, applicationID *int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countManageApplicationOperations, applicationID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countManageApplicationSuggestions = `-- name: CountManageApplicationSuggestions :one
+SELECT COUNT(*)::bigint FROM principal
+WHERE is_deleted=false AND principal_type='APPLICATION'
+  AND strpos(lower(name), lower($1::text)) > 0
+`
+
+func (q *Queries) CountManageApplicationSuggestions(ctx context.Context, applicationName string) (int64, error) {
+	row := q.db.QueryRow(ctx, countManageApplicationSuggestions, applicationName)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countManageApplications = `-- name: CountManageApplications :one
+SELECT COUNT(*)::bigint FROM principal WHERE is_deleted=false AND principal_type='APPLICATION'
+`
+
+func (q *Queries) CountManageApplications(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countManageApplications)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countManageGroupMembers = `-- name: CountManageGroupMembers :one
 SELECT COUNT(*)::bigint
 FROM principal p
@@ -183,6 +221,198 @@ func (q *Queries) ManageAddMember(ctx context.Context, arg ManageAddMemberParams
 	return err
 }
 
+const manageApplication = `-- name: ManageApplication :one
+SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at FROM principal WHERE id=$1 AND is_deleted=false AND principal_type='APPLICATION'
+`
+
+func (q *Queries) ManageApplication(ctx context.Context, id int64) (Principal, error) {
+	row := q.db.QueryRow(ctx, manageApplication, id)
+	var i Principal
+	err := row.Scan(
+		&i.ID,
+		&i.IsDeleted,
+		&i.Status,
+		&i.PrincipalType,
+		&i.Name,
+		&i.Remark,
+		&i.CreatedBy,
+		&i.UpdatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const manageApplicationOperations = `-- name: ManageApplicationOperations :many
+SELECT id,operator_name,operation_type,target_type,target_id,target_name,request_id,result,error_code,before_data,after_data,created_at
+FROM operation_log
+WHERE (id<$1 OR $1=0)
+  AND ((target_type='APPLICATION' AND target_id=$2)
+    OR (target_type='ACCESS_KEY' AND after_data->>'principalId'=$2::text)
+    OR (target_type='GROUP' AND after_data->>'applicationId'=$2::text))
+ORDER BY id DESC LIMIT $3
+`
+
+type ManageApplicationOperationsParams struct {
+	AfterID       int64
+	ApplicationID *int64
+	PageLimit     int32
+}
+
+type ManageApplicationOperationsRow struct {
+	ID            int64
+	OperatorName  string
+	OperationType string
+	TargetType    string
+	TargetID      *int64
+	TargetName    *string
+	RequestID     *string
+	Result        string
+	ErrorCode     *string
+	BeforeData    []byte
+	AfterData     []byte
+	CreatedAt     pgtype.Timestamptz
+}
+
+func (q *Queries) ManageApplicationOperations(ctx context.Context, arg ManageApplicationOperationsParams) ([]ManageApplicationOperationsRow, error) {
+	rows, err := q.db.Query(ctx, manageApplicationOperations, arg.AfterID, arg.ApplicationID, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ManageApplicationOperationsRow{}
+	for rows.Next() {
+		var i ManageApplicationOperationsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OperatorName,
+			&i.OperationType,
+			&i.TargetType,
+			&i.TargetID,
+			&i.TargetName,
+			&i.RequestID,
+			&i.Result,
+			&i.ErrorCode,
+			&i.BeforeData,
+			&i.AfterData,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const manageApplicationStatus = `-- name: ManageApplicationStatus :exec
+UPDATE principal SET status=$2,updated_by=$3,updated_at=$4 WHERE id=$1 AND is_deleted=false AND principal_type='APPLICATION'
+`
+
+type ManageApplicationStatusParams struct {
+	ID        int64
+	Status    string
+	UpdatedBy string
+	UpdatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) ManageApplicationStatus(ctx context.Context, arg ManageApplicationStatusParams) error {
+	_, err := q.db.Exec(ctx, manageApplicationStatus,
+		arg.ID,
+		arg.Status,
+		arg.UpdatedBy,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const manageApplicationSuggestions = `-- name: ManageApplicationSuggestions :many
+SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at FROM principal
+WHERE is_deleted=false AND principal_type='APPLICATION'
+  AND strpos(lower(name), lower($1::text)) > 0
+  AND (id<$2 OR $2=0)
+ORDER BY id DESC LIMIT $3
+`
+
+type ManageApplicationSuggestionsParams struct {
+	ApplicationName string
+	AfterID         int64
+	PageLimit       int32
+}
+
+func (q *Queries) ManageApplicationSuggestions(ctx context.Context, arg ManageApplicationSuggestionsParams) ([]Principal, error) {
+	rows, err := q.db.Query(ctx, manageApplicationSuggestions, arg.ApplicationName, arg.AfterID, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Principal{}
+	for rows.Next() {
+		var i Principal
+		if err := rows.Scan(
+			&i.ID,
+			&i.IsDeleted,
+			&i.Status,
+			&i.PrincipalType,
+			&i.Name,
+			&i.Remark,
+			&i.CreatedBy,
+			&i.UpdatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const manageApplications = `-- name: ManageApplications :many
+SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at FROM principal WHERE is_deleted=false AND principal_type='APPLICATION' AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2
+`
+
+type ManageApplicationsParams struct {
+	ID    int64
+	Limit int32
+}
+
+func (q *Queries) ManageApplications(ctx context.Context, arg ManageApplicationsParams) ([]Principal, error) {
+	rows, err := q.db.Query(ctx, manageApplications, arg.ID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Principal{}
+	for rows.Next() {
+		var i Principal
+		if err := rows.Scan(
+			&i.ID,
+			&i.IsDeleted,
+			&i.Status,
+			&i.PrincipalType,
+			&i.Name,
+			&i.Remark,
+			&i.CreatedBy,
+			&i.UpdatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const manageBlockResourceRuntime = `-- name: ManageBlockResourceRuntime :execrows
 UPDATE provider_credential
 SET runtime_status='BLOCKED',blocked_reason=$2,blocked_at=$3,last_error_at=$3,
@@ -214,6 +444,30 @@ func (q *Queries) ManageBlockResourceRuntime(ctx context.Context, arg ManageBloc
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const manageCreateApplication = `-- name: ManageCreateApplication :exec
+INSERT INTO principal(id,principal_type,name,remark,status,created_by,updated_by,created_at,updated_at)
+VALUES($1,'APPLICATION',$2,$3,'DISABLED',$4,$4,$5,$5)
+`
+
+type ManageCreateApplicationParams struct {
+	ID        int64
+	Name      string
+	Remark    *string
+	CreatedBy string
+	CreatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) ManageCreateApplication(ctx context.Context, arg ManageCreateApplicationParams) error {
+	_, err := q.db.Exec(ctx, manageCreateApplication,
+		arg.ID,
+		arg.Name,
+		arg.Remark,
+		arg.CreatedBy,
+		arg.CreatedAt,
+	)
+	return err
 }
 
 const manageCreateGroup = `-- name: ManageCreateGroup :exec
@@ -476,6 +730,22 @@ func (q *Queries) ManageCreateResourceQuota(ctx context.Context, arg ManageCreat
 		arg.ReachedType,
 		arg.ObservedAt,
 	)
+	return err
+}
+
+const manageDeleteApplication = `-- name: ManageDeleteApplication :exec
+UPDATE principal SET is_deleted=true,status='DISABLED',updated_by=$2,updated_at=$3
+WHERE id=$1 AND is_deleted=false AND principal_type='APPLICATION'
+`
+
+type ManageDeleteApplicationParams struct {
+	ID        int64
+	UpdatedBy string
+	UpdatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) ManageDeleteApplication(ctx context.Context, arg ManageDeleteApplicationParams) error {
+	_, err := q.db.Exec(ctx, manageDeleteApplication, arg.ID, arg.UpdatedBy, arg.UpdatedAt)
 	return err
 }
 
@@ -773,6 +1043,48 @@ func (q *Queries) ManageGroup(ctx context.Context, id int64) (PrincipalGroup, er
 	return i, err
 }
 
+const manageGroupApplications = `-- name: ManageGroupApplications :many
+SELECT p.id, p.is_deleted, p.status, p.principal_type, p.name, p.remark, p.created_by, p.updated_by, p.created_at, p.updated_at FROM principal p JOIN principal_group_membership g ON g.principal_id=p.id
+WHERE g.group_id=$1 AND g.is_deleted=false AND p.is_deleted=false AND p.principal_type='APPLICATION' AND (p.id<$2 OR $2=0) ORDER BY p.id DESC LIMIT $3
+`
+
+type ManageGroupApplicationsParams struct {
+	GroupID int64
+	ID      int64
+	Limit   int32
+}
+
+func (q *Queries) ManageGroupApplications(ctx context.Context, arg ManageGroupApplicationsParams) ([]Principal, error) {
+	rows, err := q.db.Query(ctx, manageGroupApplications, arg.GroupID, arg.ID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Principal{}
+	for rows.Next() {
+		var i Principal
+		if err := rows.Scan(
+			&i.ID,
+			&i.IsDeleted,
+			&i.Status,
+			&i.PrincipalType,
+			&i.Name,
+			&i.Remark,
+			&i.CreatedBy,
+			&i.UpdatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const manageGroupMembers = `-- name: ManageGroupMembers :many
 SELECT p.id, p.is_deleted, p.status, p.principal_type, p.name, p.remark, p.created_by, p.updated_by, p.created_at, p.updated_at FROM principal p JOIN principal_group_membership g ON g.principal_id=p.id
 WHERE g.group_id=$1 AND g.is_deleted=false AND p.is_deleted=false AND p.principal_type='MEMBER' AND (p.id<$2 OR $2=0) ORDER BY p.id DESC LIMIT $3
@@ -947,6 +1259,24 @@ func (q *Queries) ManageGroups(ctx context.Context, arg ManageGroupsParams) ([]P
 		return nil, err
 	}
 	return items, nil
+}
+
+const manageHasUsableApplicationKey = `-- name: ManageHasUsableApplicationKey :one
+SELECT EXISTS(SELECT 1 FROM principal_access_key
+WHERE principal_id=$1 AND is_deleted=false AND status='ACTIVE' AND revoked_at IS NULL
+  AND (expires_at IS NULL OR expires_at>$2::timestamptz))
+`
+
+type ManageHasUsableApplicationKeyParams struct {
+	PrincipalID int64
+	Now         pgtype.Timestamptz
+}
+
+func (q *Queries) ManageHasUsableApplicationKey(ctx context.Context, arg ManageHasUsableApplicationKeyParams) (bool, error) {
+	row := q.db.QueryRow(ctx, manageHasUsableApplicationKey, arg.PrincipalID, arg.Now)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const manageKeys = `-- name: ManageKeys :many
@@ -1915,6 +2245,30 @@ func (q *Queries) ManageRevokeModel(ctx context.Context, arg ManageRevokeModelPa
 	_, err := q.db.Exec(ctx, manageRevokeModel,
 		arg.GroupID,
 		arg.ModelID,
+		arg.UpdatedBy,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const manageUpdateApplication = `-- name: ManageUpdateApplication :exec
+UPDATE principal SET name=$2,remark=$3,updated_by=$4,updated_at=$5
+WHERE id=$1 AND is_deleted=false AND principal_type='APPLICATION'
+`
+
+type ManageUpdateApplicationParams struct {
+	ID        int64
+	Name      string
+	Remark    *string
+	UpdatedBy string
+	UpdatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) ManageUpdateApplication(ctx context.Context, arg ManageUpdateApplicationParams) error {
+	_, err := q.db.Exec(ctx, manageUpdateApplication,
+		arg.ID,
+		arg.Name,
+		arg.Remark,
 		arg.UpdatedBy,
 		arg.UpdatedAt,
 	)

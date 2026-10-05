@@ -9,6 +9,11 @@ const router = createRouter({
   routes: [
     { path: '/', name: 'home', component: () => import('./pages/Home.vue') },
     { path: '/members', name: 'members', component: () => import('./pages/Members.vue') },
+    {
+      path: '/applications',
+      name: 'applications',
+      component: () => import('./pages/Applications.vue'),
+    },
     { path: '/groups', name: 'groups', component: () => import('./pages/Groups.vue') },
     { path: '/models', name: 'models', component: () => import('./pages/Models.vue') },
     { path: '/providers', name: 'providers', component: () => import('./pages/Providers.vue') },

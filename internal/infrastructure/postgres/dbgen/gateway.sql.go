@@ -156,7 +156,7 @@ SELECT EXISTS (SELECT 1 FROM principal_access_key k
 JOIN principal p ON p.id=k.principal_id
 WHERE k.id=$1 AND k.principal_id=$2
 AND NOT k.is_deleted AND k.status='ACTIVE' AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>now())
-AND NOT p.is_deleted AND p.status='ACTIVE' AND p.principal_type='MEMBER')
+AND NOT p.is_deleted AND p.status='ACTIVE' AND p.principal_type IN ('MEMBER','APPLICATION'))
 `
 
 type GatewayIdentityActiveParams struct {

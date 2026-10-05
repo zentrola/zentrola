@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zentrola/zentrola/internal/domain/admin"
+	"github.com/zentrola/zentrola/internal/domain/principal"
 )
 
 type keyTestStore struct {
@@ -84,6 +85,38 @@ func TestLegacyVirtualKeyRemainsValidWithoutPrefixConversion(t *testing.T) {
 	}
 	if _, err := keys.Authenticate(context.Background(), "vk-"+suffix); !errors.Is(err, ErrUnauthenticated) {
 		t.Fatal("renaming a legacy key must not authenticate")
+	}
+}
+
+func TestCreateApplicationKeyUsesDistinctMarkerAndPrincipalType(t *testing.T) {
+	store := &keyTestStore{identity: PrincipalIdentity{ID: 3, AccessKeyID: 123, Type: principal.Application}}
+	keys := NewKeys(store, keyTestIDs{})
+	created, err := keys.CreateApplication(context.Background(), admin.Identity{ID: 1}, 3, "服务", nil, RequestMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(created.Key, "ak-") || !strings.HasPrefix(created.MaskedKey, "ak-") || store.row.PrincipalType != principal.Application {
+		t.Fatalf("application key was not isolated: key=%q type=%q", created.MaskedKey, store.row.PrincipalType)
+	}
+	digest := sha256.Sum256([]byte(created.Key))
+	if !bytes.Equal(store.row.Hash, digest[:]) {
+		t.Fatal("application key hash does not match complete key")
+	}
+	identity, err := keys.Authenticate(context.Background(), created.Key)
+	if err != nil || identity.Type != principal.Application {
+		t.Fatalf("application key authentication failed: identity=%+v err=%v", identity, err)
+	}
+}
+
+func TestCreateKeyStopsWhenEntropyIsUnavailable(t *testing.T) {
+	store := &keyTestStore{}
+	keys := NewKeys(store, keyTestIDs{})
+	keys.entropy = bytes.NewReader(nil)
+	if _, err := keys.CreateApplication(context.Background(), admin.Identity{ID: 1}, 3, "服务", nil, RequestMeta{}); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("entropy failure must stop key issuance: %v", err)
+	}
+	if store.row.ID != 0 {
+		t.Fatal("failed key issuance must not write to the store")
 	}
 }
 

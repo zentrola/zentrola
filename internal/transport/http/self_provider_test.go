@@ -31,7 +31,7 @@ func (s *selfProviderStore) Resolve(_ context.Context, _ appsec.PrincipalIdentit
 
 func selfProviderRouter(store *selfProviderStore) http.Handler {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	keys := appsec.NewKeys(&selfUsageKeyStore{identity: appsec.PrincipalIdentity{ID: 42, AccessKeyID: 7}}, nil)
+	keys := appsec.NewKeys(&selfUsageKeyStore{identity: appsec.PrincipalIdentity{ID: 42, AccessKeyID: 7, Type: "MEMBER"}}, nil)
 	service := gw.New(store, nil, nil)
 	return NewRouter(
 		logger, health.New(), CORSOptions{}, time.Second, "prod",

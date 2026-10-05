@@ -15,8 +15,8 @@ import TableScroll from '../components/TableScroll.vue'
 import TechnicalValue from '../components/TechnicalValue.vue'
 
 type UsageView = 'statistics' | 'records'
-type StatisticDimension = 'member' | 'model' | 'provider'
-const statisticDimensions: StatisticDimension[] = ['member', 'model', 'provider']
+type StatisticDimension = 'member' | 'application' | 'model' | 'provider'
+const statisticDimensions: StatisticDimension[] = ['member', 'application', 'model', 'provider']
 
 const route = useRoute(),
   router = useRouter()
@@ -25,6 +25,7 @@ const activeView = ref<UsageView>('statistics'),
   statisticsQuery = ref('')
 const memberID = ref(''),
   memberName = ref(''),
+  principalKind = ref<'member' | 'application'>('member'),
   modelID = ref(''),
   providerID = ref(''),
   from = ref(''),
@@ -201,9 +202,10 @@ function syncRoute() {
   if (activeView.value === 'statistics') routeQuery.dimension = statisticDimension.value
   if (activeView.value === 'records') {
     if (memberID.value) {
-      routeQuery.memberId = memberID.value
-      routeQuery.memberName = memberName.value
+      routeQuery[`${principalKind.value}Id`] = memberID.value
+      routeQuery[`${principalKind.value}Name`] = memberName.value
     }
+    routeQuery.principalKind = principalKind.value
     if (modelID.value) routeQuery.modelId = modelID.value
     if (providerID.value) routeQuery.providerId = providerID.value
   }
@@ -211,13 +213,15 @@ function syncRoute() {
 }
 function searchRecords() {
   if (memberName.value && !memberID.value) {
-    showErrorToast(t('usage.selectMember'))
+    showErrorToast(
+      t(principalKind.value === 'application' ? 'usage.selectApplication' : 'usage.selectMember'),
+    )
     return
   }
   const params = rangeParams()
   if (!params) return
   for (const [key, value] of [
-    ['memberId', memberID.value],
+    [`${principalKind.value}Id`, memberID.value],
     ['modelId', modelID.value],
     ['providerId', providerID.value],
   ])
@@ -241,6 +245,7 @@ function search() {
 function reset() {
   memberID.value = ''
   memberName.value = ''
+  principalKind.value = 'member'
   modelID.value = ''
   providerID.value = ''
   resetTimes()
@@ -262,7 +267,8 @@ function viewStatisticRecords(item: UsageStatistic) {
   memberName.value = ''
   modelID.value = ''
   providerID.value = ''
-  if (statisticDimension.value === 'member') {
+  if (statisticDimension.value === 'member' || statisticDimension.value === 'application') {
+    principalKind.value = statisticDimension.value
     memberID.value = item.entityId
     memberName.value = item.name
   } else if (statisticDimension.value === 'model') modelID.value = item.entityId
@@ -287,6 +293,14 @@ function onMemberInput() {
   memberSearchError.value = ''
   scheduleMemberSearch()
 }
+function changePrincipalKind() {
+  memberID.value = ''
+  memberName.value = ''
+  memberSuggestions.value = []
+  memberSuggestionsOpen.value = false
+  clearTimeout(memberSearchTimer)
+  memberSearchRevision++
+}
 function openMemberSuggestions() {
   if (!memberName.value.trim()) return
   memberSuggestionsOpen.value = true
@@ -308,7 +322,9 @@ function scheduleMemberSearch() {
 async function loadMemberSuggestions(keyword: string, revision: number) {
   const params = new URLSearchParams({ name: keyword, limit: '8' })
   try {
-    const result = await api<Page<Member>>(`/members/suggestions?${params}`)
+    const result = await api<Page<Member>>(
+      `/${principalKind.value === 'application' ? 'applications' : 'members'}/suggestions?${params}`,
+    )
     if (revision !== memberSearchRevision || keyword !== memberName.value.trim()) return
     memberSuggestions.value = result.items
   } catch (e) {
@@ -397,15 +413,20 @@ function routeValue(name: string) {
 function applyRoute() {
   activeView.value = routeValue('view') === 'records' ? 'records' : 'statistics'
   const dimension = routeValue('dimension')
-  if (dimension === 'model' || dimension === 'provider') statisticDimension.value = dimension
+  if (dimension === 'application' || dimension === 'model' || dimension === 'provider')
+    statisticDimension.value = dimension
   const routeFrom = routeValue('from'),
     routeTo = routeValue('to')
   if (/^\d{4}-\d{2}-\d{2}$/.test(routeFrom) && /^\d{4}-\d{2}-\d{2}$/.test(routeTo)) {
     from.value = routeFrom
     to.value = routeTo
   } else resetTimes()
-  memberID.value = routeValue('memberId')
-  memberName.value = routeValue('memberName')
+  principalKind.value =
+    routeValue('principalKind') === 'application' || !!routeValue('applicationId')
+      ? 'application'
+      : 'member'
+  memberID.value = routeValue(`${principalKind.value}Id`)
+  memberName.value = routeValue(`${principalKind.value}Name`)
   modelID.value = routeValue('modelId')
   providerID.value = routeValue('providerId')
 }
@@ -423,7 +444,7 @@ onBeforeUnmount(() => {
 </script>
 <template>
   <PageHeader name="usage" />
-  <div class="usage-view-tabs" role="tablist" :aria-label="t('nav.usage')">
+  <div class="view-tabs" role="tablist" :aria-label="t('nav.usage')">
     <button
       type="button"
       role="tab"
@@ -451,12 +472,21 @@ onBeforeUnmount(() => {
       :aria-label="t(activeView === 'statistics' ? 'usage.statisticsFilters' : 'usage.filters')"
       @submit.prevent="search"
     >
+      <label v-if="activeView === 'records'" class="filter-field">
+        <span class="filter-label">{{ t('usage.principalType') }}</span>
+        <select v-model="principalKind" @change="changePrincipalKind">
+          <option value="member">{{ t('usage.member') }}</option>
+          <option value="application">{{ t('usage.application') }}</option>
+        </select>
+      </label>
       <div
         v-if="activeView === 'records'"
         ref="memberAutocomplete"
         class="filter-field member-filter-field"
       >
-        <span class="filter-label">{{ t('usage.member') }}</span>
+        <span class="filter-label">{{
+          t(principalKind === 'application' ? 'usage.application' : 'usage.member')
+        }}</span>
         <div class="member-autocomplete" @keydown.esc="memberSuggestionsOpen = false">
           <input
             id="usage-member"
@@ -467,8 +497,14 @@ onBeforeUnmount(() => {
             aria-autocomplete="list"
             aria-controls="usage-member-options"
             :aria-expanded="memberSuggestionsOpen"
-            :aria-label="t('usage.member')"
-            :placeholder="t('usage.memberPlaceholder')"
+            :aria-label="t(principalKind === 'application' ? 'usage.application' : 'usage.member')"
+            :placeholder="
+              t(
+                principalKind === 'application'
+                  ? 'usage.applicationPlaceholder'
+                  : 'usage.memberPlaceholder',
+              )
+            "
             @input="onMemberInput"
             @focus="openMemberSuggestions"
           />
@@ -495,7 +531,13 @@ onBeforeUnmount(() => {
               {{ memberSearchError }}
             </p>
             <p v-else-if="!memberSuggestions.length" class="autocomplete-empty">
-              {{ t('usage.noMemberMatches') }}
+              {{
+                t(
+                  principalKind === 'application'
+                    ? 'usage.noApplicationMatches'
+                    : 'usage.noMemberMatches',
+                )
+              }}
             </p>
           </div>
         </div>
@@ -728,7 +770,7 @@ onBeforeUnmount(() => {
           <thead>
             <tr>
               <th>{{ t('usage.time') }}</th>
-              <th>{{ t('usage.member') }}</th>
+              <th>{{ t('usage.principal') }}</th>
               <th>{{ t('usage.model') }}</th>
               <th>{{ t('usage.protocol') }}</th>
               <th>{{ t('common.status') }}</th>
@@ -745,6 +787,9 @@ onBeforeUnmount(() => {
               </td>
               <td>
                 <strong>{{ row.principalName || row.principalId }}</strong>
+                <small class="subline">{{
+                  t(row.principalType === 'APPLICATION' ? 'usage.application' : 'usage.member')
+                }}</small>
                 <TechnicalValue
                   v-if="row.principalName"
                   :value="row.principalId"
@@ -806,7 +851,9 @@ onBeforeUnmount(() => {
       <dd>
         <TechnicalValue :value="selected.requestId" />
       </dd>
-      <dt>{{ t('usage.member') }}</dt>
+      <dt>
+        {{ t(selected.principalType === 'APPLICATION' ? 'usage.application' : 'usage.member') }}
+      </dt>
       <dd>
         {{ selected.principalName || selected.principalId
         }}<small class="subline">{{ selected.principalId }}</small>
