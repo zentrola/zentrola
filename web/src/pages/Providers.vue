@@ -29,6 +29,7 @@ import PageHeader from '../components/PageHeader.vue'
 import Status from '../components/Status.vue'
 import StatusSwitch from '../components/StatusSwitch.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+import CredentialPriceEditor from '../components/CredentialPriceEditor.vue'
 import TableScroll from '../components/TableScroll.vue'
 import TechnicalValue from '../components/TechnicalValue.vue'
 
@@ -148,6 +149,7 @@ const preferredResourceByProvider = computed(() => {
   return preferred
 })
 const credentialTarget = ref<Provider | null>(null)
+const priceTarget = ref<Resource | null>(null)
 const credentialDeleteTarget = ref<Resource | null>(null)
 const credentialCreating = ref(false)
 const credentialAuthType = ref<'API_KEY' | 'SUBSCRIPTION'>('API_KEY')
@@ -596,6 +598,17 @@ function verificationLabel(resource: Resource) {
   )
 }
 
+function subscriptionPriceLabel(resource: Resource) {
+  const price = resource.subscriptionPrice
+  if (!price) return '-'
+  const symbol = price.currency === 'CNY' ? '¥' : '$'
+  return `${symbol}${price.periodAmount} / ${t(`resources.pricing.periods.${price.billingPeriod}`)}`
+}
+
+function subscriptionPriceEffectiveDate(resource: Resource) {
+  return resource.subscriptionPrice?.effectiveAt.slice(0, 10) ?? '-'
+}
+
 function calculateProviderRuntime(provider: Provider) {
   const configured = resourcesFor(provider)
   if (!configured.length) {
@@ -1032,6 +1045,7 @@ function deleteProvider() {
 
 function closeCredential() {
   credentialTarget.value = null
+  priceTarget.value = null
   credentialCreating.value = false
   subscriptionInputMode.value = 'UPLOAD'
   subscriptionFileName.value = ''
@@ -2465,7 +2479,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   </Modal>
 
   <Modal
-    v-if="credentialTarget"
+    v-if="credentialTarget && !priceTarget"
     :title="t('resources.configurationTitle')"
     :busy="busy"
     :wide="!credentialCreating"
@@ -2535,6 +2549,19 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
                   <small v-if="resource.planCode" class="credential-detail credential-plan">
                     {{ t('resources.plan') }} · {{ resource.planCode }}
                   </small>
+                  <div
+                    v-if="resource.authType === 'SUBSCRIPTION'"
+                    class="credential-subscription-price"
+                  >
+                    <small class="credential-detail">
+                      {{ t('resources.pricing.currentSubscription') }} ·
+                      <strong>{{ subscriptionPriceLabel(resource) }}</strong>
+                    </small>
+                    <small class="credential-detail">
+                      {{ t('resources.pricing.effectiveDate') }} ·
+                      {{ subscriptionPriceEffectiveDate(resource) }}
+                    </small>
+                  </div>
                   <small
                     v-if="resource.authType === 'SUBSCRIPTION' && quotaRefreshing[resource.id]"
                     class="credential-detail credential-quota-feedback"
@@ -2642,6 +2669,14 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
               </td>
               <td class="credential-action-column" :data-label="t('common.actions')">
                 <div class="row-actions">
+                  <button
+                    type="button"
+                    class="text-button"
+                    :disabled="busy"
+                    @click="priceTarget = resource"
+                  >
+                    {{ t('resources.pricing.action') }}
+                  </button>
                   <button
                     v-if="exportableSubscription(resource)"
                     type="button"
@@ -2891,6 +2926,20 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
         {{ t(busy ? 'common.working' : 'common.save') }}
       </button>
     </template>
+  </Modal>
+
+  <Modal
+    v-if="credentialTarget && priceTarget"
+    :title="t('resources.pricing.title')"
+    :wide="priceTarget.authType === 'API_KEY'"
+    @close="priceTarget = null"
+  >
+    <CredentialPriceEditor
+      :provider="credentialTarget"
+      :resource="priceTarget"
+      @close="priceTarget = null"
+      @changed="loadResources"
+    />
   </Modal>
 
   <ConfirmDialog
@@ -3451,6 +3500,18 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   border-bottom: 1px solid var(--line);
   color: #536d84;
   font-weight: 600;
+}
+.credential-subscription-price {
+  display: grid;
+  gap: 3px;
+  margin: 0 0 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.credential-subscription-price strong {
+  color: var(--color-text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 .credential-plan + .credential-quota-windows,
 .credential-plan + .credential-quota-feedback {

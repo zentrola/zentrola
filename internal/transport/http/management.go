@@ -491,6 +491,197 @@ func (s *SecurityHandlers) mountManagementQueryRoutes(r chi.Router) {
 	// @Failure 404 {object} response
 	// @Router /api/v1/resources/{id} [get]
 	r.Get("/resources/{id}", detailEndpoint(m.Resource))
+	// @Summary 凭证价格配置与历史版本
+	// @Tags 模型与资源
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "凭证 ID（正整数字符串）"
+	// @Success 200 {object} response{data=mgmt.CredentialPrices}
+	// @Router /api/v1/resources/{id}/prices [get]
+	r.Get("/resources/{id}/prices", func(w http.ResponseWriter, req *http.Request) {
+		id, err := routeID(req, "id")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		data, err := m.CredentialPrices(req.Context(), adminFrom(req), id)
+		adminResult(w, req, http.StatusOK, data, err)
+	})
+	// @Summary 录入或修改按量凭证模型单价
+	// @Tags 模型与资源
+	// @Accept json
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "凭证 ID（正整数字符串）"
+	// @Param modelId path string true "供应方模型映射 ID（正整数字符串）"
+	// @Param body body SaveModelPriceRequest true "每百万 Token 的单价"
+	// @Success 200 {object} response{data=mgmt.ModelPrice}
+	// @Router /api/v1/resources/{id}/prices/models/{modelId} [put]
+	r.Put("/resources/{id}/prices/models/{modelId}", func(w http.ResponseWriter, req *http.Request) {
+		id, err := routeID(req, "id")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		modelID, err := routeID(req, "modelId")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		input, ok := decodeRequest[SaveModelPriceRequest](w, req)
+		if !ok {
+			return
+		}
+		data, err := m.SaveModelPrice(req.Context(), adminFrom(req), id, mgmt.ModelPriceInput{
+			ProviderModelID: modelID, Currency: input.Currency, InputPrice: input.InputPrice,
+			OutputPrice: input.OutputPrice, CachedInputPrice: input.CachedInputPrice,
+			EffectiveAt: input.EffectiveAt,
+		}, requestMeta(req))
+		adminResult(w, req, http.StatusOK, data, err)
+	})
+	// @Summary 修改模型价格版本
+	// @Tags 模型与资源
+	// @Accept json
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "凭证 ID"
+	// @Param modelId path string true "供应方模型映射 ID"
+	// @Param priceId path string true "价格版本 ID"
+	// @Param body body SaveModelPriceRequest true "价格版本"
+	// @Success 200 {object} response{data=mgmt.ModelPrice}
+	// @Router /api/v1/resources/{id}/prices/models/{modelId}/{priceId} [put]
+	r.Put("/resources/{id}/prices/models/{modelId}/{priceId}", func(w http.ResponseWriter, req *http.Request) {
+		id, err := routeID(req, "id")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		modelID, err := routeID(req, "modelId")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		priceID, err := routeID(req, "priceId")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		input, ok := decodeRequest[SaveModelPriceRequest](w, req)
+		if !ok {
+			return
+		}
+		data, err := m.UpdateModelPrice(req.Context(), adminFrom(req), id, priceID, mgmt.ModelPriceInput{
+			ProviderModelID: modelID, Currency: input.Currency, InputPrice: input.InputPrice,
+			OutputPrice: input.OutputPrice, CachedInputPrice: input.CachedInputPrice, EffectiveAt: input.EffectiveAt,
+		}, requestMeta(req))
+		adminResult(w, req, http.StatusOK, data, err)
+	})
+	// @Summary 删除模型价格版本
+	// @Tags 模型与资源
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "凭证 ID"
+	// @Param modelId path string true "供应方模型映射 ID"
+	// @Param priceId path string true "价格版本 ID"
+	// @Success 200 {object} response
+	// @Router /api/v1/resources/{id}/prices/models/{modelId}/{priceId} [delete]
+	r.Delete("/resources/{id}/prices/models/{modelId}/{priceId}", func(w http.ResponseWriter, req *http.Request) {
+		id, err := routeID(req, "id")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		modelID, err := routeID(req, "modelId")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		priceID, err := routeID(req, "priceId")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		err = m.DeleteModelPrice(req.Context(), adminFrom(req), id, modelID, priceID, requestMeta(req))
+		adminResult(w, req, http.StatusOK, map[string]bool{"deleted": true}, err)
+	})
+	// @Summary 录入或修改订阅凭证周期费用
+	// @Tags 模型与资源
+	// @Accept json
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "凭证 ID（正整数字符串）"
+	// @Param body body SaveSubscriptionPriceRequest true "订阅周期费用"
+	// @Success 200 {object} response{data=mgmt.SubscriptionPrice}
+	// @Router /api/v1/resources/{id}/prices/subscription [put]
+	r.Put("/resources/{id}/prices/subscription", func(w http.ResponseWriter, req *http.Request) {
+		id, err := routeID(req, "id")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		input, ok := decodeRequest[SaveSubscriptionPriceRequest](w, req)
+		if !ok {
+			return
+		}
+		data, err := m.SaveSubscriptionPrice(req.Context(), adminFrom(req), id, mgmt.SubscriptionPriceInput{
+			Currency: input.Currency, PeriodAmount: input.PeriodAmount,
+			BillingPeriod: input.BillingPeriod, EffectiveAt: input.EffectiveAt,
+		}, requestMeta(req))
+		adminResult(w, req, http.StatusOK, data, err)
+	})
+	// @Summary 修改订阅费用版本
+	// @Tags 模型与资源
+	// @Accept json
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "凭证 ID"
+	// @Param priceId path string true "价格版本 ID"
+	// @Param body body SaveSubscriptionPriceRequest true "订阅费用版本"
+	// @Success 200 {object} response{data=mgmt.SubscriptionPrice}
+	// @Router /api/v1/resources/{id}/prices/subscription/{priceId} [put]
+	r.Put("/resources/{id}/prices/subscription/{priceId}", func(w http.ResponseWriter, req *http.Request) {
+		id, err := routeID(req, "id")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		priceID, err := routeID(req, "priceId")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		input, ok := decodeRequest[SaveSubscriptionPriceRequest](w, req)
+		if !ok {
+			return
+		}
+		data, err := m.UpdateSubscriptionPrice(req.Context(), adminFrom(req), id, priceID, mgmt.SubscriptionPriceInput{
+			Currency: input.Currency, PeriodAmount: input.PeriodAmount,
+			BillingPeriod: input.BillingPeriod, EffectiveAt: input.EffectiveAt,
+		}, requestMeta(req))
+		adminResult(w, req, http.StatusOK, data, err)
+	})
+	// @Summary 删除订阅费用版本
+	// @Tags 模型与资源
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "凭证 ID"
+	// @Param priceId path string true "价格版本 ID"
+	// @Success 200 {object} response
+	// @Router /api/v1/resources/{id}/prices/subscription/{priceId} [delete]
+	r.Delete("/resources/{id}/prices/subscription/{priceId}", func(w http.ResponseWriter, req *http.Request) {
+		id, err := routeID(req, "id")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		priceID, err := routeID(req, "priceId")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		err = m.DeleteSubscriptionPrice(req.Context(), adminFrom(req), id, priceID, requestMeta(req))
+		adminResult(w, req, http.StatusOK, map[string]bool{"deleted": true}, err)
+	})
 	// @Summary 资源订阅额度
 	// @Tags 模型与资源
 	// @Produce json

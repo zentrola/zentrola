@@ -106,8 +106,40 @@ export interface Resource {
   lastHttpStatus: number | null
   lastErrorCode: string | null
   credentialConfigured: boolean
+  subscriptionPrice: SubscriptionPriceSummary | null
   createdAt: string
   updatedAt: string
+}
+export interface SubscriptionPriceSummary {
+  currency: 'CNY' | 'USD'
+  periodAmount: string
+  billingPeriod: 'MONTH' | 'YEAR'
+  effectiveAt: string
+}
+export interface ModelPrice {
+  id: string
+  providerCredentialId: string
+  providerModelId: string
+  currency: 'CNY' | 'USD'
+  inputPrice: string
+  outputPrice: string
+  cachedInputPrice: string
+  effectiveAt: string
+  createdAt: string
+}
+export interface SubscriptionPrice {
+  id: string
+  providerCredentialId: string
+  currency: 'CNY' | 'USD'
+  periodAmount: string
+  billingPeriod: 'MONTH' | 'YEAR'
+  effectiveAt: string
+  createdAt: string
+}
+export interface CredentialPrices {
+  modelPrices: ModelPrice[]
+  subscriptionPrices: SubscriptionPrice[]
+  subscriptionPrice: SubscriptionPrice | null
 }
 export interface ResourceQuota {
   code: string

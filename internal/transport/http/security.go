@@ -437,6 +437,8 @@ var (
 	_ requestPayload = (*UpdateGroupRequest)(nil)
 	_ requestPayload = (*CreateResourceRequest)(nil)
 	_ requestPayload = (*UpdateCredentialRequest)(nil)
+	_ requestPayload = (*SaveModelPriceRequest)(nil)
+	_ requestPayload = (*SaveSubscriptionPriceRequest)(nil)
 	_ requestPayload = (*UpdateStatusRequest)(nil)
 	_ requestPayload = (*ModelRequest)(nil)
 	_ requestPayload = (*ProviderRequest)(nil)

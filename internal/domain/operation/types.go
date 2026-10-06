@@ -50,6 +50,7 @@ const (
 	ResourceDelete           Type = "RESOURCE_DELETE"
 	ResourceConnectionTest   Type = "RESOURCE_CONNECTION_TEST"
 	ResourceRateLimitReset   Type = "RESOURCE_RATE_LIMIT_RESET"
+	ResourcePriceUpdate      Type = "RESOURCE_PRICE_UPDATE"
 	LoginSuccess             Type = "LOGIN_SUCCESS"
 	LoginFailed              Type = "LOGIN_FAILED"
 	LoginLocked              Type = "LOGIN_LOCKED"

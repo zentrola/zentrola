@@ -91,6 +91,11 @@ async function fixture(page: Page) {
       ],
     ],
   ])
+  const credentialPrices = new Map<
+    string,
+    { modelPrices: any[]; subscriptionPrices: any[]; subscriptionPrice: any | null }
+  >()
+  let priceEndpointUnavailable = false
   const operations: any[] = [
     {
       id: '203',
@@ -297,7 +302,12 @@ async function fixture(page: Page) {
         return pageReply([...filtered].sort((a, b) => (BigInt(a.id) > BigInt(b.id) ? -1 : 1)))
       }
       if (path === '/resources')
-        return pageReply(resources.map(({ credential: _, quotaDetails: __, ...row }) => row))
+        return pageReply(
+          resources.map(({ credential: _, quotaDetails: __, ...row }) => ({
+            ...row,
+            subscriptionPrice: credentialPrices.get(row.id)?.subscriptionPrice ?? null,
+          })),
+        )
       if (path === '/operation-logs') return pageReply(operations)
       if (path === '/usage') {
         usageQueries.push(url.searchParams)
@@ -659,6 +669,88 @@ async function fixture(page: Page) {
       resources.splice(index, 1)
       return reply({ deleted: true })
     }
+    if (segments[0] === 'resources' && segments.length === 2 && method === 'GET') {
+      const resource = resources.find((candidate) => candidate.id === segments[1])
+      if (!resource) return reply(null, 404, 'NOT_FOUND')
+      const { credential: _, quotaDetails: __, ...safe } = resource
+      return reply(safe)
+    }
+    if (segments[0] === 'resources' && segments[2] === 'prices') {
+      if (priceEndpointUnavailable) return reply(null, 404, 'NOT_FOUND')
+      const resource = resources.find((candidate) => candidate.id === segments[1])
+      if (!resource) return reply(null, 404, 'NOT_FOUND')
+      const prices = credentialPrices.get(resource.id) ?? {
+        modelPrices: [],
+        subscriptionPrices: [],
+        subscriptionPrice: null,
+      }
+      if (segments.length === 3 && method === 'GET') return reply(prices)
+      if (segments[3] === 'models' && segments.length === 5 && method === 'PUT') {
+        const saved = {
+          ...body,
+          id: next(),
+          providerCredentialId: resource.id,
+          providerModelId: segments[4],
+          effectiveAt: body.effectiveAt,
+          createdAt: stamp,
+        }
+        prices.modelPrices = [saved, ...prices.modelPrices.filter((price) => price.id !== saved.id)]
+        credentialPrices.set(resource.id, prices)
+        return reply(saved)
+      }
+      if (segments[3] === 'models' && segments.length === 6 && method === 'PUT') {
+        const index = prices.modelPrices.findIndex((price) => price.id === segments[5])
+        if (index < 0) return reply(null, 404, 'NOT_FOUND')
+        const saved = { ...prices.modelPrices[index], ...body }
+        prices.modelPrices[index] = saved
+        credentialPrices.set(resource.id, prices)
+        return reply(saved)
+      }
+      if (segments[3] === 'models' && segments.length === 6 && method === 'DELETE') {
+        const before = prices.modelPrices.length
+        prices.modelPrices = prices.modelPrices.filter((price) => price.id !== segments[5])
+        if (prices.modelPrices.length === before) return reply(null, 404, 'NOT_FOUND')
+        credentialPrices.set(resource.id, prices)
+        return reply({ deleted: true })
+      }
+      if (segments[3] === 'subscription' && segments.length === 4 && method === 'PUT') {
+        const saved = {
+          ...body,
+          id: next(),
+          providerCredentialId: resource.id,
+          createdAt: stamp,
+        }
+        prices.subscriptionPrices = [saved, ...prices.subscriptionPrices]
+        prices.subscriptionPrice = [...prices.subscriptionPrices]
+          .sort((left, right) => right.effectiveAt.localeCompare(left.effectiveAt))
+          .find((price) => price.effectiveAt <= new Date().toISOString())
+        credentialPrices.set(resource.id, prices)
+        return reply(saved)
+      }
+      if (segments[3] === 'subscription' && segments.length === 5 && method === 'PUT') {
+        const index = prices.subscriptionPrices.findIndex((price) => price.id === segments[4])
+        if (index < 0) return reply(null, 404, 'NOT_FOUND')
+        const saved = { ...prices.subscriptionPrices[index], ...body }
+        prices.subscriptionPrices[index] = saved
+        prices.subscriptionPrice = [...prices.subscriptionPrices]
+          .sort((left, right) => right.effectiveAt.localeCompare(left.effectiveAt))
+          .find((price) => price.effectiveAt <= new Date().toISOString())
+        credentialPrices.set(resource.id, prices)
+        return reply(saved)
+      }
+      if (segments[3] === 'subscription' && segments.length === 5 && method === 'DELETE') {
+        const before = prices.subscriptionPrices.length
+        prices.subscriptionPrices = prices.subscriptionPrices.filter(
+          (price) => price.id !== segments[4],
+        )
+        if (prices.subscriptionPrices.length === before) return reply(null, 404, 'NOT_FOUND')
+        prices.subscriptionPrice = [...prices.subscriptionPrices]
+          .sort((left, right) => right.effectiveAt.localeCompare(left.effectiveAt))
+          .find((price) => price.effectiveAt <= new Date().toISOString())
+        credentialPrices.set(resource.id, prices)
+        return reply({ deleted: true })
+      }
+    }
     if (segments[2] === 'status') {
       const list =
         segments[0] === 'members'
@@ -878,6 +970,10 @@ async function fixture(page: Page) {
     models,
     providers,
     providerMappings,
+    credentialPrices,
+    setPriceEndpointUnavailable(value: boolean) {
+      priceEndpointUnavailable = value
+    },
     providerInputs,
     groups,
     resources,
@@ -1297,6 +1393,251 @@ test('当前模型服务商在大量记录时限制卡片高度并内部滚动',
   expect(dimensions.clientHeight).toBeLessThanOrEqual(280)
   expect(dimensions.scrollHeight).toBeGreaterThan(dimensions.clientHeight)
   await page.screenshot({ path: '../.cache/web-visual/home-active-models-100.png', fullPage: true })
+})
+
+test('凭证内可按生效时间保留 API Key 单价历史并修改订阅费用', async ({ page }) => {
+  const state = await fixture(page)
+  state.resources.push(
+    {
+      id: '88',
+      providerId: '81',
+      name: 'DeepSeek API Key',
+      authType: 'API_KEY',
+      authAdapter: 'API_KEY',
+      runtimeStatus: 'HEALTHY',
+      credentialConfigured: true,
+      createdAt: stamp,
+      updatedAt: stamp,
+    },
+    {
+      id: '89',
+      providerId: '81',
+      name: 'DeepSeek 订阅',
+      authType: 'SUBSCRIPTION',
+      authAdapter: 'OPENAI_CODEX',
+      runtimeStatus: 'HEALTHY',
+      credentialConfigured: true,
+      createdAt: stamp,
+      updatedAt: stamp,
+    },
+  )
+  await signIn(page)
+  await page.getByRole('link', { name: '服务商', exact: true }).click()
+  await page.getByRole('button', { name: '管理 DeepSeek 的认证凭据' }).click()
+  await modal(page)
+    .getByRole('row')
+    .filter({ hasText: 'DeepSeek API Key' })
+    .getByRole('button', { name: '计费设置' })
+    .click()
+  await expect(modal(page).getByRole('heading', { name: '凭证计费设置' })).toBeVisible()
+  await modal(page).getByRole('button', { name: '配置价格' }).click()
+  let priceDialog = page.getByRole('dialog', { name: '新增 DeepSeek V4 Flash 的价格' })
+  await expect(priceDialog).toBeVisible()
+  await priceDialog.getByRole('button', { name: '取消' }).click()
+  await expect(priceDialog).toBeHidden()
+  await expect(modal(page).getByRole('heading', { name: '凭证计费设置' })).toBeVisible()
+  await modal(page).getByRole('button', { name: '配置价格' }).click()
+  priceDialog = page.getByRole('dialog', { name: '新增 DeepSeek V4 Flash 的价格' })
+  await expect(priceDialog.getByLabel('币种')).toHaveValue('')
+  await expect(priceDialog.getByRole('textbox', { name: '普通输入' })).toHaveValue('')
+  await expect(priceDialog.getByRole('textbox', { name: '输出' })).toHaveValue('')
+  await expect(priceDialog.getByRole('textbox', { name: '缓存输入' })).toHaveValue('')
+  await expect(priceDialog.getByLabel('生效日期（UTC）')).toHaveValue('')
+  await priceDialog.getByLabel('币种').selectOption('CNY')
+  await priceDialog.getByRole('textbox', { name: '普通输入' }).fill('1.25')
+  await priceDialog.getByRole('textbox', { name: '输出' }).fill('2.5')
+  await priceDialog.getByRole('textbox', { name: '缓存输入' }).fill('0.5')
+  await priceDialog.getByLabel('生效日期（UTC）').fill('2026-09-20')
+  await priceDialog.getByRole('button', { name: '保存' }).click()
+  await expect(priceDialog).toBeHidden()
+  await expect(modal(page)).toContainText('¥ 1.25 / 2.5 / 0.5')
+  await modal(page).getByRole('button', { name: '新增价格' }).click()
+  priceDialog = page.getByRole('dialog', { name: '新增 DeepSeek V4 Flash 的价格' })
+  await expect(priceDialog.getByLabel('币种')).toHaveValue('')
+  await expect(priceDialog.getByRole('textbox', { name: '普通输入' })).toHaveValue('')
+  await expect(priceDialog.getByRole('textbox', { name: '输出' })).toHaveValue('')
+  await expect(priceDialog.getByRole('textbox', { name: '缓存输入' })).toHaveValue('')
+  await expect(priceDialog.getByLabel('生效日期（UTC）')).toHaveValue('')
+  await priceDialog.getByLabel('币种').selectOption('CNY')
+  await priceDialog.getByRole('textbox', { name: '普通输入' }).fill('1.25')
+  await priceDialog.getByRole('textbox', { name: '输出' }).fill('3')
+  await priceDialog.getByRole('textbox', { name: '缓存输入' }).fill('0.5')
+  await priceDialog.getByLabel('生效日期（UTC）').fill('2026-10-02')
+  await priceDialog.getByRole('button', { name: '保存' }).click()
+  expect(state.credentialPrices.get('88')?.modelPrices[0].outputPrice).toBe('3')
+  expect(state.credentialPrices.get('88')?.modelPrices).toHaveLength(2)
+  await expect(modal(page).getByLabel('价格历史').locator('.price-history-item')).toHaveCount(2)
+  await expect(modal(page).getByText('未配置', { exact: true })).toHaveCount(0)
+  await expect(modal(page).getByLabel('价格历史')).not.toContainText('08:00')
+  await expect(modal(page).getByText('¥ 1.25 / 2.5 / 0.5', { exact: true })).toBeVisible()
+  const olderPrice = modal(page).getByLabel('价格历史').locator('.price-history-item').nth(1)
+  await olderPrice.getByRole('button', { name: '修改' }).click()
+  priceDialog = page.getByRole('dialog', { name: '修改 DeepSeek V4 Flash 的价格' })
+  await expect(priceDialog).toBeVisible()
+  await priceDialog.getByRole('textbox', { name: '输出' }).fill('2.75')
+  await priceDialog.getByRole('button', { name: '保存' }).click()
+  await expect(modal(page).getByText('¥ 1.25 / 2.75 / 0.5', { exact: true })).toBeVisible()
+  await modal(page)
+    .getByLabel('价格历史')
+    .locator('.price-history-item')
+    .nth(1)
+    .getByRole('button', { name: '删除' })
+    .click()
+  await page.getByRole('dialog', { name: '删除价格' }).getByRole('button', { name: '删除' }).click()
+  await expect(modal(page).getByLabel('价格历史').locator('.price-history-item')).toHaveCount(1)
+
+  await modal(page).getByRole('button', { name: '返回凭证' }).click()
+  await modal(page)
+    .getByRole('row')
+    .filter({ hasText: 'DeepSeek 订阅' })
+    .getByRole('button', { name: '计费设置' })
+    .click()
+  await expect(modal(page).getByText('价格列表', { exact: true })).toBeVisible()
+  await expect(modal(page).locator('.price-subscription-empty')).toHaveText('-')
+  await modal(page).getByRole('button', { name: '配置订阅费用' }).click()
+  let subscriptionDialog = page.getByRole('dialog', { name: '新增「DeepSeek 订阅」的订阅费用' })
+  await expect(subscriptionDialog).toBeVisible()
+  await subscriptionDialog.getByRole('button', { name: '取消' }).click()
+  await expect(subscriptionDialog).toBeHidden()
+  await modal(page).getByRole('button', { name: '配置订阅费用' }).click()
+  subscriptionDialog = page.getByRole('dialog', { name: '新增「DeepSeek 订阅」的订阅费用' })
+  await expect(subscriptionDialog.getByLabel('计费周期起始日（UTC）')).toHaveCount(0)
+  await expect(subscriptionDialog.getByLabel('币种')).toHaveValue('')
+  await expect(subscriptionDialog.getByRole('textbox', { name: '周期费用' })).toHaveValue('')
+  await expect(subscriptionDialog.getByLabel('计费周期')).toHaveValue('')
+  await expect(subscriptionDialog.getByLabel('生效日期（UTC）')).toHaveValue('')
+  await subscriptionDialog.getByLabel('币种').selectOption('CNY')
+  await subscriptionDialog.getByRole('textbox', { name: '周期费用' }).fill('100')
+  await subscriptionDialog.getByLabel('计费周期').selectOption('MONTH')
+  await subscriptionDialog.getByLabel('生效日期（UTC）').fill('2026-09-20')
+  await subscriptionDialog.getByRole('button', { name: '保存' }).click()
+  await expect(subscriptionDialog).toBeHidden()
+  expect(state.credentialPrices.get('89')?.subscriptionPrice.periodAmount).toBe('100')
+  await modal(page).getByRole('button', { name: '新增价格' }).click()
+  subscriptionDialog = page.getByRole('dialog', { name: '新增「DeepSeek 订阅」的订阅费用' })
+  await expect(subscriptionDialog.getByLabel('币种')).toHaveValue('')
+  await expect(subscriptionDialog.getByRole('textbox', { name: '周期费用' })).toHaveValue('')
+  await expect(subscriptionDialog.getByLabel('计费周期')).toHaveValue('')
+  await expect(subscriptionDialog.getByLabel('生效日期（UTC）')).toHaveValue('')
+  await subscriptionDialog.getByLabel('币种').selectOption('CNY')
+  await subscriptionDialog.getByRole('textbox', { name: '周期费用' }).fill('100')
+  await subscriptionDialog.getByLabel('计费周期').selectOption('MONTH')
+  await subscriptionDialog.getByLabel('生效日期（UTC）').fill('2026-09-20')
+  await subscriptionDialog.getByRole('button', { name: '保存' }).click()
+  await expect(subscriptionDialog.getByRole('alert')).toHaveText(
+    '该生效日期已存在，请选择其他日期。',
+  )
+  expect(state.credentialPrices.get('89')?.subscriptionPrices).toHaveLength(1)
+  await subscriptionDialog.getByRole('textbox', { name: '周期费用' }).fill('120')
+  await subscriptionDialog.getByLabel('生效日期（UTC）').fill('2026-10-02')
+  await subscriptionDialog.getByRole('button', { name: '保存' }).click()
+  expect(state.credentialPrices.get('89')?.subscriptionPrices).toHaveLength(2)
+  const subscriptionHistory = modal(page).getByLabel('价格历史')
+  await expect(subscriptionHistory.locator('.price-history-item')).toHaveCount(2)
+  const olderSubscriptionPrice = subscriptionHistory.locator('.price-history-item').nth(1)
+  await olderSubscriptionPrice.getByRole('button', { name: '修改' }).click()
+  subscriptionDialog = page.getByRole('dialog', { name: '修改「DeepSeek 订阅」的订阅费用' })
+  await expect(subscriptionDialog.getByRole('textbox', { name: '周期费用' })).toHaveValue('100')
+  await subscriptionDialog.getByRole('textbox', { name: '周期费用' }).fill('110')
+  await subscriptionDialog.getByLabel('生效日期（UTC）').fill('2026-10-02')
+  await subscriptionDialog.getByRole('button', { name: '保存' }).click()
+  await expect(subscriptionDialog.getByRole('alert')).toHaveText(
+    '该生效日期已存在，请选择其他日期。',
+  )
+  await subscriptionDialog.getByLabel('生效日期（UTC）').fill('2026-09-20')
+  await subscriptionDialog.getByRole('button', { name: '保存' }).click()
+  expect(state.credentialPrices.get('89')?.subscriptionPrice.periodAmount).toBe('120')
+  await subscriptionHistory
+    .locator('.price-history-item')
+    .nth(1)
+    .getByRole('button', { name: '删除' })
+    .click()
+  await page
+    .getByRole('dialog', { name: '删除订阅费用' })
+    .getByRole('button', { name: '删除' })
+    .click()
+  await expect(subscriptionHistory.locator('.price-history-item')).toHaveCount(1)
+  await modal(page).getByRole('button', { name: '返回凭证' }).click()
+  const subscriptionRow = modal(page).getByRole('row').filter({ hasText: 'DeepSeek 订阅' })
+  await expect(subscriptionRow).toContainText('当前订阅费用 · ¥120 / 月')
+  await expect(subscriptionRow).toContainText('生效日期（UTC） · 2026-10-02')
+})
+
+test('价格接口未更新时不误报模型映射缺失', async ({ page }) => {
+  const state = await fixture(page)
+  state.setPriceEndpointUnavailable(true)
+  state.resources.push({
+    id: '88',
+    providerId: '81',
+    name: 'DeepSeek API Key',
+    authType: 'API_KEY',
+    authAdapter: 'API_KEY',
+    runtimeStatus: 'HEALTHY',
+    credentialConfigured: true,
+    createdAt: stamp,
+    updatedAt: stamp,
+  })
+  await signIn(page)
+  await page.getByRole('link', { name: '服务商', exact: true }).click()
+  await page.getByRole('button', { name: '管理 DeepSeek 的认证凭据' }).click()
+  await modal(page)
+    .getByRole('row')
+    .filter({ hasText: 'DeepSeek API Key' })
+    .getByRole('button', { name: '计费设置' })
+    .click()
+
+  await expect(modal(page)).toContainText('凭证仍然存在，但价格接口不可用')
+  await expect(modal(page)).toContainText('DeepSeek V4 Flash')
+  await expect(modal(page)).not.toContainText('该服务商尚未配置模型映射')
+  await expect(modal(page).getByRole('button', { name: '配置价格' })).toBeDisabled()
+})
+
+test('价格历史较多时默认折叠并可独立展开', async ({ page }) => {
+  const state = await fixture(page)
+  state.resources.push({
+    id: '88',
+    providerId: '81',
+    name: 'DeepSeek API Key',
+    authType: 'API_KEY',
+    authAdapter: 'API_KEY',
+    runtimeStatus: 'HEALTHY',
+    credentialConfigured: true,
+    createdAt: stamp,
+    updatedAt: stamp,
+  })
+  state.credentialPrices.set('88', {
+    modelPrices: Array.from({ length: 6 }, (_, index) => ({
+      id: String(900 + index),
+      providerCredentialId: '88',
+      providerModelId: '92',
+      currency: 'CNY',
+      inputPrice: '5',
+      outputPrice: '4',
+      cachedInputPrice: String(index + 1),
+      effectiveAt: `2026-09-${String(index + 1).padStart(2, '0')}T00:00:00Z`,
+      createdAt: stamp,
+    })),
+    subscriptionPrices: [],
+    subscriptionPrice: null,
+  })
+  await signIn(page)
+  await page.getByRole('link', { name: '服务商', exact: true }).click()
+  await page.getByRole('button', { name: '管理 DeepSeek 的认证凭据' }).click()
+  await modal(page)
+    .getByRole('row')
+    .filter({ hasText: 'DeepSeek API Key' })
+    .getByRole('button', { name: '计费设置' })
+    .click()
+
+  await expect(modal(page).getByLabel('价格历史')).toHaveCount(0)
+  await modal(page).getByRole('button', { name: '展开 DeepSeek V4 Flash 的价格' }).click()
+  const history = modal(page).getByLabel('价格历史')
+  await expect(history.locator('.price-history-item')).toHaveCount(3)
+  await modal(page).getByRole('button', { name: '查看全部 6 条价格' }).click()
+  await expect(history.locator('.price-history-item')).toHaveCount(6)
+  await expect(history).toHaveCSS('max-height', '320px')
+  await modal(page).getByRole('button', { name: '收起价格历史' }).click()
+  await expect(history.locator('.price-history-item')).toHaveCount(3)
 })
 
 test('首页在启用服务商不可用时提醒管理员', async ({ page }) => {

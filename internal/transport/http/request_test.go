@@ -172,6 +172,51 @@ func TestParseUTCQueryTime(t *testing.T) {
 	}
 }
 
+func TestCredentialPriceRequestsValidateCurrencyPrecisionAndUTC(t *testing.T) {
+	modelRecorder := httptest.NewRecorder()
+	modelRequest := httptest.NewRequest(http.MethodPut, "/api/v1/resources/1/prices/models/2", strings.NewReader(
+		`{"currency":"USD","inputPrice":"0","outputPrice":"12.34567890","cachedInputPrice":"0.5","effectiveAt":"2026-10-01T00:00:00Z"}`,
+	))
+	model, ok := decodeRequest[SaveModelPriceRequest](modelRecorder, modelRequest)
+	if !ok {
+		t.Fatalf("valid model price request was rejected: status=%d body=%s", modelRecorder.Code, modelRecorder.Body.String())
+	}
+	if !model.Valid() {
+		t.Fatal("valid model price was rejected")
+	}
+	model.Currency = "EUR"
+	if model.Valid() {
+		t.Fatal("unsupported currency was accepted")
+	}
+	model.Currency = "CNY"
+	model.InputPrice = "1.123456789"
+	if model.Valid() {
+		t.Fatal("excess precision was accepted")
+	}
+	model.InputPrice = "1"
+	model.EffectiveAt = time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	if model.Valid() {
+		t.Fatal("non-midnight effective date was accepted")
+	}
+
+	effectiveAt := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	subscriptionRecorder := httptest.NewRecorder()
+	subscriptionRequest := httptest.NewRequest(http.MethodPut, "/api/v1/resources/1/prices/subscription", strings.NewReader(
+		`{"currency":"CNY","periodAmount":"100","billingPeriod":"MONTH","effectiveAt":"2026-10-01T00:00:00Z"}`,
+	))
+	subscription, ok := decodeRequest[SaveSubscriptionPriceRequest](subscriptionRecorder, subscriptionRequest)
+	if !ok {
+		t.Fatalf("valid subscription price request was rejected: status=%d body=%s", subscriptionRecorder.Code, subscriptionRecorder.Body.String())
+	}
+	if !subscription.Valid() {
+		t.Fatal("valid subscription price was rejected")
+	}
+	subscription.EffectiveAt = effectiveAt.Add(9 * time.Hour)
+	if subscription.Valid() {
+		t.Fatal("non-midnight subscription effective date was accepted")
+	}
+}
+
 func TestMissingRequiredParameterReturnsField(t *testing.T) {
 	t.Run("top level", func(t *testing.T) {
 		assertMissingParameter[UpdateStatusRequest](t, http.MethodPatch, "/api/v1/models/1/status", `{}`, "status")

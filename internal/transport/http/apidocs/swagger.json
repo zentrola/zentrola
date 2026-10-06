@@ -5537,6 +5537,390 @@
                 }
             }
         },
+        "/api/v1/resources/{id}/prices": {
+            "get": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "模型与资源"
+                ],
+                "summary": "凭证价格配置与历史版本",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "凭证 ID（正整数字符串）",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/management.CredentialPrices"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/resources/{id}/prices/models/{modelId}": {
+            "put": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "模型与资源"
+                ],
+                "summary": "录入或修改按量凭证模型单价",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "凭证 ID（正整数字符串）",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "供应方模型映射 ID（正整数字符串）",
+                        "name": "modelId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "每百万 Token 的单价",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.SaveModelPriceRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/management.ModelPrice"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/resources/{id}/prices/models/{modelId}/{priceId}": {
+            "put": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "模型与资源"
+                ],
+                "summary": "修改模型价格版本",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "凭证 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "供应方模型映射 ID",
+                        "name": "modelId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "价格版本 ID",
+                        "name": "priceId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "价格版本",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.SaveModelPriceRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/management.ModelPrice"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "模型与资源"
+                ],
+                "summary": "删除模型价格版本",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "凭证 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "供应方模型映射 ID",
+                        "name": "modelId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "价格版本 ID",
+                        "name": "priceId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/resources/{id}/prices/subscription": {
+            "put": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "模型与资源"
+                ],
+                "summary": "录入或修改订阅凭证周期费用",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "凭证 ID（正整数字符串）",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "订阅周期费用",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.SaveSubscriptionPriceRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/management.SubscriptionPrice"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/resources/{id}/prices/subscription/{priceId}": {
+            "put": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "模型与资源"
+                ],
+                "summary": "修改订阅费用版本",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "凭证 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "价格版本 ID",
+                        "name": "priceId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "订阅费用版本",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.SaveSubscriptionPriceRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/management.SubscriptionPrice"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "模型与资源"
+                ],
+                "summary": "删除订阅费用版本",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "凭证 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "价格版本 ID",
+                        "name": "priceId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/resources/{id}/quotas": {
             "get": {
                 "security": [
@@ -7605,6 +7989,72 @@
                 }
             }
         },
+        "http.SaveModelPriceRequest": {
+            "type": "object",
+            "required": [
+                "cachedInputPrice",
+                "currency",
+                "effectiveAt",
+                "inputPrice",
+                "outputPrice"
+            ],
+            "properties": {
+                "cachedInputPrice": {
+                    "type": "string"
+                },
+                "currency": {
+                    "type": "string",
+                    "enum": [
+                        "CNY",
+                        "USD"
+                    ]
+                },
+                "effectiveAt": {
+                    "description": "EffectiveAt 是以 Z 结尾的 UTC 日期起点。",
+                    "type": "string",
+                    "example": "2026-10-01T00:00:00Z"
+                },
+                "inputPrice": {
+                    "type": "string"
+                },
+                "outputPrice": {
+                    "type": "string"
+                }
+            }
+        },
+        "http.SaveSubscriptionPriceRequest": {
+            "type": "object",
+            "required": [
+                "billingPeriod",
+                "currency",
+                "effectiveAt",
+                "periodAmount"
+            ],
+            "properties": {
+                "billingPeriod": {
+                    "type": "string",
+                    "enum": [
+                        "MONTH",
+                        "YEAR"
+                    ]
+                },
+                "currency": {
+                    "type": "string",
+                    "enum": [
+                        "CNY",
+                        "USD"
+                    ]
+                },
+                "effectiveAt": {
+                    "description": "EffectiveAt 是以 Z 结尾的 UTC 日期起点。",
+                    "type": "string",
+                    "example": "2026-10-01T00:00:00Z"
+                },
+                "periodAmount": {
+                    "type": "string"
+                }
+            }
+        },
         "http.SetupResponse": {
             "type": "object",
             "properties": {
@@ -7763,6 +8213,26 @@
                 }
             }
         },
+        "management.CredentialPrices": {
+            "type": "object",
+            "properties": {
+                "modelPrices": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/management.ModelPrice"
+                    }
+                },
+                "subscriptionPrice": {
+                    "$ref": "#/definitions/management.SubscriptionPrice"
+                },
+                "subscriptionPrices": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/management.SubscriptionPrice"
+                    }
+                }
+            }
+        },
         "management.Group": {
             "type": "object",
             "properties": {
@@ -7878,6 +8348,41 @@
                 },
                 "updatedAt": {
                     "type": "string"
+                }
+            }
+        },
+        "management.ModelPrice": {
+            "type": "object",
+            "properties": {
+                "cachedInputPrice": {
+                    "type": "string"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "effectiveAt": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "inputPrice": {
+                    "type": "string"
+                },
+                "outputPrice": {
+                    "type": "string"
+                },
+                "providerCredentialId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "providerModelId": {
+                    "type": "string",
+                    "example": "0"
                 }
             }
         },
@@ -8310,6 +8815,9 @@
                 "runtimeStatus": {
                     "type": "string"
                 },
+                "subscriptionPrice": {
+                    "$ref": "#/definitions/management.SubscriptionPriceSummary"
+                },
                 "subscriptionType": {
                     "type": "string"
                 },
@@ -8360,6 +8868,51 @@
                 },
                 "windowDurationSeconds": {
                     "type": "integer"
+                }
+            }
+        },
+        "management.SubscriptionPrice": {
+            "type": "object",
+            "properties": {
+                "billingPeriod": {
+                    "type": "string"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "effectiveAt": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "periodAmount": {
+                    "type": "string"
+                },
+                "providerCredentialId": {
+                    "type": "string",
+                    "example": "0"
+                }
+            }
+        },
+        "management.SubscriptionPriceSummary": {
+            "type": "object",
+            "properties": {
+                "billingPeriod": {
+                    "type": "string"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "effectiveAt": {
+                    "type": "string"
+                },
+                "periodAmount": {
+                    "type": "string"
                 }
             }
         },

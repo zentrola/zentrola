@@ -192,33 +192,40 @@ type ProviderInitializeResult struct {
 	Updated  int `json:"updated"`
 	Existing int `json:"existing"`
 }
+type SubscriptionPriceSummary struct {
+	Currency      string    `json:"currency"`
+	PeriodAmount  string    `json:"periodAmount"`
+	BillingPeriod string    `json:"billingPeriod"`
+	EffectiveAt   time.Time `json:"effectiveAt"`
+}
 type Resource struct {
-	ID                    int64      `json:"id,string"`
-	Version               int64      `json:"version,string" example:"1"`
-	ProviderID            int64      `json:"providerId,string"`
-	Name                  string     `json:"name"`
-	AuthType              string     `json:"authType"`
-	AuthAdapter           string     `json:"authAdapter"`
-	SubscriptionType      *string    `json:"subscriptionType"`
-	PlanCode              *string    `json:"planCode"`
-	ExternalAccountRef    *string    `json:"externalAccountRef"`
-	Priority              int32      `json:"priority"`
-	EffectiveAt           *time.Time `json:"effectiveAt"`
-	ExpiresAt             *time.Time `json:"expiresAt"`
-	QuotaStatus           string     `json:"quotaStatus"`
-	QuotaCheckedAt        *time.Time `json:"quotaCheckedAt"`
-	QuotaResetsAt         *time.Time `json:"quotaResetsAt"`
-	CredentialRefreshedAt *time.Time `json:"-"`
-	CredentialExpiresAt   *time.Time `json:"-"`
-	RuntimeStatus         string     `json:"runtimeStatus"`
-	BlockedReason         *string    `json:"blockedReason"`
-	BlockedAt             *time.Time `json:"blockedAt"`
-	LastErrorAt           *time.Time `json:"lastErrorAt"`
-	LastHTTPStatus        *int32     `json:"lastHttpStatus"`
-	LastErrorCode         *string    `json:"lastErrorCode"`
-	CredentialConfigured  bool       `json:"credentialConfigured"`
-	CreatedAt             time.Time  `json:"createdAt"`
-	UpdatedAt             time.Time  `json:"updatedAt"`
+	ID                    int64                     `json:"id,string"`
+	Version               int64                     `json:"version,string" example:"1"`
+	ProviderID            int64                     `json:"providerId,string"`
+	Name                  string                    `json:"name"`
+	AuthType              string                    `json:"authType"`
+	AuthAdapter           string                    `json:"authAdapter"`
+	SubscriptionType      *string                   `json:"subscriptionType"`
+	PlanCode              *string                   `json:"planCode"`
+	ExternalAccountRef    *string                   `json:"externalAccountRef"`
+	Priority              int32                     `json:"priority"`
+	EffectiveAt           *time.Time                `json:"effectiveAt"`
+	ExpiresAt             *time.Time                `json:"expiresAt"`
+	QuotaStatus           string                    `json:"quotaStatus"`
+	QuotaCheckedAt        *time.Time                `json:"quotaCheckedAt"`
+	QuotaResetsAt         *time.Time                `json:"quotaResetsAt"`
+	CredentialRefreshedAt *time.Time                `json:"-"`
+	CredentialExpiresAt   *time.Time                `json:"-"`
+	RuntimeStatus         string                    `json:"runtimeStatus"`
+	BlockedReason         *string                   `json:"blockedReason"`
+	BlockedAt             *time.Time                `json:"blockedAt"`
+	LastErrorAt           *time.Time                `json:"lastErrorAt"`
+	LastHTTPStatus        *int32                    `json:"lastHttpStatus"`
+	LastErrorCode         *string                   `json:"lastErrorCode"`
+	CredentialConfigured  bool                      `json:"credentialConfigured"`
+	SubscriptionPrice     *SubscriptionPriceSummary `json:"subscriptionPrice"`
+	CreatedAt             time.Time                 `json:"createdAt"`
+	UpdatedAt             time.Time                 `json:"updatedAt"`
 }
 type ResourceQuota struct {
 	Code                  string     `json:"code"`

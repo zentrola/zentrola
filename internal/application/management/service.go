@@ -19,12 +19,14 @@ type Service struct {
 	ProviderService
 	QueryService
 	ResourceService
+	PriceService
 }
 
 type serviceOptions struct {
 	discoverer    ModelDiscoverer
 	subscriptions []SubscriptionAdapter
 	now           func() time.Time
+	priceStore    PriceStore
 }
 
 type Option func(*serviceOptions)
@@ -39,6 +41,10 @@ func WithSubscriptionAdapter(adapter SubscriptionAdapter) Option {
 			options.subscriptions = append(options.subscriptions, adapter)
 		}
 	}
+}
+
+func WithPriceStore(store PriceStore) Option {
+	return func(options *serviceOptions) { options.priceStore = store }
 }
 
 // WithClock 注入业务时间，测试可使用固定时钟；所有结果统一规范化为 UTC 微秒精度。
@@ -81,6 +87,7 @@ func New(store Store, ids shared.IDGenerator, cipher Cipher, tester ConnectionTe
 			store: resourceStoreAdapter{Store: store}, ids: ids, cipher: cipher, tester: tester, now: now,
 			subscriptions: subscriptions,
 		},
+		PriceService: PriceService{store: configuration.priceStore, ids: ids, now: now},
 		QueryService: QueryService{
 			store: store, discoverer: configuration.discoverer, subscriptions: subscriptions,
 		},

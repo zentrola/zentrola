@@ -219,12 +219,24 @@ SET is_deleted=true,updated_by=$3,updated_at=$4
 WHERE id=$1 AND provider_id=$2 AND is_deleted=false;
 
 -- name: ManageResources :many
-SELECT id,provider_id,resource_name,auth_type,auth_adapter,subscription_type,plan_code,
-       external_account_ref,priority,effective_at,expires_at,quota_status,quota_checked_at,
-       quota_resets_at,credential_refreshed_at,credential_expires_at,
-       runtime_status,blocked_reason,blocked_at,last_error_at,last_http_status,
-       last_error_code,version,created_at,updated_at FROM provider_credential
-WHERE is_deleted=false AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2;
+SELECT r.id,r.provider_id,r.resource_name,r.auth_type,r.auth_adapter,r.subscription_type,r.plan_code,
+       r.external_account_ref,r.priority,r.effective_at,r.expires_at,r.quota_status,r.quota_checked_at,
+       r.quota_resets_at,r.credential_refreshed_at,r.credential_expires_at,
+       r.runtime_status,r.blocked_reason,r.blocked_at,r.last_error_at,r.last_http_status,
+       r.last_error_code,r.version,r.created_at,r.updated_at,
+       COALESCE(price.currency,'') AS subscription_price_currency,
+       price.period_amount AS subscription_period_amount,
+       COALESCE(price.billing_period,'') AS subscription_billing_period,
+       price.effective_at AS subscription_price_effective_at
+FROM provider_credential r
+LEFT JOIN LATERAL (
+    SELECT currency,period_amount,billing_period,effective_at
+    FROM provider_credential_subscription_price
+    WHERE provider_credential_id=r.id AND effective_at<=CURRENT_TIMESTAMP
+    ORDER BY effective_at DESC,id DESC
+    LIMIT 1
+) price ON r.auth_type='SUBSCRIPTION'
+WHERE r.is_deleted=false AND (r.id<$1 OR $1=0) ORDER BY r.id DESC LIMIT $2;
 -- name: ManageResource :one
 SELECT * FROM provider_credential WHERE id=$1 AND is_deleted=false;
 -- name: ManageCreateResource :exec

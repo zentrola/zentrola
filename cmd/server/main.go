@@ -296,12 +296,14 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 		openaicodex.WithRefreshAhead(cfg.Gateway.SubscriptionRefreshAhead),
 	)
 	claudeSubscription := anthropicclaude.New()
-	managementStore := gatewaycache.NewManagementStore(postgres.NewManagementStore(pool, ids, logger), gatewayCache, logger)
+	postgresManagementStore := postgres.NewManagementStore(pool, ids, logger)
+	managementStore := gatewaycache.NewManagementStore(postgresManagementStore, gatewayCache, logger)
 	managementService := management.New(
 		managementStore, ids, credentials, connectionTester,
 		management.WithModelDiscoverer(modelcatalog.NewDiscoverer(logger)),
 		management.WithSubscriptionAdapter(codexSubscription),
 		management.WithSubscriptionAdapter(claudeSubscription),
+		management.WithPriceStore(postgresManagementStore),
 	)
 	anthropicClient := anthropic.NewGatewayClient(cfg.Gateway.HeaderTimeout, logger)
 	defer anthropicClient.CloseIdleConnections()

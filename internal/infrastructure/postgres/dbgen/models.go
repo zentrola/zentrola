@@ -346,6 +346,30 @@ type ProviderCredential struct {
 	Version int64
 }
 
+// 按量凭证按生效时间保留的模型计价版本
+type ProviderCredentialModelPrice struct {
+	// 主键，由应用侧生成的正数 64-bit ID
+	ID int64
+	// 计价所属的 API Key 凭证 ID
+	ProviderCredentialID int64
+	// 计价对应的供应方模型映射 ID
+	ProviderModelID int64
+	// 计价币种：CNY=人民币，USD=美元；不同币种不自动换算或合计
+	Currency string
+	// 普通输入每百万 Token 的价格
+	InputPrice pgtype.Numeric
+	// 输出每百万 Token 的价格
+	OutputPrice pgtype.Numeric
+	// 缓存命中输入每百万 Token 的价格
+	CachedInputPrice pgtype.Numeric
+	// 此版本价格的生效时间，UTC
+	EffectiveAt pgtype.Timestamptz
+	// 创建者引用：system、admin:<id> 或 principal:<id>
+	CreatedBy string
+	// 记录创建时间，UTC
+	CreatedAt pgtype.Timestamptz
+}
+
 // Provider 认证资源最近观测到的额度窗口；只保存当前状态，不作为 Usage 事实
 type ProviderCredentialQuotum struct {
 	// 所属 Provider 认证资源 ID
@@ -378,6 +402,26 @@ type ProviderCredentialQuotum struct {
 	CreatedAt pgtype.Timestamptz
 	// 额度窗口最近更新时间，UTC
 	UpdatedAt pgtype.Timestamptz
+}
+
+// 订阅凭证按生效时间保留的周期费用版本
+type ProviderCredentialSubscriptionPrice struct {
+	// 主键，由应用侧生成的正数 64-bit ID
+	ID int64
+	// 费用所属的订阅凭证 ID
+	ProviderCredentialID int64
+	// 费用币种：CNY=人民币，USD=美元；不同币种不自动换算或合计
+	Currency string
+	// 一个完整计费周期的固定费用，非每日分摊金额
+	PeriodAmount pgtype.Numeric
+	// 计费周期：MONTH=月，YEAR=年
+	BillingPeriod string
+	// 此版本费用的生效时间，UTC
+	EffectiveAt pgtype.Timestamptz
+	// 创建者引用：system、admin:<id> 或 principal:<id>
+	CreatedBy string
+	// 记录创建时间，UTC
+	CreatedAt pgtype.Timestamptz
 }
 
 // 服务商支持的协议及对应上游基础地址
