@@ -1334,13 +1334,17 @@ function syncModels(provider: Provider) {
 }
 
 function resultMessage(result: ConnectionResult, resource?: Resource) {
-  return result.ok
-    ? t(
-        resource?.authType === 'SUBSCRIPTION'
-          ? 'resources.subscriptionTestPassed'
-          : 'resources.testPassed',
-      )
-    : t(i18n.global.te(`errors.${result.code}`) ? `errors.${result.code}` : 'errors.UNKNOWN')
+  if (result.ok) {
+    return t(
+      resource?.authType === 'SUBSCRIPTION'
+        ? 'resources.subscriptionTestPassed'
+        : 'resources.testPassed',
+    )
+  }
+  if (result.code === 'CODEX_APP_SERVER_UNAVAILABLE') {
+    return t('errors.CODEX_APP_SERVER_UNAVAILABLE', { executable: 'CODEX_EXECUTABLE' })
+  }
+  return t(i18n.global.te(`errors.${result.code}`) ? `errors.${result.code}` : 'errors.UNKNOWN')
 }
 
 function save() {

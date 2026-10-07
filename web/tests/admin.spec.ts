@@ -3552,6 +3552,81 @@ test('服务商列表展示凭证聚合运行状态和错误原因', async ({ pa
   })
 })
 
+test('个人订阅额度刷新失败时展示 Codex 可执行文件配置项', async ({ page }) => {
+  const state = await fixture(page)
+  state.providers.push({
+    id: '82',
+    name: 'OpenAI',
+    code: 'openai-official',
+    type: 'OFFICIAL',
+    status: 'ACTIVE',
+    website: 'https://openai.com',
+    endpoints: [{ protocolType: 'OPENAI', baseUrl: 'https://api.openai.com/v1' }],
+    proxyEnabled: false,
+    proxyUrl: null,
+    proxyHeaders: [],
+    modelSyncSupported: false,
+    authAdapters: ['API_KEY', 'OPENAI_CODEX'],
+    createdAt: stamp,
+    updatedAt: stamp,
+  })
+  state.resources.push({
+    id: '89',
+    providerId: '82',
+    name: 'OpenAI 个人订阅 · ccount',
+    authType: 'SUBSCRIPTION',
+    authAdapter: 'OPENAI_CODEX',
+    subscriptionType: 'PERSONAL',
+    planCode: 'plus',
+    externalAccountRef: 'fixture-account',
+    priority: 100,
+    effectiveAt: null,
+    expiresAt: null,
+    quotaStatus: 'UNKNOWN',
+    quotaCheckedAt: null,
+    quotaResetsAt: null,
+    runtimeStatus: 'HEALTHY',
+    blockedReason: null,
+    blockedAt: null,
+    lastErrorAt: null,
+    lastHttpStatus: null,
+    lastErrorCode: null,
+    credentialConfigured: true,
+    subscriptionPrice: null,
+    createdAt: stamp,
+    updatedAt: stamp,
+  })
+  await page.route('**/api/v1/resources/89/test-connection', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        code: 'OK',
+        data: {
+          ok: false,
+          code: 'CODEX_APP_SERVER_UNAVAILABLE',
+          httpStatus: null,
+          latencyMs: 0,
+        },
+        requestId: 'req_codex_app_server_unavailable',
+      }),
+    }),
+  )
+
+  await signIn(page)
+  await page.getByRole('link', { name: '服务商', exact: true }).click()
+  await page
+    .getByRole('row')
+    .filter({ hasText: 'OpenAI' })
+    .getByRole('button', { name: '管理 OpenAI 的认证凭据', exact: true })
+    .click()
+
+  const subscriptionRow = modal(page).getByRole('row').filter({ hasText: '个人订阅' })
+  await expect(subscriptionRow.locator('.credential-quota-feedback')).toHaveText(
+    '额度刷新失败 · Codex App Server 无法启动，请检查 Codex 可执行文件配置（CODEX_EXECUTABLE）并重启后端。',
+  )
+})
+
 test('服务商支持个人订阅优先并保留 API Key 兜底', async ({ page }) => {
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
   const state = await fixture(page)
