@@ -364,6 +364,24 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 	}()
 	billingStore := postgres.NewBillingStore(pool)
 	billingService := billingapp.New(billingStore, ids)
+	ratingWorker, err := billingapp.NewRatingWorker(
+		billingService, routeState, logger, cfg.Billing.RatingInterval,
+		cfg.Billing.RatingTimeout, cfg.Billing.RatingPageSize,
+	)
+	if err != nil {
+		return err
+	}
+	logger.Info("api key usage rating worker started",
+		"interval", cfg.Billing.RatingInterval,
+		"run_timeout", cfg.Billing.RatingTimeout,
+		"page_size", cfg.Billing.RatingPageSize)
+	defer func() {
+		workerShutdown, workerCancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+		defer workerCancel()
+		if err := ratingWorker.Close(workerShutdown); err != nil {
+			runErr = errors.Join(runErr, errors.New("cannot stop api key usage rating worker"))
+		}
+	}()
 	billingWorker, err := billingapp.NewWorker(
 		billingService, routeState, logger, cfg.Billing.SettlementInterval,
 		cfg.Billing.SettlementGrace, cfg.Billing.SettlementTimeout,
@@ -371,7 +389,7 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 	if err != nil {
 		return err
 	}
-	logger.Info("subscription billing worker started",
+	logger.Info("billing settlement worker started",
 		"interval", cfg.Billing.SettlementInterval,
 		"grace", cfg.Billing.SettlementGrace,
 		"run_timeout", cfg.Billing.SettlementTimeout)
@@ -379,7 +397,7 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 		workerShutdown, workerCancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 		defer workerCancel()
 		if err := billingWorker.Close(workerShutdown); err != nil {
-			runErr = errors.Join(runErr, errors.New("cannot stop subscription billing worker"))
+			runErr = errors.Join(runErr, errors.New("cannot stop billing settlement worker"))
 		}
 	}()
 	gatewayOptions := httptransport.GatewayOptions{

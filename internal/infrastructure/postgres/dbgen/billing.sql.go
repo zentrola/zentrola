@@ -11,6 +11,268 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const billingAPIKeyCurrentDocument = `-- name: BillingAPIKeyCurrentDocument :one
+WITH base AS (
+    SELECT id, total_amount, total_tokens
+    FROM billing_document
+    WHERE billing_type = 'API_KEY'
+      AND document_type = 'CHARGE'
+      AND status = 'CONFIRMED'
+      AND provider_credential_id = $1::bigint
+      AND period_start = $2::timestamptz
+      AND period_end = $3::timestamptz
+      AND currency = $4::text
+)
+SELECT base.id AS original_document_id,
+       (base.total_amount + COALESCE(SUM(adjustment.total_amount), 0::numeric))::numeric AS total_amount,
+       (base.total_tokens + COALESCE(SUM(adjustment.total_tokens), 0::numeric))::bigint AS total_tokens
+FROM base
+LEFT JOIN billing_document adjustment
+  ON adjustment.original_document_id = base.id
+ AND adjustment.document_type = 'ADJUSTMENT'
+ AND adjustment.status = 'CONFIRMED'
+GROUP BY base.id, base.total_amount, base.total_tokens
+`
+
+type BillingAPIKeyCurrentDocumentParams struct {
+	ProviderCredentialID int64
+	PeriodStart          pgtype.Timestamptz
+	PeriodEnd            pgtype.Timestamptz
+	Currency             string
+}
+
+type BillingAPIKeyCurrentDocumentRow struct {
+	OriginalDocumentID int64
+	TotalAmount        pgtype.Numeric
+	TotalTokens        int64
+}
+
+func (q *Queries) BillingAPIKeyCurrentDocument(ctx context.Context, arg BillingAPIKeyCurrentDocumentParams) (BillingAPIKeyCurrentDocumentRow, error) {
+	row := q.db.QueryRow(ctx, billingAPIKeyCurrentDocument,
+		arg.ProviderCredentialID,
+		arg.PeriodStart,
+		arg.PeriodEnd,
+		arg.Currency,
+	)
+	var i BillingAPIKeyCurrentDocumentRow
+	err := row.Scan(&i.OriginalDocumentID, &i.TotalAmount, &i.TotalTokens)
+	return i, err
+}
+
+const billingAPIKeyCurrentItems = `-- name: BillingAPIKeyCurrentItems :many
+WITH base AS (
+    SELECT id
+    FROM billing_document
+    WHERE billing_type = 'API_KEY'
+      AND document_type = 'CHARGE'
+      AND status = 'CONFIRMED'
+      AND provider_credential_id = $1::bigint
+      AND period_start = $2::timestamptz
+      AND period_end = $3::timestamptz
+      AND currency = $4::text
+), documents AS (
+    SELECT document.id
+    FROM billing_document document, base
+    WHERE document.id = base.id
+       OR (document.original_document_id = base.id
+           AND document.document_type = 'ADJUSTMENT'
+           AND document.status = 'CONFIRMED')
+)
+SELECT item.principal_id,
+       SUM(item.usage_tokens)::bigint AS tokens,
+       SUM(item.amount)::numeric AS amount
+FROM billing_document_item item
+JOIN documents ON documents.id = item.billing_document_id
+GROUP BY item.principal_id
+ORDER BY item.principal_id
+`
+
+type BillingAPIKeyCurrentItemsParams struct {
+	ProviderCredentialID int64
+	PeriodStart          pgtype.Timestamptz
+	PeriodEnd            pgtype.Timestamptz
+	Currency             string
+}
+
+type BillingAPIKeyCurrentItemsRow struct {
+	PrincipalID int64
+	Tokens      int64
+	Amount      pgtype.Numeric
+}
+
+func (q *Queries) BillingAPIKeyCurrentItems(ctx context.Context, arg BillingAPIKeyCurrentItemsParams) ([]BillingAPIKeyCurrentItemsRow, error) {
+	rows, err := q.db.Query(ctx, billingAPIKeyCurrentItems,
+		arg.ProviderCredentialID,
+		arg.PeriodStart,
+		arg.PeriodEnd,
+		arg.Currency,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []BillingAPIKeyCurrentItemsRow{}
+	for rows.Next() {
+		var i BillingAPIKeyCurrentItemsRow
+		if err := rows.Scan(&i.PrincipalID, &i.Tokens, &i.Amount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const billingAPIKeyPeriods = `-- name: BillingAPIKeyPeriods :many
+WITH current_rating AS (
+    SELECT DISTINCT ON (usage_record_id)
+           provider_credential_id, usage_started_at, currency
+    FROM usage_rating
+    ORDER BY usage_record_id, revision DESC, id DESC
+)
+SELECT provider_credential_id,
+       date_trunc('month', usage_started_at, 'UTC')::timestamptz AS period_start,
+       (date_trunc('month', usage_started_at, 'UTC') + interval '1 month')::timestamptz AS period_end,
+       currency
+FROM current_rating
+WHERE date_trunc('month', usage_started_at, 'UTC') + interval '1 month' <= $1::timestamptz
+GROUP BY provider_credential_id, period_start, period_end, currency
+ORDER BY period_start, provider_credential_id, currency
+`
+
+type BillingAPIKeyPeriodsRow struct {
+	ProviderCredentialID int64
+	PeriodStart          pgtype.Timestamptz
+	PeriodEnd            pgtype.Timestamptz
+	Currency             string
+}
+
+func (q *Queries) BillingAPIKeyPeriods(ctx context.Context, cutoff pgtype.Timestamptz) ([]BillingAPIKeyPeriodsRow, error) {
+	rows, err := q.db.Query(ctx, billingAPIKeyPeriods, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []BillingAPIKeyPeriodsRow{}
+	for rows.Next() {
+		var i BillingAPIKeyPeriodsRow
+		if err := rows.Scan(
+			&i.ProviderCredentialID,
+			&i.PeriodStart,
+			&i.PeriodEnd,
+			&i.Currency,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const billingAPIKeyUsage = `-- name: BillingAPIKeyUsage :many
+WITH current_rating AS (
+    SELECT DISTINCT ON (usage_record_id)
+           id, principal_id, provider_credential_id, usage_started_at,
+           input_tokens, output_tokens, total_cost, currency
+    FROM usage_rating
+    ORDER BY usage_record_id, revision DESC, id DESC
+)
+SELECT id AS usage_rating_id,
+       principal_id,
+       (input_tokens + output_tokens)::bigint AS tokens,
+       total_cost
+FROM current_rating
+WHERE provider_credential_id = $1::bigint
+  AND usage_started_at >= $2::timestamptz
+  AND usage_started_at < $3::timestamptz
+  AND currency = $4::text
+ORDER BY principal_id, id
+`
+
+type BillingAPIKeyUsageParams struct {
+	ProviderCredentialID int64
+	PeriodStart          pgtype.Timestamptz
+	PeriodEnd            pgtype.Timestamptz
+	Currency             string
+}
+
+type BillingAPIKeyUsageRow struct {
+	UsageRatingID int64
+	PrincipalID   int64
+	Tokens        int64
+	TotalCost     pgtype.Numeric
+}
+
+func (q *Queries) BillingAPIKeyUsage(ctx context.Context, arg BillingAPIKeyUsageParams) ([]BillingAPIKeyUsageRow, error) {
+	rows, err := q.db.Query(ctx, billingAPIKeyUsage,
+		arg.ProviderCredentialID,
+		arg.PeriodStart,
+		arg.PeriodEnd,
+		arg.Currency,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []BillingAPIKeyUsageRow{}
+	for rows.Next() {
+		var i BillingAPIKeyUsageRow
+		if err := rows.Scan(
+			&i.UsageRatingID,
+			&i.PrincipalID,
+			&i.Tokens,
+			&i.TotalCost,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const billingChargeExists = `-- name: BillingChargeExists :one
+SELECT EXISTS (
+    SELECT 1
+    FROM billing_document
+    WHERE billing_type = $1::text
+      AND document_type = 'CHARGE'
+      AND status = 'CONFIRMED'
+      AND provider_credential_id = $2::bigint
+      AND period_start = $3::timestamptz
+      AND period_end = $4::timestamptz
+      AND ($1::text = 'SUBSCRIPTION' OR currency = $5::text)
+)
+`
+
+type BillingChargeExistsParams struct {
+	BillingType          string
+	ProviderCredentialID int64
+	PeriodStart          pgtype.Timestamptz
+	PeriodEnd            pgtype.Timestamptz
+	Currency             string
+}
+
+func (q *Queries) BillingChargeExists(ctx context.Context, arg BillingChargeExistsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, billingChargeExists,
+		arg.BillingType,
+		arg.ProviderCredentialID,
+		arg.PeriodStart,
+		arg.PeriodEnd,
+		arg.Currency,
+	)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const billingChargePeriods = `-- name: BillingChargePeriods :many
 SELECT provider_credential_id, period_start, period_end
 FROM billing_document
@@ -75,9 +337,7 @@ INSERT INTO billing_document (
     $8, $9, $10,
     $11, $12, $13, $14
 )
-ON CONFLICT (billing_type, provider_credential_id, period_start, period_end)
-    WHERE document_type = 'CHARGE' AND status = 'CONFIRMED'
-DO NOTHING
+ON CONFLICT DO NOTHING
 `
 
 type BillingInsertDocumentParams struct {
@@ -87,7 +347,7 @@ type BillingInsertDocumentParams struct {
 	DocumentType         string
 	ProviderCredentialID int64
 	SourceType           string
-	SourceID             int64
+	SourceID             *int64
 	OriginalDocumentID   *int64
 	PeriodStart          pgtype.Timestamptz
 	PeriodEnd            pgtype.Timestamptz
@@ -153,11 +413,100 @@ func (q *Queries) BillingInsertDocumentItem(ctx context.Context, arg BillingInse
 	return err
 }
 
+const billingInsertDocumentUsageRating = `-- name: BillingInsertDocumentUsageRating :exec
+INSERT INTO billing_document_usage_rating (billing_document_id, usage_rating_id, created_at)
+VALUES ($1, $2, $3)
+ON CONFLICT (usage_rating_id) DO NOTHING
+`
+
+type BillingInsertDocumentUsageRatingParams struct {
+	BillingDocumentID int64
+	UsageRatingID     int64
+	CreatedAt         pgtype.Timestamptz
+}
+
+func (q *Queries) BillingInsertDocumentUsageRating(ctx context.Context, arg BillingInsertDocumentUsageRatingParams) error {
+	_, err := q.db.Exec(ctx, billingInsertDocumentUsageRating, arg.BillingDocumentID, arg.UsageRatingID, arg.CreatedAt)
+	return err
+}
+
+const billingInsertUsageRating = `-- name: BillingInsertUsageRating :execrows
+INSERT INTO usage_rating (
+    id, usage_record_id, revision, supersedes_rating_id, principal_id,
+    provider_credential_id, provider_model_id, model_price_id, usage_started_at,
+    input_tokens, cached_input_tokens, output_tokens,
+    input_price, cached_input_price, output_price,
+    input_cost, cached_input_cost, output_cost, total_cost, currency, created_at
+) VALUES (
+    $1, $2, $3, $4,
+    $5, $6, $7,
+    $8, $9, $10,
+    $11, $12, $13,
+    $14, $15, $16,
+    $17, $18, $19,
+    $20, $21
+)
+ON CONFLICT (usage_record_id, revision) DO NOTHING
+`
+
+type BillingInsertUsageRatingParams struct {
+	ID                   int64
+	UsageRecordID        int64
+	Revision             int32
+	SupersedesRatingID   *int64
+	PrincipalID          int64
+	ProviderCredentialID int64
+	ProviderModelID      int64
+	ModelPriceID         int64
+	UsageStartedAt       pgtype.Timestamptz
+	InputTokens          int64
+	CachedInputTokens    int64
+	OutputTokens         int64
+	InputPrice           pgtype.Numeric
+	CachedInputPrice     pgtype.Numeric
+	OutputPrice          pgtype.Numeric
+	InputCost            pgtype.Numeric
+	CachedInputCost      pgtype.Numeric
+	OutputCost           pgtype.Numeric
+	TotalCost            pgtype.Numeric
+	Currency             string
+	CreatedAt            pgtype.Timestamptz
+}
+
+func (q *Queries) BillingInsertUsageRating(ctx context.Context, arg BillingInsertUsageRatingParams) (int64, error) {
+	result, err := q.db.Exec(ctx, billingInsertUsageRating,
+		arg.ID,
+		arg.UsageRecordID,
+		arg.Revision,
+		arg.SupersedesRatingID,
+		arg.PrincipalID,
+		arg.ProviderCredentialID,
+		arg.ProviderModelID,
+		arg.ModelPriceID,
+		arg.UsageStartedAt,
+		arg.InputTokens,
+		arg.CachedInputTokens,
+		arg.OutputTokens,
+		arg.InputPrice,
+		arg.CachedInputPrice,
+		arg.OutputPrice,
+		arg.InputCost,
+		arg.CachedInputCost,
+		arg.OutputCost,
+		arg.TotalCost,
+		arg.Currency,
+		arg.CreatedAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const billingLockDocument = `-- name: BillingLockDocument :one
 SELECT id
 FROM billing_document
 WHERE id = $1::bigint
-  AND billing_type = 'SUBSCRIPTION'
   AND document_type = 'CHARGE'
   AND status = 'CONFIRMED'
 FOR UPDATE
@@ -209,7 +558,7 @@ SELECT item.principal_id,
        document.billing_type,
        document.currency,
        SUM(item.amount)::numeric AS amount,
-       SUM(CASE WHEN document.document_type = 'CHARGE' THEN item.usage_tokens ELSE 0 END)::bigint AS tokens,
+       SUM(item.usage_tokens)::bigint AS tokens,
        COUNT(*) OVER ()::bigint AS total_count
 FROM billing_document_item item
 JOIN billing_document document ON document.id = item.billing_document_id
@@ -288,7 +637,7 @@ SELECT document.currency,
        SUM(document.total_amount)::numeric AS total_amount,
        SUM(COALESCE(item_total.amount, 0::numeric))::numeric AS allocated_amount,
        SUM(document.total_amount - COALESCE(item_total.amount, 0::numeric))::numeric AS unallocated_amount,
-       SUM(CASE WHEN document.document_type = 'CHARGE' THEN document.total_tokens ELSE 0 END)::bigint AS total_tokens
+       SUM(document.total_tokens)::bigint AS total_tokens
 FROM billing_document document
 LEFT JOIN item_total ON item_total.billing_document_id = document.id
 WHERE document.status = 'CONFIRMED'
@@ -376,7 +725,7 @@ ORDER BY base.id
 type BillingSubscriptionCorrectionsRow struct {
 	OriginalDocumentID   int64
 	ProviderCredentialID int64
-	SourcePriceID        int64
+	SourcePriceID        *int64
 	PeriodStart          pgtype.Timestamptz
 	PeriodEnd            pgtype.Timestamptz
 	Currency             string
@@ -501,6 +850,119 @@ func (q *Queries) BillingSubscriptionUsage(ctx context.Context, arg BillingSubsc
 	for rows.Next() {
 		var i BillingSubscriptionUsageRow
 		if err := rows.Scan(&i.PrincipalID, &i.Tokens); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const billingUsageRatingCandidates = `-- name: BillingUsageRatingCandidates :many
+SELECT usage.id AS usage_record_id,
+       usage.principal_id,
+       usage.provider_credential_id,
+       usage.provider_model_id,
+       usage.started_at AS usage_started_at,
+       usage.input_tokens::bigint AS input_tokens,
+       usage.cached_input_tokens::bigint AS cached_input_tokens,
+       usage.output_tokens::bigint AS output_tokens,
+       price.id AS model_price_id,
+       price.currency,
+       price.input_price,
+       price.cached_input_price,
+       price.output_price,
+       COALESCE(latest.id, 0)::bigint AS latest_rating_id,
+       COALESCE(latest.revision, 0)::int AS latest_revision
+FROM usage_record usage
+JOIN provider_credential credential
+  ON credential.id = usage.provider_credential_id
+ AND credential.auth_type = 'API_KEY'
+JOIN LATERAL (
+    SELECT candidate.id, candidate.provider_credential_id, candidate.provider_model_id, candidate.currency, candidate.input_price, candidate.output_price, candidate.cached_input_price, candidate.effective_at, candidate.created_by, candidate.created_at
+    FROM provider_credential_model_price candidate
+    WHERE candidate.provider_credential_id = usage.provider_credential_id
+      AND candidate.provider_model_id = usage.provider_model_id
+      AND candidate.effective_at <= usage.started_at
+    ORDER BY candidate.effective_at DESC, candidate.id DESC
+    LIMIT 1
+) price ON TRUE
+LEFT JOIN LATERAL (
+    SELECT rating.id, rating.usage_record_id, rating.revision, rating.supersedes_rating_id, rating.principal_id, rating.provider_credential_id, rating.provider_model_id, rating.model_price_id, rating.usage_started_at, rating.input_tokens, rating.cached_input_tokens, rating.output_tokens, rating.input_price, rating.cached_input_price, rating.output_price, rating.input_cost, rating.cached_input_cost, rating.output_cost, rating.total_cost, rating.currency, rating.created_at
+    FROM usage_rating rating
+    WHERE rating.usage_record_id = usage.id
+    ORDER BY rating.revision DESC, rating.id DESC
+    LIMIT 1
+) latest ON TRUE
+WHERE usage.id > $1::bigint
+  AND usage.status = 'SUCCESS'
+  AND usage.input_tokens IS NOT NULL
+  AND usage.cached_input_tokens IS NOT NULL
+  AND usage.output_tokens IS NOT NULL
+  AND usage.cached_input_tokens <= usage.input_tokens
+  AND (
+      latest.id IS NULL
+      OR latest.model_price_id <> price.id
+      OR latest.currency <> price.currency
+      OR latest.input_price <> price.input_price
+      OR latest.cached_input_price <> price.cached_input_price
+      OR latest.output_price <> price.output_price
+  )
+ORDER BY usage.id
+LIMIT $2::int
+`
+
+type BillingUsageRatingCandidatesParams struct {
+	AfterID   int64
+	PageLimit int32
+}
+
+type BillingUsageRatingCandidatesRow struct {
+	UsageRecordID        int64
+	PrincipalID          int64
+	ProviderCredentialID int64
+	ProviderModelID      int64
+	UsageStartedAt       pgtype.Timestamptz
+	InputTokens          int64
+	CachedInputTokens    int64
+	OutputTokens         int64
+	ModelPriceID         int64
+	Currency             string
+	InputPrice           pgtype.Numeric
+	CachedInputPrice     pgtype.Numeric
+	OutputPrice          pgtype.Numeric
+	LatestRatingID       int64
+	LatestRevision       int32
+}
+
+func (q *Queries) BillingUsageRatingCandidates(ctx context.Context, arg BillingUsageRatingCandidatesParams) ([]BillingUsageRatingCandidatesRow, error) {
+	rows, err := q.db.Query(ctx, billingUsageRatingCandidates, arg.AfterID, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []BillingUsageRatingCandidatesRow{}
+	for rows.Next() {
+		var i BillingUsageRatingCandidatesRow
+		if err := rows.Scan(
+			&i.UsageRecordID,
+			&i.PrincipalID,
+			&i.ProviderCredentialID,
+			&i.ProviderModelID,
+			&i.UsageStartedAt,
+			&i.InputTokens,
+			&i.CachedInputTokens,
+			&i.OutputTokens,
+			&i.ModelPriceID,
+			&i.Currency,
+			&i.InputPrice,
+			&i.CachedInputPrice,
+			&i.OutputPrice,
+			&i.LatestRatingID,
+			&i.LatestRevision,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

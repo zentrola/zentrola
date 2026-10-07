@@ -40,9 +40,20 @@ INSERT INTO billing_document (
     sqlc.narg(original_document_id), sqlc.arg(period_start), sqlc.arg(period_end),
     sqlc.arg(total_tokens), sqlc.arg(total_amount), sqlc.arg(currency), sqlc.arg(created_at)
 )
-ON CONFLICT (billing_type, provider_credential_id, period_start, period_end)
-    WHERE document_type = 'CHARGE' AND status = 'CONFIRMED'
-DO NOTHING;
+ON CONFLICT DO NOTHING;
+
+-- name: BillingChargeExists :one
+SELECT EXISTS (
+    SELECT 1
+    FROM billing_document
+    WHERE billing_type = sqlc.arg(billing_type)::text
+      AND document_type = 'CHARGE'
+      AND status = 'CONFIRMED'
+      AND provider_credential_id = sqlc.arg(provider_credential_id)::bigint
+      AND period_start = sqlc.arg(period_start)::timestamptz
+      AND period_end = sqlc.arg(period_end)::timestamptz
+      AND (sqlc.arg(billing_type)::text = 'SUBSCRIPTION' OR currency = sqlc.arg(currency)::text)
+);
 
 -- name: BillingInsertDocumentItem :exec
 INSERT INTO billing_document_item (
@@ -95,7 +106,6 @@ ORDER BY usage_tokens DESC, principal_id;
 SELECT id
 FROM billing_document
 WHERE id = sqlc.arg(id)::bigint
-  AND billing_type = 'SUBSCRIPTION'
   AND document_type = 'CHARGE'
   AND status = 'CONFIRMED'
 FOR UPDATE;
@@ -121,7 +131,7 @@ SELECT document.currency,
        SUM(document.total_amount)::numeric AS total_amount,
        SUM(COALESCE(item_total.amount, 0::numeric))::numeric AS allocated_amount,
        SUM(document.total_amount - COALESCE(item_total.amount, 0::numeric))::numeric AS unallocated_amount,
-       SUM(CASE WHEN document.document_type = 'CHARGE' THEN document.total_tokens ELSE 0 END)::bigint AS total_tokens
+       SUM(document.total_tokens)::bigint AS total_tokens
 FROM billing_document document
 LEFT JOIN item_total ON item_total.billing_document_id = document.id
 WHERE document.status = 'CONFIRMED'
@@ -138,7 +148,7 @@ SELECT item.principal_id,
        document.billing_type,
        document.currency,
        SUM(item.amount)::numeric AS amount,
-       SUM(CASE WHEN document.document_type = 'CHARGE' THEN item.usage_tokens ELSE 0 END)::bigint AS tokens,
+       SUM(item.usage_tokens)::bigint AS tokens,
        COUNT(*) OVER ()::bigint AS total_count
 FROM billing_document_item item
 JOIN billing_document document ON document.id = item.billing_document_id
@@ -150,3 +160,163 @@ WHERE document.status = 'CONFIRMED'
 GROUP BY item.principal_id, principal.name, principal.principal_type, document.billing_type, document.currency
 ORDER BY amount DESC, item.principal_id, document.billing_type, document.currency
 LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::bigint;
+
+-- name: BillingUsageRatingCandidates :many
+SELECT usage.id AS usage_record_id,
+       usage.principal_id,
+       usage.provider_credential_id,
+       usage.provider_model_id,
+       usage.started_at AS usage_started_at,
+       usage.input_tokens::bigint AS input_tokens,
+       usage.cached_input_tokens::bigint AS cached_input_tokens,
+       usage.output_tokens::bigint AS output_tokens,
+       price.id AS model_price_id,
+       price.currency,
+       price.input_price,
+       price.cached_input_price,
+       price.output_price,
+       COALESCE(latest.id, 0)::bigint AS latest_rating_id,
+       COALESCE(latest.revision, 0)::int AS latest_revision
+FROM usage_record usage
+JOIN provider_credential credential
+  ON credential.id = usage.provider_credential_id
+ AND credential.auth_type = 'API_KEY'
+JOIN LATERAL (
+    SELECT candidate.*
+    FROM provider_credential_model_price candidate
+    WHERE candidate.provider_credential_id = usage.provider_credential_id
+      AND candidate.provider_model_id = usage.provider_model_id
+      AND candidate.effective_at <= usage.started_at
+    ORDER BY candidate.effective_at DESC, candidate.id DESC
+    LIMIT 1
+) price ON TRUE
+LEFT JOIN LATERAL (
+    SELECT rating.*
+    FROM usage_rating rating
+    WHERE rating.usage_record_id = usage.id
+    ORDER BY rating.revision DESC, rating.id DESC
+    LIMIT 1
+) latest ON TRUE
+WHERE usage.id > sqlc.arg(after_id)::bigint
+  AND usage.status = 'SUCCESS'
+  AND usage.input_tokens IS NOT NULL
+  AND usage.cached_input_tokens IS NOT NULL
+  AND usage.output_tokens IS NOT NULL
+  AND usage.cached_input_tokens <= usage.input_tokens
+  AND (
+      latest.id IS NULL
+      OR latest.model_price_id <> price.id
+      OR latest.currency <> price.currency
+      OR latest.input_price <> price.input_price
+      OR latest.cached_input_price <> price.cached_input_price
+      OR latest.output_price <> price.output_price
+  )
+ORDER BY usage.id
+LIMIT sqlc.arg(page_limit)::int;
+
+-- name: BillingInsertUsageRating :execrows
+INSERT INTO usage_rating (
+    id, usage_record_id, revision, supersedes_rating_id, principal_id,
+    provider_credential_id, provider_model_id, model_price_id, usage_started_at,
+    input_tokens, cached_input_tokens, output_tokens,
+    input_price, cached_input_price, output_price,
+    input_cost, cached_input_cost, output_cost, total_cost, currency, created_at
+) VALUES (
+    sqlc.arg(id), sqlc.arg(usage_record_id), sqlc.arg(revision), sqlc.narg(supersedes_rating_id),
+    sqlc.arg(principal_id), sqlc.arg(provider_credential_id), sqlc.arg(provider_model_id),
+    sqlc.arg(model_price_id), sqlc.arg(usage_started_at), sqlc.arg(input_tokens),
+    sqlc.arg(cached_input_tokens), sqlc.arg(output_tokens), sqlc.arg(input_price),
+    sqlc.arg(cached_input_price), sqlc.arg(output_price), sqlc.arg(input_cost),
+    sqlc.arg(cached_input_cost), sqlc.arg(output_cost), sqlc.arg(total_cost),
+    sqlc.arg(currency), sqlc.arg(created_at)
+)
+ON CONFLICT (usage_record_id, revision) DO NOTHING;
+
+-- name: BillingAPIKeyPeriods :many
+WITH current_rating AS (
+    SELECT DISTINCT ON (usage_record_id)
+           provider_credential_id, usage_started_at, currency
+    FROM usage_rating
+    ORDER BY usage_record_id, revision DESC, id DESC
+)
+SELECT provider_credential_id,
+       date_trunc('month', usage_started_at, 'UTC')::timestamptz AS period_start,
+       (date_trunc('month', usage_started_at, 'UTC') + interval '1 month')::timestamptz AS period_end,
+       currency
+FROM current_rating
+WHERE date_trunc('month', usage_started_at, 'UTC') + interval '1 month' <= sqlc.arg(cutoff)::timestamptz
+GROUP BY provider_credential_id, period_start, period_end, currency
+ORDER BY period_start, provider_credential_id, currency;
+
+-- name: BillingAPIKeyUsage :many
+WITH current_rating AS (
+    SELECT DISTINCT ON (usage_record_id)
+           id, principal_id, provider_credential_id, usage_started_at,
+           input_tokens, output_tokens, total_cost, currency
+    FROM usage_rating
+    ORDER BY usage_record_id, revision DESC, id DESC
+)
+SELECT id AS usage_rating_id,
+       principal_id,
+       (input_tokens + output_tokens)::bigint AS tokens,
+       total_cost
+FROM current_rating
+WHERE provider_credential_id = sqlc.arg(provider_credential_id)::bigint
+  AND usage_started_at >= sqlc.arg(period_start)::timestamptz
+  AND usage_started_at < sqlc.arg(period_end)::timestamptz
+  AND currency = sqlc.arg(currency)::text
+ORDER BY principal_id, id;
+
+-- name: BillingAPIKeyCurrentDocument :one
+WITH base AS (
+    SELECT id, total_amount, total_tokens
+    FROM billing_document
+    WHERE billing_type = 'API_KEY'
+      AND document_type = 'CHARGE'
+      AND status = 'CONFIRMED'
+      AND provider_credential_id = sqlc.arg(provider_credential_id)::bigint
+      AND period_start = sqlc.arg(period_start)::timestamptz
+      AND period_end = sqlc.arg(period_end)::timestamptz
+      AND currency = sqlc.arg(currency)::text
+)
+SELECT base.id AS original_document_id,
+       (base.total_amount + COALESCE(SUM(adjustment.total_amount), 0::numeric))::numeric AS total_amount,
+       (base.total_tokens + COALESCE(SUM(adjustment.total_tokens), 0::numeric))::bigint AS total_tokens
+FROM base
+LEFT JOIN billing_document adjustment
+  ON adjustment.original_document_id = base.id
+ AND adjustment.document_type = 'ADJUSTMENT'
+ AND adjustment.status = 'CONFIRMED'
+GROUP BY base.id, base.total_amount, base.total_tokens;
+
+-- name: BillingAPIKeyCurrentItems :many
+WITH base AS (
+    SELECT id
+    FROM billing_document
+    WHERE billing_type = 'API_KEY'
+      AND document_type = 'CHARGE'
+      AND status = 'CONFIRMED'
+      AND provider_credential_id = sqlc.arg(provider_credential_id)::bigint
+      AND period_start = sqlc.arg(period_start)::timestamptz
+      AND period_end = sqlc.arg(period_end)::timestamptz
+      AND currency = sqlc.arg(currency)::text
+), documents AS (
+    SELECT document.id
+    FROM billing_document document, base
+    WHERE document.id = base.id
+       OR (document.original_document_id = base.id
+           AND document.document_type = 'ADJUSTMENT'
+           AND document.status = 'CONFIRMED')
+)
+SELECT item.principal_id,
+       SUM(item.usage_tokens)::bigint AS tokens,
+       SUM(item.amount)::numeric AS amount
+FROM billing_document_item item
+JOIN documents ON documents.id = item.billing_document_id
+GROUP BY item.principal_id
+ORDER BY item.principal_id;
+
+-- name: BillingInsertDocumentUsageRating :exec
+INSERT INTO billing_document_usage_rating (billing_document_id, usage_rating_id, created_at)
+VALUES (sqlc.arg(billing_document_id), sqlc.arg(usage_rating_id), sqlc.arg(created_at))
+ON CONFLICT (usage_rating_id) DO NOTHING;

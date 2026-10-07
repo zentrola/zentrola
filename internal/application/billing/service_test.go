@@ -17,14 +17,21 @@ func (g *billingIDs) NextID(context.Context) (int64, error) {
 }
 
 type billingStoreStub struct {
-	prices      []SubscriptionPrice
-	periods     []ChargePeriod
-	usage       map[int64][]domain.UsageShare
-	charges     []Document
-	corrections []Correction
-	original    map[int64][]domain.UsageShare
-	adjustments []Document
-	statistics  Statistics
+	prices           []SubscriptionPrice
+	periods          []ChargePeriod
+	usage            map[int64][]domain.UsageShare
+	charges          []Document
+	corrections      []Correction
+	original         map[int64][]domain.UsageShare
+	adjustments      []Document
+	statistics       Statistics
+	ratingCandidates []UsageRatingCandidate
+	ratings          []UsageRating
+	apiKeyPeriods    []APIKeyPeriod
+	apiKeyUsage      map[APIKeyPeriod][]domain.RatedShare
+	apiKeyRatingIDs  map[APIKeyPeriod][]int64
+	apiKeyCurrent    map[APIKeyPeriod]APIKeyCurrent
+	apiKeyDocuments  []Document
 }
 
 func (s *billingStoreStub) SubscriptionPrices(context.Context) ([]SubscriptionPrice, error) {
@@ -52,6 +59,32 @@ func (s *billingStoreStub) CreateAdjustment(_ context.Context, _ string, documen
 }
 func (s *billingStoreStub) Statistics(context.Context, admin.Identity, StatisticsFilter) (Statistics, error) {
 	return s.statistics, nil
+}
+func (s *billingStoreStub) UsageRatingCandidates(_ context.Context, after int64, limit int32) ([]UsageRatingCandidate, error) {
+	result := make([]UsageRatingCandidate, 0, limit)
+	for _, candidate := range s.ratingCandidates {
+		if candidate.UsageRecordID > after && len(result) < int(limit) {
+			result = append(result, candidate)
+		}
+	}
+	return result, nil
+}
+func (s *billingStoreStub) CreateUsageRating(_ context.Context, rating UsageRating) (bool, error) {
+	s.ratings = append(s.ratings, rating)
+	return true, nil
+}
+func (s *billingStoreStub) APIKeyPeriods(context.Context, time.Time) ([]APIKeyPeriod, error) {
+	return s.apiKeyPeriods, nil
+}
+func (s *billingStoreStub) APIKeyUsage(_ context.Context, period APIKeyPeriod) ([]domain.RatedShare, []int64, error) {
+	return s.apiKeyUsage[period], s.apiKeyRatingIDs[period], nil
+}
+func (s *billingStoreStub) APIKeyCurrent(_ context.Context, period APIKeyPeriod) (APIKeyCurrent, error) {
+	return s.apiKeyCurrent[period], nil
+}
+func (s *billingStoreStub) CreateAPIKeyDocument(_ context.Context, _ string, _ int64, document Document, _ []int64) (bool, error) {
+	s.apiKeyDocuments = append(s.apiKeyDocuments, document)
+	return true, nil
 }
 
 func TestSettleDueMonthlySubscriptionAndSkipExistingPeriod(t *testing.T) {

@@ -111,6 +111,10 @@ func Subtract(left, right string) (string, error) {
 }
 
 func parseAmount(value string) (*big.Int, error) {
+	return parseFixed(value, amountScale)
+}
+
+func parseFixed(value string, scale int) (*big.Int, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return nil, errors.New("empty billing amount")
@@ -120,7 +124,7 @@ func parseAmount(value string) (*big.Int, error) {
 		value = value[1:]
 	}
 	parts := strings.Split(value, ".")
-	if len(parts) > 2 || parts[0] == "" || len(parts) == 2 && len(parts[1]) > amountScale {
+	if scale < 0 || len(parts) > 2 || parts[0] == "" || len(parts) == 2 && len(parts[1]) > scale {
 		return nil, errors.New("invalid billing amount")
 	}
 	for _, part := range parts {
@@ -137,7 +141,7 @@ func parseAmount(value string) (*big.Int, error) {
 	if len(parts) == 2 {
 		fraction = parts[1]
 	}
-	digits := strings.TrimLeft(parts[0]+fraction+strings.Repeat("0", amountScale-len(fraction)), "0")
+	digits := strings.TrimLeft(parts[0]+fraction+strings.Repeat("0", scale-len(fraction)), "0")
 	if digits == "" {
 		digits = "0"
 	}
@@ -152,13 +156,22 @@ func parseAmount(value string) (*big.Int, error) {
 }
 
 func formatAmount(units *big.Int) string {
+	return formatFixed(units, amountScale)
+}
+
+func formatFixed(units *big.Int, scale int) string {
 	negative := units.Sign() < 0
 	digits := new(big.Int).Abs(new(big.Int).Set(units)).String()
-	if len(digits) <= amountScale {
-		digits = strings.Repeat("0", amountScale-len(digits)+1) + digits
+	if len(digits) <= scale {
+		digits = strings.Repeat("0", scale-len(digits)+1) + digits
 	}
-	value := digits[:len(digits)-amountScale] + "." + digits[len(digits)-amountScale:]
-	value = strings.TrimRight(strings.TrimRight(value, "0"), ".")
+	value := digits
+	if scale > 0 {
+		value = digits[:len(digits)-scale] + "." + digits[len(digits)-scale:]
+	}
+	if scale > 0 {
+		value = strings.TrimRight(strings.TrimRight(value, "0"), ".")
+	}
 	if value == "" {
 		value = "0"
 	}

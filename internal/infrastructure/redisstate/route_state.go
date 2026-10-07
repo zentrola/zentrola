@@ -143,6 +143,13 @@ func (s *State) AcquireBillingSettlement(ctx context.Context, ttl time.Duration)
 	return s.acquireLock(ctx, "zentrola:billing:settlement:scheduler:v1", ttl)
 }
 
+// AcquireAPIKeyRating serializes the asynchronous usage rating scan across
+// application instances. The database revision constraint remains the final
+// idempotency guard if a lease expires during a long run.
+func (s *State) AcquireAPIKeyRating(ctx context.Context, ttl time.Duration) (func(), bool, error) {
+	return s.acquireLock(ctx, "zentrola:billing:api-key-rating:scheduler:v1", ttl)
+}
+
 func (s *State) acquireLock(ctx context.Context, key string, ttl time.Duration) (func(), bool, error) {
 	if s == nil || s.client == nil || s.redisUnavailable() {
 		return nil, false, errors.New("redis unavailable")

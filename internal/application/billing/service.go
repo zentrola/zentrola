@@ -1,4 +1,4 @@
-// Package billing 编排个人订阅账期结算、差额调整和费用统计。
+// Package billing 编排个人订阅与 API Key 的用量核算、账期结算、差额调整和费用统计。
 package billing
 
 import (
@@ -97,6 +97,12 @@ type Store interface {
 	SubscriptionCorrections(context.Context) ([]Correction, error)
 	OriginalUsage(context.Context, int64) ([]domain.UsageShare, error)
 	CreateAdjustment(context.Context, string, Document) (bool, error)
+	UsageRatingCandidates(context.Context, int64, int32) ([]UsageRatingCandidate, error)
+	CreateUsageRating(context.Context, UsageRating) (bool, error)
+	APIKeyPeriods(context.Context, time.Time) ([]APIKeyPeriod, error)
+	APIKeyUsage(context.Context, APIKeyPeriod) ([]domain.RatedShare, []int64, error)
+	APIKeyCurrent(context.Context, APIKeyPeriod) (APIKeyCurrent, error)
+	CreateAPIKeyDocument(context.Context, string, int64, Document, []int64) (bool, error)
 	Statistics(context.Context, admin.Identity, StatisticsFilter) (Statistics, error)
 }
 

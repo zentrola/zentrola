@@ -45,6 +45,14 @@ func TestBillingSettlementLockFailsClosedWithoutRedisClient(t *testing.T) {
 	}
 }
 
+func TestAPIKeyRatingLockFailsClosedWithoutRedisClient(t *testing.T) {
+	state := &State{}
+	_, acquired, err := state.AcquireAPIKeyRating(context.Background(), time.Minute)
+	if err == nil || acquired {
+		t.Fatalf("acquired=%v err=%v", acquired, err)
+	}
+}
+
 func TestLockRejectsInvalidTTLBeforeCallingRedis(t *testing.T) {
 	state := &State{client: redis.NewClient(&redis.Options{Addr: "127.0.0.1:0"})}
 	defer state.Close()

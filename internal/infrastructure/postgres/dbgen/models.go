@@ -56,15 +56,15 @@ type BillingDocument struct {
 	ProviderCredentialID int64
 	// 费用来源类型：SUBSCRIPTION_PRICE=订阅价格版本；API_KEY_USAGE=API Key 用量核算汇总
 	SourceType string
-	// 费用来源记录 ID；含义由 source_type 决定
-	SourceID int64
+	// 费用来源记录 ID；订阅单据为价格版本 ID，API Key 汇总单据为 NULL
+	SourceID *int64
 	// 调整单对应的原始账期单据 ID；普通账期单据为 NULL
 	OriginalDocumentID *int64
 	// 费用归属账期起始时间，UTC，包含该时刻
 	PeriodStart pgtype.Timestamptz
 	// 费用归属账期结束时间，UTC，不包含该时刻
 	PeriodEnd pgtype.Timestamptz
-	// 原始账期单据用于分摊的输入与输出 Token 总数；调整单固定为 0，避免统计重复累计
+	// 单据新增确认的输入与输出 Token 数；价格纠错调整单为 0，晚到用量调整单可大于 0
 	TotalTokens int64
 	// 单据总金额；账期费用为非负数，调整金额可正可负
 	TotalAmount pgtype.Numeric
@@ -82,13 +82,23 @@ type BillingDocumentItem struct {
 	BillingDocumentID int64
 	// 费用归属的用户或应用主体 ID
 	PrincipalID int64
-	// 主体在原始账期内的计费 Token 数；调整明细固定为 0，避免统计重复累计
+	// 主体在该单据中新增确认的输入与输出 Token 数；价格纠错调整明细为 0
 	UsageTokens int64
 	// 个人订阅费用按 Token 计算的分摊比例；API Key 按量费用为 NULL；调整明细沿用原单据比例
 	AllocationRatio pgtype.Numeric
 	// 主体承担的费用金额；个人订阅为分摊金额，API Key 为按量核算金额，调整明细可正可负
 	Amount pgtype.Numeric
 	// 明细创建时间，UTC
+	CreatedAt pgtype.Timestamptz
+}
+
+// API Key 计费单据与单次调用核算 revision 的追加式审计关联
+type BillingDocumentUsageRating struct {
+	// 引用的 API Key 计费单据 ID
+	BillingDocumentID int64
+	// 被该单据首次确认的单次调用核算 revision ID
+	UsageRatingID int64
+	// 审计关联创建时间，UTC
 	CreatedAt pgtype.Timestamptz
 }
 
@@ -516,6 +526,52 @@ type ProviderModel struct {
 	CreatedAt pgtype.Timestamptz
 	// 更新时间，UTC
 	UpdatedAt pgtype.Timestamptz
+}
+
+// API Key 单次调用的计价快照；价格纠错时追加 revision，原核算记录永久保留
+type UsageRating struct {
+	// 主键，由应用侧生成的正数 64-bit ID
+	ID int64
+	// 被核算的原始上游调用用量记录 ID
+	UsageRecordID int64
+	// 同一用量记录的核算版本，从 1 开始连续递增
+	Revision int32
+	// 当前 revision 直接替代的上一核算记录 ID；首版为 NULL
+	SupersedesRatingID *int64
+	// 费用直接归属的用户或应用主体 ID
+	PrincipalID int64
+	// 实际调用的 API Key 凭证 ID
+	ProviderCredentialID int64
+	// 实际调用的供应方模型映射 ID
+	ProviderModelID int64
+	// 按调用发生时间命中的模型价格版本 ID
+	ModelPriceID int64
+	// 原始调用开始时间快照，UTC；用于确定价格版本和自然月账期
+	UsageStartedAt pgtype.Timestamptz
+	// 输入 Token 总数快照，包含缓存命中输入
+	InputTokens int64
+	// 缓存命中输入 Token 数快照
+	CachedInputTokens int64
+	// 输出 Token 数快照
+	OutputTokens int64
+	// 普通输入每百万 Token 价格快照，保留 8 位小数
+	InputPrice pgtype.Numeric
+	// 缓存命中输入每百万 Token 价格快照，保留 8 位小数
+	CachedInputPrice pgtype.Numeric
+	// 输出每百万 Token 价格快照，保留 8 位小数
+	OutputPrice pgtype.Numeric
+	// 普通输入成本，保留 14 位小数
+	InputCost pgtype.Numeric
+	// 缓存命中输入成本，保留 14 位小数
+	CachedInputCost pgtype.Numeric
+	// 输出成本，保留 14 位小数
+	OutputCost pgtype.Numeric
+	// 单次调用总成本，保留 14 位小数
+	TotalCost pgtype.Numeric
+	// 成本币种：CNY=人民币，USD=美元；不同币种分别结算
+	Currency string
+	// 核算记录创建时间，UTC
+	CreatedAt pgtype.Timestamptz
 }
 
 // 一次真实上游调用 Attempt 的原始用量事实；不保存价格与成本，无逻辑删除

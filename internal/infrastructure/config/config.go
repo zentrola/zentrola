@@ -46,6 +46,8 @@ type Usage struct {
 
 type Billing struct {
 	SettlementInterval, SettlementGrace, SettlementTimeout time.Duration
+	RatingInterval, RatingTimeout                          time.Duration
+	RatingPageSize                                         int32
 }
 
 type Gateway struct {
@@ -295,6 +297,9 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 			SettlementInterval: duration("BILLING_SETTLEMENT_INTERVAL", "1h"),
 			SettlementGrace:    durationAllowZero("BILLING_SETTLEMENT_GRACE", "10m"),
 			SettlementTimeout:  duration("BILLING_SETTLEMENT_TIMEOUT", "5m"),
+			RatingInterval:     duration("BILLING_API_KEY_RATING_INTERVAL", "1m"),
+			RatingTimeout:      duration("BILLING_API_KEY_RATING_TIMEOUT", "50s"),
+			RatingPageSize:     int32(integer("BILLING_API_KEY_RATING_PAGE_SIZE", "500", 5000)),
 		},
 		Gateway: Gateway{
 			MaxBodyBytes:                         int64(integer("GATEWAY_MAX_BODY_BYTES", "33554432", 128<<20)),

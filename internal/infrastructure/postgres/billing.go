@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -72,7 +73,7 @@ func (s *BillingStore) SubscriptionUsage(ctx context.Context, credentialID int64
 }
 
 func (s *BillingStore) CreateCharge(ctx context.Context, document app.Document) (bool, error) {
-	return s.createDocument(ctx, document, "")
+	return s.createDocument(ctx, document, "", 0, nil)
 }
 
 func (s *BillingStore) SubscriptionCorrections(ctx context.Context) ([]app.Correction, error) {
@@ -82,9 +83,12 @@ func (s *BillingStore) SubscriptionCorrections(ctx context.Context) ([]app.Corre
 	}
 	result := make([]app.Correction, 0, len(rows))
 	for _, row := range rows {
+		if row.SourcePriceID == nil {
+			return nil, errors.New("subscription billing source price is missing")
+		}
 		result = append(result, app.Correction{
 			OriginalDocumentID: row.OriginalDocumentID, CredentialID: row.ProviderCredentialID,
-			SourcePriceID: row.SourcePriceID, PeriodStart: row.PeriodStart.Time.UTC(), PeriodEnd: row.PeriodEnd.Time.UTC(),
+			SourcePriceID: *row.SourcePriceID, PeriodStart: row.PeriodStart.Time.UTC(), PeriodEnd: row.PeriodEnd.Time.UTC(),
 			Currency: row.Currency, TargetCurrency: row.TargetCurrency,
 			CurrentAmount: priceNumber(row.CurrentAmount), TargetAmount: priceNumber(row.TargetAmount),
 		})
@@ -105,10 +109,10 @@ func (s *BillingStore) OriginalUsage(ctx context.Context, documentID int64) ([]d
 }
 
 func (s *BillingStore) CreateAdjustment(ctx context.Context, expectedCurrent string, document app.Document) (bool, error) {
-	return s.createDocument(ctx, document, expectedCurrent)
+	return s.createDocument(ctx, document, expectedCurrent, 0, nil)
 }
 
-func (s *BillingStore) createDocument(ctx context.Context, document app.Document, expectedCurrent string) (bool, error) {
+func (s *BillingStore) createDocument(ctx context.Context, document app.Document, expectedCurrent string, expectedTokens int64, ratingIDs []int64) (bool, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return false, err
@@ -126,25 +130,62 @@ func (s *BillingStore) createDocument(ctx context.Context, document app.Document
 		if priceNumber(current) != expectedCurrent {
 			return false, nil
 		}
+		if document.BillingType == "API_KEY" {
+			currentDocument, currentErr := q.BillingAPIKeyCurrentDocument(ctx, dbgen.BillingAPIKeyCurrentDocumentParams{
+				ProviderCredentialID: document.CredentialID, PeriodStart: priceTime(document.PeriodStart),
+				PeriodEnd: priceTime(document.PeriodEnd), Currency: document.Currency,
+			})
+			if currentErr != nil {
+				return false, currentErr
+			}
+			if currentDocument.OriginalDocumentID != document.OriginalDocumentID || currentDocument.TotalTokens != expectedTokens {
+				return false, nil
+			}
+		}
 	}
 	var originalID *int64
 	if document.OriginalDocumentID > 0 {
 		originalID = &document.OriginalDocumentID
 	}
+	var sourceID *int64
+	if document.SourceID > 0 {
+		sourceID = &document.SourceID
+	}
 	amount := pgNumeric(&document.TotalAmount)
 	inserted, err := q.BillingInsertDocument(ctx, dbgen.BillingInsertDocumentParams{
 		ID: document.ID, Status: document.Status, BillingType: document.BillingType,
 		DocumentType: document.DocumentType, ProviderCredentialID: document.CredentialID,
-		SourceType: document.SourceType, SourceID: document.SourceID, OriginalDocumentID: originalID,
+		SourceType: document.SourceType, SourceID: sourceID, OriginalDocumentID: originalID,
 		PeriodStart: priceTime(document.PeriodStart), PeriodEnd: priceTime(document.PeriodEnd),
 		TotalTokens: document.TotalTokens, TotalAmount: amount, Currency: document.Currency,
 		CreatedAt: priceTime(document.CreatedAt),
 	})
-	if err != nil || inserted == 0 {
+	if err != nil {
 		return false, err
 	}
+	if inserted == 0 {
+		if document.DocumentType != "CHARGE" {
+			return false, errors.New("billing document ID conflict")
+		}
+		exists, existsErr := q.BillingChargeExists(ctx, dbgen.BillingChargeExistsParams{
+			BillingType: document.BillingType, ProviderCredentialID: document.CredentialID,
+			PeriodStart: priceTime(document.PeriodStart), PeriodEnd: priceTime(document.PeriodEnd),
+			Currency: document.Currency,
+		})
+		if existsErr != nil {
+			return false, existsErr
+		}
+		if !exists {
+			return false, errors.New("billing document ID conflict")
+		}
+		return false, nil
+	}
 	for _, item := range document.Items {
-		ratio := pgNumeric(&item.AllocationRatio)
+		var ratioValue *string
+		if item.AllocationRatio != "" {
+			ratioValue = &item.AllocationRatio
+		}
+		ratio := pgNumeric(ratioValue)
 		itemAmount := pgNumeric(&item.Amount)
 		if err := q.BillingInsertDocumentItem(ctx, dbgen.BillingInsertDocumentItemParams{
 			ID: item.ID, BillingDocumentID: document.ID, PrincipalID: item.PrincipalID,
@@ -154,10 +195,132 @@ func (s *BillingStore) createDocument(ctx context.Context, document app.Document
 			return false, err
 		}
 	}
+	for _, ratingID := range ratingIDs {
+		if err := q.BillingInsertDocumentUsageRating(ctx, dbgen.BillingInsertDocumentUsageRatingParams{
+			BillingDocumentID: document.ID, UsageRatingID: ratingID, CreatedAt: priceTime(document.CreatedAt),
+		}); err != nil {
+			return false, err
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+func (s *BillingStore) UsageRatingCandidates(ctx context.Context, after int64, limit int32) ([]app.UsageRatingCandidate, error) {
+	rows, err := s.q.BillingUsageRatingCandidates(ctx, dbgen.BillingUsageRatingCandidatesParams{AfterID: after, PageLimit: limit})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]app.UsageRatingCandidate, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, app.UsageRatingCandidate{
+			UsageRecordID: row.UsageRecordID, PrincipalID: row.PrincipalID,
+			CredentialID: row.ProviderCredentialID, ProviderModelID: row.ProviderModelID,
+			ModelPriceID: row.ModelPriceID, LatestRatingID: row.LatestRatingID,
+			LatestRevision: row.LatestRevision, UsageStartedAt: row.UsageStartedAt.Time.UTC(),
+			InputTokens: row.InputTokens, CachedInputTokens: row.CachedInputTokens, OutputTokens: row.OutputTokens,
+			InputPrice: priceNumber(row.InputPrice), CachedInputPrice: priceNumber(row.CachedInputPrice),
+			OutputPrice: priceNumber(row.OutputPrice), Currency: row.Currency,
+		})
+	}
+	return result, nil
+}
+
+func (s *BillingStore) CreateUsageRating(ctx context.Context, rating app.UsageRating) (bool, error) {
+	var supersedesID *int64
+	if rating.SupersedesRatingID > 0 {
+		supersedesID = &rating.SupersedesRatingID
+	}
+	inputPrice, cachedPrice, outputPrice := pgNumeric(&rating.InputPrice), pgNumeric(&rating.CachedInputPrice), pgNumeric(&rating.OutputPrice)
+	inputCost, cachedCost, outputCost := pgNumeric(&rating.InputCost), pgNumeric(&rating.CachedInputCost), pgNumeric(&rating.OutputCost)
+	totalCost := pgNumeric(&rating.TotalCost)
+	inserted, err := s.q.BillingInsertUsageRating(ctx, dbgen.BillingInsertUsageRatingParams{
+		ID: rating.ID, UsageRecordID: rating.UsageRecordID, Revision: rating.Revision,
+		SupersedesRatingID: supersedesID, PrincipalID: rating.PrincipalID,
+		ProviderCredentialID: rating.CredentialID, ProviderModelID: rating.ProviderModelID,
+		ModelPriceID: rating.ModelPriceID, UsageStartedAt: priceTime(rating.UsageStartedAt),
+		InputTokens: rating.InputTokens, CachedInputTokens: rating.CachedInputTokens, OutputTokens: rating.OutputTokens,
+		InputPrice: inputPrice, CachedInputPrice: cachedPrice, OutputPrice: outputPrice,
+		InputCost: inputCost, CachedInputCost: cachedCost, OutputCost: outputCost,
+		TotalCost: totalCost, Currency: rating.Currency, CreatedAt: priceTime(rating.CreatedAt),
+	})
+	return inserted > 0, err
+}
+
+func (s *BillingStore) APIKeyPeriods(ctx context.Context, cutoff time.Time) ([]app.APIKeyPeriod, error) {
+	rows, err := s.q.BillingAPIKeyPeriods(ctx, priceTime(cutoff))
+	if err != nil {
+		return nil, err
+	}
+	result := make([]app.APIKeyPeriod, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, app.APIKeyPeriod{
+			CredentialID: row.ProviderCredentialID, PeriodStart: row.PeriodStart.Time.UTC(),
+			PeriodEnd: row.PeriodEnd.Time.UTC(), Currency: row.Currency,
+		})
+	}
+	return result, nil
+}
+
+func (s *BillingStore) APIKeyUsage(ctx context.Context, period app.APIKeyPeriod) ([]domain.RatedShare, []int64, error) {
+	rows, err := s.q.BillingAPIKeyUsage(ctx, dbgen.BillingAPIKeyUsageParams{
+		ProviderCredentialID: period.CredentialID, PeriodStart: priceTime(period.PeriodStart),
+		PeriodEnd: priceTime(period.PeriodEnd), Currency: period.Currency,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	shares := make([]domain.RatedShare, 0, len(rows))
+	ratingIDs := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		shares = append(shares, domain.RatedShare{PrincipalID: row.PrincipalID, Tokens: row.Tokens, Amount: priceNumber(row.TotalCost)})
+		ratingIDs = append(ratingIDs, row.UsageRatingID)
+	}
+	return shares, ratingIDs, nil
+}
+
+func (s *BillingStore) APIKeyCurrent(ctx context.Context, period app.APIKeyPeriod) (app.APIKeyCurrent, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return app.APIKeyCurrent{}, err
+	}
+	defer tx.Rollback(context.Background())
+	q := dbgen.New(tx)
+	params := dbgen.BillingAPIKeyCurrentDocumentParams{
+		ProviderCredentialID: period.CredentialID, PeriodStart: priceTime(period.PeriodStart),
+		PeriodEnd: priceTime(period.PeriodEnd), Currency: period.Currency,
+	}
+	document, err := q.BillingAPIKeyCurrentDocument(ctx, params)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return app.APIKeyCurrent{}, nil
+	}
+	if err != nil {
+		return app.APIKeyCurrent{}, err
+	}
+	rows, err := q.BillingAPIKeyCurrentItems(ctx, dbgen.BillingAPIKeyCurrentItemsParams(params))
+	if err != nil {
+		return app.APIKeyCurrent{}, err
+	}
+	result := app.APIKeyCurrent{
+		Found: true, OriginalDocumentID: document.OriginalDocumentID,
+		TotalTokens: document.TotalTokens, TotalAmount: priceNumber(document.TotalAmount),
+		Items: make([]app.APIKeyCurrentItem, 0, len(rows)),
+	}
+	for _, row := range rows {
+		result.Items = append(result.Items, app.APIKeyCurrentItem{
+			PrincipalID: row.PrincipalID, Tokens: row.Tokens, Amount: priceNumber(row.Amount),
+		})
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return app.APIKeyCurrent{}, err
+	}
+	return result, nil
+}
+
+func (s *BillingStore) CreateAPIKeyDocument(ctx context.Context, expectedAmount string, expectedTokens int64, document app.Document, ratingIDs []int64) (bool, error) {
+	return s.createDocument(ctx, document, expectedAmount, expectedTokens, ratingIDs)
 }
 
 func (s *BillingStore) Statistics(ctx context.Context, _ admin.Identity, filter app.StatisticsFilter) (app.Statistics, error) {

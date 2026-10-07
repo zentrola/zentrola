@@ -64,28 +64,42 @@ func (w *Worker) settle(parent context.Context) {
 	release, acquired, err := w.coordinator.AcquireBillingSettlement(ctx, settlementLeaseTTL(w.timeout))
 	if err != nil {
 		if parent.Err() == nil {
-			w.logger.Error("subscription billing settlement lock failed", "error_code", "SUBSCRIPTION_BILLING_LOCK_FAILED")
+			w.logger.Error("billing settlement lock failed", "error_code", "BILLING_SETTLEMENT_LOCK_FAILED")
 		}
 		return
 	}
 	if !acquired {
-		w.logger.Debug("subscription billing settlement skipped", "reason", "scheduler_lock_not_acquired")
+		w.logger.Debug("billing settlement skipped", "reason", "scheduler_lock_not_acquired")
 		return
 	}
 	defer release()
-	summary, err := w.service.SettleDueSubscriptions(ctx, time.Now().UTC().Add(-w.grace))
+	cutoff := time.Now().UTC().Add(-w.grace)
+	subscriptionSummary, err := w.service.SettleDueSubscriptions(ctx, cutoff)
 	if err != nil {
 		if parent.Err() == nil {
 			w.logger.Error("subscription billing settlement failed", "error_code", "SUBSCRIPTION_BILLING_FAILED")
 		}
 		return
 	}
+	apiKeySummary, err := w.service.SettleDueAPIKeys(ctx, cutoff)
+	if err != nil {
+		if parent.Err() == nil {
+			w.logger.Error("api key billing settlement failed", "error_code", "API_KEY_BILLING_FAILED")
+		}
+		return
+	}
+	summary := Summary{
+		Created:  subscriptionSummary.Created + apiKeySummary.Created,
+		Adjusted: subscriptionSummary.Adjusted + apiKeySummary.Adjusted,
+		Skipped:  subscriptionSummary.Skipped + apiKeySummary.Skipped,
+		Failed:   subscriptionSummary.Failed + apiKeySummary.Failed,
+	}
 	if summary.Created > 0 || summary.Adjusted > 0 || summary.Failed > 0 {
-		w.logger.Info("subscription billing settlement completed",
+		w.logger.Info("billing settlement completed",
 			"created", summary.Created, "adjusted", summary.Adjusted, "skipped", summary.Skipped,
 			"failed", summary.Failed, "duration_ms", time.Since(startedAt).Milliseconds())
 	} else {
-		w.logger.Debug("subscription billing settlement completed",
+		w.logger.Debug("billing settlement completed",
 			"created", 0, "adjusted", 0, "skipped", summary.Skipped, "failed", 0,
 			"duration_ms", time.Since(startedAt).Milliseconds())
 	}

@@ -43,6 +43,9 @@ func TestConfigValidation(t *testing.T) {
 		{"billing settlement disabled", "BILLING_SETTLEMENT_INTERVAL", "0s", "BILLING_SETTLEMENT_INTERVAL"},
 		{"billing settlement grace invalid", "BILLING_SETTLEMENT_GRACE", "-1s", "BILLING_SETTLEMENT_GRACE"},
 		{"billing settlement timeout disabled", "BILLING_SETTLEMENT_TIMEOUT", "0s", "BILLING_SETTLEMENT_TIMEOUT"},
+		{"api key rating disabled", "BILLING_API_KEY_RATING_INTERVAL", "0s", "BILLING_API_KEY_RATING_INTERVAL"},
+		{"api key rating timeout disabled", "BILLING_API_KEY_RATING_TIMEOUT", "0s", "BILLING_API_KEY_RATING_TIMEOUT"},
+		{"api key rating page too large", "BILLING_API_KEY_RATING_PAGE_SIZE", "5001", "BILLING_API_KEY_RATING_PAGE_SIZE"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -66,7 +69,8 @@ func TestBillingDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cfg.Billing.SettlementInterval != time.Hour || cfg.Billing.SettlementGrace != 10*time.Minute ||
-		cfg.Billing.SettlementTimeout != 5*time.Minute {
+		cfg.Billing.SettlementTimeout != 5*time.Minute || cfg.Billing.RatingInterval != time.Minute ||
+		cfg.Billing.RatingTimeout != 50*time.Second || cfg.Billing.RatingPageSize != 500 {
 		t.Fatalf("unexpected billing defaults: %+v", cfg.Billing)
 	}
 }
