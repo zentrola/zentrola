@@ -200,7 +200,15 @@ function deleteGroup() {
       {{ error }}<button class="text-button" @click="retry">{{ t('common.retry') }}</button>
     </p>
     <TableScroll has-actions>
-      <table>
+      <table class="groups-table">
+        <colgroup>
+          <col class="record-id-column" />
+          <col class="group-name-column" />
+          <col class="group-status-column" />
+          <col class="group-created-column" />
+          <col class="group-remark-column" />
+          <col class="group-action-column" />
+        </colgroup>
         <thead>
           <tr>
             <th>{{ t('common.id') }}</th>
@@ -422,6 +430,25 @@ function deleteGroup() {
   />
 </template>
 <style scoped>
+.groups-table {
+  min-width: 960px;
+  table-layout: fixed;
+}
+.group-name-column {
+  width: 24%;
+}
+.group-status-column {
+  width: 120px;
+}
+.group-created-column {
+  width: 160px;
+}
+.group-remark-column {
+  width: calc(76% - 600px);
+}
+.group-action-column {
+  width: 176px;
+}
 .group-form-fields {
   display: grid;
   gap: 16px;

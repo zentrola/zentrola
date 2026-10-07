@@ -1197,15 +1197,15 @@ test('应用管理签发仅展示一次的 App Key', async ({ page }) => {
   })
 
   await signIn(page, 'home')
-  await page.getByRole('link', { name: '用户管理', exact: true }).click()
-  await expect(page.getByRole('link', { name: '应用管理', exact: true })).toHaveCount(0)
-  await expect(page.getByRole('tab', { name: '用户管理' })).toHaveAttribute('aria-selected', 'true')
-  await page.getByRole('tab', { name: '应用管理' }).click()
+  const memberNavigation = page.getByRole('link', { name: '用户管理', exact: true })
+  const applicationNavigation = page.getByRole('link', { name: '应用管理', exact: true })
+  await expect(memberNavigation).toBeVisible()
+  await expect(applicationNavigation).toBeVisible()
+  await applicationNavigation.click()
   await expect(page).toHaveURL(/#\/applications$/)
-  await expect(page.getByRole('tab', { name: '应用管理' })).toHaveAttribute('aria-selected', 'true')
-  await expect(page.getByRole('link', { name: '用户管理', exact: true })).toHaveClass(
-    /router-link-active/,
-  )
+  await expect(applicationNavigation).toHaveClass(/router-link-active/)
+  await expect(memberNavigation).not.toHaveClass(/router-link-active/)
+  await expect(page.getByRole('tab', { name: '应用管理' })).toHaveCount(0)
   await expect(page.getByRole('heading', { name: '应用管理', exact: true })).toBeVisible()
   await expect(page.getByRole('columnheader').first()).toHaveText('ID')
   await page.getByRole('button', { name: '创建应用' }).click()
@@ -1231,17 +1231,17 @@ test('应用管理签发仅展示一次的 App Key', async ({ page }) => {
   )
   await modal(page).getByRole('button', { name: '我已保存，关闭' }).click()
   await expect(page.getByText('ak-once-only-secret')).toHaveCount(0)
-  await page.getByRole('tab', { name: '用户管理' }).click()
+  await memberNavigation.click()
   await expect(page).toHaveURL(/#\/members$/)
   await expect(page.getByRole('heading', { name: '用户管理', exact: true })).toBeVisible()
   await page.goto('/#/applications')
-  await expect(page.getByRole('tab', { name: '应用管理' })).toHaveAttribute('aria-selected', 'true')
+  await expect(applicationNavigation).toHaveClass(/router-link-active/)
   await expect(page.getByRole('row').filter({ hasText: '自动化服务' })).toBeVisible()
   await page.setViewportSize({ width: 390, height: 844 })
-  const tabs = page.getByRole('tablist', { name: '用户管理 / 应用管理' })
-  await expect(tabs).toBeVisible()
   await expect(page.locator('.workspace')).toHaveCSS('margin-left', '0px')
-  expect(await tabs.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+  await page.getByRole('button', { name: '打开导航' }).click()
+  await expect(memberNavigation).toBeVisible()
+  await expect(applicationNavigation).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
 })
 test('仪表盘初始化向导依次高亮配置入口', async ({ page }) => {
@@ -4926,6 +4926,30 @@ test('高密度表格在常用桌面分辨率保持稳定列宽和单行技术�
     expect((await headers.nth(3).boundingBox())!.width).toBeGreaterThanOrEqual(120)
     expect((await headers.nth(6).boundingBox())!.width).toBeGreaterThanOrEqual(170)
   }
+
+  const managementPages = [
+    { name: '用户管理', path: 'members' },
+    { name: '用户分组', path: 'groups' },
+    { name: '模型', path: 'models' },
+    { name: '服务商', path: 'providers' },
+  ]
+  const idColumnWidths: Array<{ name: string; width: number }> = []
+  for (const { name, path } of managementPages) {
+    await page.getByRole('link', { name, exact: true }).click()
+    await expect(page).toHaveURL(new RegExp(`#/${path}$`))
+    const idHeader = page.getByRole('columnheader', { name: 'ID', exact: true }).first()
+    await expect(idHeader).toBeVisible()
+    idColumnWidths.push({
+      name,
+      width: Math.round((await idHeader.boundingBox())!.width),
+    })
+  }
+  expect(idColumnWidths).toEqual(
+    managementPages.map(({ name }) => ({
+      name,
+      width: 144,
+    })),
+  )
 
   const endpoint = page.locator('.providers-table .endpoint').first()
   await expect(endpoint).toHaveAttribute('title', /https:\/\//)

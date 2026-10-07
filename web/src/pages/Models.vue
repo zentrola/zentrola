@@ -200,7 +200,17 @@ function deleteModel() {
       }}<button class="text-button" @click="retryAll">{{ t('common.retry') }}</button>
     </p>
     <TableScroll has-actions>
-      <table>
+      <table class="models-table">
+        <colgroup>
+          <col class="record-id-column" />
+          <col class="model-name-column" />
+          <col class="model-publisher-column" />
+          <col class="model-status-column" />
+          <col class="model-input-column" />
+          <col class="model-output-column" />
+          <col class="model-remark-column" />
+          <col class="model-action-column" />
+        </colgroup>
         <thead>
           <tr>
             <th>{{ t('common.id') }}</th>
@@ -418,6 +428,29 @@ function deleteModel() {
   />
 </template>
 <style scoped>
+.models-table {
+  min-width: 1180px;
+  table-layout: fixed;
+}
+.model-name-column {
+  width: 22%;
+}
+.model-publisher-column {
+  width: 160px;
+}
+.model-status-column {
+  width: 100px;
+}
+.model-input-column,
+.model-output-column {
+  width: 120px;
+}
+.model-remark-column {
+  width: calc(78% - 820px);
+}
+.model-action-column {
+  width: 176px;
+}
 .model-publisher-filter {
   display: flex;
   flex: none;

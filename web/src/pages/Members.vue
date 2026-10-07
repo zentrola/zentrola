@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { all, api } from '../api'
 import { useCollection, useAction, useListSearch, date, validText } from '../composables'
 import { t } from '../i18n'
@@ -17,7 +16,6 @@ import ConfirmDialog from '../components/ConfirmDialog.vue'
 import TableScroll from '../components/TableScroll.vue'
 import TechnicalValue from '../components/TechnicalValue.vue'
 const { kind = 'member' } = defineProps<{ kind?: 'member' | 'application' }>()
-const router = useRouter()
 const basePath = computed(() => (kind === 'application' ? '/applications' : '/members'))
 const local = (key: string, values: Record<string, string | number> = {}) =>
   t(`${kind === 'application' ? 'applications' : 'members'}.${key}`, values)
@@ -59,10 +57,6 @@ const { keyword, query, visible, search, reset, searching, searchingAll } = useL
 )
 const originalGroupIDSet = computed(() => new Set(originalGroupIDs.value))
 onMounted(() => load())
-function selectKind(target: 'member' | 'application') {
-  if (busy.value || loading.value || kind === target) return
-  void router.push(target === 'application' ? '/applications' : '/members')
-}
 function newMember() {
   editing.value = null
   name.value = ''
@@ -205,42 +199,7 @@ async function copyKey() {
 </script>
 <template>
   <PageHeader :name="kind === 'application' ? 'applications' : 'members'" />
-  <div
-    class="view-tabs"
-    role="tablist"
-    :aria-label="`${t('nav.members')} / ${t('nav.applications')}`"
-  >
-    <button
-      id="principal-member-tab"
-      type="button"
-      role="tab"
-      aria-controls="principal-list"
-      :disabled="busy || loading"
-      :aria-selected="kind === 'member'"
-      :class="{ selected: kind === 'member' }"
-      @click="selectKind('member')"
-    >
-      <Icon name="members" :size="17" />{{ t('nav.members') }}
-    </button>
-    <button
-      id="principal-application-tab"
-      type="button"
-      role="tab"
-      aria-controls="principal-list"
-      :disabled="busy || loading"
-      :aria-selected="kind === 'application'"
-      :class="{ selected: kind === 'application' }"
-      @click="selectKind('application')"
-    >
-      <Icon name="applications" :size="17" />{{ t('nav.applications') }}
-    </button>
-  </div>
-  <section
-    id="principal-list"
-    class="panel"
-    role="tabpanel"
-    :aria-labelledby="kind === 'application' ? 'principal-application-tab' : 'principal-member-tab'"
-  >
+  <section class="panel">
     <ListSearch
       v-model="keyword"
       :loading="loading || searching"
@@ -262,6 +221,14 @@ async function copyKey() {
     </div>
     <TableScroll has-actions>
       <table class="members-table">
+        <colgroup>
+          <col class="record-id-column" />
+          <col class="member-name-column" />
+          <col class="member-status-column" />
+          <col class="member-remark-column" />
+          <col class="member-created-column" />
+          <col class="member-action-column" />
+        </colgroup>
         <thead>
           <tr>
             <th>{{ t('common.id') }}</th>
@@ -492,22 +459,19 @@ async function copyKey() {
   min-width: 1032px;
   table-layout: fixed;
 }
-.members-table th:nth-child(1) {
-  width: 192px;
+.member-name-column {
+  width: 30%;
 }
-.members-table th:nth-child(2) {
-  width: 260px;
-}
-.members-table th:nth-child(3) {
+.member-status-column {
   width: 100px;
 }
-.members-table th:nth-child(4) {
-  width: 164px;
+.member-remark-column {
+  width: calc(70% - 560px);
 }
-.members-table th:nth-child(5) {
+.member-created-column {
   width: 140px;
 }
-.members-table th:nth-child(6) {
+.member-action-column {
   width: 176px;
 }
 .members-table th,

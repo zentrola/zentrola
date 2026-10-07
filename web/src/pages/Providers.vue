@@ -1572,7 +1572,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
     <TableScroll has-actions>
       <table class="providers-table">
         <colgroup>
-          <col class="provider-id-column" />
+          <col class="record-id-column" />
           <col class="provider-name-column" />
           <col class="provider-enable-column" />
           <col class="provider-runtime-column" />
@@ -3184,9 +3184,6 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
 }
 .provider-name-column {
   width: 252px;
-}
-.provider-id-column {
-  width: 192px;
 }
 .provider-enable-column {
   width: 88px;
