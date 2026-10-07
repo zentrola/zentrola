@@ -180,7 +180,16 @@ watch(identity, (value) => {
     void loadSetup()
   }
 })
-const navigation = ['home', 'members', 'groups', 'models', 'providers', 'usage', 'operations']
+const navigation = [
+  'home',
+  'members',
+  'groups',
+  'models',
+  'providers',
+  'usage',
+  'billing',
+  'operations',
+]
 watch(
   () => route.path,
   () => {

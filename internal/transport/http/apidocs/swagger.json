@@ -1545,6 +1545,190 @@
                 }
             }
         },
+        "/api/v1/billing/documents": {
+            "get": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "成本管理"
+                ],
+                "summary": "成本单据列表",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "账期起始时间（含），UTC RFC3339 Z",
+                        "name": "from",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "账期结束时间（不含），UTC RFC3339 Z",
+                        "name": "to",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "SUBSCRIPTION",
+                            "API_KEY"
+                        ],
+                        "type": "string",
+                        "description": "计费类型",
+                        "name": "billingType",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "CHARGE",
+                            "ADJUSTMENT"
+                        ],
+                        "type": "string",
+                        "description": "单据类型",
+                        "name": "documentType",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "CNY",
+                            "USD"
+                        ],
+                        "type": "string",
+                        "description": "币种",
+                        "name": "currency",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "上一页末尾单据 ID",
+                        "name": "after",
+                        "in": "query"
+                    },
+                    {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer",
+                        "default": 50,
+                        "description": "每页数量",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/http.PageResponse-billing_DocumentSummary"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/billing/documents/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "成本管理"
+                ],
+                "summary": "成本单据详情",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "单据 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/billing.DocumentDetail"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/billing/statistics": {
             "get": {
                 "security": [
@@ -1616,6 +1800,103 @@
                                     "properties": {
                                         "data": {
                                             "$ref": "#/definitions/billing.Statistics"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/billing/unrated-usage": {
+            "get": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "description": "返回 API Key 成功调用中 Token 不完整、缺少有效价格或等待按当前价格核算的记录。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "成本管理"
+                ],
+                "summary": "待处理核算异常",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "调用起始时间（含），UTC RFC3339 Z",
+                        "name": "from",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "调用结束时间（不含），UTC RFC3339 Z",
+                        "name": "to",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "INCOMPLETE_TOKENS",
+                            "MISSING_PRICE",
+                            "PENDING_RATING"
+                        ],
+                        "type": "string",
+                        "description": "异常原因",
+                        "name": "reason",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "上一页末尾用量记录 ID",
+                        "name": "after",
+                        "in": "query"
+                    },
+                    {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer",
+                        "default": 50,
+                        "description": "每页数量",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/http.PageResponse-billing_UnratedUsage"
                                         }
                                     }
                                 }
@@ -7430,6 +7711,146 @@
                 }
             }
         },
+        "billing.DocumentDetail": {
+            "type": "object",
+            "properties": {
+                "adjustments": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/billing.DocumentSummary"
+                    }
+                },
+                "billingType": {
+                    "type": "string"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "credentialId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "credentialName": {
+                    "type": "string"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "documentType": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/billing.DocumentItemDetail"
+                    }
+                },
+                "original": {
+                    "$ref": "#/definitions/billing.DocumentSummary"
+                },
+                "originalDocumentId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "periodEnd": {
+                    "type": "string"
+                },
+                "periodStart": {
+                    "type": "string"
+                },
+                "ratingCount": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "totalAmount": {
+                    "type": "string"
+                },
+                "totalTokens": {
+                    "type": "integer"
+                }
+            }
+        },
+        "billing.DocumentItemDetail": {
+            "type": "object",
+            "properties": {
+                "allocationRatio": {
+                    "type": "string"
+                },
+                "amount": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "principalId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "principalName": {
+                    "type": "string"
+                },
+                "principalType": {
+                    "type": "string"
+                },
+                "usageTokens": {
+                    "type": "integer"
+                }
+            }
+        },
+        "billing.DocumentSummary": {
+            "type": "object",
+            "properties": {
+                "billingType": {
+                    "type": "string"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "credentialId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "credentialName": {
+                    "type": "string"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "documentType": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "originalDocumentId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "periodEnd": {
+                    "type": "string"
+                },
+                "periodStart": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "totalAmount": {
+                    "type": "string"
+                },
+                "totalTokens": {
+                    "type": "integer"
+                }
+            }
+        },
         "billing.PrincipalTotal": {
             "type": "object",
             "properties": {
@@ -7480,6 +7901,54 @@
                     "items": {
                         "$ref": "#/definitions/billing.CurrencyTotal"
                     }
+                }
+            }
+        },
+        "billing.UnratedUsage": {
+            "type": "object",
+            "properties": {
+                "cachedInputTokens": {
+                    "type": "integer"
+                },
+                "credentialId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "credentialName": {
+                    "type": "string"
+                },
+                "inputTokens": {
+                    "type": "integer"
+                },
+                "outputTokens": {
+                    "type": "integer"
+                },
+                "principalId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "principalName": {
+                    "type": "string"
+                },
+                "principalType": {
+                    "type": "string"
+                },
+                "providerModelId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "startedAt": {
+                    "type": "string"
+                },
+                "usageRecordId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "waitingSince": {
+                    "type": "string"
                 }
             }
         },
@@ -7858,6 +8327,40 @@
                 "object": {
                     "type": "string",
                     "example": "list"
+                }
+            }
+        },
+        "http.PageResponse-billing_DocumentSummary": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/billing.DocumentSummary"
+                    }
+                },
+                "nextCursor": {
+                    "type": "string"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "http.PageResponse-billing_UnratedUsage": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/billing.UnratedUsage"
+                    }
+                },
+                "nextCursor": {
+                    "type": "string"
+                },
+                "total": {
+                    "type": "integer"
                 }
             }
         },

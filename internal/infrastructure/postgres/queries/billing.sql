@@ -320,3 +320,155 @@ ORDER BY item.principal_id;
 INSERT INTO billing_document_usage_rating (billing_document_id, usage_rating_id, created_at)
 VALUES (sqlc.arg(billing_document_id), sqlc.arg(usage_rating_id), sqlc.arg(created_at))
 ON CONFLICT (usage_rating_id) DO NOTHING;
+
+-- name: BillingDocuments :many
+WITH filtered AS (
+    SELECT document.id,
+           document.billing_type,
+           document.document_type,
+           document.status,
+           document.provider_credential_id,
+           credential.resource_name AS credential_name,
+           document.original_document_id,
+           document.period_start,
+           document.period_end,
+           document.total_tokens,
+           document.total_amount,
+           document.currency,
+           document.created_at
+    FROM billing_document document
+    JOIN provider_credential credential ON credential.id = document.provider_credential_id
+    WHERE document.period_start >= sqlc.arg(from_time)::timestamptz
+      AND document.period_start < sqlc.arg(to_time)::timestamptz
+      AND (sqlc.arg(billing_type)::text = '' OR document.billing_type = sqlc.arg(billing_type)::text)
+      AND (sqlc.arg(document_type)::text = '' OR document.document_type = sqlc.arg(document_type)::text)
+      AND (sqlc.arg(currency)::text = '' OR document.currency = sqlc.arg(currency)::text)
+)
+SELECT filtered.*,
+       (SELECT COUNT(*) FROM filtered)::bigint AS total_count
+FROM filtered
+WHERE sqlc.arg(after_id)::bigint = 0 OR filtered.id < sqlc.arg(after_id)::bigint
+ORDER BY filtered.id DESC
+LIMIT sqlc.arg(page_limit)::int;
+
+-- name: BillingDocument :one
+SELECT document.id,
+       document.billing_type,
+       document.document_type,
+       document.status,
+       document.provider_credential_id,
+       credential.resource_name AS credential_name,
+       document.original_document_id,
+       document.period_start,
+       document.period_end,
+       document.total_tokens,
+       document.total_amount,
+       document.currency,
+       document.created_at
+FROM billing_document document
+JOIN provider_credential credential ON credential.id = document.provider_credential_id
+WHERE document.id = sqlc.arg(id)::bigint;
+
+-- name: BillingDocumentItems :many
+SELECT item.id,
+       item.principal_id,
+       principal.name AS principal_name,
+       principal.principal_type,
+       item.usage_tokens,
+       item.allocation_ratio,
+       item.amount
+FROM billing_document_item item
+JOIN principal ON principal.id = item.principal_id
+WHERE item.billing_document_id = sqlc.arg(billing_document_id)::bigint
+ORDER BY item.amount DESC, item.principal_id;
+
+-- name: BillingDocumentAdjustments :many
+SELECT document.id,
+       document.billing_type,
+       document.document_type,
+       document.status,
+       document.provider_credential_id,
+       credential.resource_name AS credential_name,
+       document.original_document_id,
+       document.period_start,
+       document.period_end,
+       document.total_tokens,
+       document.total_amount,
+       document.currency,
+       document.created_at
+FROM billing_document document
+JOIN provider_credential credential ON credential.id = document.provider_credential_id
+WHERE document.original_document_id = sqlc.arg(original_document_id)::bigint
+ORDER BY document.id;
+
+-- name: BillingDocumentRatingCount :one
+SELECT COUNT(*)::bigint
+FROM billing_document_usage_rating
+WHERE billing_document_id = sqlc.arg(billing_document_id)::bigint;
+
+-- name: BillingUnratedUsage :many
+WITH candidates AS (
+    SELECT usage.id AS usage_record_id,
+           usage.principal_id,
+           principal.name AS principal_name,
+           principal.principal_type,
+           usage.provider_credential_id,
+           credential.resource_name AS credential_name,
+           usage.provider_model_id,
+           usage.started_at,
+           usage.input_tokens,
+           usage.cached_input_tokens,
+           usage.output_tokens,
+           usage.created_at AS waiting_since,
+           CASE
+               WHEN usage.input_tokens IS NULL
+                 OR usage.cached_input_tokens IS NULL
+                 OR usage.output_tokens IS NULL
+                 OR usage.cached_input_tokens > usage.input_tokens
+                   THEN 'INCOMPLETE_TOKENS'
+               WHEN price.id IS NULL THEN 'MISSING_PRICE'
+               WHEN latest.id IS NULL
+                 OR latest.model_price_id <> price.id
+                 OR latest.currency <> price.currency
+                 OR latest.input_price <> price.input_price
+                 OR latest.cached_input_price <> price.cached_input_price
+                 OR latest.output_price <> price.output_price
+                   THEN 'PENDING_RATING'
+               ELSE NULL
+           END::text AS reason
+    FROM usage_record usage
+    JOIN principal ON principal.id = usage.principal_id
+    JOIN provider_credential credential
+      ON credential.id = usage.provider_credential_id
+     AND credential.auth_type = 'API_KEY'
+    LEFT JOIN LATERAL (
+        SELECT candidate.*
+        FROM provider_credential_model_price candidate
+        WHERE candidate.provider_credential_id = usage.provider_credential_id
+          AND candidate.provider_model_id = usage.provider_model_id
+          AND candidate.effective_at <= usage.started_at
+        ORDER BY candidate.effective_at DESC, candidate.id DESC
+        LIMIT 1
+    ) price ON TRUE
+    LEFT JOIN LATERAL (
+        SELECT rating.*
+        FROM usage_rating rating
+        WHERE rating.usage_record_id = usage.id
+        ORDER BY rating.revision DESC, rating.id DESC
+        LIMIT 1
+    ) latest ON TRUE
+    WHERE usage.status = 'SUCCESS'
+      AND usage.started_at >= sqlc.arg(from_time)::timestamptz
+      AND usage.started_at < sqlc.arg(to_time)::timestamptz
+), filtered AS (
+    SELECT *
+    FROM candidates
+    WHERE reason IS NOT NULL
+      AND (sqlc.arg(reason)::text = '' OR reason = sqlc.arg(reason)::text)
+)
+SELECT filtered.*,
+       (SELECT COUNT(*) FROM filtered)::bigint AS total_count
+FROM filtered
+WHERE filtered.usage_record_id > sqlc.arg(after_id)::bigint
+ORDER BY filtered.usage_record_id
+LIMIT sqlc.arg(page_limit)::int;

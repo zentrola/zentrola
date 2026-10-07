@@ -17,6 +17,7 @@ const paths: Record<string, string> = {
   edit: 'M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4L16.5 3.5Z',
   resources: 'M8 3v5m8-5v5M5 8h14v3a7 7 0 0 1-14 0V8Zm7 10v4',
   usage: 'M4 3v18h17M8 16v-5m5 5V7m5 9V3',
+  billing: 'M6 3h12v18l-3-2-3 2-3-2-3 2V3Zm3 5h6m-6 4h6m-6 4h3',
   operations: 'M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2',
   plus: 'M12 5v14M5 12h14',
   upload: 'M12 16V4m0 0-5 5m5-5 5 5M4 16v4h16v-4',

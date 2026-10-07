@@ -285,3 +285,78 @@ export interface Operation {
   before: unknown
   after: unknown
 }
+
+export type BillingType = 'SUBSCRIPTION' | 'API_KEY'
+export type BillingCurrency = 'CNY' | 'USD'
+export type BillingDocumentType = 'CHARGE' | 'ADJUSTMENT'
+
+export interface BillingCurrencyTotal {
+  billingType: BillingType
+  currency: BillingCurrency
+  totalAmount: string
+  allocatedAmount: string
+  unallocatedAmount: string
+  totalTokens: number
+}
+export interface BillingPrincipalTotal {
+  principalId: string
+  principalName: string
+  principalType: 'MEMBER' | 'APPLICATION'
+  billingType: BillingType
+  currency: BillingCurrency
+  amount: string
+  tokens: number
+}
+export interface BillingStatistics {
+  from: string
+  to: string
+  totals: BillingCurrencyTotal[]
+  items: BillingPrincipalTotal[]
+  total: number
+}
+export interface BillingDocument {
+  id: string
+  billingType: BillingType
+  documentType: BillingDocumentType
+  status: string
+  credentialId: string
+  credentialName: string
+  originalDocumentId: string | null
+  periodStart: string
+  periodEnd: string
+  totalTokens: number
+  totalAmount: string
+  currency: BillingCurrency
+  createdAt: string
+}
+export interface BillingDocumentItem {
+  id: string
+  principalId: string
+  principalName: string
+  principalType: 'MEMBER' | 'APPLICATION'
+  usageTokens: number
+  allocationRatio: string | null
+  amount: string
+}
+export interface BillingDocumentDetail extends BillingDocument {
+  items: BillingDocumentItem[]
+  original: BillingDocument | null
+  adjustments: BillingDocument[]
+  ratingCount: number
+}
+export type BillingIssueReason = 'INCOMPLETE_TOKENS' | 'MISSING_PRICE' | 'PENDING_RATING'
+export interface UnratedUsage {
+  usageRecordId: string
+  principalId: string
+  principalName: string
+  principalType: 'MEMBER' | 'APPLICATION'
+  credentialId: string
+  credentialName: string
+  providerModelId: string
+  startedAt: string
+  inputTokens: number | null
+  cachedInputTokens: number | null
+  outputTokens: number | null
+  reason: BillingIssueReason
+  waitingSince: string
+}

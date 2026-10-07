@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	app "github.com/zentrola/zentrola/internal/application/billing"
+	appsec "github.com/zentrola/zentrola/internal/application/security"
 	"github.com/zentrola/zentrola/internal/domain/admin"
 	domain "github.com/zentrola/zentrola/internal/domain/billing"
 	"github.com/zentrola/zentrola/internal/infrastructure/postgres/dbgen"
@@ -356,4 +357,126 @@ func (s *BillingStore) Statistics(ctx context.Context, _ admin.Identity, filter 
 		result.Total = row.TotalCount
 	}
 	return result, nil
+}
+
+func (s *BillingStore) BillingDocuments(ctx context.Context, filter app.DocumentFilter) (app.DocumentPage, error) {
+	rows, err := s.q.BillingDocuments(ctx, dbgen.BillingDocumentsParams{
+		FromTime: priceTime(filter.From), ToTime: priceTime(filter.To),
+		BillingType: filter.BillingType, DocumentType: filter.DocumentType, Currency: filter.Currency,
+		AfterID: filter.After, PageLimit: filter.Limit + 1,
+	})
+	if err != nil {
+		return app.DocumentPage{}, err
+	}
+	result := app.DocumentPage{Items: make([]app.DocumentSummary, 0, len(rows))}
+	for _, row := range rows {
+		result.Items = append(result.Items, billingDocumentSummary(
+			row.ID, row.BillingType, row.DocumentType, row.Status, row.ProviderCredentialID,
+			row.CredentialName, row.OriginalDocumentID, row.PeriodStart.Time, row.PeriodEnd.Time,
+			row.TotalTokens, priceNumber(row.TotalAmount), row.Currency, row.CreatedAt.Time,
+		))
+		result.Total = row.TotalCount
+	}
+	return result, nil
+}
+
+func (s *BillingStore) BillingDocument(ctx context.Context, id int64) (app.DocumentDetail, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return app.DocumentDetail{}, err
+	}
+	defer tx.Rollback(context.Background())
+	q := dbgen.New(tx)
+	row, err := q.BillingDocument(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return app.DocumentDetail{}, appsec.ErrNotFound
+	}
+	if err != nil {
+		return app.DocumentDetail{}, err
+	}
+	result := app.DocumentDetail{DocumentSummary: billingDocumentSummary(
+		row.ID, row.BillingType, row.DocumentType, row.Status, row.ProviderCredentialID,
+		row.CredentialName, row.OriginalDocumentID, row.PeriodStart.Time, row.PeriodEnd.Time,
+		row.TotalTokens, priceNumber(row.TotalAmount), row.Currency, row.CreatedAt.Time,
+	), Items: []app.DocumentItemDetail{}, Adjustments: []app.DocumentSummary{}}
+	items, err := q.BillingDocumentItems(ctx, id)
+	if err != nil {
+		return app.DocumentDetail{}, err
+	}
+	for _, item := range items {
+		result.Items = append(result.Items, app.DocumentItemDetail{
+			ID: item.ID, PrincipalID: item.PrincipalID, PrincipalName: item.PrincipalName,
+			PrincipalType: item.PrincipalType, UsageTokens: item.UsageTokens,
+			AllocationRatio: numericString(item.AllocationRatio), Amount: priceNumber(item.Amount),
+		})
+	}
+	if row.OriginalDocumentID != nil {
+		original, originalErr := q.BillingDocument(ctx, *row.OriginalDocumentID)
+		if originalErr != nil {
+			return app.DocumentDetail{}, originalErr
+		}
+		summary := billingDocumentSummary(
+			original.ID, original.BillingType, original.DocumentType, original.Status,
+			original.ProviderCredentialID, original.CredentialName, original.OriginalDocumentID,
+			original.PeriodStart.Time, original.PeriodEnd.Time, original.TotalTokens,
+			priceNumber(original.TotalAmount), original.Currency, original.CreatedAt.Time,
+		)
+		result.Original = &summary
+	} else {
+		adjustments, adjustmentErr := q.BillingDocumentAdjustments(ctx, id)
+		if adjustmentErr != nil {
+			return app.DocumentDetail{}, adjustmentErr
+		}
+		for _, adjustment := range adjustments {
+			result.Adjustments = append(result.Adjustments, billingDocumentSummary(
+				adjustment.ID, adjustment.BillingType, adjustment.DocumentType, adjustment.Status,
+				adjustment.ProviderCredentialID, adjustment.CredentialName, adjustment.OriginalDocumentID,
+				adjustment.PeriodStart.Time, adjustment.PeriodEnd.Time, adjustment.TotalTokens,
+				priceNumber(adjustment.TotalAmount), adjustment.Currency, adjustment.CreatedAt.Time,
+			))
+		}
+	}
+	result.RatingCount, err = q.BillingDocumentRatingCount(ctx, id)
+	if err != nil {
+		return app.DocumentDetail{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return app.DocumentDetail{}, err
+	}
+	return result, nil
+}
+
+func (s *BillingStore) UnratedUsage(ctx context.Context, filter app.UnratedUsageFilter) (app.UnratedUsagePage, error) {
+	rows, err := s.q.BillingUnratedUsage(ctx, dbgen.BillingUnratedUsageParams{
+		FromTime: priceTime(filter.From), ToTime: priceTime(filter.To), Reason: filter.Reason,
+		AfterID: filter.After, PageLimit: filter.Limit + 1,
+	})
+	if err != nil {
+		return app.UnratedUsagePage{}, err
+	}
+	result := app.UnratedUsagePage{Items: make([]app.UnratedUsage, 0, len(rows))}
+	for _, row := range rows {
+		result.Items = append(result.Items, app.UnratedUsage{
+			UsageRecordID: row.UsageRecordID, PrincipalID: row.PrincipalID,
+			PrincipalName: row.PrincipalName, PrincipalType: row.PrincipalType,
+			CredentialID: row.ProviderCredentialID, CredentialName: row.CredentialName,
+			ProviderModelID: row.ProviderModelID, StartedAt: row.StartedAt.Time.UTC(),
+			InputTokens: row.InputTokens, CachedInputTokens: row.CachedInputTokens,
+			OutputTokens: row.OutputTokens, Reason: row.Reason, WaitingSince: row.WaitingSince.Time.UTC(),
+		})
+		result.Total = row.TotalCount
+	}
+	return result, nil
+}
+
+func billingDocumentSummary(id int64, billingType, documentType, status string, credentialID int64,
+	credentialName string, originalDocumentID *int64, periodStart, periodEnd time.Time,
+	totalTokens int64, totalAmount, currency string, createdAt time.Time,
+) app.DocumentSummary {
+	return app.DocumentSummary{
+		ID: id, BillingType: billingType, DocumentType: documentType, Status: status,
+		CredentialID: credentialID, CredentialName: credentialName, OriginalDocumentID: originalDocumentID,
+		PeriodStart: periodStart.UTC(), PeriodEnd: periodEnd.UTC(), TotalTokens: totalTokens,
+		TotalAmount: totalAmount, Currency: currency, CreatedAt: createdAt.UTC(),
+	}
 }

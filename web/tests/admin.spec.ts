@@ -199,6 +199,144 @@ async function fixture(page: Page) {
     if (path === '/me') return reply({ id: '1', username: 'admin', displayName: '管理员' })
     if (path === '/auth/logout') return reply({ clearToken: true })
     if (path === '/gateway/active-models') return reply(activeModelRows)
+    if (path === '/billing/statistics' && method === 'GET')
+      return reply({
+        from: url.searchParams.get('from'),
+        to: url.searchParams.get('to'),
+        totals: [
+          {
+            billingType: 'SUBSCRIPTION',
+            currency: 'CNY',
+            totalAmount: '710.00000000',
+            allocatedAmount: '710.00000000',
+            unallocatedAmount: '0',
+            totalTokens: 1000000,
+          },
+          {
+            billingType: 'API_KEY',
+            currency: 'USD',
+            totalAmount: '5.12500000',
+            allocatedAmount: '5.12500000',
+            unallocatedAmount: '0',
+            totalTokens: 2500000,
+          },
+        ],
+        items: [
+          {
+            principalId: longID,
+            principalName: '林知远',
+            principalType: 'MEMBER',
+            billingType: 'SUBSCRIPTION',
+            currency: 'CNY',
+            amount: '497.00000000',
+            tokens: 700000,
+          },
+        ],
+        total: 1,
+      })
+    if (path === '/billing/documents' && method === 'GET')
+      return reply({
+        items: [
+          {
+            id: '602',
+            billingType: 'SUBSCRIPTION',
+            documentType: 'ADJUSTMENT',
+            status: 'CONFIRMED',
+            credentialId: '88',
+            credentialName: '个人订阅主账号',
+            originalDocumentId: '601',
+            periodStart: '2026-09-01T00:00:00Z',
+            periodEnd: '2026-10-01T00:00:00Z',
+            totalTokens: 0,
+            totalAmount: '-200.00000000',
+            currency: 'CNY',
+            createdAt: stamp,
+          },
+          {
+            id: '601',
+            billingType: 'SUBSCRIPTION',
+            documentType: 'CHARGE',
+            status: 'CONFIRMED',
+            credentialId: '88',
+            credentialName: '个人订阅主账号',
+            originalDocumentId: null,
+            periodStart: '2026-09-01T00:00:00Z',
+            periodEnd: '2026-10-01T00:00:00Z',
+            totalTokens: 1000000,
+            totalAmount: '1000.00000000',
+            currency: 'CNY',
+            createdAt: stamp,
+          },
+        ],
+        nextCursor: null,
+        total: 2,
+      })
+    if (path === '/billing/documents/602' && method === 'GET')
+      return reply({
+        id: '602',
+        billingType: 'SUBSCRIPTION',
+        documentType: 'ADJUSTMENT',
+        status: 'CONFIRMED',
+        credentialId: '88',
+        credentialName: '个人订阅主账号',
+        originalDocumentId: '601',
+        periodStart: '2026-09-01T00:00:00Z',
+        periodEnd: '2026-10-01T00:00:00Z',
+        totalTokens: 0,
+        totalAmount: '-200.00000000',
+        currency: 'CNY',
+        createdAt: stamp,
+        original: {
+          id: '601',
+          billingType: 'SUBSCRIPTION',
+          documentType: 'CHARGE',
+          status: 'CONFIRMED',
+          credentialId: '88',
+          credentialName: '个人订阅主账号',
+          originalDocumentId: null,
+          periodStart: '2026-09-01T00:00:00Z',
+          periodEnd: '2026-10-01T00:00:00Z',
+          totalTokens: 1000000,
+          totalAmount: '1000.00000000',
+          currency: 'CNY',
+          createdAt: stamp,
+        },
+        adjustments: [],
+        ratingCount: 0,
+        items: [
+          {
+            id: '701',
+            principalId: longID,
+            principalName: '林知远',
+            principalType: 'MEMBER',
+            usageTokens: 0,
+            allocationRatio: '0.7000000000000000',
+            amount: '-140.00000000',
+          },
+        ],
+      })
+    if (path === '/billing/unrated-usage' && method === 'GET')
+      return reply({
+        items: [
+          {
+            usageRecordId: '801',
+            principalId: longID,
+            principalName: '林知远',
+            principalType: 'MEMBER',
+            credentialId: '89',
+            credentialName: 'DeepSeek API Key',
+            providerModelId: '92',
+            startedAt: stamp,
+            inputTokens: null,
+            cachedInputTokens: null,
+            outputTokens: 5,
+            reason: 'INCOMPLETE_TOKENS',
+            waitingSince: stamp,
+          },
+        ],
+        nextCursor: null,
+        total: 1,
+      })
     if (path === '/usage/dashboard')
       return reply({
         activeMemberCount: 2,
@@ -4994,4 +5132,33 @@ test('列表搜索覆盖全部分页并安全传递不透明游标', async ({ pa
   expect(searchRequests[1].searchParams.get('after')).toBe(opaqueCursor)
   await page.getByRole('button', { name: '重置', exact: true }).click()
   await expect(page.getByLabel('分页')).toBeVisible()
+})
+
+test('成本管理分币种展示概览、调整单详情和核算异常', async ({ page }) => {
+  await fixture(page)
+  await signIn(page)
+
+  await page.getByRole('link', { name: '成本管理', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '成本管理', exact: true })).toBeVisible()
+  await expect(page.getByRole('tab')).toHaveText(['成本概览', '成本单据', '核算异常'])
+  const ledger = page.locator('.cost-ledger')
+  await expect(ledger.getByText('CNY', { exact: true })).toBeVisible()
+  await expect(ledger.getByText('USD', { exact: true })).toBeVisible()
+  await expect(ledger.getByText('¥710', { exact: true })).toBeVisible()
+  await expect(ledger.getByText('$5.125', { exact: true })).toBeVisible()
+  await expect(ledger.getByText('¥715.125')).toHaveCount(0)
+
+  await page.getByRole('tab', { name: '成本单据', exact: true }).click()
+  await expect(page.getByRole('cell', { name: '成本调整单', exact: true })).toBeVisible()
+  await expect(page.getByText('-¥200', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '查看详情' }).first().click()
+  const detail = page.getByRole('dialog', { name: '成本单据详情' })
+  await expect(detail).toContainText('原单据')
+  await expect(detail).toContainText('601')
+  await expect(detail).toContainText('70%')
+  await detail.getByRole('button', { name: '关闭' }).click()
+
+  await page.getByRole('tab', { name: '核算异常', exact: true }).click()
+  await expect(page.getByRole('table').getByText('Token 数据不完整', { exact: true })).toBeVisible()
+  await expect(page.getByRole('cell', { name: '-', exact: true })).toHaveCount(2)
 })

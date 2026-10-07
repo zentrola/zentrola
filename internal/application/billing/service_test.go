@@ -32,6 +32,9 @@ type billingStoreStub struct {
 	apiKeyRatingIDs  map[APIKeyPeriod][]int64
 	apiKeyCurrent    map[APIKeyPeriod]APIKeyCurrent
 	apiKeyDocuments  []Document
+	documents        DocumentPage
+	document         DocumentDetail
+	unrated          UnratedUsagePage
 }
 
 func (s *billingStoreStub) SubscriptionPrices(context.Context) ([]SubscriptionPrice, error) {
@@ -59,6 +62,15 @@ func (s *billingStoreStub) CreateAdjustment(_ context.Context, _ string, documen
 }
 func (s *billingStoreStub) Statistics(context.Context, admin.Identity, StatisticsFilter) (Statistics, error) {
 	return s.statistics, nil
+}
+func (s *billingStoreStub) BillingDocuments(context.Context, DocumentFilter) (DocumentPage, error) {
+	return s.documents, nil
+}
+func (s *billingStoreStub) BillingDocument(context.Context, int64) (DocumentDetail, error) {
+	return s.document, nil
+}
+func (s *billingStoreStub) UnratedUsage(context.Context, UnratedUsageFilter) (UnratedUsagePage, error) {
+	return s.unrated, nil
 }
 func (s *billingStoreStub) UsageRatingCandidates(_ context.Context, after int64, limit int32) ([]UsageRatingCandidate, error) {
 	result := make([]UsageRatingCandidate, 0, limit)

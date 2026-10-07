@@ -1382,6 +1382,138 @@ tbody tr:hover {
 .usage-filters .provider-filter-field .filter-label {
   font-weight: 400;
 }
+.billing-tabs {
+  margin-bottom: 14px;
+}
+.billing-filter-panel {
+  margin-bottom: 16px;
+  overflow: visible;
+}
+.billing-filters {
+  padding: 15px 20px;
+}
+.billing-filters label {
+  flex: 0 1 auto;
+}
+.billing-filters input,
+.billing-filters select {
+  min-width: 138px;
+}
+.billing-alert {
+  margin-bottom: 16px;
+}
+.cost-ledger {
+  margin-bottom: 16px;
+}
+.cost-ledger-row {
+  display: grid;
+  grid-template-columns: 90px repeat(2, minmax(220px, 1fr));
+  align-items: stretch;
+  min-height: 76px;
+  border-bottom: 1px solid var(--line);
+}
+.cost-ledger-row:last-child {
+  border-bottom: 0;
+}
+.cost-currency {
+  display: flex;
+  align-items: center;
+  padding: 18px 22px;
+  color: var(--color-text);
+  letter-spacing: 0.08em;
+  background: #f8fafc;
+}
+.cost-ledger-entry {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto;
+  align-content: center;
+  gap: 4px 24px;
+  padding: 14px 24px;
+  border-left: 1px solid var(--line);
+}
+.cost-ledger-entry span,
+.cost-ledger-entry small {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+.cost-ledger-entry strong {
+  grid-row: span 2;
+  align-self: center;
+  color: var(--color-text);
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+.billing-table-panel {
+  overflow: hidden;
+}
+.billing-table .numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.billing-table .subline {
+  display: block;
+  margin-top: 3px;
+  color: var(--color-text-tertiary, #8a98a8);
+  font-size: 11px;
+}
+.amount-cell {
+  color: var(--color-text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.amount-cell.negative {
+  color: #b45309;
+}
+.empty-cell {
+  height: 110px;
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+.issue-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 25px;
+  padding: 3px 8px;
+  border-radius: 5px;
+  color: #475569;
+  background: #f1f5f9;
+  font-size: 12px;
+  font-weight: 600;
+}
+.issue-badge.incomplete_tokens {
+  color: #9f1239;
+  background: #fff1f2;
+}
+.issue-badge.missing_price {
+  color: #9a3412;
+  background: #fff7ed;
+}
+.issue-badge.pending_rating {
+  color: #1d4ed8;
+  background: #eff6ff;
+}
+.billing-detail-grid {
+  margin-bottom: 22px;
+}
+.detail-items-table {
+  min-width: 720px;
+}
+@media (max-width: 760px) {
+  .cost-ledger-row {
+    grid-template-columns: 64px 1fr;
+  }
+  .cost-ledger-entry:last-child {
+    grid-column: 2;
+    border-top: 1px solid var(--line);
+  }
+  .billing-filters label {
+    width: 100%;
+  }
+  .billing-filters input,
+  .billing-filters select {
+    width: 100%;
+  }
+}
 .member-autocomplete,
 .date-range-control {
   position: relative;

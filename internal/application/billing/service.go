@@ -104,6 +104,9 @@ type Store interface {
 	APIKeyCurrent(context.Context, APIKeyPeriod) (APIKeyCurrent, error)
 	CreateAPIKeyDocument(context.Context, string, int64, Document, []int64) (bool, error)
 	Statistics(context.Context, admin.Identity, StatisticsFilter) (Statistics, error)
+	BillingDocuments(context.Context, DocumentFilter) (DocumentPage, error)
+	BillingDocument(context.Context, int64) (DocumentDetail, error)
+	UnratedUsage(context.Context, UnratedUsageFilter) (UnratedUsagePage, error)
 }
 
 type Service struct {

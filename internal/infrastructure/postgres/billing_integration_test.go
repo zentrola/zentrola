@@ -119,6 +119,51 @@ func TestSubscriptionBillingSettlementCorrectionAndStatistics(t *testing.T) {
 		t.Fatalf("all statistics=%+v err=%v", allStatistics, err)
 	}
 
+	documentsPage, err := service.Documents(ctx, admin.Identity{ID: 1}, app.DocumentFilter{
+		BillingType: "SUBSCRIPTION", From: periodStart, To: periodEnd, Limit: 1,
+	})
+	if err != nil || documentsPage.Total != 2 || len(documentsPage.Items) != 2 ||
+		documentsPage.Items[0].DocumentType != "ADJUSTMENT" ||
+		documentsPage.Items[0].CredentialName != "Personal Subscription" {
+		t.Fatalf("documents=%+v err=%v", documentsPage, err)
+	}
+	adjustmentDetail, err := service.Document(ctx, admin.Identity{ID: 1}, documentsPage.Items[0].ID)
+	if err != nil || adjustmentDetail.Original == nil || len(adjustmentDetail.Items) != 2 ||
+		adjustmentDetail.Items[0].AllocationRatio == nil || len(adjustmentDetail.Adjustments) != 0 {
+		t.Fatalf("adjustment detail=%+v err=%v", adjustmentDetail, err)
+	}
+	apiKeyDetail, err := service.Document(ctx, admin.Identity{ID: 1}, 9001)
+	if err != nil || len(apiKeyDetail.Items) != 1 || apiKeyDetail.Items[0].AllocationRatio != nil ||
+		apiKeyDetail.RatingCount != 0 {
+		t.Fatalf("api key detail=%+v err=%v", apiKeyDetail, err)
+	}
+
+	if _, err := pool.Exec(ctx, `INSERT INTO provider_credential_model_price (
+        id,provider_credential_id,provider_model_id,currency,input_price,output_price,cached_input_price,
+        effective_at,created_by,created_at
+    ) VALUES (6002,5002,4001,'CNY',5,10,1,$1,'system',$1)`, usageAt.Add(2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO usage_record (
+        id,request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,
+        usage_scene,client_protocol,input_tokens,output_tokens,cached_input_tokens,
+        started_at,completed_at,latency_ms,status,created_at
+    ) VALUES
+        (7003,'billing-incomplete',1,1001,3001,4001,5002,2001,'MODEL_GATEWAY','OPENAI_RESPONSES',NULL,5,NULL,$1,$1,0,'SUCCESS',$1),
+        (7004,'billing-missing-price',1,1001,3001,4001,5002,2001,'MODEL_GATEWAY','OPENAI_RESPONSES',5,5,0,$1,$1,0,'SUCCESS',$1),
+        (7005,'billing-pending',1,1002,3001,4001,5002,2001,'MODEL_GATEWAY','OPENAI_RESPONSES',5,5,0,$2,$2,0,'SUCCESS',$2)`,
+		usageAt, usageAt.Add(3*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	unrated, err := service.Unrated(ctx, admin.Identity{ID: 1}, app.UnratedUsageFilter{
+		From: periodStart, To: periodEnd, Limit: 50,
+	})
+	if err != nil || unrated.Total != 3 || len(unrated.Items) != 3 ||
+		unrated.Items[0].Reason != "INCOMPLETE_TOKENS" || unrated.Items[0].InputTokens != nil ||
+		unrated.Items[1].Reason != "MISSING_PRICE" || unrated.Items[2].Reason != "PENDING_RATING" {
+		t.Fatalf("unrated=%+v err=%v", unrated, err)
+	}
+
 	for _, statement := range []string{
 		`UPDATE billing_document SET total_amount=1`,
 		`DELETE FROM billing_document_item`,

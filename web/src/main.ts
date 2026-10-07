@@ -18,6 +18,7 @@ const router = createRouter({
     { path: '/models', name: 'models', component: () => import('./pages/Models.vue') },
     { path: '/providers', name: 'providers', component: () => import('./pages/Providers.vue') },
     { path: '/usage', name: 'usage', component: () => import('./pages/Usage.vue') },
+    { path: '/billing', name: 'billing', component: () => import('./pages/Billing.vue') },
     {
       path: '/operations',
       name: 'operations',
