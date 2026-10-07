@@ -75,6 +75,7 @@ type PriceWriteSession interface {
 	InsertSubscriptionPrice(context.Context, SubscriptionPrice, string) error
 	UpdateSubscriptionPrice(context.Context, SubscriptionPrice) (bool, error)
 	DeleteSubscriptionPrice(context.Context, int64, int64) (bool, error)
+	SubscriptionPriceReferenced(context.Context, int64) (bool, error)
 	Audit(context.Context, Audit, appsec.RequestMeta) error
 }
 
@@ -429,6 +430,15 @@ func (s *PriceService) UpdateSubscriptionPrice(ctx context.Context, actor admin.
 			saved = *before
 			return nil
 		}
+		if before.Currency != input.Currency || before.BillingPeriod != input.BillingPeriod || !before.EffectiveAt.Equal(input.EffectiveAt) {
+			referenced, inspectErr := writer.SubscriptionPriceReferenced(ctx, priceID)
+			if inspectErr != nil {
+				return inspectErr
+			}
+			if referenced {
+				return ErrConflict
+			}
+		}
 		for _, price := range prices {
 			if price.ID != priceID && price.EffectiveAt.Equal(input.EffectiveAt) {
 				return ErrConflict
@@ -474,6 +484,13 @@ func (s *PriceService) DeleteSubscriptionPrice(ctx context.Context, actor admin.
 		before := findSubscriptionPrice(prices, credentialID, priceID)
 		if before == nil {
 			return appsec.ErrNotFound
+		}
+		referenced, inspectErr := writer.SubscriptionPriceReferenced(ctx, priceID)
+		if inspectErr != nil {
+			return inspectErr
+		}
+		if referenced {
+			return ErrConflict
 		}
 		deleted, err := writer.DeleteSubscriptionPrice(ctx, credentialID, priceID)
 		if err != nil {

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	billingapp "github.com/zentrola/zentrola/internal/application/billing"
 	gw "github.com/zentrola/zentrola/internal/application/gateway"
 	mgmt "github.com/zentrola/zentrola/internal/application/management"
 	appsec "github.com/zentrola/zentrola/internal/application/security"
@@ -30,6 +31,7 @@ type SecurityHandlers struct {
 	OpenAI          *GatewayHandler
 	ActiveModels    gw.ActiveModelReader
 	Usage           *usageapp.QueryService
+	Billing         *billingapp.Service
 	UsageWriter     *usageapp.Writer
 	BodyReadTimeout time.Duration
 	logger          *slog.Logger
@@ -157,6 +159,9 @@ func (s *SecurityHandlers) mount(r chi.Router) {
 			}
 			if s.Usage != nil {
 				s.mountUsage(protected)
+			}
+			if s.Billing != nil {
+				s.mountBilling(protected)
 			}
 			if s.ActiveModels != nil {
 				s.mountActiveModels(protected)

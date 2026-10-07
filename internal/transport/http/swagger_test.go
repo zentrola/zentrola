@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/zentrola/zentrola/internal/application/billing"
 	"github.com/zentrola/zentrola/internal/application/health"
 	"github.com/zentrola/zentrola/internal/application/management"
 	"github.com/zentrola/zentrola/internal/application/usage"
@@ -80,7 +81,7 @@ func TestSwaggerCoversRoutesAndResolvesSchemas(t *testing.T) {
 		}
 	}
 	router := NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), health.New(), CORSOptions{}, time.Second, "prod",
-		&SecurityHandlers{Management: &management.Service{}, Applications: management.NewApplications(nil, nil), ActiveModels: &activeModelReaderStub{}, Usage: &usage.QueryService{}, UsageWriter: &usage.Writer{}})
+		&SecurityHandlers{Management: &management.Service{}, Applications: management.NewApplications(nil, nil), ActiveModels: &activeModelReaderStub{}, Usage: &usage.QueryService{}, UsageWriter: &usage.Writer{}, Billing: &billing.Service{}})
 	expected := map[string]bool{}
 	err := chi.Walk(router.(chi.Routes), func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
 		// 页面和构建资产不是 API，不加入 Swagger 接口覆盖清单。

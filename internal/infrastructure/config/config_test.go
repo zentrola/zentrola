@@ -40,6 +40,9 @@ func TestConfigValidation(t *testing.T) {
 		{"usage flush disabled", "USAGE_FLUSH_INTERVAL", "0s", "USAGE_FLUSH_INTERVAL"},
 		{"unbounded usage write", "USAGE_WRITE_TIMEOUT", "0s", "USAGE_WRITE_TIMEOUT"},
 		{"unbounded usage shutdown", "USAGE_SHUTDOWN_TIMEOUT", "0s", "USAGE_SHUTDOWN_TIMEOUT"},
+		{"billing settlement disabled", "BILLING_SETTLEMENT_INTERVAL", "0s", "BILLING_SETTLEMENT_INTERVAL"},
+		{"billing settlement grace invalid", "BILLING_SETTLEMENT_GRACE", "-1s", "BILLING_SETTLEMENT_GRACE"},
+		{"billing settlement timeout disabled", "BILLING_SETTLEMENT_TIMEOUT", "0s", "BILLING_SETTLEMENT_TIMEOUT"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -49,6 +52,22 @@ func TestConfigValidation(t *testing.T) {
 				t.Fatalf("expected %s error, got %v", tt.want, err)
 			}
 		})
+	}
+}
+
+func TestBillingDefaults(t *testing.T) {
+	cfg, err := parse(func(key string) (string, bool) {
+		if key == "POSTGRES_PASSWORD" {
+			return "test-only", true
+		}
+		return "", false
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Billing.SettlementInterval != time.Hour || cfg.Billing.SettlementGrace != 10*time.Minute ||
+		cfg.Billing.SettlementTimeout != 5*time.Minute {
+		t.Fatalf("unexpected billing defaults: %+v", cfg.Billing)
 	}
 }
 

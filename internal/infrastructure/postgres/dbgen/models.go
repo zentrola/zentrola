@@ -42,6 +42,56 @@ type AdminUser struct {
 	UpdatedAt pgtype.Timestamptz
 }
 
+// 统一计费单据；按计费类型和 UTC 归属账期保存个人订阅与 API Key 的费用确认及调整结果
+type BillingDocument struct {
+	// 主键，由应用侧生成的正数 64-bit ID
+	ID int64
+	// 单据状态：CONFIRMED=已确认并参与统计；VOID=已作废且不参与统计
+	Status string
+	// 计费类型：SUBSCRIPTION=个人订阅；API_KEY=API Key 按量调用
+	BillingType string
+	// 单据类型：CHARGE=账期费用；ADJUSTMENT=对原单据的差额调整
+	DocumentType string
+	// 费用对应的实际供应方凭证 ID
+	ProviderCredentialID int64
+	// 费用来源类型：SUBSCRIPTION_PRICE=订阅价格版本；API_KEY_USAGE=API Key 用量核算汇总
+	SourceType string
+	// 费用来源记录 ID；含义由 source_type 决定
+	SourceID int64
+	// 调整单对应的原始账期单据 ID；普通账期单据为 NULL
+	OriginalDocumentID *int64
+	// 费用归属账期起始时间，UTC，包含该时刻
+	PeriodStart pgtype.Timestamptz
+	// 费用归属账期结束时间，UTC，不包含该时刻
+	PeriodEnd pgtype.Timestamptz
+	// 原始账期单据用于分摊的输入与输出 Token 总数；调整单固定为 0，避免统计重复累计
+	TotalTokens int64
+	// 单据总金额；账期费用为非负数，调整金额可正可负
+	TotalAmount pgtype.Numeric
+	// 单据币种：CNY=人民币，USD=美元；不同币种不自动换算或合计
+	Currency string
+	// 单据创建时间，UTC
+	CreatedAt pgtype.Timestamptz
+}
+
+// 统一计费单据主体明细；保存个人订阅分摊结果或 API Key 按量费用结果，用于主体成本统计
+type BillingDocumentItem struct {
+	// 主键，由应用侧生成的正数 64-bit ID
+	ID int64
+	// 所属计费单据 ID
+	BillingDocumentID int64
+	// 费用归属的用户或应用主体 ID
+	PrincipalID int64
+	// 主体在原始账期内的计费 Token 数；调整明细固定为 0，避免统计重复累计
+	UsageTokens int64
+	// 个人订阅费用按 Token 计算的分摊比例；API Key 按量费用为 NULL；调整明细沿用原单据比例
+	AllocationRatio pgtype.Numeric
+	// 主体承担的费用金额；个人订阅为分摊金额，API Key 为按量核算金额，调整明细可正可负
+	Amount pgtype.Numeric
+	// 明细创建时间，UTC
+	CreatedAt pgtype.Timestamptz
+}
+
 // 平台稳定逻辑模型；发布厂商仅用于归属展示，与调用供应方映射解耦
 type Model struct {
 	// 主键，由应用侧生成的正数 64-bit ID

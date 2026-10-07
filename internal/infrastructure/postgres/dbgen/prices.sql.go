@@ -178,6 +178,22 @@ func (q *Queries) ManageModelPrices(ctx context.Context, providerCredentialID in
 	return items, nil
 }
 
+const manageSubscriptionPriceReferenced = `-- name: ManageSubscriptionPriceReferenced :one
+SELECT EXISTS (
+    SELECT 1
+    FROM billing_document
+    WHERE source_type = 'SUBSCRIPTION_PRICE'
+      AND source_id = $1::bigint
+)
+`
+
+func (q *Queries) ManageSubscriptionPriceReferenced(ctx context.Context, priceID int64) (bool, error) {
+	row := q.db.QueryRow(ctx, manageSubscriptionPriceReferenced, priceID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const manageSubscriptionPrices = `-- name: ManageSubscriptionPrices :many
 SELECT id, provider_credential_id, currency, period_amount,
        billing_period, effective_at, created_at

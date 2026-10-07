@@ -60,3 +60,11 @@ WHERE id = sqlc.arg(id) AND provider_credential_id = sqlc.arg(provider_credentia
 -- name: ManageDeleteSubscriptionPrice :execrows
 DELETE FROM provider_credential_subscription_price
 WHERE id = sqlc.arg(id) AND provider_credential_id = sqlc.arg(provider_credential_id);
+
+-- name: ManageSubscriptionPriceReferenced :one
+SELECT EXISTS (
+    SELECT 1
+    FROM billing_document
+    WHERE source_type = 'SUBSCRIPTION_PRICE'
+      AND source_id = sqlc.arg(price_id)::bigint
+);

@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	billingapp "github.com/zentrola/zentrola/internal/application/billing"
 	"github.com/zentrola/zentrola/internal/application/gateway"
 	"github.com/zentrola/zentrola/internal/application/health"
 	"github.com/zentrola/zentrola/internal/application/management"
@@ -361,6 +362,26 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 		m := usageWriter.Metrics()
 		logger.Info("usage writer stopped", "persisted", m.Persisted, "failed", m.Failed, "pending", m.Pending)
 	}()
+	billingStore := postgres.NewBillingStore(pool)
+	billingService := billingapp.New(billingStore, ids)
+	billingWorker, err := billingapp.NewWorker(
+		billingService, routeState, logger, cfg.Billing.SettlementInterval,
+		cfg.Billing.SettlementGrace, cfg.Billing.SettlementTimeout,
+	)
+	if err != nil {
+		return err
+	}
+	logger.Info("subscription billing worker started",
+		"interval", cfg.Billing.SettlementInterval,
+		"grace", cfg.Billing.SettlementGrace,
+		"run_timeout", cfg.Billing.SettlementTimeout)
+	defer func() {
+		workerShutdown, workerCancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+		defer workerCancel()
+		if err := billingWorker.Close(workerShutdown); err != nil {
+			runErr = errors.Join(runErr, errors.New("cannot stop subscription billing worker"))
+		}
+	}()
 	gatewayOptions := httptransport.GatewayOptions{
 		MaxBodyBytes: cfg.Gateway.MaxBodyBytes, RequestTimeout: cfg.Gateway.RequestTimeout,
 		BodyReadTimeout: cfg.Gateway.BodyReadTimeout, WriteTimeout: cfg.Gateway.WriteTimeout,
@@ -378,7 +399,7 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 	var active sync.WaitGroup
 	var admission sync.Mutex
 	stopping := false
-	router := httptransport.NewRouter(logger, readiness, httptransport.CORSOptions{Enabled: cfg.CORS.Enabled, Origins: cfg.CORS.Origins}, cfg.HealthTimeout, cfg.Environment, &httptransport.SecurityHandlers{Admin: adminService, Keys: keyService, Management: managementService, Applications: management.NewApplications(managementStore, ids), Gateway: gatewayHandler, OpenAI: openaiHandler, ActiveModels: gatewayCache, Usage: usageapp.NewQuery(usageStore), UsageWriter: usageWriter, BodyReadTimeout: cfg.BodyReadTimeout})
+	router := httptransport.NewRouter(logger, readiness, httptransport.CORSOptions{Enabled: cfg.CORS.Enabled, Origins: cfg.CORS.Origins}, cfg.HealthTimeout, cfg.Environment, &httptransport.SecurityHandlers{Admin: adminService, Keys: keyService, Management: managementService, Applications: management.NewApplications(managementStore, ids), Gateway: gatewayHandler, OpenAI: openaiHandler, ActiveModels: gatewayCache, Usage: usageapp.NewQuery(usageStore), UsageWriter: usageWriter, Billing: billingService, BodyReadTimeout: cfg.BodyReadTimeout})
 	server := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -22,6 +22,7 @@ type priceStoreStub struct {
 	audits      int
 	auditBefore []any
 	writes      int
+	referenced  bool
 }
 
 func (s *priceStoreStub) ReadPrice(_ context.Context, _ admin.Identity, fn func(PriceReadSession) error) error {
@@ -94,6 +95,9 @@ func (s *priceStoreStub) Audit(_ context.Context, audit Audit, _ appsec.RequestM
 	s.audits++
 	s.auditBefore = append(s.auditBefore, audit.Before)
 	return nil
+}
+func (s *priceStoreStub) SubscriptionPriceReferenced(context.Context, int64) (bool, error) {
+	return s.referenced, nil
 }
 
 func TestPriceInputValidationBeforeStore(t *testing.T) {
@@ -233,5 +237,30 @@ func TestSaveSubscriptionPrice(t *testing.T) {
 	}
 	if err := service.DeleteSubscriptionPrice(context.Background(), admin.Identity{ID: 7}, 1, changed.ID, appsec.RequestMeta{}); err != nil || len(store.subs) != 1 || store.subs[0].ID != saved.ID {
 		t.Fatalf("delete subscription price: subs=%+v err=%v", store.subs, err)
+	}
+}
+
+func TestReferencedSubscriptionPriceOnlyAllowsAmountCorrection(t *testing.T) {
+	effectiveAt := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	store := &priceStoreStub{
+		resource:   ResourceRecord{Resource: Resource{ID: 1, Name: "subscription", AuthType: "SUBSCRIPTION"}},
+		referenced: true,
+		subs: []SubscriptionPrice{{
+			ID: 9, ProviderCredentialID: 1, Currency: "CNY", PeriodAmount: "1000",
+			BillingPeriod: "MONTH", EffectiveAt: effectiveAt, CreatedAt: effectiveAt,
+		}},
+	}
+	service := PriceService{store: store}
+	input := SubscriptionPriceInput{Currency: "CNY", PeriodAmount: "800", BillingPeriod: "MONTH", EffectiveAt: effectiveAt}
+	updated, err := service.UpdateSubscriptionPrice(context.Background(), admin.Identity{ID: 7}, 1, 9, input, appsec.RequestMeta{})
+	if err != nil || updated.PeriodAmount != "800" {
+		t.Fatalf("amount correction=%+v err=%v", updated, err)
+	}
+	input.Currency = "USD"
+	if _, err := service.UpdateSubscriptionPrice(context.Background(), admin.Identity{ID: 7}, 1, 9, input, appsec.RequestMeta{}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("referenced currency update error=%v", err)
+	}
+	if err := service.DeleteSubscriptionPrice(context.Background(), admin.Identity{ID: 7}, 1, 9, appsec.RequestMeta{}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("referenced delete error=%v", err)
 	}
 }

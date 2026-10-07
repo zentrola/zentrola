@@ -1545,6 +1545,104 @@
                 }
             }
         },
+        "/api/v1/billing/statistics": {
+            "get": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "description": "按 UTC 账期开始时间统计已确认单据；结果按计费类型、币种和用户分组，返回总成本、已分摊与未分摊成本。个人订阅调整单自动计入对应计费类型，Token 不重复累计。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "计费账单"
+                ],
+                "summary": "费用统计",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "起始时间（含），UTC RFC3339，必须以 Z 结尾",
+                        "name": "from",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "结束时间（不含），UTC RFC3339，必须以 Z 结尾",
+                        "name": "to",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "SUBSCRIPTION",
+                            "API_KEY"
+                        ],
+                        "type": "string",
+                        "description": "计费类型；不传表示全部",
+                        "name": "billingType",
+                        "in": "query"
+                    },
+                    {
+                        "minimum": 0,
+                        "type": "integer",
+                        "default": 0,
+                        "description": "用户统计偏移量",
+                        "name": "after",
+                        "in": "query"
+                    },
+                    {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer",
+                        "default": 50,
+                        "description": "用户统计数量",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/billing.Statistics"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/gateway/active-models": {
             "get": {
                 "security": [
@@ -7306,6 +7404,82 @@
                 },
                 "username": {
                     "type": "string"
+                }
+            }
+        },
+        "billing.CurrencyTotal": {
+            "type": "object",
+            "properties": {
+                "allocatedAmount": {
+                    "type": "string"
+                },
+                "billingType": {
+                    "type": "string"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "totalAmount": {
+                    "type": "string"
+                },
+                "totalTokens": {
+                    "type": "integer"
+                },
+                "unallocatedAmount": {
+                    "type": "string"
+                }
+            }
+        },
+        "billing.PrincipalTotal": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "string"
+                },
+                "billingType": {
+                    "type": "string"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "principalId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "principalName": {
+                    "type": "string"
+                },
+                "principalType": {
+                    "type": "string"
+                },
+                "tokens": {
+                    "type": "integer"
+                }
+            }
+        },
+        "billing.Statistics": {
+            "type": "object",
+            "properties": {
+                "from": {
+                    "type": "string"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/billing.PrincipalTotal"
+                    }
+                },
+                "to": {
+                    "type": "string"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "totals": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/billing.CurrencyTotal"
+                    }
                 }
             }
         },

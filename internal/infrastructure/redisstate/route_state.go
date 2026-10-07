@@ -1,5 +1,5 @@
-// Package redisstate 保存路由的短期冷却状态；Redis 不可用时由应用层按 fail-open 继续路由。
-// 冷却 key 的 TTL 表示实际冷却时长，探测 key 在冷却结束后提供短暂的恢复租约。
+// Package redisstate 保存路由的短期状态并协调跨实例后台任务。
+// 路由冷却在 Redis 不可用时 fail-open，后台任务锁则 fail-closed。
 package redisstate
 
 import (
@@ -126,19 +126,29 @@ func (s *State) Healthy(ctx context.Context, route gateway.Route) error {
 // closed when Redis is unavailable so multiple instances do not refresh the
 // same batch concurrently.
 func (s *State) AcquireSubscriptionRefreshScheduler(ctx context.Context) (func(), bool, error) {
-	return s.acquireSubscriptionLock(ctx, "zentrola:subscription:refresh:scheduler:v1", subscriptionSchedulerLockTTL)
+	return s.acquireLock(ctx, "zentrola:subscription:refresh:scheduler:v1", subscriptionSchedulerLockTTL)
 }
 
 // AcquireSubscriptionRefreshResource serializes refreshes for one resource
 // across all application instances.
 func (s *State) AcquireSubscriptionRefreshResource(ctx context.Context, resourceID int64) (func(), bool, error) {
 	key := "zentrola:subscription:refresh:resource:v1:" + strconv.FormatInt(resourceID, 10)
-	return s.acquireSubscriptionLock(ctx, key, subscriptionResourceLockTTL)
+	return s.acquireLock(ctx, key, subscriptionResourceLockTTL)
 }
 
-func (s *State) acquireSubscriptionLock(ctx context.Context, key string, ttl time.Duration) (func(), bool, error) {
+// AcquireBillingSettlement serializes one complete billing settlement scan
+// across all application instances. The caller supplies a lease duration that
+// covers its bounded run timeout; a crashed instance releases the lock by TTL.
+func (s *State) AcquireBillingSettlement(ctx context.Context, ttl time.Duration) (func(), bool, error) {
+	return s.acquireLock(ctx, "zentrola:billing:settlement:scheduler:v1", ttl)
+}
+
+func (s *State) acquireLock(ctx context.Context, key string, ttl time.Duration) (func(), bool, error) {
 	if s == nil || s.client == nil || s.redisUnavailable() {
 		return nil, false, errors.New("redis unavailable")
+	}
+	if ttl <= 0 {
+		return nil, false, errors.New("invalid lock TTL")
 	}
 	ownerBytes := make([]byte, 16)
 	if _, err := rand.Read(ownerBytes); err != nil {

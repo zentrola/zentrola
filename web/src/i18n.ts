@@ -691,15 +691,15 @@ export const i18n = createI18n({
           subscriptionVersionNote:
             '按所选 UTC 日期的 00:00 生效，并新增一条订阅费用记录；已有记录不会被覆盖。',
           subscriptionEditNote:
-            '保存会直接修改这条订阅费用记录；当前仅保存价格配置，不会重新计算使用费。',
+            '修改金额后，已结算账期会由后台生成差额调整；币种、周期和生效日期在被账单引用后不可修改。',
           deleteSubscriptionTitle: '删除订阅费用',
           deleteSubscriptionQuestion: '确定删除这条订阅费用记录吗？',
-          deleteSubscriptionHint: '删除后价格列表将按剩余记录展示；当前未启用使用费计算。',
+          deleteSubscriptionHint: '未被账单引用的记录可以删除；已参与结算的记录必须保留。',
           effectiveAt: '价格记录生效于',
           periodAmount: '周期费用',
           billingPeriod: '计费周期',
           periods: { MONTH: '月', YEAR: '年' },
-          subscriptionNote: '费用按完整周期录入；这里不会按天分摊或计算成本。',
+          subscriptionNote: '费用按完整周期结算，并按账期内各用户的输入与输出 Token 比例分摊。',
           invalidAmount: '请输入非负金额，最多 12 位整数和 8 位小数。',
           invalidDate: '请选择有效的生效日期。',
           duplicateEffectiveDate: '该生效日期已存在，请选择其他日期。',

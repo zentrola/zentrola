@@ -123,3 +123,7 @@ func (s *managementSession) DeleteSubscriptionPrice(ctx context.Context, credent
 	})
 	return count == 1, err
 }
+
+func (s *managementSession) SubscriptionPriceReferenced(ctx context.Context, priceID int64) (bool, error) {
+	return s.q.ManageSubscriptionPriceReferenced(ctx, priceID)
+}
