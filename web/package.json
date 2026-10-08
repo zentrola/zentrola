@@ -20,7 +20,7 @@
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
-    "@types/node": "24.10.1",
+    "@types/node": "26.6.4",
     "@vitejs/plugin-vue": "6.0.8",
     "prettier": "3.6.2",
     "typescript": "5.9.3",
