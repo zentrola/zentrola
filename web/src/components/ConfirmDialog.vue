@@ -44,7 +44,7 @@ const iconName = computed(() => {
       </div>
     </div>
     <p v-if="error" class="alert error" role="alert">{{ error }}</p>
-    <footer class="confirm-actions">
+    <template #footer>
       <button class="button" :disabled="busy" autofocus @click="emit('close')">
         {{ cancelLabel || t('common.cancel') }}
       </button>
@@ -56,6 +56,6 @@ const iconName = computed(() => {
       >
         {{ busy ? t('common.working') : confirmLabel }}
       </button>
-    </footer>
+    </template>
   </Modal>
 </template>

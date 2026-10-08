@@ -354,7 +354,7 @@ function deleteGroup() {
     @saved="quotaSaved"
   />
   <Modal v-if="creating" :title="t('groups.create')" :busy="busy" wide @close="creating = false"
-    ><form class="group-form" @submit.prevent="create">
+    ><form id="group-create-form" class="group-form" @submit.prevent="create">
       <div class="group-form-fields">
         <div class="group-form-row">
           <label class="group-form-label required-label" for="create-group-name-input">{{
@@ -413,14 +413,20 @@ function deleteGroup() {
           {{ t('common.retry') }}
         </button>
       </p>
-      <footer class="form-footer">
-        <button type="button" class="button" :disabled="busy" @click="creating = false">
-          {{ t('common.cancel') }}</button
-        ><button class="button primary" :disabled="busy || !createModelsReady">
-          {{ t(busy ? 'common.working' : 'common.create') }}
-        </button>
-      </footer>
-    </form></Modal
+    </form>
+    <template #footer>
+      <button type="button" class="button" :disabled="busy" @click="creating = false">
+        {{ t('common.cancel') }}
+      </button>
+      <button
+        type="submit"
+        form="group-create-form"
+        class="button primary"
+        :disabled="busy || !createModelsReady"
+      >
+        {{ t(busy ? 'common.working' : 'common.create') }}
+      </button>
+    </template></Modal
   >
   <Modal
     v-if="selected"
@@ -429,7 +435,7 @@ function deleteGroup() {
     wide
     @close="selected = null"
   >
-    <form class="group-form" @submit.prevent="saveEdit">
+    <form id="group-edit-form" class="group-form" @submit.prevent="saveEdit">
       <div class="group-form-fields">
         <div class="group-form-row">
           <label class="group-form-label required-label" for="edit-group-name-input">{{
@@ -484,14 +490,20 @@ function deleteGroup() {
           {{ t('common.retry') }}
         </button>
       </p>
-      <footer class="form-footer">
-        <button type="button" class="button" :disabled="busy" @click="selected = null">
-          {{ t('common.cancel') }}</button
-        ><button class="button primary" :disabled="busy || !relationReady">
-          {{ t(busy ? 'common.working' : 'common.save') }}
-        </button>
-      </footer>
     </form>
+    <template #footer>
+      <button type="button" class="button" :disabled="busy" @click="selected = null">
+        {{ t('common.cancel') }}
+      </button>
+      <button
+        type="submit"
+        form="group-edit-form"
+        class="button primary"
+        :disabled="busy || !relationReady"
+      >
+        {{ t(busy ? 'common.working' : 'common.save') }}
+      </button>
+    </template>
   </Modal>
   <ConfirmDialog
     v-if="quotaRemovalTarget"

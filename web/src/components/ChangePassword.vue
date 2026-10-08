@@ -70,7 +70,13 @@ async function submit() {
 <template>
   <Modal :title="t('passwordChange.title')" :busy="busy" @close="emit('close')">
     <p class="password-hint" id="password-change-hint">{{ t('passwordChange.hint') }}</p>
-    <form ref="form" novalidate aria-describedby="password-change-hint" @submit.prevent="submit">
+    <form
+      id="password-change-form"
+      ref="form"
+      novalidate
+      aria-describedby="password-change-hint"
+      @submit.prevent="submit"
+    >
       <input type="text" name="username" autocomplete="username" :value="username" hidden />
       <label for="current-password"
         >{{ t('passwordChange.current') }}
@@ -143,15 +149,15 @@ async function submit() {
       >
         {{ errors.confirmation }}
       </p>
-      <footer class="form-footer">
-        <button type="button" class="button" :disabled="busy" @click="emit('close')">
-          {{ t('common.cancel') }}
-        </button>
-        <button class="button primary" :disabled="busy">
-          {{ t(busy ? 'common.working' : 'passwordChange.submit') }}
-        </button>
-      </footer>
     </form>
+    <template #footer>
+      <button type="button" class="button" :disabled="busy" @click="emit('close')">
+        {{ t('common.cancel') }}
+      </button>
+      <button type="submit" form="password-change-form" class="button primary" :disabled="busy">
+        {{ t(busy ? 'common.working' : 'passwordChange.submit') }}
+      </button>
+    </template>
   </Modal>
 </template>
 

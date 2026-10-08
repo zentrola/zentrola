@@ -317,7 +317,7 @@ function deleteModel() {
     @close="editing = false"
   >
     <p v-if="!editTarget" class="model-form-hint">{{ t('models.createHint') }}</p>
-    <form class="model-form" @submit.prevent="save">
+    <form id="model-form" class="model-form" @submit.prevent="save">
       <div class="model-form-row">
         <label class="model-form-label required-label" for="model-code-input">{{
           t('models.code')
@@ -412,14 +412,15 @@ function deleteModel() {
           />
         </div>
       </div>
-      <footer class="form-footer">
-        <button type="button" class="button" :disabled="busy" @click="editing = false">
-          {{ t('common.cancel') }}</button
-        ><button class="button primary" :disabled="busy">
-          {{ t(busy ? 'common.working' : 'common.save') }}
-        </button>
-      </footer>
     </form>
+    <template #footer>
+      <button type="button" class="button" :disabled="busy" @click="editing = false">
+        {{ t('common.cancel') }}
+      </button>
+      <button type="submit" form="model-form" class="button primary" :disabled="busy">
+        {{ t(busy ? 'common.working' : 'common.save') }}
+      </button>
+    </template>
   </Modal>
   <ConfirmDialog
     v-if="deleteTarget"
@@ -483,9 +484,6 @@ function deleteModel() {
 }
 .model-form label {
   margin-bottom: 0;
-}
-.model-form .form-footer {
-  margin-top: 0;
 }
 .model-form-hint {
   margin: 0 0 20px;

@@ -1,8 +1,40 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Locator, type Page } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
 
 const stamp = '2026-09-06T07:30:00Z'
 const longID = '90071992547409931'
+async function expectOnlyModalBodyScrolls(dialog: Locator) {
+  const layout = await dialog.evaluate((element) => {
+    const body = element.querySelector('.modal-body') as HTMLElement
+    const head = element.querySelector('.modal-head') as HTMLElement
+    const footer = element.querySelector('.modal-footer') as HTMLElement
+    const before = {
+      headTop: head.getBoundingClientRect().top,
+      footerTop: footer.getBoundingClientRect().top,
+      dialogTop: element.getBoundingClientRect().top,
+    }
+    body.scrollTop = body.scrollHeight
+    return {
+      scrollable: body.scrollHeight > body.clientHeight,
+      scrollTop: body.scrollTop,
+      bodyOverflow: getComputedStyle(body).overflowY,
+      dialogOverflow: getComputedStyle(element).overflowY,
+      headTopUnchanged: head.getBoundingClientRect().top === before.headTop,
+      footerTopUnchanged: footer.getBoundingClientRect().top === before.footerTop,
+      dialogTopUnchanged: element.getBoundingClientRect().top === before.dialogTop,
+    }
+  })
+  expect(layout).toEqual({
+    scrollable: true,
+    scrollTop: expect.any(Number),
+    bodyOverflow: 'auto',
+    dialogOverflow: 'hidden',
+    headTopUnchanged: true,
+    footerTopUnchanged: true,
+    dialogTopUnchanged: true,
+  })
+  expect(layout.scrollTop).toBeGreaterThan(0)
+}
 async function fixture(page: Page) {
   let nextID = 100n
   const next = () => (90071992547409900n + nextID++).toString()
@@ -2699,6 +2731,9 @@ test('模型新增编辑、模态校验、冲突恢复和窄屏表单', async ({
   await dialog.getByLabel('模型编码', { exact: true }).fill('official-test-v2')
   await expect(dialog.getByRole('status')).toContainText('客户端需要使用新编码')
   await dialog.getByRole('group', { name: '输出类型' }).getByLabel('音频', { exact: true }).check()
+  await page.setViewportSize({ width: 390, height: 480 })
+  await expectOnlyModalBodyScrolls(dialog)
+  await expect(dialog.locator('.modal-footer').getByRole('button', { name: '保存' })).toBeVisible()
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(dialog.getByRole('button', { name: '保存', exact: true })).toBeVisible()
   expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true)

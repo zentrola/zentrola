@@ -1216,14 +1216,12 @@ tbody tr:hover {
   line-height: 21px;
   overflow-wrap: anywhere;
 }
-.modal.confirm .confirm-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
+.modal.confirm .modal-footer {
   gap: 8px;
-  margin-top: 18px;
+  padding: 0 20px 18px;
+  border-top: 0;
 }
-.modal.confirm .confirm-actions .button {
+.modal.confirm .modal-footer .button {
   min-width: 64px;
   min-height: 32px;
   padding: 5px 15px;
@@ -1241,15 +1239,6 @@ tbody tr:hover {
 .modal-body > p {
   font-size: 13px;
   line-height: 1.8;
-}
-.form-footer {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
-  border-top: 1px solid var(--line);
-  padding-top: 20px;
-  margin-top: 24px;
 }
 .modal-footer {
   display: flex;
@@ -3624,7 +3613,10 @@ tbody tr:hover {
   .modal.confirm .modal-body {
     padding: 6px 18px 18px;
   }
-  .modal.confirm .confirm-actions .button {
+  .modal.confirm .modal-footer {
+    padding: 0 18px 18px;
+  }
+  .modal.confirm .modal-footer .button {
     flex: 1;
   }
   .modal-footer {
@@ -3660,9 +3652,6 @@ tbody tr:hover {
   }
   .modal.wide .table-scroll {
     margin: 0 -8px;
-  }
-  .form-footer {
-    flex-wrap: wrap;
   }
 }
 @media (prefers-reduced-motion: reduce) {

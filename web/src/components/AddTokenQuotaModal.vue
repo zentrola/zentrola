@@ -53,7 +53,7 @@ function submit() {
 
 <template>
   <Modal :title="t('tokenQuota.addTitle', { name })" :busy="busy" @close="emit('close')">
-    <form @submit.prevent="submit">
+    <form id="token-quota-form" @submit.prevent="submit">
       <label>
         <span class="quota-amount-label">
           <span>{{ t('tokenQuota.amount') }}</span>
@@ -93,15 +93,15 @@ function submit() {
           :disabled="busy"
         ></textarea>
       </label>
-      <footer class="form-footer">
-        <button type="button" class="button" :disabled="busy" @click="emit('close')">
-          {{ t('common.cancel') }}
-        </button>
-        <button class="button primary" :disabled="busy">
-          {{ t(busy ? 'common.working' : 'tokenQuota.addAction') }}
-        </button>
-      </footer>
     </form>
+    <template #footer>
+      <button type="button" class="button" :disabled="busy" @click="emit('close')">
+        {{ t('common.cancel') }}
+      </button>
+      <button type="submit" form="token-quota-form" class="button primary" :disabled="busy">
+        {{ t(busy ? 'common.working' : 'tokenQuota.addAction') }}
+      </button>
+    </template>
   </Modal>
 </template>
 

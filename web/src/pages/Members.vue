@@ -400,7 +400,7 @@ async function copyKey() {
     :busy="busy"
     medium
     @close="closeMemberForm"
-    ><form class="member-form" @submit.prevent="saveMember">
+    ><form id="member-form" class="member-form" @submit.prevent="saveMember">
       <div class="member-form-fields">
         <div class="member-form-row">
           <label class="member-form-label required-label" for="member-name-input">{{
@@ -465,14 +465,20 @@ async function copyKey() {
           {{ t('common.retry') }}
         </button>
       </div>
-      <footer class="form-footer">
-        <button type="button" class="button" :disabled="busy" @click="closeMemberForm">
-          {{ t('common.cancel') }}</button
-        ><button class="button primary" :disabled="busy || !groupsReady">
-          {{ t(busy ? 'common.working' : editing ? 'common.save' : 'common.create') }}
-        </button>
-      </footer>
-    </form></Modal
+    </form>
+    <template #footer>
+      <button type="button" class="button" :disabled="busy" @click="closeMemberForm">
+        {{ t('common.cancel') }}
+      </button>
+      <button
+        type="submit"
+        form="member-form"
+        class="button primary"
+        :disabled="busy || !groupsReady"
+      >
+        {{ t(busy ? 'common.working' : editing ? 'common.save' : 'common.create') }}
+      </button>
+    </template></Modal
   >
   <ConfirmDialog
     v-if="quotaRemovalTarget"
@@ -503,23 +509,21 @@ async function copyKey() {
     @close="selected = null"
   >
     <p class="muted">{{ local('keyHint') }}</p>
-    <form @submit.prevent="issueKey">
+    <form id="member-key-form" @submit.prevent="issueKey">
       <label
         >{{ local('keyName') }}<input v-model="keyName" required autofocus :disabled="busy"
       /></label>
       <label>{{ local('expires') }}<input v-model="expires" type="date" :disabled="busy" /></label>
       <p class="muted">{{ local('expiresHint') }}</p>
-      <footer class="form-footer">
-        <button type="button" class="button" :disabled="busy" @click="selected = null">
-          {{ t('common.cancel') }}
-        </button>
-        <button class="button primary" :disabled="busy">
-          {{
-            busy ? t('common.working') : local(kind === 'application' ? 'issueKey' : 'assignKey')
-          }}
-        </button>
-      </footer>
     </form>
+    <template #footer>
+      <button type="button" class="button" :disabled="busy" @click="selected = null">
+        {{ t('common.cancel') }}
+      </button>
+      <button type="submit" form="member-key-form" class="button primary" :disabled="busy">
+        {{ busy ? t('common.working') : local(kind === 'application' ? 'issueKey' : 'assignKey') }}
+      </button>
+    </template>
   </Modal>
   <Modal v-if="createdKey" :title="local('oneTime')" locked
     ><p>{{ local('oneTimeHint') }}</p>
@@ -531,12 +535,12 @@ async function copyKey() {
       spellcheck="false"
       rows="3"
     ></textarea>
-    <footer class="form-footer">
+    <template #footer>
       <button class="button" @click="copyKey">{{ t('common.copy') }}</button
       ><button class="button primary" @click="createdKey = null">
         {{ local('acknowledged') }}
       </button>
-    </footer></Modal
+    </template></Modal
   >
 </template>
 
@@ -659,10 +663,6 @@ async function copyKey() {
 }
 .member-group-list > .empty-compact {
   flex-basis: 100%;
-}
-.member-form .form-footer {
-  margin-top: 16px;
-  padding-top: 14px;
 }
 @media (max-width: 640px) {
   .member-form-row {
