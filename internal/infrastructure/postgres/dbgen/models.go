@@ -132,6 +132,18 @@ type Model struct {
 	UpdatedAt pgtype.Timestamptz
 }
 
+// 与 Usage 写入事务同步维护的主体及 Group 每月 Token 累计量
+type MonthlyTokenUsage struct {
+	// 配额范围类型：PRINCIPAL 或 GROUP
+	ScopeType string
+	// 主体或 Group ID
+	ScopeID int64
+	// UTC 自然月起始时刻
+	PeriodStart pgtype.Timestamptz
+	// 该范围该月已写入 Usage 的输入与输出 Token 总量
+	UsedTokens int64
+}
+
 // 管理员与系统操作日志；Append Only，普通操作禁止更新和删除
 type OperationLog struct {
 	// 主键，由应用侧生成的正数 64-bit ID
@@ -618,4 +630,6 @@ type UsageRecord struct {
 	ErrorType *string
 	// 事实记录创建时间，UTC
 	CreatedAt pgtype.Timestamptz
+	// 调用发生时具有该模型权限的有效 Group ID 快照，不受后续成员和授权变更影响
+	QuotaGroupIds []int64
 }

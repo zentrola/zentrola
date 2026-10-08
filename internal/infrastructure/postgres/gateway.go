@@ -99,14 +99,18 @@ func (s *GatewayStore) ResolveCandidates(ctx context.Context, identity appsec.Pr
 		quotaScopes = append(quotaScopes, domainquota.Scope{Type: domainquota.Principal, ID: identity.ID, Limit: *quotaConfiguration.MonthlyTokenLimit})
 	}
 	var groupQuotas []struct {
-		ID    int64 `json:"id"`
-		Limit int64 `json:"limit"`
+		ID    int64  `json:"id"`
+		Limit *int64 `json:"limit"`
 	}
 	if err := json.Unmarshal([]byte(quotaConfiguration.GroupQuotas), &groupQuotas); err != nil {
 		return nil, s.gatewayError(ctx, "decode_gateway_token_quota", err)
 	}
+	groupIDs := make([]int64, 0, len(groupQuotas))
 	for _, groupQuota := range groupQuotas {
-		quotaScopes = append(quotaScopes, domainquota.Scope{Type: domainquota.Group, ID: groupQuota.ID, Limit: groupQuota.Limit})
+		groupIDs = append(groupIDs, groupQuota.ID)
+		if groupQuota.Limit != nil {
+			quotaScopes = append(quotaScopes, domainquota.Scope{Type: domainquota.Group, ID: groupQuota.ID, Limit: *groupQuota.Limit})
+		}
 	}
 	rows, err := q.GatewayCandidates(ctx, dbgen.GatewayCandidatesParams{
 		ModelID: m.ID, PreferredProtocol: preferredProtocol,
@@ -151,9 +155,10 @@ func (s *GatewayStore) ResolveCandidates(ctx context.Context, identity appsec.Pr
 			AuthType: row.AuthType, AuthAdapter: row.AuthAdapter, ResourcePriority: row.ResourcePriority,
 			QuotaStatus: row.QuotaStatus, ExpiresAt: timePointer(row.ExpiresAt),
 			CredentialRefreshedAt: timePointer(row.CredentialRefreshedAt), CredentialExpiresAt: timePointer(row.CredentialExpiresAt),
-			Credential:   catalog.SealedCredential{Ciphertext: row.CredentialCiphertext, Nonce: row.CredentialNonce, KeyVersion: row.KeyVersion},
-			ProxyEnabled: row.ProxyEnabled,
-			QuotaScopes:  append([]domainquota.Scope(nil), quotaScopes...),
+			Credential:    catalog.SealedCredential{Ciphertext: row.CredentialCiphertext, Nonce: row.CredentialNonce, KeyVersion: row.KeyVersion},
+			ProxyEnabled:  row.ProxyEnabled,
+			QuotaScopes:   append([]domainquota.Scope(nil), quotaScopes...),
+			QuotaGroupIDs: append([]int64(nil), groupIDs...),
 		}
 		if row.SubscriptionType != nil {
 			route.SubscriptionType = *row.SubscriptionType

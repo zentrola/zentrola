@@ -41,8 +41,8 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 
 ### Database / 数据库
 
-- Added migrations `00044` through `00050` for application principals, credential price histories, billing documents and API-key usage ratings, monthly Token quotas, and removable quota limits.
-- 新增 `00044` 至 `00050` 迁移，用于应用主体、凭证价格历史、成本单据与 API Key 用量核算、月度 Token 配额及可取消的配额限制。
+- Added migrations `00044` through `00051` for application principals, credential price histories, billing documents and API-key usage ratings, monthly Token quotas, removable quota limits, and transactional quota totals with call-time Group attribution.
+- 新增 `00044` 至 `00051` 迁移，用于应用主体、凭证价格历史、成本单据与 API Key 用量核算、月度 Token 配额、取消配额限制，以及调用时 Group 归属和事务内累计用量。
 
 ## [1.0.1] - 2026-10-04
 

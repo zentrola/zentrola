@@ -249,7 +249,6 @@ LEFT JOIN principal_group_membership membership
     ON membership.principal_id=p.id AND NOT membership.is_deleted
 LEFT JOIN principal_group g
     ON g.id=membership.group_id AND NOT g.is_deleted AND g.status='ACTIVE'
-       AND g.monthly_token_limit IS NOT NULL
 LEFT JOIN principal_group_model_permission permission
     ON permission.group_id=g.id AND permission.model_id=$1 AND NOT permission.is_deleted
 WHERE p.id=$2 AND NOT p.is_deleted

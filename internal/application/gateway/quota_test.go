@@ -36,10 +36,11 @@ func TestForwardRejectsReachedMonthlyTokenQuotaBeforeOpeningUpstream(t *testing.
 	}
 }
 
-func TestForwardAttachesCheckedScopesAndTokenCountBypassesQuota(t *testing.T) {
+func TestForwardAttachesCallTimeGroupsAndTokenCountBypassesQuota(t *testing.T) {
 	scope := domainquota.Scope{Type: domainquota.Group, ID: 2, Limit: 200}
 	routes := testRoutes()
 	routes[0].QuotaScopes = []domainquota.Scope{scope}
+	routes[0].QuotaGroupIDs = []int64{2, 3}
 	checks := 0
 	service := New(&failoverStore{routes: routes}, failoverCipher{}, upstreamFunc(func(context.Context, Route, Request, []byte) (*Response, error) {
 		return &Response{Status: 200, Headers: map[string][]string{}, Body: io.NopCloser(strings.NewReader(`{}`))}, nil
@@ -50,15 +51,16 @@ func TestForwardAttachesCheckedScopesAndTokenCountBypassesQuota(t *testing.T) {
 
 	trace := &usage.Event{}
 	result, err := testForward(t, service, trace)
-	if err != nil || result == nil || len(trace.QuotaScopes) != 1 || trace.QuotaScopes[0] != scope || checks != 1 {
-		t.Fatalf("checked scope was not preserved for usage metering: trace=%+v checks=%d err=%v", trace, checks, err)
+	if err != nil || result == nil || len(trace.QuotaGroupIDs) != 2 || trace.QuotaGroupIDs[0] != 2 || trace.QuotaGroupIDs[1] != 3 || checks != 1 {
+		t.Fatalf("call-time groups were not preserved for usage metering: trace=%+v checks=%d err=%v", trace, checks, err)
 	}
 	_ = result.Body.Close()
 
+	countTrace := &usage.Event{}
 	result, err = service.Forward(context.Background(), appsec.PrincipalIdentity{ID: 1, AccessKeyID: 3}, Request{
-		Path: "/v1/messages/count_tokens", Protocol: AnthropicProtocol, Body: []byte(`{"model":"claude-opus-5"}`), Trace: &usage.Event{},
+		Path: "/v1/messages/count_tokens", Protocol: AnthropicProtocol, Body: []byte(`{"model":"claude-opus-5"}`), Trace: countTrace,
 	})
-	if err != nil || result == nil || checks != 1 {
+	if err != nil || result == nil || checks != 1 || len(countTrace.QuotaGroupIDs) != 0 {
 		t.Fatalf("count_tokens must bypass token quota admission: checks=%d err=%v", checks, err)
 	}
 	_ = result.Body.Close()

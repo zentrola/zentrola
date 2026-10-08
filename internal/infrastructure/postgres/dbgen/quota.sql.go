@@ -81,34 +81,17 @@ func (q *Queries) QuotaConfiguredPrincipals(ctx context.Context, scopeIds []int6
 
 const quotaGroupUsedTokens = `-- name: QuotaGroupUsedTokens :many
 SELECT requested.scope_id::bigint AS scope_id,
-       COALESCE((
-           SELECT SUM(COALESCE(usage.input_tokens, 0) + COALESCE(usage.output_tokens, 0))
-           FROM usage_record usage
-           WHERE usage.started_at>=$1::timestamptz
-             AND usage.started_at<$2::timestamptz
-             AND EXISTS (
-                 SELECT 1
-                 FROM principal_group_membership membership
-                 WHERE membership.group_id=requested.scope_id
-                   AND membership.principal_id=usage.principal_id
-                   AND NOT membership.is_deleted
-             )
-             AND EXISTS (
-                 SELECT 1
-                 FROM principal_group_model_permission permission
-                 WHERE permission.group_id=requested.scope_id
-                   AND permission.model_id=usage.model_id
-                   AND NOT permission.is_deleted
-             )
-       ), 0)::bigint AS used_tokens
-FROM unnest($3::bigint[]) AS requested(scope_id)
+       COALESCE(counter.used_tokens, 0)::bigint AS used_tokens
+FROM unnest($1::bigint[]) AS requested(scope_id)
+LEFT JOIN monthly_token_usage counter
+  ON counter.scope_type='GROUP' AND counter.scope_id=requested.scope_id
+ AND counter.period_start=$2::timestamptz
 ORDER BY requested.scope_id
 `
 
 type QuotaGroupUsedTokensParams struct {
-	PeriodStart pgtype.Timestamptz
-	PeriodEnd   pgtype.Timestamptz
 	ScopeIds    []int64
+	PeriodStart pgtype.Timestamptz
 }
 
 type QuotaGroupUsedTokensRow struct {
@@ -117,7 +100,7 @@ type QuotaGroupUsedTokensRow struct {
 }
 
 func (q *Queries) QuotaGroupUsedTokens(ctx context.Context, arg QuotaGroupUsedTokensParams) ([]QuotaGroupUsedTokensRow, error) {
-	rows, err := q.db.Query(ctx, quotaGroupUsedTokens, arg.PeriodStart, arg.PeriodEnd, arg.ScopeIds)
+	rows, err := q.db.Query(ctx, quotaGroupUsedTokens, arg.ScopeIds, arg.PeriodStart)
 	if err != nil {
 		return nil, err
 	}
@@ -138,21 +121,17 @@ func (q *Queries) QuotaGroupUsedTokens(ctx context.Context, arg QuotaGroupUsedTo
 
 const quotaPrincipalUsedTokens = `-- name: QuotaPrincipalUsedTokens :many
 SELECT requested.scope_id::bigint AS scope_id,
-       COALESCE((
-           SELECT SUM(COALESCE(usage.input_tokens, 0) + COALESCE(usage.output_tokens, 0))
-           FROM usage_record usage
-           WHERE usage.principal_id=requested.scope_id
-             AND usage.started_at>=$1::timestamptz
-             AND usage.started_at<$2::timestamptz
-       ), 0)::bigint AS used_tokens
-FROM unnest($3::bigint[]) AS requested(scope_id)
+       COALESCE(counter.used_tokens, 0)::bigint AS used_tokens
+FROM unnest($1::bigint[]) AS requested(scope_id)
+LEFT JOIN monthly_token_usage counter
+  ON counter.scope_type='PRINCIPAL' AND counter.scope_id=requested.scope_id
+ AND counter.period_start=$2::timestamptz
 ORDER BY requested.scope_id
 `
 
 type QuotaPrincipalUsedTokensParams struct {
-	PeriodStart pgtype.Timestamptz
-	PeriodEnd   pgtype.Timestamptz
 	ScopeIds    []int64
+	PeriodStart pgtype.Timestamptz
 }
 
 type QuotaPrincipalUsedTokensRow struct {
@@ -161,7 +140,7 @@ type QuotaPrincipalUsedTokensRow struct {
 }
 
 func (q *Queries) QuotaPrincipalUsedTokens(ctx context.Context, arg QuotaPrincipalUsedTokensParams) ([]QuotaPrincipalUsedTokensRow, error) {
-	rows, err := q.db.Query(ctx, quotaPrincipalUsedTokens, arg.PeriodStart, arg.PeriodEnd, arg.ScopeIds)
+	rows, err := q.db.Query(ctx, quotaPrincipalUsedTokens, arg.ScopeIds, arg.PeriodStart)
 	if err != nil {
 		return nil, err
 	}

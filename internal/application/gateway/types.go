@@ -70,6 +70,7 @@ type Route struct {
 	ProxyURL, ProxyHeaders                                 catalog.SealedCredential
 	Proxy                                                  *catalog.OutboundProxy
 	QuotaScopes                                            []domainquota.Scope
+	QuotaGroupIDs                                          []int64
 }
 
 const AnthropicProtocol = "ANTHROPIC_MESSAGES"
@@ -331,6 +332,9 @@ func (s *Service) Forward(ctx context.Context, identity appsec.PrincipalIdentity
 	}
 	if request.Trace != nil && len(routes) > 0 {
 		request.Trace.ModelID = routes[0].ModelID
+		if request.Path != "/v1/messages/count_tokens" && request.Protocol != OpenAIImagesProtocol {
+			request.Trace.QuotaGroupIDs = append([]int64(nil), routes[0].QuotaGroupIDs...)
+		}
 	}
 	if s.quotaAdmission != nil && len(routes) > 0 && len(routes[0].QuotaScopes) > 0 &&
 		request.Path != "/v1/messages/count_tokens" && request.Protocol != OpenAIImagesProtocol {
@@ -340,9 +344,6 @@ func (s *Service) Forward(ctx context.Context, identity appsec.PrincipalIdentity
 		}
 		if !decision.Allowed {
 			return nil, ErrBudgetExceeded
-		}
-		if request.Trace != nil {
-			request.Trace.QuotaScopes = append([]domainquota.Scope(nil), routes[0].QuotaScopes...)
 		}
 	}
 	response, err := s.forwardCandidates(ctx, identity, request, parsed, routes)

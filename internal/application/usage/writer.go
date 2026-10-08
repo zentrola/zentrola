@@ -9,7 +9,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/zentrola/zentrola/internal/domain/quota"
 	domain "github.com/zentrola/zentrola/internal/domain/usage"
 )
 
@@ -83,7 +82,7 @@ func (w *Writer) Submit(event domain.Event) error {
 		return source
 	}
 	event.Attempts = append([]domain.Attempt(nil), event.Attempts...)
-	event.QuotaScopes = append([]quota.Scope(nil), event.QuotaScopes...)
+	event.QuotaGroupIDs = append([]int64(nil), event.QuotaGroupIDs...)
 	for index := range event.Attempts {
 		attempt := cloneAttempt(event.Attempts[index])
 		if attempt.AttemptNo <= 0 {

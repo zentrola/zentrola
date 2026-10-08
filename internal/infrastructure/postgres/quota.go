@@ -55,7 +55,7 @@ func (s *QuotaStore) Configured(ctx context.Context, scopeType domain.ScopeType,
 	return result, nil
 }
 
-func (s *QuotaStore) Used(ctx context.Context, scopes []domain.Scope, start, end time.Time) (map[domain.ScopeType]map[int64]int64, error) {
+func (s *QuotaStore) Used(ctx context.Context, scopes []domain.Scope, start, _ time.Time) (map[domain.ScopeType]map[int64]int64, error) {
 	result := make(map[domain.ScopeType]map[int64]int64)
 	if len(scopes) == 0 {
 		return result, nil
@@ -71,10 +71,9 @@ func (s *QuotaStore) Used(ctx context.Context, scopes []domain.Scope, start, end
 		}
 	}
 	periodStart := pgtype.Timestamptz{Time: start.UTC(), Valid: true}
-	periodEnd := pgtype.Timestamptz{Time: end.UTC(), Valid: true}
 	q := dbgen.New(s.pool)
 	if len(principalIDs) > 0 {
-		rows, err := q.QuotaPrincipalUsedTokens(ctx, dbgen.QuotaPrincipalUsedTokensParams{ScopeIds: principalIDs, PeriodStart: periodStart, PeriodEnd: periodEnd})
+		rows, err := q.QuotaPrincipalUsedTokens(ctx, dbgen.QuotaPrincipalUsedTokensParams{ScopeIds: principalIDs, PeriodStart: periodStart})
 		if err != nil {
 			return nil, diagnosePostgresError(ctx, s.logger, "quota", "principal_used_tokens", err, appsec.ErrUnavailable)
 		}
@@ -84,7 +83,7 @@ func (s *QuotaStore) Used(ctx context.Context, scopes []domain.Scope, start, end
 		}
 	}
 	if len(groupIDs) > 0 {
-		rows, err := q.QuotaGroupUsedTokens(ctx, dbgen.QuotaGroupUsedTokensParams{ScopeIds: groupIDs, PeriodStart: periodStart, PeriodEnd: periodEnd})
+		rows, err := q.QuotaGroupUsedTokens(ctx, dbgen.QuotaGroupUsedTokensParams{ScopeIds: groupIDs, PeriodStart: periodStart})
 		if err != nil {
 			return nil, diagnosePostgresError(ctx, s.logger, "quota", "group_used_tokens", err, appsec.ErrUnavailable)
 		}

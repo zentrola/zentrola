@@ -319,7 +319,7 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 		logger.Warn("route state Redis unavailable; cooldown state will fail open", "error_code", "REDIS_UNAVAILABLE")
 	}
 	redisProbeCancel()
-	quotaService := quotaapp.New(postgres.NewQuotaStore(pool, logger), routeState, logger)
+	quotaService := quotaapp.New(postgres.NewQuotaStore(pool, logger), logger)
 	gatewayService := gateway.New(
 		gatewaycache.NewGatewayStore(postgres.NewGatewayStore(pool, logger), gatewayCache, logger), credentials, compatibleUpstream,
 		gateway.WithRouteState(routeState),
@@ -352,7 +352,7 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 		}
 	}()
 	usageStore := postgres.NewUsageStore(pool, logger)
-	usageWriter, err := usageapp.NewWriter(usageStore, logger, usageapp.Options{QueueSize: cfg.Usage.QueueSize, BatchSize: cfg.Usage.BatchSize, FlushInterval: cfg.Usage.FlushInterval, WriteTimeout: cfg.Usage.WriteTimeout}, quotaService)
+	usageWriter, err := usageapp.NewWriter(usageStore, logger, usageapp.Options{QueueSize: cfg.Usage.QueueSize, BatchSize: cfg.Usage.BatchSize, FlushInterval: cfg.Usage.FlushInterval, WriteTimeout: cfg.Usage.WriteTimeout})
 	if err != nil {
 		return err
 	}

@@ -102,7 +102,9 @@ Zentrola 会随 Backend 启动两个成本处理任务。两个任务都会在�
 
 多实例部署通过 Redis 锁保证每类任务同一时间只有一个 Backend 实例执行。这两个锁采用 fail-closed 策略：Redis 不可用时，成本核算和结算暂停，并在后续扫描时重试；Gateway 流量和已经持久化的 Usage 记录不受影响，但成本页面数据可能暂时滞后。如果处理没有推进，可在 Backend 日志中检查 `BILLING_SETTLEMENT_LOCK_FAILED`、`SUBSCRIPTION_BILLING_FAILED`、`API_KEY_BILLING_FAILED`、`API_KEY_RATING_LOCK_FAILED` 或 `API_KEY_RATING_FAILED`。
 
-月度 Token 配额不使用环境变量。管理员在 Admin Web 中按用户、应用或 Group 增加额度或取消额度限制；Redis 计数不可用时，当前用量会根据已持久化的 Usage 记录重建。
+月度 Token 配额不使用环境变量。管理员在 Admin Web 中按用户、应用或 Group 增加额度或取消额度限制。用量累计与 Usage 记录在同一 PostgreSQL 事务中提交；Group 归属按调用发生时的成员关系和模型授权保存。
+
+迁移 `00051` 会按升级时的成员关系和模型授权补齐当前 UTC 月的既有 Group 用量。升级前发生的历史成员变更无法从旧 Usage 记录中准确还原。
 
 ## 日志
 

@@ -1,7 +1,7 @@
 -- name: InsertUsageAttempts :exec
-INSERT INTO usage_record(id,request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,client_protocol,input_tokens,output_tokens,cached_input_tokens,started_at,completed_at,latency_ms,status,error_type,created_at)
-SELECT nextval('zentrola_global_id_seq'),request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,'MODEL_GATEWAY',client_protocol,input_tokens,output_tokens,cached_input_tokens,started_at,completed_at,latency_ms,status,error_type,completed_at
-FROM jsonb_to_recordset(sqlc.arg(payload)::jsonb) AS x(request_id text,attempt_no integer,client_protocol text,principal_id bigint,provider_id bigint,provider_model_id bigint,provider_credential_id bigint,model_id bigint,input_tokens bigint,output_tokens bigint,cached_input_tokens bigint,started_at timestamptz,completed_at timestamptz,latency_ms bigint,status text,error_type text)
+INSERT INTO usage_record(id,request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,client_protocol,quota_group_ids,input_tokens,output_tokens,cached_input_tokens,started_at,completed_at,latency_ms,status,error_type,created_at)
+SELECT nextval('zentrola_global_id_seq'),request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,'MODEL_GATEWAY',client_protocol,COALESCE(quota_group_ids, '{}'::bigint[]),input_tokens,output_tokens,cached_input_tokens,started_at,completed_at,latency_ms,status,error_type,completed_at
+FROM jsonb_to_recordset(sqlc.arg(payload)::jsonb) AS x(request_id text,attempt_no integer,client_protocol text,principal_id bigint,provider_id bigint,provider_model_id bigint,provider_credential_id bigint,model_id bigint,quota_group_ids bigint[],input_tokens bigint,output_tokens bigint,cached_input_tokens bigint,started_at timestamptz,completed_at timestamptz,latency_ms bigint,status text,error_type text)
 ON CONFLICT(request_id,attempt_no) DO NOTHING;
 
 -- name: QueryUsage :many

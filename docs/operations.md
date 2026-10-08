@@ -102,7 +102,9 @@ The defaults are suitable for ordinary deployments. A larger rating page can red
 
 In a multi-instance deployment, Redis locks allow only one Backend instance to run each worker at a time. These locks fail closed: if Redis is unavailable, cost rating and settlement pause and are retried by a later scan. Gateway traffic and persisted usage records remain available, but cost views may temporarily lag. Look for `BILLING_SETTLEMENT_LOCK_FAILED`, `SUBSCRIPTION_BILLING_FAILED`, `API_KEY_BILLING_FAILED`, `API_KEY_RATING_LOCK_FAILED`, or `API_KEY_RATING_FAILED` in Backend logs when processing does not advance.
 
-Monthly Token quotas do not use environment variables. Administrators configure or remove quota limits per user, application, or Group in the Admin Web; current usage is rebuilt from persisted usage records when its Redis counter is unavailable.
+Monthly Token quotas do not use environment variables. Administrators configure or remove quota limits per user, application, or Group in the Admin Web. Usage totals are updated in the same PostgreSQL transaction as usage records; Group attribution is recorded at call time.
+
+Migration `00051` backfills the current UTC month's existing Group usage from membership and model permissions at upgrade time. Earlier membership changes cannot be reconstructed from pre-upgrade usage records.
 
 ## Logging
 

@@ -1,10 +1,6 @@
 package usage
 
-import (
-	"time"
-
-	"github.com/zentrola/zentrola/internal/domain/quota"
-)
+import "time"
 
 // Event 不持有 Prompt、响应文本、Credential 或数据库连接。
 type Event struct {
@@ -16,7 +12,7 @@ type Event struct {
 	RequestAt, CompletedAt time.Time
 	Status                 Status
 	ErrorType              string
-	QuotaScopes            []quota.Scope
+	QuotaGroupIDs          []int64
 	Attempt                *Attempt
 	Attempts               []Attempt
 }
