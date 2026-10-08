@@ -9,6 +9,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -65,6 +66,28 @@ func writeGatewayError(w http.ResponseWriter, failure *gw.Failure) {
 		message += " [" + failure.Code + "]"
 	}
 	writeProtocolError(w, failure.Status, failure.Type, message)
+}
+
+func failureWithRequestedModel(failure *gw.Failure, protocol string, body []byte) *gw.Failure {
+	if failure.Code != gw.ErrModelUnknown.Code && failure.Code != gw.ErrRoute.Code {
+		return failure
+	}
+	parse := gw.Parse
+	if gw.IsOpenAIProtocol(protocol) {
+		parse = gw.ParseOpenAI
+	}
+	parsed, err := parse(body)
+	if err != nil {
+		return failure
+	}
+	detailed := *failure
+	model := strconv.Quote(parsed.Model)
+	if failure.Code == gw.ErrModelUnknown.Code {
+		detailed.Message = "The requested model " + model + " is not configured."
+	} else {
+		detailed.Message = "No active provider route is available for model " + model + ". Enable a provider and configure its endpoint and model mapping."
+	}
+	return &detailed
 }
 
 type gatewayRoute struct {
@@ -304,6 +327,7 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			failure = gw.ErrTimeout
 		}
+		failure = failureWithRequestedModel(failure, protocol, body)
 		attributes := []any{
 			"error_code", failure.Code, "protocol", protocol,
 			"principal_id", identity.ID, "access_key_id", identity.AccessKeyID,
