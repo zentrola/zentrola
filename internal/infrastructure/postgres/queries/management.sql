@@ -47,6 +47,11 @@ SET monthly_token_limit=COALESCE(monthly_token_limit, 0)+sqlc.arg(amount)::bigin
 WHERE id=sqlc.arg(principal_id) AND NOT is_deleted AND principal_type IN ('MEMBER','APPLICATION')
 RETURNING monthly_token_limit;
 
+-- name: ManageClearPrincipalTokenQuota :exec
+UPDATE principal
+SET monthly_token_limit=NULL,updated_by=sqlc.arg(updated_by),updated_at=sqlc.arg(updated_at)
+WHERE id=sqlc.arg(principal_id) AND NOT is_deleted AND principal_type IN ('MEMBER','APPLICATION');
+
 -- name: ManageDeleteMember :exec
 UPDATE principal SET is_deleted=true,status='DISABLED',updated_by=$2,updated_at=$3
 WHERE id=$1 AND is_deleted=false AND principal_type='MEMBER';
@@ -81,6 +86,11 @@ SET monthly_token_limit=COALESCE(monthly_token_limit, 0)+sqlc.arg(amount)::bigin
     updated_by=sqlc.arg(updated_by),updated_at=sqlc.arg(updated_at)
 WHERE id=sqlc.arg(group_id) AND NOT is_deleted
 RETURNING monthly_token_limit;
+
+-- name: ManageClearGroupTokenQuota :exec
+UPDATE principal_group
+SET monthly_token_limit=NULL,updated_by=sqlc.arg(updated_by),updated_at=sqlc.arg(updated_at)
+WHERE id=sqlc.arg(group_id) AND NOT is_deleted;
 -- name: ManageDeleteGroup :exec
 UPDATE principal_group SET is_deleted=true,status='DISABLED',updated_by=$2,updated_at=$3
 WHERE id=$1 AND is_deleted=false;

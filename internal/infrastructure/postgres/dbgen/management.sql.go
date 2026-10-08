@@ -503,6 +503,40 @@ func (q *Queries) ManageBlockResourceRuntime(ctx context.Context, arg ManageBloc
 	return result.RowsAffected(), nil
 }
 
+const manageClearGroupTokenQuota = `-- name: ManageClearGroupTokenQuota :exec
+UPDATE principal_group
+SET monthly_token_limit=NULL,updated_by=$1,updated_at=$2
+WHERE id=$3 AND NOT is_deleted
+`
+
+type ManageClearGroupTokenQuotaParams struct {
+	UpdatedBy string
+	UpdatedAt pgtype.Timestamptz
+	GroupID   int64
+}
+
+func (q *Queries) ManageClearGroupTokenQuota(ctx context.Context, arg ManageClearGroupTokenQuotaParams) error {
+	_, err := q.db.Exec(ctx, manageClearGroupTokenQuota, arg.UpdatedBy, arg.UpdatedAt, arg.GroupID)
+	return err
+}
+
+const manageClearPrincipalTokenQuota = `-- name: ManageClearPrincipalTokenQuota :exec
+UPDATE principal
+SET monthly_token_limit=NULL,updated_by=$1,updated_at=$2
+WHERE id=$3 AND NOT is_deleted AND principal_type IN ('MEMBER','APPLICATION')
+`
+
+type ManageClearPrincipalTokenQuotaParams struct {
+	UpdatedBy   string
+	UpdatedAt   pgtype.Timestamptz
+	PrincipalID int64
+}
+
+func (q *Queries) ManageClearPrincipalTokenQuota(ctx context.Context, arg ManageClearPrincipalTokenQuotaParams) error {
+	_, err := q.db.Exec(ctx, manageClearPrincipalTokenQuota, arg.UpdatedBy, arg.UpdatedAt, arg.PrincipalID)
+	return err
+}
+
 const manageCreateApplication = `-- name: ManageCreateApplication :exec
 INSERT INTO principal(id,principal_type,name,remark,status,created_by,updated_by,created_at,updated_at)
 VALUES($1,'APPLICATION',$2,$3,'DISABLED',$4,$4,$5,$5)

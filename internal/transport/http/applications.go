@@ -145,7 +145,7 @@ func (s *SecurityHandlers) mountApplicationRoutes(r chi.Router) {
 	// @Produce json
 	// @Security AdminBearer
 	// @Param id path string true "应用 ID"
-	// @Param body body AddTokenQuotaRequest true "增加额度及原因"
+	// @Param body body AddTokenQuotaRequest true "增加额度和可选原因"
 	// @Success 200 {object} response{data=mgmt.Application}
 	// @Failure 400,401,404,503 {object} response
 	// @Router /api/v1/applications/{id}/token-quota/add [post]
@@ -160,6 +160,23 @@ func (s *SecurityHandlers) mountApplicationRoutes(r chi.Router) {
 			return
 		}
 		value, err := a.AddTokenQuota(req.Context(), adminFrom(req), id, input.TokenAmount(), input.Reason, requestMeta(req))
+		adminResult(w, req, http.StatusOK, value, err)
+	})
+	// @Summary 取消应用月度 Token 配额限制
+	// @Tags 应用管理
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "应用 ID"
+	// @Success 200 {object} response{data=mgmt.Application}
+	// @Failure 400,401,404,409,503 {object} response
+	// @Router /api/v1/applications/{id}/token-quota [delete]
+	r.Delete("/applications/{id}/token-quota", func(w http.ResponseWriter, req *http.Request) {
+		id, err := positiveID(chi.URLParam(req, "id"))
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		value, err := a.RemoveTokenQuota(req.Context(), adminFrom(req), id, requestMeta(req))
 		adminResult(w, req, http.StatusOK, value, err)
 	})
 	// @Summary 设置应用状态

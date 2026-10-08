@@ -355,7 +355,7 @@ func (r UpdateStatusRequest) Valid() bool { return r.Status == "ACTIVE" || r.Sta
 
 type AddTokenQuotaRequest struct {
 	Amount string `json:"amount" binding:"required" example:"1000000"`
-	Reason string `json:"reason" binding:"required" example:"项目扩容"`
+	Reason string `json:"reason" example:"项目扩容"`
 }
 
 func (r *AddTokenQuotaRequest) Normalize() {
@@ -365,7 +365,7 @@ func (r *AddTokenQuotaRequest) Normalize() {
 
 func (r AddTokenQuotaRequest) Valid() bool {
 	amount, err := strconv.ParseInt(r.Amount, 10, 64)
-	return err == nil && amount > 0 && validRequestText(r.Reason, 500, true)
+	return err == nil && amount > 0 && validRequestText(r.Reason, 500, false)
 }
 
 func (r AddTokenQuotaRequest) TokenAmount() int64 {

@@ -24,6 +24,7 @@ type memberSessionStub struct {
 	auditErr     error
 	deleted      bool
 	quotaAdds    int
+	quotaClears  int
 }
 
 func (s *memberSessionStub) Member(context.Context, int64) (Member, error) { return s.member, nil }
@@ -57,6 +58,11 @@ func (s *memberSessionStub) AddPrincipalTokenQuota(_ context.Context, _ int64, a
 	s.member.MonthlyTokenLimit = &limit
 	s.quotaAdds++
 	return limit, nil
+}
+func (s *memberSessionStub) ClearPrincipalTokenQuota(context.Context, int64) error {
+	s.member.MonthlyTokenLimit = nil
+	s.quotaClears++
+	return nil
 }
 func (s *memberSessionStub) SetGroupMember(_ context.Context, groupID, memberID int64, add bool) (bool, error) {
 	value := int64(0)
@@ -165,6 +171,53 @@ func TestAddMemberTokenQuotaRejectsOverflowBeforeWrite(t *testing.T) {
 	}
 }
 
+func TestAddMemberTokenQuotaAllowsEmptyReasonWithoutEmptyAuditField(t *testing.T) {
+	session := &memberSessionStub{member: Member{ID: 7, Name: "成员"}}
+	service := MemberService{store: memberStoreStub{session: session}}
+	updated, err := service.AddMemberTokenQuota(
+		context.Background(), admin.Identity{ID: 1}, 7, 500, "", appsec.RequestMeta{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.MonthlyTokenLimit == nil || *updated.MonthlyTokenLimit != 500 || len(session.audits) != 1 {
+		t.Fatalf("updated=%+v audits=%+v", updated, session.audits)
+	}
+	after := session.audits[0].After.(map[string]any)
+	if _, exists := after["reason"]; exists {
+		t.Fatalf("empty reason should be omitted from audit: %+v", after)
+	}
+}
+
+func TestRemoveMemberTokenQuotaClearsLimitAndAudits(t *testing.T) {
+	limit := int64(500)
+	session := &memberSessionStub{member: Member{ID: 7, Name: "成员", MonthlyTokenLimit: &limit}}
+	service := MemberService{store: memberStoreStub{session: session}}
+	updated, err := service.RemoveMemberTokenQuota(context.Background(), admin.Identity{ID: 1}, 7, appsec.RequestMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.MonthlyTokenLimit != nil || session.quotaClears != 1 {
+		t.Fatalf("updated=%+v quotaClears=%d", updated, session.quotaClears)
+	}
+	if len(session.audits) != 1 || session.audits[0].Event != operation.PrincipalTokenQuotaRemove {
+		t.Fatalf("unexpected audit: %+v", session.audits)
+	}
+	before := session.audits[0].Before.(map[string]any)
+	if before["monthlyTokenLimit"] != "500" {
+		t.Fatalf("unexpected previous quota: %+v", before)
+	}
+}
+
+func TestRemoveMemberTokenQuotaRejectsMissingLimit(t *testing.T) {
+	session := &memberSessionStub{member: Member{ID: 7, Name: "成员"}}
+	service := MemberService{store: memberStoreStub{session: session}}
+	_, err := service.RemoveMemberTokenQuota(context.Background(), admin.Identity{ID: 1}, 7, appsec.RequestMeta{})
+	if !errors.Is(err, ErrConflict) || session.quotaClears != 0 || len(session.audits) != 0 {
+		t.Fatalf("err=%v quotaClears=%d audits=%d", err, session.quotaClears, len(session.audits))
+	}
+}
+
 type groupSessionStub struct {
 	GroupSession
 	group         Group
@@ -176,6 +229,7 @@ type groupSessionStub struct {
 	relations     [][3]int64
 	audits        []Audit
 	quotaAdds     int
+	quotaClears   int
 }
 
 func (s *groupSessionStub) Group(context.Context, int64) (Group, error) { return s.group, nil }
@@ -209,6 +263,11 @@ func (s *groupSessionStub) AddGroupTokenQuota(_ context.Context, _ int64, amount
 	s.group.MonthlyTokenLimit = &limit
 	s.quotaAdds++
 	return limit, nil
+}
+func (s *groupSessionStub) ClearGroupTokenQuota(context.Context, int64) error {
+	s.group.MonthlyTokenLimit = nil
+	s.quotaClears++
+	return nil
 }
 func (s *groupSessionStub) SetGroupModel(_ context.Context, groupID, modelID int64, grant bool) (bool, error) {
 	value := int64(0)
@@ -308,5 +367,21 @@ func TestAddGroupTokenQuotaPreservesPreviousLimitInAudit(t *testing.T) {
 	before := session.audits[0].Before.(map[string]any)
 	if before["monthlyTokenLimit"] != "1000" {
 		t.Fatalf("unexpected previous quota: %+v", before)
+	}
+}
+
+func TestRemoveGroupTokenQuotaClearsLimitAndAudits(t *testing.T) {
+	limit := int64(1250)
+	session := &groupSessionStub{group: Group{ID: 22, Name: "分组", MonthlyTokenLimit: &limit}}
+	service := GroupService{store: groupStoreStub{session: session}}
+	updated, err := service.RemoveGroupTokenQuota(context.Background(), admin.Identity{ID: 1}, 22, appsec.RequestMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.MonthlyTokenLimit != nil || session.quotaClears != 1 {
+		t.Fatalf("updated=%+v quotaClears=%d", updated, session.quotaClears)
+	}
+	if len(session.audits) != 1 || session.audits[0].Event != operation.GroupTokenQuotaRemove {
+		t.Fatalf("unexpected audit: %+v", session.audits)
 	}
 }

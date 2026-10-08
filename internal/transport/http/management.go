@@ -836,7 +836,7 @@ func (s *SecurityHandlers) mountManagementCommandRoutes(r chi.Router) {
 	// @Produce json
 	// @Security AdminBearer
 	// @Param id path string true "用户 ID"
-	// @Param body body AddTokenQuotaRequest true "增加额度及原因"
+	// @Param body body AddTokenQuotaRequest true "增加额度和可选原因"
 	// @Success 200 {object} response{data=mgmt.Member}
 	// @Failure 400,401,404,503 {object} response
 	// @Router /api/v1/members/{id}/token-quota/add [post]
@@ -851,6 +851,23 @@ func (s *SecurityHandlers) mountManagementCommandRoutes(r chi.Router) {
 			return
 		}
 		data, err := m.AddMemberTokenQuota(req.Context(), adminFrom(req), id, input.TokenAmount(), input.Reason, requestMeta(req))
+		adminResult(w, req, http.StatusOK, data, err)
+	})
+	// @Summary 取消用户月度 Token 配额限制
+	// @Tags 成员管理
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "用户 ID"
+	// @Success 200 {object} response{data=mgmt.Member}
+	// @Failure 400,401,404,409,503 {object} response
+	// @Router /api/v1/members/{id}/token-quota [delete]
+	r.Delete("/members/{id}/token-quota", func(w http.ResponseWriter, req *http.Request) {
+		id, err := routeID(req, "id")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		data, err := m.RemoveMemberTokenQuota(req.Context(), adminFrom(req), id, requestMeta(req))
 		adminResult(w, req, http.StatusOK, data, err)
 	})
 	// @Summary 创建分组
@@ -920,7 +937,7 @@ func (s *SecurityHandlers) mountManagementCommandRoutes(r chi.Router) {
 	// @Produce json
 	// @Security AdminBearer
 	// @Param id path string true "分组 ID"
-	// @Param body body AddTokenQuotaRequest true "增加额度及原因"
+	// @Param body body AddTokenQuotaRequest true "增加额度和可选原因"
 	// @Success 200 {object} response{data=mgmt.Group}
 	// @Failure 400,401,404,503 {object} response
 	// @Router /api/v1/groups/{id}/token-quota/add [post]
@@ -935,6 +952,23 @@ func (s *SecurityHandlers) mountManagementCommandRoutes(r chi.Router) {
 			return
 		}
 		data, err := m.AddGroupTokenQuota(req.Context(), adminFrom(req), id, input.TokenAmount(), input.Reason, requestMeta(req))
+		adminResult(w, req, http.StatusOK, data, err)
+	})
+	// @Summary 取消分组月度 Token 配额限制
+	// @Tags 分组与授权
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "分组 ID"
+	// @Success 200 {object} response{data=mgmt.Group}
+	// @Failure 400,401,404,409,503 {object} response
+	// @Router /api/v1/groups/{id}/token-quota [delete]
+	r.Delete("/groups/{id}/token-quota", func(w http.ResponseWriter, req *http.Request) {
+		id, err := routeID(req, "id")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		data, err := m.RemoveGroupTokenQuota(req.Context(), adminFrom(req), id, requestMeta(req))
 		adminResult(w, req, http.StatusOK, data, err)
 	})
 	// @Summary 创建资源

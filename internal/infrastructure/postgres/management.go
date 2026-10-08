@@ -417,6 +417,11 @@ func (s *managementSession) AddPrincipalTokenQuota(ctx context.Context, id, amou
 	}
 	return *limit, nil
 }
+func (s *managementSession) ClearPrincipalTokenQuota(ctx context.Context, id int64) error {
+	return s.q.ManageClearPrincipalTokenQuota(ctx, dbgen.ManageClearPrincipalTokenQuotaParams{
+		PrincipalID: id, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(time.Now().UTC()),
+	})
+}
 func (s *managementSession) DeleteMember(ctx context.Context, id int64) error {
 	now, actor := pgTime(time.Now().UTC()), actorRef(s.actor.ID)
 	// 先锁定并删除成员，和签发 Key 的成员行锁串行化；所有更改与审计同事务提交。
@@ -445,6 +450,11 @@ func (s *managementSession) AddGroupTokenQuota(ctx context.Context, id, amount i
 		return 0, err
 	}
 	return *limit, nil
+}
+func (s *managementSession) ClearGroupTokenQuota(ctx context.Context, id int64) error {
+	return s.q.ManageClearGroupTokenQuota(ctx, dbgen.ManageClearGroupTokenQuotaParams{
+		GroupID: id, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(time.Now().UTC()),
+	})
 }
 func (s *managementSession) DeleteGroup(ctx context.Context, id int64) error {
 	now, actor := pgTime(time.Now().UTC()), actorRef(s.actor.ID)

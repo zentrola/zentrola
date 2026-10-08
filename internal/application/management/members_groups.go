@@ -27,6 +27,7 @@ type MemberSession interface {
 	SetMemberStatus(context.Context, int64, string) error
 	DeleteMember(context.Context, int64) error
 	AddPrincipalTokenQuota(context.Context, int64, int64) (int64, error)
+	ClearPrincipalTokenQuota(context.Context, int64) error
 	SetGroupMember(context.Context, int64, int64, bool) (bool, error)
 	Audit(context.Context, Audit, appsec.RequestMeta) error
 }
@@ -64,6 +65,7 @@ type GroupSession interface {
 	SetGroupStatus(context.Context, int64, string) error
 	DeleteGroup(context.Context, int64) error
 	AddGroupTokenQuota(context.Context, int64, int64) (int64, error)
+	ClearGroupTokenQuota(context.Context, int64) error
 	SetGroupMember(context.Context, int64, int64, bool) (bool, error)
 	SetGroupModel(context.Context, int64, int64, bool) (bool, error)
 	Audit(context.Context, Audit, appsec.RequestMeta) error
@@ -251,7 +253,7 @@ func (s *MemberService) DeleteMember(ctx context.Context, actor admin.Identity, 
 }
 
 func (s *MemberService) AddMemberTokenQuota(ctx context.Context, actor admin.Identity, id, amount int64, reason string, meta appsec.RequestMeta) (Member, error) {
-	if id <= 0 || amount <= 0 || !validText(reason, 500) {
+	if id <= 0 || amount <= 0 || !validTokenQuotaReason(reason) {
 		return Member{}, appsec.ErrInvalidArgument
 	}
 	var updated Member
@@ -271,7 +273,32 @@ func (s *MemberService) AddMemberTokenQuota(ctx context.Context, actor admin.Ide
 		updated.MonthlyTokenLimit = &limit
 		return w.Audit(ctx, Audit{Event: operation.PrincipalTokenQuotaAdd, Target: "PRINCIPAL", ID: id, Name: current.Name,
 			Before: map[string]any{"monthlyTokenLimit": tokenQuotaBeforeValue(limit, amount)},
-			After:  map[string]any{"monthlyTokenLimit": idString(limit), "amount": idString(amount), "reason": reason}}, meta)
+			After:  tokenQuotaAfterValue(limit, amount, reason)}, meta)
+	})
+	return updated, err
+}
+
+func (s *MemberService) RemoveMemberTokenQuota(ctx context.Context, actor admin.Identity, id int64, meta appsec.RequestMeta) (Member, error) {
+	if id <= 0 {
+		return Member{}, appsec.ErrInvalidArgument
+	}
+	var updated Member
+	err := s.store.WriteMember(ctx, actor, func(w MemberSession) error {
+		current, err := w.Member(ctx, id)
+		if err != nil {
+			return err
+		}
+		if current.MonthlyTokenLimit == nil {
+			return ErrConflict
+		}
+		if err := w.ClearPrincipalTokenQuota(ctx, id); err != nil {
+			return err
+		}
+		updated = current
+		updated.MonthlyTokenLimit = nil
+		return w.Audit(ctx, Audit{Event: operation.PrincipalTokenQuotaRemove, Target: "PRINCIPAL", ID: id, Name: current.Name,
+			Before: map[string]any{"monthlyTokenLimit": idString(*current.MonthlyTokenLimit)},
+			After:  map[string]any{"monthlyTokenLimit": nil}}, meta)
 	})
 	return updated, err
 }
@@ -280,7 +307,7 @@ func (s *GroupService) CreateGroup(ctx context.Context, actor admin.Identity, co
 }
 
 func (s *GroupService) AddGroupTokenQuota(ctx context.Context, actor admin.Identity, id, amount int64, reason string, meta appsec.RequestMeta) (Group, error) {
-	if id <= 0 || amount <= 0 || !validText(reason, 500) {
+	if id <= 0 || amount <= 0 || !validTokenQuotaReason(reason) {
 		return Group{}, appsec.ErrInvalidArgument
 	}
 	var updated Group
@@ -300,7 +327,32 @@ func (s *GroupService) AddGroupTokenQuota(ctx context.Context, actor admin.Ident
 		updated.MonthlyTokenLimit = &limit
 		return w.Audit(ctx, Audit{Event: operation.GroupTokenQuotaAdd, Target: "GROUP", ID: id, Name: current.Name,
 			Before: map[string]any{"monthlyTokenLimit": tokenQuotaBeforeValue(limit, amount)},
-			After:  map[string]any{"monthlyTokenLimit": idString(limit), "amount": idString(amount), "reason": reason}}, meta)
+			After:  tokenQuotaAfterValue(limit, amount, reason)}, meta)
+	})
+	return updated, err
+}
+
+func (s *GroupService) RemoveGroupTokenQuota(ctx context.Context, actor admin.Identity, id int64, meta appsec.RequestMeta) (Group, error) {
+	if id <= 0 {
+		return Group{}, appsec.ErrInvalidArgument
+	}
+	var updated Group
+	err := s.store.WriteGroup(ctx, actor, func(w GroupSession) error {
+		current, err := w.Group(ctx, id)
+		if err != nil {
+			return err
+		}
+		if current.MonthlyTokenLimit == nil {
+			return ErrConflict
+		}
+		if err := w.ClearGroupTokenQuota(ctx, id); err != nil {
+			return err
+		}
+		updated = current
+		updated.MonthlyTokenLimit = nil
+		return w.Audit(ctx, Audit{Event: operation.GroupTokenQuotaRemove, Target: "GROUP", ID: id, Name: current.Name,
+			Before: map[string]any{"monthlyTokenLimit": idString(*current.MonthlyTokenLimit)},
+			After:  map[string]any{"monthlyTokenLimit": nil}}, meta)
 	})
 	return updated, err
 }

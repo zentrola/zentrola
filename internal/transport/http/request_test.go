@@ -154,6 +154,9 @@ func TestAddTokenQuotaRequestKeepsInt64Precision(t *testing.T) {
 	if !request.Valid() || request.TokenAmount() != 10000000000000001 || request.Reason != "项目扩容" {
 		t.Fatalf("normalized request = %+v amount=%d", request, request.TokenAmount())
 	}
+	if request := (AddTokenQuotaRequest{Amount: "1000000"}); !request.Valid() {
+		t.Fatal("optional empty reason was rejected")
+	}
 }
 
 func TestTimeInputsRequireUTC(t *testing.T) {

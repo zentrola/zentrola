@@ -22,6 +22,7 @@ type applicationSessionStub struct {
 	keyError    error
 	audits      []Audit
 	quotaAdds   int
+	quotaClears int
 }
 
 func (s *applicationSessionStub) Application(context.Context, int64) (Application, error) {
@@ -54,6 +55,11 @@ func (s *applicationSessionStub) AddPrincipalTokenQuota(_ context.Context, _ int
 	s.application.MonthlyTokenLimit = &limit
 	s.quotaAdds++
 	return limit, nil
+}
+func (s *applicationSessionStub) ClearPrincipalTokenQuota(context.Context, int64) error {
+	s.application.MonthlyTokenLimit = nil
+	s.quotaClears++
+	return nil
 }
 func (s *applicationSessionStub) Audit(_ context.Context, audit Audit, _ appsec.RequestMeta) error {
 	s.audits = append(s.audits, audit)
@@ -128,6 +134,22 @@ func TestAddApplicationTokenQuotaUsesPrincipalAuditType(t *testing.T) {
 		t.Fatalf("updated=%+v quotaAdds=%d", updated, session.quotaAdds)
 	}
 	if len(session.audits) != 1 || session.audits[0].Event != operation.PrincipalTokenQuotaAdd || session.audits[0].Target != "APPLICATION" {
+		t.Fatalf("unexpected audit: %+v", session.audits)
+	}
+}
+
+func TestRemoveApplicationTokenQuotaClearsLimitAndAudits(t *testing.T) {
+	limit := int64(800)
+	session := &applicationSessionStub{application: Application{ID: 7, Name: "应用", MonthlyTokenLimit: &limit}}
+	service := ApplicationService{store: applicationStoreStub{session: session}}
+	updated, err := service.RemoveTokenQuota(context.Background(), admin.Identity{ID: 1}, 7, appsec.RequestMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.MonthlyTokenLimit != nil || session.quotaClears != 1 {
+		t.Fatalf("updated=%+v quotaClears=%d", updated, session.quotaClears)
+	}
+	if len(session.audits) != 1 || session.audits[0].Event != operation.PrincipalTokenQuotaRemove || session.audits[0].Target != "APPLICATION" {
 		t.Fatalf("unexpected audit: %+v", session.audits)
 	}
 }

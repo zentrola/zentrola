@@ -32,6 +32,7 @@ type ApplicationSession interface {
 	SetApplicationStatus(context.Context, int64, string) error
 	DeleteApplication(context.Context, int64) error
 	AddPrincipalTokenQuota(context.Context, int64, int64) (int64, error)
+	ClearPrincipalTokenQuota(context.Context, int64) error
 	SetGroupApplication(context.Context, int64, int64, bool) (bool, error)
 	Audit(context.Context, Audit, appsec.RequestMeta) error
 }
@@ -310,7 +311,7 @@ func (s *ApplicationService) Delete(ctx context.Context, actor admin.Identity, i
 }
 
 func (s *ApplicationService) AddTokenQuota(ctx context.Context, actor admin.Identity, id, amount int64, reason string, meta appsec.RequestMeta) (Application, error) {
-	if id <= 0 || amount <= 0 || !validText(reason, 500) {
+	if id <= 0 || amount <= 0 || !validTokenQuotaReason(reason) {
 		return Application{}, appsec.ErrInvalidArgument
 	}
 	var updated Application
@@ -330,7 +331,32 @@ func (s *ApplicationService) AddTokenQuota(ctx context.Context, actor admin.Iden
 		updated.MonthlyTokenLimit = &limit
 		return w.Audit(ctx, Audit{Event: operation.PrincipalTokenQuotaAdd, Target: "APPLICATION", ID: id, Name: current.Name,
 			Before: map[string]any{"monthlyTokenLimit": tokenQuotaBeforeValue(limit, amount)},
-			After:  map[string]any{"monthlyTokenLimit": idString(limit), "amount": idString(amount), "reason": reason}}, meta)
+			After:  tokenQuotaAfterValue(limit, amount, reason)}, meta)
+	})
+	return updated, err
+}
+
+func (s *ApplicationService) RemoveTokenQuota(ctx context.Context, actor admin.Identity, id int64, meta appsec.RequestMeta) (Application, error) {
+	if id <= 0 {
+		return Application{}, appsec.ErrInvalidArgument
+	}
+	var updated Application
+	err := s.store.WriteApplication(ctx, actor, func(w ApplicationSession) error {
+		current, err := w.Application(ctx, id)
+		if err != nil {
+			return err
+		}
+		if current.MonthlyTokenLimit == nil {
+			return ErrConflict
+		}
+		if err := w.ClearPrincipalTokenQuota(ctx, id); err != nil {
+			return err
+		}
+		updated = current
+		updated.MonthlyTokenLimit = nil
+		return w.Audit(ctx, Audit{Event: operation.PrincipalTokenQuotaRemove, Target: "APPLICATION", ID: id, Name: current.Name,
+			Before: map[string]any{"monthlyTokenLimit": idString(*current.MonthlyTokenLimit)},
+			After:  map[string]any{"monthlyTokenLimit": nil}}, meta)
 	})
 	return updated, err
 }

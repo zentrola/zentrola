@@ -49,7 +49,8 @@ const statusTarget = ref<Member | null>(null),
   selected = ref<Member | null>(null),
   viewingKeys = ref<Member | null>(null),
   deleteTarget = ref<Member | null>(null),
-  quotaTarget = ref<Member | null>(null)
+  quotaTarget = ref<Member | null>(null),
+  quotaRemovalTarget = ref<Member | null>(null)
 const quotaStatuses = ref<Record<string, TokenQuotaStatus>>({})
 let quotaRevision = 0
 const keyName = ref(''),
@@ -85,6 +86,16 @@ async function loadQuotaStatuses(rows: Member[]) {
 async function quotaSaved() {
   quotaTarget.value = null
   await refresh()
+}
+function removeTokenQuota() {
+  if (!quotaRemovalTarget.value) return
+  const memberID = quotaRemovalTarget.value.id
+  void run(async () => {
+    await api(`${basePath.value}/${memberID}/token-quota`, 'DELETE')
+    quotaRemovalTarget.value = null
+    await refresh()
+    showSuccessToast(t('tokenQuota.removed'))
+  })
 }
 function newMember() {
   editing.value = null
@@ -253,8 +264,8 @@ async function copyKey() {
         <colgroup>
           <col class="record-id-column" />
           <col class="member-name-column" />
-          <col class="member-quota-column" />
           <col class="member-status-column" />
+          <col class="member-quota-column" />
           <col class="member-remark-column" />
           <col class="member-created-column" />
           <col class="member-action-column" />
@@ -263,8 +274,8 @@ async function copyKey() {
           <tr>
             <th>{{ t('common.id') }}</th>
             <th>{{ local('member') }}</th>
-            <th>{{ t('tokenQuota.column') }}</th>
             <th>{{ local('activationStatus') }}</th>
+            <th>{{ t('tokenQuota.column') }}</th>
             <th>{{ t('common.remark') }}</th>
             <th>{{ t('common.created') }}</th>
             <th class="align-right">{{ t('common.actions') }}</th>
@@ -293,12 +304,6 @@ async function copyKey() {
               </div>
             </td>
             <td>
-              <TokenQuotaUsage
-                :limit="member.monthlyTokenLimit"
-                :status="quotaStatuses[member.id]"
-              />
-            </td>
-            <td>
               <StatusSwitch
                 :value="member.status"
                 :name="member.name"
@@ -306,6 +311,12 @@ async function copyKey() {
                 :disabled="busy || loading"
                 :busy="busy && statusTarget?.id === member.id"
                 @change="changeStatus(member)"
+              />
+            </td>
+            <td>
+              <TokenQuotaUsage
+                :limit="member.monthlyTokenLimit"
+                :status="quotaStatuses[member.id]"
               />
             </td>
             <td class="remark-cell" :title="member.remark || ''">
@@ -330,6 +341,14 @@ async function copyKey() {
                     @click="quotaTarget = member"
                   >
                     {{ t('tokenQuota.addAction') }}
+                  </button>
+                  <button
+                    v-if="member.monthlyTokenLimit"
+                    class="text-button"
+                    :disabled="busy || loading"
+                    @click="quotaRemovalTarget = member"
+                  >
+                    {{ t('tokenQuota.removeAction') }}
                   </button>
                   <button
                     class="text-button danger"
@@ -455,6 +474,17 @@ async function copyKey() {
       </footer>
     </form></Modal
   >
+  <ConfirmDialog
+    v-if="quotaRemovalTarget"
+    :title="t('tokenQuota.removeTitle')"
+    :message="t('tokenQuota.removeQuestion', { name: quotaRemovalTarget.name })"
+    :hint="t('tokenQuota.removeHint')"
+    :confirm-label="t('tokenQuota.removeAction')"
+    :busy="busy"
+    tone="warning"
+    @close="quotaRemovalTarget = null"
+    @confirm="removeTokenQuota"
+  />
   <ConfirmDialog
     v-if="deleteTarget"
     :title="local('deleteTitle')"

@@ -129,12 +129,20 @@ func validRemark(s string) bool { return s == "" || validText(s, 2000) }
 func validTokenQuotaAddition(current *int64, amount int64) bool {
 	return amount > 0 && (current == nil || amount <= int64(^uint64(0)>>1)-*current)
 }
+func validTokenQuotaReason(reason string) bool { return reason == "" || validText(reason, 500) }
 func tokenQuotaBeforeValue(limit, amount int64) any {
 	before := limit - amount
 	if before == 0 {
 		return nil
 	}
 	return idString(before)
+}
+func tokenQuotaAfterValue(limit, amount int64, reason string) map[string]any {
+	after := map[string]any{"monthlyTokenLimit": idString(limit), "amount": idString(amount)}
+	if reason != "" {
+		after["reason"] = reason
+	}
+	return after
 }
 func remark(s string) *string {
 	if s == "" {

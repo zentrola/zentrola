@@ -407,6 +407,7 @@ type MemberWriter interface {
 	SetMemberStatus(context.Context, int64, string) error
 	DeleteMember(context.Context, int64) error
 	AddPrincipalTokenQuota(context.Context, int64, int64) (int64, error)
+	ClearPrincipalTokenQuota(context.Context, int64) error
 }
 
 type GroupWriter interface {
@@ -415,6 +416,7 @@ type GroupWriter interface {
 	SetGroupStatus(context.Context, int64, string) error
 	DeleteGroup(context.Context, int64) error
 	AddGroupTokenQuota(context.Context, int64, int64) (int64, error)
+	ClearGroupTokenQuota(context.Context, int64) error
 	SetGroupMember(context.Context, int64, int64, bool) (bool, error)
 	SetGroupModel(context.Context, int64, int64, bool) (bool, error)
 }

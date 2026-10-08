@@ -1033,6 +1033,18 @@ async function fixture(page: Page) {
       row.monthlyTokenLimit = String(BigInt(row.monthlyTokenLimit || '0') + BigInt(body.amount))
       return reply(row)
     }
+    if (
+      (segments[0] === 'members' || segments[0] === 'groups') &&
+      segments[2] === 'token-quota' &&
+      segments.length === 3 &&
+      method === 'DELETE'
+    ) {
+      const source = segments[0] === 'groups' ? groups : members
+      const row = source.find((entry) => entry.id === segments[1])
+      if (!row) return reply(null, 404, 'NOT_FOUND')
+      row.monthlyTokenLimit = null
+      return reply(row)
+    }
     if (segments[0] === 'members' && segments.length === 2 && method === 'PUT') {
       if (conflict) return reply(null, 409, 'CONFLICT')
       const row = members.find((member) => member.id === segments[1])
@@ -2464,14 +2476,14 @@ test('成员列表不预查密钥且分配密钥后可激活', async ({ page }) 
   expect(state.members.find((member) => member.name === '周予安')?.status).toBe('ACTIVE')
 })
 
-test('用户月度额度展示已用与剩余并支持增量调整', async ({ page }) => {
+test('用户月度额度展示已用与剩余并支持增量调整和取消限制', async ({ page }) => {
   const state = await fixture(page)
   state.members[0].monthlyTokenLimit = '1000'
   state.members[0].quotaUsedTokens = '600'
   await signIn(page)
 
   const row = page.getByRole('row').filter({ hasText: '林知远' })
-  const quotaCell = row.getByRole('cell').nth(2)
+  const quotaCell = row.getByRole('cell').nth(3)
   await expect(quotaCell).toContainText(/600\s*\/\s*1,000/)
   await expect(quotaCell).toContainText('剩余 400')
 
@@ -2486,8 +2498,20 @@ test('用户月度额度展示已用与剩余并支持增量调整', async ({ pa
   await expect(page.locator('.row-action-more-menu:popover-open')).toHaveCount(1)
   await moreActions.click()
   await row.getByRole('button', { name: '增加配额', exact: true }).click()
-  await modal(page).getByLabel('增加 Token 数').fill('500')
-  await modal(page).getByLabel('调整原因').fill('项目扩容')
+  const quotaDialog = modal(page)
+  await expect(quotaDialog.getByRole('group', { name: '常用额度' }).getByRole('button')).toHaveText(
+    ['100 万', '1000 万', '1 亿'],
+  )
+  await quotaDialog.getByRole('button', { name: '1 亿', exact: true }).click()
+  await expect(quotaDialog.getByLabel('增加 Token 数')).toHaveValue('100000000')
+  await expect(quotaDialog.getByText('约 1亿 Token', { exact: true })).toBeVisible()
+  await quotaDialog.getByLabel('增加 Token 数').fill('10000000')
+  await expect(quotaDialog.getByText('约 1000万 Token', { exact: true })).toBeVisible()
+  await quotaDialog.getByLabel('增加 Token 数').fill('500')
+  await expect(quotaDialog.getByLabel('调整原因（选填）')).toHaveAttribute(
+    'placeholder',
+    '例如：项目扩容',
+  )
   await modal(page).getByRole('button', { name: '增加配额', exact: true }).click()
 
   await expect(page.locator('.toast-success')).toContainText('配额已增加')
@@ -2495,6 +2519,16 @@ test('用户月度额度展示已用与剩余并支持增量调整', async ({ pa
   await expect(quotaCell).toContainText(/600\s*\/\s*1,500/)
   await expect(quotaCell).toContainText('剩余 900')
   expect(state.members[0].monthlyTokenLimit).toBe('1500')
+
+  await moreActions.click()
+  await row.getByRole('button', { name: '取消额度限制', exact: true }).click()
+  await expect(modal(page)).toContainText('取消后将不再按月度 Token 用量拒绝请求')
+  await modal(page).getByRole('button', { name: '取消额度限制', exact: true }).click()
+
+  await expect(page.locator('.toast-success')).toContainText('额度限制已取消')
+  await expect(modal(page)).toHaveCount(0)
+  await expect(quotaCell).toHaveText('-')
+  expect(state.members[0].monthlyTokenLimit).toBeNull()
 })
 
 test('成员 Key 弹层加载失败可重试', async ({ page }) => {
@@ -4724,8 +4758,8 @@ test('分组列表按最新记录倒序显示并提示输入分组名称', async
   await expect(page.getByRole('columnheader')).toHaveText([
     'ID',
     '名称',
-    '月度额度',
     '启用状态',
+    '月度额度',
     '创建时间',
     '备注',
     '操作',

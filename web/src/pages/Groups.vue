@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { api, all, errorText } from '../api'
 import { useCollection, useAction, useListSearch, date, validText } from '../composables'
 import { t } from '../i18n'
-import { showErrorToast } from '../toast'
+import { showErrorToast, showSuccessToast } from '../toast'
 import type { Group, Model, TokenQuotaStatus } from '../types'
 import Icon from '../components/Icon.vue'
 import StatusSwitch from '../components/StatusSwitch.vue'
@@ -48,7 +48,8 @@ const selected = ref<Group | null>(null),
   relationReady = ref(false),
   statusTarget = ref<Group | null>(null),
   deleteTarget = ref<Group | null>(null),
-  quotaTarget = ref<Group | null>(null)
+  quotaTarget = ref<Group | null>(null),
+  quotaRemovalTarget = ref<Group | null>(null)
 const quotaStatuses = ref<Record<string, TokenQuotaStatus>>({})
 let quotaRevision = 0
 const { keyword, query, visible, search, reset, searching, searchingAll } = useListSearch(
@@ -87,6 +88,16 @@ async function loadQuotaStatuses(rows: Group[]) {
 async function quotaSaved() {
   quotaTarget.value = null
   await refresh()
+}
+function removeTokenQuota() {
+  if (!quotaRemovalTarget.value) return
+  const groupID = quotaRemovalTarget.value.id
+  void run(async () => {
+    await api(`/groups/${groupID}/token-quota`, 'DELETE')
+    quotaRemovalTarget.value = null
+    await refresh()
+    showSuccessToast(t('tokenQuota.removed'))
+  })
 }
 function canEditModelSelection(model: Model) {
   return (
@@ -233,8 +244,8 @@ function deleteGroup() {
         <colgroup>
           <col class="record-id-column" />
           <col class="group-name-column" />
-          <col class="group-quota-column" />
           <col class="group-status-column" />
+          <col class="group-quota-column" />
           <col class="group-created-column" />
           <col class="group-remark-column" />
           <col class="group-action-column" />
@@ -243,8 +254,8 @@ function deleteGroup() {
           <tr>
             <th>{{ t('common.id') }}</th>
             <th>{{ t('common.name') }}</th>
-            <th>{{ t('tokenQuota.column') }}</th>
             <th>{{ t('common.enableStatus') }}</th>
+            <th>{{ t('tokenQuota.column') }}</th>
             <th>{{ t('common.created') }}</th>
             <th>{{ t('common.remark') }}</th>
             <th class="align-right">{{ t('common.actions') }}</th>
@@ -260,9 +271,6 @@ function deleteGroup() {
               </div>
             </td>
             <td>
-              <TokenQuotaUsage :limit="group.monthlyTokenLimit" :status="quotaStatuses[group.id]" />
-            </td>
-            <td>
               <StatusSwitch
                 :value="group.status"
                 :name="group.name"
@@ -270,6 +278,9 @@ function deleteGroup() {
                 :busy="busy && statusTarget?.id === group.id"
                 @change="changeStatus(group)"
               />
+            </td>
+            <td>
+              <TokenQuotaUsage :limit="group.monthlyTokenLimit" :status="quotaStatuses[group.id]" />
             </td>
             <td>{{ date(group.createdAt) }}</td>
             <td class="remark-cell" :title="group.remark || ''">
@@ -290,6 +301,14 @@ function deleteGroup() {
                     @click="quotaTarget = group"
                   >
                     {{ t('tokenQuota.addAction') }}
+                  </button>
+                  <button
+                    v-if="group.monthlyTokenLimit"
+                    class="text-button"
+                    :disabled="busy || loading"
+                    @click="quotaRemovalTarget = group"
+                  >
+                    {{ t('tokenQuota.removeAction') }}
                   </button>
                   <button
                     class="text-button danger"
@@ -474,6 +493,17 @@ function deleteGroup() {
       </footer>
     </form>
   </Modal>
+  <ConfirmDialog
+    v-if="quotaRemovalTarget"
+    :title="t('tokenQuota.removeTitle')"
+    :message="t('tokenQuota.removeQuestion', { name: quotaRemovalTarget.name })"
+    :hint="t('tokenQuota.removeHint')"
+    :confirm-label="t('tokenQuota.removeAction')"
+    :busy="busy"
+    tone="warning"
+    @close="quotaRemovalTarget = null"
+    @confirm="removeTokenQuota"
+  />
   <ConfirmDialog
     v-if="deleteTarget"
     :title="t('groups.deleteTitle')"
