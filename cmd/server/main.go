@@ -19,6 +19,7 @@ import (
 	"github.com/zentrola/zentrola/internal/application/gateway"
 	"github.com/zentrola/zentrola/internal/application/health"
 	"github.com/zentrola/zentrola/internal/application/management"
+	quotaapp "github.com/zentrola/zentrola/internal/application/quota"
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	usageapp "github.com/zentrola/zentrola/internal/application/usage"
 	"github.com/zentrola/zentrola/internal/domain/admin"
@@ -318,9 +319,11 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 		logger.Warn("route state Redis unavailable; cooldown state will fail open", "error_code", "REDIS_UNAVAILABLE")
 	}
 	redisProbeCancel()
+	quotaService := quotaapp.New(postgres.NewQuotaStore(pool, logger), routeState, logger)
 	gatewayService := gateway.New(
 		gatewaycache.NewGatewayStore(postgres.NewGatewayStore(pool, logger), gatewayCache, logger), credentials, compatibleUpstream,
 		gateway.WithRouteState(routeState),
+		gateway.WithTokenQuotaAdmission(quotaService),
 		gateway.WithActiveRouteRecorder(gatewayCache),
 		gateway.WithSubscriptionRefreshCoordinator(routeState),
 		gateway.WithCredentialRefreshTimeout(cfg.Gateway.SubscriptionRefreshCredentialTimeout),
@@ -349,7 +352,7 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 		}
 	}()
 	usageStore := postgres.NewUsageStore(pool, logger)
-	usageWriter, err := usageapp.NewWriter(usageStore, logger, usageapp.Options{QueueSize: cfg.Usage.QueueSize, BatchSize: cfg.Usage.BatchSize, FlushInterval: cfg.Usage.FlushInterval, WriteTimeout: cfg.Usage.WriteTimeout})
+	usageWriter, err := usageapp.NewWriter(usageStore, logger, usageapp.Options{QueueSize: cfg.Usage.QueueSize, BatchSize: cfg.Usage.BatchSize, FlushInterval: cfg.Usage.FlushInterval, WriteTimeout: cfg.Usage.WriteTimeout}, quotaService)
 	if err != nil {
 		return err
 	}
@@ -417,7 +420,7 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 	var active sync.WaitGroup
 	var admission sync.Mutex
 	stopping := false
-	router := httptransport.NewRouter(logger, readiness, httptransport.CORSOptions{Enabled: cfg.CORS.Enabled, Origins: cfg.CORS.Origins}, cfg.HealthTimeout, cfg.Environment, &httptransport.SecurityHandlers{Admin: adminService, Keys: keyService, Management: managementService, Applications: management.NewApplications(managementStore, ids), Gateway: gatewayHandler, OpenAI: openaiHandler, ActiveModels: gatewayCache, Usage: usageapp.NewQuery(usageStore), UsageWriter: usageWriter, Billing: billingService, BillingCosts: billingapp.NewUsageCostQuery(billingStore), BodyReadTimeout: cfg.BodyReadTimeout})
+	router := httptransport.NewRouter(logger, readiness, httptransport.CORSOptions{Enabled: cfg.CORS.Enabled, Origins: cfg.CORS.Origins}, cfg.HealthTimeout, cfg.Environment, &httptransport.SecurityHandlers{Admin: adminService, Keys: keyService, Management: managementService, Applications: management.NewApplications(managementStore, ids), Gateway: gatewayHandler, OpenAI: openaiHandler, ActiveModels: gatewayCache, Usage: usageapp.NewQuery(usageStore), TokenQuotas: quotaService, UsageWriter: usageWriter, Billing: billingService, BillingCosts: billingapp.NewUsageCostQuery(billingStore), BodyReadTimeout: cfg.BodyReadTimeout})
 	server := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

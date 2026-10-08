@@ -198,6 +198,8 @@ type Principal struct {
 	CreatedAt pgtype.Timestamptz
 	// 更新时间，UTC
 	UpdatedAt pgtype.Timestamptz
+	// 主体每个 UTC 自然月允许使用的 Token 上限；NULL 表示不限制
+	MonthlyTokenLimit *int64
 }
 
 // 调用主体访问凭证；仅识别主体，不存储权限或完整 Key
@@ -254,6 +256,8 @@ type PrincipalGroup struct {
 	CreatedAt pgtype.Timestamptz
 	// 更新时间，UTC
 	UpdatedAt pgtype.Timestamptz
+	// 分组内授权模型共享的每个 UTC 自然月 Token 上限；NULL 表示不限制
+	MonthlyTokenLimit *int64
 }
 
 // 调用主体与治理分组的多对多关系

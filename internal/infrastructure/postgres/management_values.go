@@ -12,11 +12,11 @@ import (
 )
 
 func memberView(r dbgen.Principal) mgmt.Member {
-	return mgmt.Member{ID: r.ID, Name: r.Name, Remark: r.Remark, Status: r.Status, CreatedAt: r.CreatedAt.Time.UTC()}
+	return mgmt.Member{ID: r.ID, Name: r.Name, MonthlyTokenLimit: r.MonthlyTokenLimit, Remark: r.Remark, Status: r.Status, CreatedAt: r.CreatedAt.Time.UTC()}
 }
 
 func groupView(r dbgen.PrincipalGroup) mgmt.Group {
-	return mgmt.Group{ID: r.ID, Code: r.GroupCode, Name: r.GroupName, Remark: r.Remark, Status: r.Status, CreatedAt: r.CreatedAt.Time.UTC()}
+	return mgmt.Group{ID: r.ID, Code: r.GroupCode, Name: r.GroupName, MonthlyTokenLimit: r.MonthlyTokenLimit, Remark: r.Remark, Status: r.Status, CreatedAt: r.CreatedAt.Time.UTC()}
 }
 
 func modelView(id int64, code, name, status string, inputJSON, outputJSON []byte, remark string, publisherProviderID *int64, publisherProviderName *string, createdAt, updatedAt time.Time) mgmt.Model {

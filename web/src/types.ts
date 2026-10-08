@@ -11,12 +11,24 @@ export interface Identity {
 export interface Member {
   id: string
   name: string
+  monthlyTokenLimit: string | null
   remark: string | null
   status: string
   createdAt: string
 }
 export interface Group extends Member {
   code: string
+}
+export interface TokenQuotaStatus {
+  scopeType: 'PRINCIPAL' | 'GROUP'
+  scopeId: string
+  monthlyTokenLimit: string
+  usedTokens: string
+  remainingTokens: string
+  usedPercent: number
+  level: 'NORMAL' | 'NOTICE' | 'WARNING' | 'EXHAUSTED'
+  periodStart: string
+  periodEnd: string
 }
 export interface Model {
   id: string

@@ -14,6 +14,7 @@ import ListSearch from '../components/ListSearch.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import TableScroll from '../components/TableScroll.vue'
 import TechnicalValue from '../components/TechnicalValue.vue'
+import RowActionMenu from '../components/RowActionMenu.vue'
 const {
   items,
   cursor,
@@ -264,12 +265,17 @@ function deleteModel() {
             </td>
             <td>
               <div class="row-actions">
-                <button class="text-button danger" :disabled="busy" @click="openDelete(model)">
-                  {{ t('models.delete') }}
-                </button>
                 <button class="text-button" :disabled="busy" @click="openEdit(model)">
                   {{ t('models.editAction') }}
                 </button>
+                <RowActionMenu
+                  :label="t('common.moreActionsFor', { name: model.name })"
+                  :title="t('common.moreActions')"
+                >
+                  <button class="text-button danger" :disabled="busy" @click="openDelete(model)">
+                    {{ t('models.delete') }}
+                  </button>
+                </RowActionMenu>
               </div>
             </td>
           </tr>

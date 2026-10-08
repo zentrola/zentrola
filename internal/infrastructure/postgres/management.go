@@ -408,6 +408,15 @@ func (s *managementSession) UpdateMember(ctx context.Context, m mgmt.Member) err
 func (s *managementSession) SetMemberStatus(ctx context.Context, id int64, status string) error {
 	return s.q.ManageMemberStatus(ctx, dbgen.ManageMemberStatusParams{ID: id, Status: status, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(time.Now().UTC())})
 }
+func (s *managementSession) AddPrincipalTokenQuota(ctx context.Context, id, amount int64) (int64, error) {
+	limit, err := s.q.ManageAddPrincipalTokenQuota(ctx, dbgen.ManageAddPrincipalTokenQuotaParams{
+		PrincipalID: id, Amount: amount, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(time.Now().UTC()),
+	})
+	if err != nil || limit == nil {
+		return 0, err
+	}
+	return *limit, nil
+}
 func (s *managementSession) DeleteMember(ctx context.Context, id int64) error {
 	now, actor := pgTime(time.Now().UTC()), actorRef(s.actor.ID)
 	// 先锁定并删除成员，和签发 Key 的成员行锁串行化；所有更改与审计同事务提交。
@@ -427,6 +436,15 @@ func (s *managementSession) UpdateGroup(ctx context.Context, g mgmt.Group) error
 }
 func (s *managementSession) SetGroupStatus(ctx context.Context, id int64, status string) error {
 	return s.q.ManageGroupStatus(ctx, dbgen.ManageGroupStatusParams{ID: id, Status: status, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(time.Now().UTC())})
+}
+func (s *managementSession) AddGroupTokenQuota(ctx context.Context, id, amount int64) (int64, error) {
+	limit, err := s.q.ManageAddGroupTokenQuota(ctx, dbgen.ManageAddGroupTokenQuotaParams{
+		GroupID: id, Amount: amount, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(time.Now().UTC()),
+	})
+	if err != nil || limit == nil {
+		return 0, err
+	}
+	return *limit, nil
 }
 func (s *managementSession) DeleteGroup(ctx context.Context, id int64) error {
 	now, actor := pgTime(time.Now().UTC()), actorRef(s.actor.ID)

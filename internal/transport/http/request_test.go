@@ -129,6 +129,33 @@ func TestConsumeResetCreditRequestValidation(t *testing.T) {
 	)
 }
 
+func TestAddTokenQuotaRequestKeepsInt64Precision(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		amount string
+		valid  bool
+	}{
+		{name: "one", amount: "1", valid: true},
+		{name: "max int64", amount: "9223372036854775807", valid: true},
+		{name: "zero", amount: "0"},
+		{name: "negative", amount: "-1"},
+		{name: "overflow", amount: "9223372036854775808"},
+		{name: "decimal", amount: "1.5"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := AddTokenQuotaRequest{Amount: test.amount, Reason: "项目扩容"}
+			if request.Valid() != test.valid {
+				t.Fatalf("amount %q validity = %v, want %v", test.amount, request.Valid(), test.valid)
+			}
+		})
+	}
+	request := AddTokenQuotaRequest{Amount: " 10000000000000001 ", Reason: " 项目扩容 "}
+	request.Normalize()
+	if !request.Valid() || request.TokenAmount() != 10000000000000001 || request.Reason != "项目扩容" {
+		t.Fatalf("normalized request = %+v amount=%d", request, request.TokenAmount())
+	}
+}
+
 func TestTimeInputsRequireUTC(t *testing.T) {
 	utc := time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)
 	offset := time.Date(2099, 1, 1, 8, 0, 0, 0, time.FixedZone("CST", 8*60*60))

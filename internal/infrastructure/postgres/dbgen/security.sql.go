@@ -244,7 +244,7 @@ func (q *Queries) GetKeyForRevoke(ctx context.Context, id int64) (PrincipalAcces
 }
 
 const getPrincipalForKey = `-- name: GetPrincipalForKey :one
-SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at FROM principal
+SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at, monthly_token_limit FROM principal
 WHERE id=$1 AND principal_type=$2 AND is_deleted=false FOR UPDATE
 `
 
@@ -267,6 +267,7 @@ func (q *Queries) GetPrincipalForKey(ctx context.Context, arg GetPrincipalForKey
 		&i.UpdatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MonthlyTokenLimit,
 	)
 	return i, err
 }

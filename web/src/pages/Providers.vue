@@ -32,6 +32,7 @@ import ConfirmDialog from '../components/ConfirmDialog.vue'
 import CredentialPriceEditor from '../components/CredentialPriceEditor.vue'
 import TableScroll from '../components/TableScroll.vue'
 import TechnicalValue from '../components/TechnicalValue.vue'
+import RowActionMenu from '../components/RowActionMenu.vue'
 
 const {
   items,
@@ -1747,24 +1748,19 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
                 >
                   {{ t('providers.credentialAction') }}
                 </button>
-                <details class="provider-more">
-                  <summary
-                    :aria-label="t('providers.moreActionsFor', { name: provider.name })"
-                    :title="t('providers.moreActions')"
+                <RowActionMenu
+                  :label="t('providers.moreActionsFor', { name: provider.name })"
+                  :title="t('providers.moreActions')"
+                >
+                  <button
+                    type="button"
+                    class="text-button danger"
+                    :disabled="busy"
+                    @click="openDelete(provider)"
                   >
-                    ⋯
-                  </summary>
-                  <div class="provider-more-menu">
-                    <button
-                      type="button"
-                      class="text-button danger"
-                      :disabled="busy"
-                      @click="openDelete(provider)"
-                    >
-                      {{ t('providers.delete') }}
-                    </button>
-                  </div>
-                </details>
+                    {{ t('providers.delete') }}
+                  </button>
+                </RowActionMenu>
               </div>
             </td>
           </tr>
@@ -3981,52 +3977,6 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   justify-content: flex-end;
   gap: 10px;
   white-space: nowrap;
-}
-.provider-more {
-  position: relative;
-  flex: none;
-}
-.provider-more summary {
-  display: grid;
-  width: 26px;
-  height: 26px;
-  place-items: center;
-  border-radius: 5px;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  font-size: 18px;
-  line-height: 1;
-  list-style: none;
-}
-.provider-more summary::-webkit-details-marker {
-  display: none;
-}
-.provider-more summary:hover,
-.provider-more summary:focus-visible {
-  color: var(--blue);
-  background: var(--color-primary-soft);
-}
-.provider-more summary:focus-visible {
-  outline: 2px solid #bfdbfe;
-  outline-offset: 2px;
-}
-.provider-more-menu {
-  position: absolute;
-  z-index: 4;
-  top: 50%;
-  right: calc(100% + 4px);
-  min-width: 80px;
-  padding: 6px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-control);
-  background: #fff;
-  box-shadow: 0 12px 28px rgb(15 23 42 / 12%);
-  transform: translateY(-50%);
-}
-.provider-more-menu .text-button {
-  width: 100%;
-  justify-content: flex-start;
-  padding: 6px 8px;
 }
 .provider-form {
   --provider-field-label-width: 160px;

@@ -17,6 +17,7 @@ import (
 	billingapp "github.com/zentrola/zentrola/internal/application/billing"
 	gw "github.com/zentrola/zentrola/internal/application/gateway"
 	mgmt "github.com/zentrola/zentrola/internal/application/management"
+	quotaapp "github.com/zentrola/zentrola/internal/application/quota"
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	usageapp "github.com/zentrola/zentrola/internal/application/usage"
 	"github.com/zentrola/zentrola/internal/domain/admin"
@@ -31,6 +32,7 @@ type SecurityHandlers struct {
 	OpenAI          *GatewayHandler
 	ActiveModels    gw.ActiveModelReader
 	Usage           *usageapp.QueryService
+	TokenQuotas     *quotaapp.Service
 	Billing         *billingapp.Service
 	BillingCosts    *billingapp.UsageCostQueryService
 	UsageWriter     *usageapp.Writer
@@ -161,6 +163,7 @@ func (s *SecurityHandlers) mount(r chi.Router) {
 			if s.Usage != nil {
 				s.mountUsage(protected)
 			}
+			s.mountTokenQuotas(protected)
 			if s.Billing != nil {
 				s.mountBilling(protected)
 			}

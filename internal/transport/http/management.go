@@ -830,6 +830,29 @@ func (s *SecurityHandlers) mountManagementCommandRoutes(r chi.Router) {
 		data, err := m.UpdateMemberWithGroups(req.Context(), adminFrom(req), id, input.Name, input.Remark, groupIDs, requestMeta(req))
 		adminResult(w, req, 200, data, err)
 	})
+	// @Summary 增加用户月度 Token 配额
+	// @Tags 成员管理
+	// @Accept json
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "用户 ID"
+	// @Param body body AddTokenQuotaRequest true "增加额度及原因"
+	// @Success 200 {object} response{data=mgmt.Member}
+	// @Failure 400,401,404,503 {object} response
+	// @Router /api/v1/members/{id}/token-quota/add [post]
+	r.Post("/members/{id}/token-quota/add", func(w http.ResponseWriter, req *http.Request) {
+		input, ok := decodeRequest[AddTokenQuotaRequest](w, req)
+		if !ok {
+			return
+		}
+		id, err := routeID(req, "id")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		data, err := m.AddMemberTokenQuota(req.Context(), adminFrom(req), id, input.TokenAmount(), input.Reason, requestMeta(req))
+		adminResult(w, req, http.StatusOK, data, err)
+	})
 	// @Summary 创建分组
 	// @Tags 分组与授权
 	// @Produce json
@@ -890,6 +913,29 @@ func (s *SecurityHandlers) mountManagementCommandRoutes(r chi.Router) {
 		}
 		data, err := m.UpdateGroupWithModels(req.Context(), adminFrom(req), id, input.Name, input.Remark, modelIDs, requestMeta(req))
 		adminResult(w, req, 200, data, err)
+	})
+	// @Summary 增加分组月度 Token 配额
+	// @Tags 分组与授权
+	// @Accept json
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "分组 ID"
+	// @Param body body AddTokenQuotaRequest true "增加额度及原因"
+	// @Success 200 {object} response{data=mgmt.Group}
+	// @Failure 400,401,404,503 {object} response
+	// @Router /api/v1/groups/{id}/token-quota/add [post]
+	r.Post("/groups/{id}/token-quota/add", func(w http.ResponseWriter, req *http.Request) {
+		input, ok := decodeRequest[AddTokenQuotaRequest](w, req)
+		if !ok {
+			return
+		}
+		id, err := routeID(req, "id")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		data, err := m.AddGroupTokenQuota(req.Context(), adminFrom(req), id, input.TokenAmount(), input.Reason, requestMeta(req))
+		adminResult(w, req, http.StatusOK, data, err)
 	})
 	// @Summary 创建资源
 	// @Tags 模型与资源

@@ -1175,6 +1175,87 @@
                 }
             }
         },
+        "/api/v1/applications/{id}/token-quota/add": {
+            "post": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "应用管理"
+                ],
+                "summary": "增加应用月度 Token 配额",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "应用 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "增加额度及原因",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.AddTokenQuotaRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/management.Application"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/auth/login": {
             "post": {
                 "description": "登录后复制 data.token，在 Authorize 的 AdminBearer 中填写 Bearer + 空格 + Token。",
@@ -3512,6 +3593,87 @@
                 }
             }
         },
+        "/api/v1/groups/{id}/token-quota/add": {
+            "post": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "分组与授权"
+                ],
+                "summary": "增加分组月度 Token 配额",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "分组 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "增加额度及原因",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.AddTokenQuotaRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/management.Group"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/me": {
             "get": {
                 "security": [
@@ -4625,6 +4787,87 @@
                     },
                     "422": {
                         "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/members/{id}/token-quota/add": {
+            "post": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "成员管理"
+                ],
+                "summary": "增加用户月度 Token 配额",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "用户 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "增加额度及原因",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.AddTokenQuotaRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/management.Member"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
                         }
@@ -7140,6 +7383,83 @@
                 }
             }
         },
+        "/api/v1/token-quotas": {
+            "get": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "用量配额"
+                ],
+                "summary": "批量查询月度 Token 配额状态",
+                "parameters": [
+                    {
+                        "enum": [
+                            "PRINCIPAL",
+                            "GROUP"
+                        ],
+                        "type": "string",
+                        "description": "额度范围",
+                        "name": "scopeType",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "逗号分隔的用户、应用或分组 ID，最多 100 个",
+                        "name": "scopeIds",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/quota.Status"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/usage": {
             "get": {
                 "security": [
@@ -8848,6 +9168,23 @@
                 }
             }
         },
+        "http.AddTokenQuotaRequest": {
+            "type": "object",
+            "required": [
+                "amount",
+                "reason"
+            ],
+            "properties": {
+                "amount": {
+                    "type": "string",
+                    "example": "1000000"
+                },
+                "reason": {
+                    "type": "string",
+                    "example": "项目扩容"
+                }
+            }
+        },
         "http.AnthropicErrorResponse": {
             "type": "object",
             "properties": {
@@ -9692,6 +10029,10 @@
                     "type": "string",
                     "example": "0"
                 },
+                "monthlyTokenLimit": {
+                    "type": "string",
+                    "example": "0"
+                },
                 "name": {
                     "type": "string"
                 },
@@ -9767,6 +10108,10 @@
                     "type": "string",
                     "example": "0"
                 },
+                "monthlyTokenLimit": {
+                    "type": "string",
+                    "example": "0"
+                },
                 "name": {
                     "type": "string"
                 },
@@ -9812,6 +10157,10 @@
                     "type": "string"
                 },
                 "id": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "monthlyTokenLimit": {
                     "type": "string",
                     "example": "0"
                 },
@@ -10434,6 +10783,53 @@
                 },
                 "periodAmount": {
                     "type": "string"
+                }
+            }
+        },
+        "quota.ScopeType": {
+            "type": "string",
+            "enum": [
+                "PRINCIPAL",
+                "GROUP"
+            ],
+            "x-enum-varnames": [
+                "Principal",
+                "Group"
+            ]
+        },
+        "quota.Status": {
+            "type": "object",
+            "properties": {
+                "level": {
+                    "type": "string"
+                },
+                "monthlyTokenLimit": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "periodEnd": {
+                    "type": "string"
+                },
+                "periodStart": {
+                    "type": "string"
+                },
+                "remainingTokens": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "scopeId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "scopeType": {
+                    "$ref": "#/definitions/quota.ScopeType"
+                },
+                "usedPercent": {
+                    "type": "number"
+                },
+                "usedTokens": {
+                    "type": "string",
+                    "example": "0"
                 }
             }
         },

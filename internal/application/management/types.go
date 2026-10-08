@@ -77,20 +77,22 @@ type PageData[T any] struct {
 	Total int64
 }
 type Member struct {
-	ID        int64     `json:"id,string"`
-	Name      string    `json:"name"`
-	Remark    *string   `json:"remark"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"createdAt"`
+	ID                int64     `json:"id,string"`
+	Name              string    `json:"name"`
+	MonthlyTokenLimit *int64    `json:"monthlyTokenLimit,string"`
+	Remark            *string   `json:"remark"`
+	Status            string    `json:"status"`
+	CreatedAt         time.Time `json:"createdAt"`
 }
 type Application Member
 type Group struct {
-	ID        int64     `json:"id,string"`
-	Code      string    `json:"code"`
-	Name      string    `json:"name"`
-	Remark    *string   `json:"remark"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"createdAt"`
+	ID                int64     `json:"id,string"`
+	Code              string    `json:"code"`
+	Name              string    `json:"name"`
+	MonthlyTokenLimit *int64    `json:"monthlyTokenLimit,string"`
+	Remark            *string   `json:"remark"`
+	Status            string    `json:"status"`
+	CreatedAt         time.Time `json:"createdAt"`
 }
 type Model struct {
 	ID                    int64     `json:"id,string"`
@@ -404,6 +406,7 @@ type MemberWriter interface {
 	UpdateMember(context.Context, Member) error
 	SetMemberStatus(context.Context, int64, string) error
 	DeleteMember(context.Context, int64) error
+	AddPrincipalTokenQuota(context.Context, int64, int64) (int64, error)
 }
 
 type GroupWriter interface {
@@ -411,6 +414,7 @@ type GroupWriter interface {
 	UpdateGroup(context.Context, Group) error
 	SetGroupStatus(context.Context, int64, string) error
 	DeleteGroup(context.Context, int64) error
+	AddGroupTokenQuota(context.Context, int64, int64) (int64, error)
 	SetGroupMember(context.Context, int64, int64, bool) (bool, error)
 	SetGroupModel(context.Context, int64, int64, bool) (bool, error)
 }

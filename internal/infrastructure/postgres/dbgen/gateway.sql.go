@@ -237,6 +237,42 @@ func (q *Queries) GatewayRouteExists(ctx context.Context, modelID int64) (bool, 
 	return exists, err
 }
 
+const gatewayTokenQuotaConfiguration = `-- name: GatewayTokenQuotaConfiguration :one
+SELECT p.monthly_token_limit,
+       COALESCE(
+           jsonb_agg(DISTINCT jsonb_build_object('id', g.id, 'limit', g.monthly_token_limit))
+               FILTER (WHERE permission.group_id IS NOT NULL),
+           '[]'::jsonb
+       )::text AS group_quotas
+FROM principal p
+LEFT JOIN principal_group_membership membership
+    ON membership.principal_id=p.id AND NOT membership.is_deleted
+LEFT JOIN principal_group g
+    ON g.id=membership.group_id AND NOT g.is_deleted AND g.status='ACTIVE'
+       AND g.monthly_token_limit IS NOT NULL
+LEFT JOIN principal_group_model_permission permission
+    ON permission.group_id=g.id AND permission.model_id=$1 AND NOT permission.is_deleted
+WHERE p.id=$2 AND NOT p.is_deleted
+GROUP BY p.id, p.monthly_token_limit
+`
+
+type GatewayTokenQuotaConfigurationParams struct {
+	ModelID     int64
+	PrincipalID int64
+}
+
+type GatewayTokenQuotaConfigurationRow struct {
+	MonthlyTokenLimit *int64
+	GroupQuotas       string
+}
+
+func (q *Queries) GatewayTokenQuotaConfiguration(ctx context.Context, arg GatewayTokenQuotaConfigurationParams) (GatewayTokenQuotaConfigurationRow, error) {
+	row := q.db.QueryRow(ctx, gatewayTokenQuotaConfiguration, arg.ModelID, arg.PrincipalID)
+	var i GatewayTokenQuotaConfigurationRow
+	err := row.Scan(&i.MonthlyTokenLimit, &i.GroupQuotas)
+	return i, err
+}
+
 const listGatewaySubscriptionCredentials = `-- name: ListGatewaySubscriptionCredentials :many
 SELECT r.id AS resource_id,r.provider_id,r.auth_adapter,r.credential_refreshed_at,r.credential_expires_at,
        p.proxy_enabled,p.proxy_url_ciphertext,p.proxy_url_nonce,p.proxy_url_key_version,

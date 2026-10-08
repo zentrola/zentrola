@@ -126,6 +126,16 @@ func validText(s string, max int) bool {
 	return utf8.ValidString(s) && s == strings.TrimSpace(s) && s != "" && len(s) <= max && !strings.ContainsRune(s, 0)
 }
 func validRemark(s string) bool { return s == "" || validText(s, 2000) }
+func validTokenQuotaAddition(current *int64, amount int64) bool {
+	return amount > 0 && (current == nil || amount <= int64(^uint64(0)>>1)-*current)
+}
+func tokenQuotaBeforeValue(limit, amount int64) any {
+	before := limit - amount
+	if before == 0 {
+		return nil
+	}
+	return idString(before)
+}
 func remark(s string) *string {
 	if s == "" {
 		return nil

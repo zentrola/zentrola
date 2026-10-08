@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { all, api } from '../api'
+import { computed, onMounted, ref, watch } from 'vue'
+import { all, api, errorText } from '../api'
 import { useCollection, useAction, useListSearch, date, validText } from '../composables'
 import { t } from '../i18n'
 import { showErrorToast, showSuccessToast } from '../toast'
-import type { Member, Group, CreatedKey } from '../types'
+import type { Member, Group, CreatedKey, TokenQuotaStatus } from '../types'
 import Icon from '../components/Icon.vue'
 import StatusSwitch from '../components/StatusSwitch.vue'
 import Modal from '../components/Modal.vue'
@@ -15,6 +15,9 @@ import MemberKeys from '../components/MemberKeys.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import TableScroll from '../components/TableScroll.vue'
 import TechnicalValue from '../components/TechnicalValue.vue'
+import TokenQuotaUsage from '../components/TokenQuotaUsage.vue'
+import AddTokenQuotaModal from '../components/AddTokenQuotaModal.vue'
+import RowActionMenu from '../components/RowActionMenu.vue'
 const { kind = 'member' } = defineProps<{ kind?: 'member' | 'application' }>()
 const basePath = computed(() => (kind === 'application' ? '/applications' : '/members'))
 const local = (key: string, values: Record<string, string | number> = {}) =>
@@ -45,7 +48,10 @@ const creating = ref(false),
 const statusTarget = ref<Member | null>(null),
   selected = ref<Member | null>(null),
   viewingKeys = ref<Member | null>(null),
-  deleteTarget = ref<Member | null>(null)
+  deleteTarget = ref<Member | null>(null),
+  quotaTarget = ref<Member | null>(null)
+const quotaStatuses = ref<Record<string, TokenQuotaStatus>>({})
+let quotaRevision = 0
 const keyName = ref(''),
   expires = ref(''),
   createdKey = ref<CreatedKey | null>(null)
@@ -57,6 +63,29 @@ const { keyword, query, visible, search, reset, searching, searchingAll } = useL
 )
 const originalGroupIDSet = computed(() => new Set(originalGroupIDs.value))
 onMounted(() => load())
+watch(visible, (rows) => void loadQuotaStatuses(rows), { immediate: true })
+
+async function loadQuotaStatuses(rows: Member[]) {
+  const revision = ++quotaRevision
+  const ids = rows.filter((member) => member.monthlyTokenLimit).map((member) => member.id)
+  if (!ids.length) {
+    quotaStatuses.value = {}
+    return
+  }
+  try {
+    const params = new URLSearchParams({ scopeType: 'PRINCIPAL', scopeIds: ids.join(',') })
+    const statuses = await api<TokenQuotaStatus[]>(`/token-quotas?${params}`)
+    if (revision !== quotaRevision) return
+    quotaStatuses.value = Object.fromEntries(statuses.map((status) => [status.scopeId, status]))
+  } catch (error) {
+    if (revision === quotaRevision) showErrorToast(errorText(error))
+  }
+}
+
+async function quotaSaved() {
+  quotaTarget.value = null
+  await refresh()
+}
 function newMember() {
   editing.value = null
   name.value = ''
@@ -224,6 +253,7 @@ async function copyKey() {
         <colgroup>
           <col class="record-id-column" />
           <col class="member-name-column" />
+          <col class="member-quota-column" />
           <col class="member-status-column" />
           <col class="member-remark-column" />
           <col class="member-created-column" />
@@ -233,6 +263,7 @@ async function copyKey() {
           <tr>
             <th>{{ t('common.id') }}</th>
             <th>{{ local('member') }}</th>
+            <th>{{ t('tokenQuota.column') }}</th>
             <th>{{ local('activationStatus') }}</th>
             <th>{{ t('common.remark') }}</th>
             <th>{{ t('common.created') }}</th>
@@ -262,6 +293,12 @@ async function copyKey() {
               </div>
             </td>
             <td>
+              <TokenQuotaUsage
+                :limit="member.monthlyTokenLimit"
+                :status="quotaStatuses[member.id]"
+              />
+            </td>
+            <td>
               <StatusSwitch
                 :value="member.status"
                 :name="member.name"
@@ -280,16 +317,28 @@ async function copyKey() {
                 <button class="text-button" :disabled="busy || loading" @click="openEdit(member)">
                   {{ local('edit') }}
                 </button>
-                <button
-                  class="text-button danger"
-                  :disabled="busy || loading"
-                  @click="openDelete(member)"
-                >
-                  {{ local('delete') }}
-                </button>
                 <button class="text-button" :disabled="busy || loading" @click="openKeys(member)">
                   {{ local('assignKey') }}
                 </button>
+                <RowActionMenu
+                  :label="t('common.moreActionsFor', { name: member.name })"
+                  :title="t('common.moreActions')"
+                >
+                  <button
+                    class="text-button"
+                    :disabled="busy || loading"
+                    @click="quotaTarget = member"
+                  >
+                    {{ t('tokenQuota.addAction') }}
+                  </button>
+                  <button
+                    class="text-button danger"
+                    :disabled="busy || loading"
+                    @click="openDelete(member)"
+                  >
+                    {{ local('delete') }}
+                  </button>
+                </RowActionMenu>
               </div>
             </td>
           </tr>
@@ -319,6 +368,13 @@ async function copyKey() {
     />
   </section>
   <MemberKeys v-if="viewingKeys" :member="viewingKeys" :kind="kind" @close="viewingKeys = null" />
+  <AddTokenQuotaModal
+    v-if="quotaTarget"
+    :name="quotaTarget.name"
+    :path="`${basePath}/${quotaTarget.id}`"
+    @close="quotaTarget = null"
+    @saved="quotaSaved"
+  />
   <Modal
     v-if="creating || editing"
     :title="editing ? local('editTitle', { name: editing.name }) : local('create')"
@@ -456,17 +512,20 @@ async function copyKey() {
 
 <style scoped>
 .members-table {
-  min-width: 1032px;
+  min-width: 1146px;
   table-layout: fixed;
 }
 .member-name-column {
-  width: 30%;
+  width: 24%;
+}
+.member-quota-column {
+  width: 190px;
 }
 .member-status-column {
   width: 100px;
 }
 .member-remark-column {
-  width: calc(70% - 560px);
+  width: calc(76% - 686px);
 }
 .member-created-column {
   width: 140px;

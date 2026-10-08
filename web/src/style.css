@@ -786,9 +786,9 @@ label textarea {
 }
 .record-id-column,
 .record-id-cell {
-  width: 144px;
-  min-width: 144px;
-  max-width: 144px;
+  width: 88px;
+  min-width: 88px;
+  max-width: 88px;
 }
 .table-scroll > table > thead > tr > th:first-child,
 .table-scroll > table > tbody > tr > td:first-child {
@@ -819,7 +819,7 @@ label textarea {
 }
 .table-scroll > table > tbody > tr:hover > td:first-child,
 .table-scroll--actions > table > tbody > tr:hover > td:last-child {
-  background: #fbfdff;
+  background: #f8fafc;
 }
 .table-scroll.is-overflowing:not(.is-at-start) > table > thead > tr > th:first-child,
 .table-scroll.is-overflowing:not(.is-at-start) > table > tbody > tr > td:first-child {

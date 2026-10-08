@@ -656,6 +656,34 @@ async function fixture(page: Page) {
       const name = url.searchParams.get('name') || ''
       return pageReply(members.filter((member) => member.name.includes(name)))
     }
+    if (path === '/token-quotas' && method === 'GET') {
+      const scopeType = url.searchParams.get('scopeType')
+      const ids = (url.searchParams.get('scopeIds') || '').split(',').filter(Boolean)
+      const source = scopeType === 'GROUP' ? groups : members
+      return reply(
+        ids.flatMap((id) => {
+          const item = source.find((entry) => entry.id === id)
+          if (!item?.monthlyTokenLimit) return []
+          const usedTokens = item.quotaUsedTokens || '600'
+          const limit = BigInt(item.monthlyTokenLimit)
+          const used = BigInt(usedTokens)
+          return [
+            {
+              scopeType,
+              scopeId: id,
+              monthlyTokenLimit: item.monthlyTokenLimit,
+              usedTokens,
+              remainingTokens: String(limit > used ? limit - used : 0n),
+              usedPercent: Number((used * 10000n) / limit) / 100,
+              level:
+                used >= limit ? 'EXHAUSTED' : used * 100n >= limit * 80n ? 'WARNING' : 'NOTICE',
+              periodStart: '2026-09-01T00:00:00Z',
+              periodEnd: '2026-10-01T00:00:00Z',
+            },
+          ]
+        }),
+      )
+    }
     if (segments.length === 1 && method === 'GET') {
       if (path === '/members') {
         memberListQueries.push(new URLSearchParams(url.searchParams))
@@ -991,6 +1019,18 @@ async function fixture(page: Page) {
       const { modelIds = [], ...fields } = body
       Object.assign(row, fields)
       relationships.set(`groups/${row.id}/models`, new Set(modelIds))
+      return reply(row)
+    }
+    if (
+      (segments[0] === 'members' || segments[0] === 'groups') &&
+      segments[2] === 'token-quota' &&
+      segments[3] === 'add' &&
+      method === 'POST'
+    ) {
+      const source = segments[0] === 'groups' ? groups : members
+      const row = source.find((entry) => entry.id === segments[1])
+      if (!row) return reply(null, 404, 'NOT_FOUND')
+      row.monthlyTokenLimit = String(BigInt(row.monthlyTokenLimit || '0') + BigInt(body.amount))
       return reply(row)
     }
     if (segments[0] === 'members' && segments.length === 2 && method === 'PUT') {
@@ -1463,6 +1503,29 @@ test('应用管理签发仅展示一次的 App Key', async ({ page }) => {
   await dialog.getByRole('button', { name: '创建', exact: true }).click()
   const row = page.getByRole('row').filter({ hasText: '自动化服务' })
   await expect(row).toBeVisible()
+  await row.hover()
+  await expect(row.getByRole('cell').first()).toHaveCSS('background-color', 'rgb(248, 250, 252)')
+  await expect(row.getByRole('cell').last()).toHaveCSS('background-color', 'rgb(248, 250, 252)')
+  const applicationMoreActions = row.locator('summary')
+  await expect(applicationMoreActions).toHaveAttribute('aria-label', '自动化服务 的更多操作')
+  await expect(applicationMoreActions).toHaveText('⋮')
+  await expect(row.getByRole('button', { name: '增加配额', exact: true })).toBeHidden()
+  const tableScroll = page.locator('.table-scroll').first()
+  const scrollHeightBeforeMenu = await tableScroll.evaluate((element) => element.scrollHeight)
+  await applicationMoreActions.click()
+  const quotaAction = row.getByRole('button', { name: '增加配额', exact: true })
+  const deleteAction = row.getByRole('button', { name: '删除', exact: true })
+  await expect(quotaAction).toBeVisible()
+  await expect(deleteAction).toBeVisible()
+  const menuBox = (await row.locator('.row-action-more-menu').boundingBox())!
+  const quotaActionBox = (await quotaAction.boundingBox())!
+  const deleteActionBox = (await deleteAction.boundingBox())!
+  expect(deleteActionBox.y).toBeGreaterThan(quotaActionBox.y)
+  expect(quotaActionBox.x).toBeGreaterThanOrEqual(menuBox.x)
+  expect(deleteActionBox.x + deleteActionBox.width).toBeLessThanOrEqual(menuBox.x + menuBox.width)
+  expect(await tableScroll.evaluate((element) => element.scrollHeight)).toBe(scrollHeightBeforeMenu)
+  await applicationMoreActions.press('Escape')
+  await expect(row.getByRole('button', { name: '增加配额', exact: true })).toBeHidden()
   await expect(row.getByRole('cell').first().locator('code')).toHaveText('71')
   await expect(row.getByRole('cell').first().locator('.technical-value-copy')).toHaveCount(0)
   await mkdir('../.cache/web-visual', { recursive: true })
@@ -2235,9 +2298,13 @@ test('成员列表按需查看 Key 并处理删除和失败恢复', async ({ pag
       .first()
       .locator('code')
       .evaluate((element) => {
-        return element.scrollWidth <= element.clientWidth
+        return element.scrollWidth > element.clientWidth
       }),
   ).toBe(true)
+  await expect(row.getByRole('cell').first().locator('.technical-value')).toHaveAttribute(
+    'title',
+    longID,
+  )
   await expect(row).not.toContainText('vk-work1234')
   await expect(row).not.toContainText('zt_vk_temp')
   await expect(row.getByText('工作站', { exact: true })).toHaveCount(0)
@@ -2356,9 +2423,11 @@ test('成员列表按需查看 Key 并处理删除和失败恢复', async ({ pag
   ).toEqual([2099, 12, 31, 23, 59, 59, 999])
   await mkdir('../.cache/web-visual', { recursive: true })
   await page.screenshot({ path: '../.cache/web-visual/members-keys.png', fullPage: true })
+  await row.locator('summary').click()
   await row.getByRole('button', { name: '删除', exact: true }).click()
   await modal(page).getByRole('button', { name: '取消' }).click()
   expect(state.members).toHaveLength(3)
+  await row.locator('summary').click()
   await row.getByRole('button', { name: '删除', exact: true }).click()
   state.conflict(true)
   await modal(page).getByRole('button', { name: '删除', exact: true }).click()
@@ -2393,6 +2462,39 @@ test('成员列表不预查密钥且分配密钥后可激活', async ({ page }) 
   await expect(modal(page)).toHaveCount(0)
   await expect(status).toHaveText('')
   expect(state.members.find((member) => member.name === '周予安')?.status).toBe('ACTIVE')
+})
+
+test('用户月度额度展示已用与剩余并支持增量调整', async ({ page }) => {
+  const state = await fixture(page)
+  state.members[0].monthlyTokenLimit = '1000'
+  state.members[0].quotaUsedTokens = '600'
+  await signIn(page)
+
+  const row = page.getByRole('row').filter({ hasText: '林知远' })
+  const quotaCell = row.getByRole('cell').nth(2)
+  await expect(quotaCell).toContainText(/600\s*\/\s*1,000/)
+  await expect(quotaCell).toContainText('剩余 400')
+
+  const moreActions = row.locator('summary')
+  await expect(moreActions).toHaveAttribute('aria-label', '林知远 的更多操作')
+  await expect(row.getByRole('button', { name: '增加配额', exact: true })).toBeHidden()
+  await moreActions.click()
+  const otherRow = page.getByRole('row').filter({ hasText: '陈清和' })
+  await otherRow.locator('summary').click()
+  await expect(row.locator('.row-action-more-menu')).toBeHidden()
+  await expect(otherRow.locator('.row-action-more-menu')).toBeVisible()
+  await expect(page.locator('.row-action-more-menu:popover-open')).toHaveCount(1)
+  await moreActions.click()
+  await row.getByRole('button', { name: '增加配额', exact: true }).click()
+  await modal(page).getByLabel('增加 Token 数').fill('500')
+  await modal(page).getByLabel('调整原因').fill('项目扩容')
+  await modal(page).getByRole('button', { name: '增加配额', exact: true }).click()
+
+  await expect(page.locator('.toast-success')).toContainText('配额已增加')
+  await expect(modal(page)).toHaveCount(0)
+  await expect(quotaCell).toContainText(/600\s*\/\s*1,500/)
+  await expect(quotaCell).toContainText('剩余 900')
+  expect(state.members[0].monthlyTokenLimit).toBe('1500')
 })
 
 test('成员 Key 弹层加载失败可重试', async ({ page }) => {
@@ -2588,6 +2690,7 @@ test('模型新增编辑、模态校验、冲突恢复和窄屏表单', async ({
   await page.screenshot({ path: '../.cache/web-visual/model-catalog-desktop.png' })
   const updatedRow = page.getByRole('row').filter({ hasText: 'official-test-v2' })
   await expect(updatedRow.getByRole('cell').nth(2)).toHaveText('-')
+  await updatedRow.locator('summary').click()
   await updatedRow.getByRole('button', { name: '删除', exact: true }).click()
   const deleteDialog = modal(page)
   await expect(deleteDialog).toContainText('相关服务商映射和分组授权将同时失效')
@@ -3232,11 +3335,10 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   const moreActions = deepSeekRow.locator('td').last().locator('summary')
   await expect(moreActions).toHaveAttribute('aria-label', '深度求索 的更多操作')
   await moreActions.click()
-  await expect(deepSeekRow.locator('.provider-more-menu')).toBeVisible()
-  const moreMenuBox = (await deepSeekRow.locator('.provider-more-menu').boundingBox())!
-  const tableBox = (await page.locator('.table-scroll').boundingBox())!
-  expect(moreMenuBox.x).toBeGreaterThanOrEqual(tableBox.x)
-  expect(moreMenuBox.y).toBeGreaterThanOrEqual(tableBox.y)
+  await expect(deepSeekRow.locator('.row-action-more-menu')).toBeVisible()
+  const moreMenuBox = (await deepSeekRow.locator('.row-action-more-menu').boundingBox())!
+  expect(moreMenuBox.x).toBeGreaterThanOrEqual(8)
+  expect(moreMenuBox.y).toBeGreaterThanOrEqual(8)
   await moreActions.click()
   expect(state.modelQueries).toHaveLength(0)
   await deepSeekRow.getByRole('button', { name: '编辑', exact: true }).click()
@@ -4264,7 +4366,7 @@ test('状态 switch 直接生效且危险操作仍需确认', async ({ page }) =
   await status.click()
   await expect(status).not.toBeChecked()
   await expect(modal(page)).toHaveCount(0)
-  await row.locator('summary', { hasText: '⋯' }).click()
+  await row.locator('summary', { hasText: '⋮' }).click()
   await row.getByRole('button', { name: 'Delete', exact: true }).click()
 
   const dialog = modal(page)
@@ -4622,6 +4724,7 @@ test('分组列表按最新记录倒序显示并提示输入分组名称', async
   await expect(page.getByRole('columnheader')).toHaveText([
     'ID',
     '名称',
+    '月度额度',
     '启用状态',
     '创建时间',
     '备注',
@@ -4641,10 +4744,10 @@ test('分组列表按最新记录倒序显示并提示输入分组名称', async
   ).toHaveCount(0)
   await expect(page.locator('tbody tr .avatar')).toHaveText(['最', '较'])
   await expect(
-    page.getByRole('row').filter({ hasText: '最新分组' }).getByRole('cell').nth(4),
+    page.getByRole('row').filter({ hasText: '最新分组' }).getByRole('cell').nth(5),
   ).toHaveText('-')
   await expect(
-    page.getByRole('row').filter({ hasText: '较早分组' }).getByRole('cell').nth(4),
+    page.getByRole('row').filter({ hasText: '较早分组' }).getByRole('cell').nth(5),
   ).toHaveText('核心服务组')
   await expect(page.getByRole('searchbox', { name: '分组名称' })).toHaveAttribute(
     'placeholder',
@@ -4816,11 +4919,9 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
   await modelGrant.click()
   await expect(modelGrant).toBeChecked()
   await modal(page).getByRole('button', { name: '关闭', exact: true }).click()
-  await page
-    .getByRole('row')
-    .filter({ hasText: '平台研发组' })
-    .getByRole('button', { name: '删除', exact: true })
-    .click()
+  const createdGroupRow = page.getByRole('row').filter({ hasText: '平台研发组' })
+  await createdGroupRow.locator('summary').click()
+  await createdGroupRow.getByRole('button', { name: '删除', exact: true }).click()
   await expect(modal(page)).toContainText('用户关联和模型授权将失效')
   await modal(page).getByRole('button', { name: '删除', exact: true }).click()
   await expect(page.getByRole('row').filter({ hasText: '平台研发组' })).toHaveCount(0)
@@ -5195,7 +5296,7 @@ test('高密度表格在常用桌面分辨率保持稳定列宽和单行技术�
   expect(idColumnWidths).toEqual(
     managementPages.map(({ name }) => ({
       name,
-      width: 144,
+      width: 88,
     })),
   )
 

@@ -31,6 +31,7 @@ type ApplicationSession interface {
 	UpdateApplication(context.Context, Application) error
 	SetApplicationStatus(context.Context, int64, string) error
 	DeleteApplication(context.Context, int64) error
+	AddPrincipalTokenQuota(context.Context, int64, int64) (int64, error)
 	SetGroupApplication(context.Context, int64, int64, bool) (bool, error)
 	Audit(context.Context, Audit, appsec.RequestMeta) error
 }
@@ -306,4 +307,30 @@ func (s *ApplicationService) Delete(ctx context.Context, actor admin.Identity, i
 		return w.Audit(ctx, Audit{Event: operation.ApplicationDelete, Target: "APPLICATION", ID: id, Name: value.Name,
 			Before: value, After: map[string]bool{"deleted": true}}, meta)
 	})
+}
+
+func (s *ApplicationService) AddTokenQuota(ctx context.Context, actor admin.Identity, id, amount int64, reason string, meta appsec.RequestMeta) (Application, error) {
+	if id <= 0 || amount <= 0 || !validText(reason, 500) {
+		return Application{}, appsec.ErrInvalidArgument
+	}
+	var updated Application
+	err := s.store.WriteApplication(ctx, actor, func(w ApplicationSession) error {
+		current, err := w.Application(ctx, id)
+		if err != nil {
+			return err
+		}
+		if !validTokenQuotaAddition(current.MonthlyTokenLimit, amount) {
+			return appsec.ErrInvalidArgument
+		}
+		limit, err := w.AddPrincipalTokenQuota(ctx, id, amount)
+		if err != nil {
+			return err
+		}
+		updated = current
+		updated.MonthlyTokenLimit = &limit
+		return w.Audit(ctx, Audit{Event: operation.PrincipalTokenQuotaAdd, Target: "APPLICATION", ID: id, Name: current.Name,
+			Before: map[string]any{"monthlyTokenLimit": tokenQuotaBeforeValue(limit, amount)},
+			After:  map[string]any{"monthlyTokenLimit": idString(limit), "amount": idString(amount), "reason": reason}}, meta)
+	})
+	return updated, err
 }

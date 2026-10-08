@@ -139,6 +139,29 @@ func (s *SecurityHandlers) mountApplicationRoutes(r chi.Router) {
 		value, err := a.Update(req.Context(), adminFrom(req), id, input.Name, input.Remark, groupIDs, requestMeta(req))
 		adminResult(w, req, http.StatusOK, value, err)
 	})
+	// @Summary 增加应用月度 Token 配额
+	// @Tags 应用管理
+	// @Accept json
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "应用 ID"
+	// @Param body body AddTokenQuotaRequest true "增加额度及原因"
+	// @Success 200 {object} response{data=mgmt.Application}
+	// @Failure 400,401,404,503 {object} response
+	// @Router /api/v1/applications/{id}/token-quota/add [post]
+	r.Post("/applications/{id}/token-quota/add", func(w http.ResponseWriter, req *http.Request) {
+		input, ok := decodeRequest[AddTokenQuotaRequest](w, req)
+		if !ok {
+			return
+		}
+		id, err := positiveID(chi.URLParam(req, "id"))
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		value, err := a.AddTokenQuota(req.Context(), adminFrom(req), id, input.TokenAmount(), input.Reason, requestMeta(req))
+		adminResult(w, req, http.StatusOK, value, err)
+	})
 	// @Summary 设置应用状态
 	// @Tags 应用管理
 	// @Accept json

@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { api, all } from '../api'
+import { computed, onMounted, ref, watch } from 'vue'
+import { api, all, errorText } from '../api'
 import { useCollection, useAction, useListSearch, date, validText } from '../composables'
 import { t } from '../i18n'
 import { showErrorToast } from '../toast'
-import type { Group, Model } from '../types'
+import type { Group, Model, TokenQuotaStatus } from '../types'
 import Icon from '../components/Icon.vue'
 import StatusSwitch from '../components/StatusSwitch.vue'
 import Modal from '../components/Modal.vue'
@@ -15,6 +15,9 @@ import ConfirmDialog from '../components/ConfirmDialog.vue'
 import GroupModelSelector from '../components/GroupModelSelector.vue'
 import TableScroll from '../components/TableScroll.vue'
 import TechnicalValue from '../components/TechnicalValue.vue'
+import TokenQuotaUsage from '../components/TokenQuotaUsage.vue'
+import AddTokenQuotaModal from '../components/AddTokenQuotaModal.vue'
+import RowActionMenu from '../components/RowActionMenu.vue'
 const {
   items,
   cursor,
@@ -44,7 +47,10 @@ const selected = ref<Group | null>(null),
   modelCandidates = ref<Model[]>([]),
   relationReady = ref(false),
   statusTarget = ref<Group | null>(null),
-  deleteTarget = ref<Group | null>(null)
+  deleteTarget = ref<Group | null>(null),
+  quotaTarget = ref<Group | null>(null)
+const quotaStatuses = ref<Record<string, TokenQuotaStatus>>({})
+let quotaRevision = 0
 const { keyword, query, visible, search, reset, searching, searchingAll } = useListSearch(
   items,
   (g) => `${g.name} ${g.id} ${g.remark || ''}`,
@@ -59,6 +65,29 @@ const editSelectableModelIDs = computed(() =>
   modelCandidates.value.filter(canEditModelSelection).map((model) => model.id),
 )
 onMounted(() => load())
+watch(visible, (rows) => void loadQuotaStatuses(rows), { immediate: true })
+
+async function loadQuotaStatuses(rows: Group[]) {
+  const revision = ++quotaRevision
+  const ids = rows.filter((group) => group.monthlyTokenLimit).map((group) => group.id)
+  if (!ids.length) {
+    quotaStatuses.value = {}
+    return
+  }
+  try {
+    const params = new URLSearchParams({ scopeType: 'GROUP', scopeIds: ids.join(',') })
+    const statuses = await api<TokenQuotaStatus[]>(`/token-quotas?${params}`)
+    if (revision !== quotaRevision) return
+    quotaStatuses.value = Object.fromEntries(statuses.map((status) => [status.scopeId, status]))
+  } catch (error) {
+    if (revision === quotaRevision) showErrorToast(errorText(error))
+  }
+}
+
+async function quotaSaved() {
+  quotaTarget.value = null
+  await refresh()
+}
 function canEditModelSelection(model: Model) {
   return (
     grantedModelIDs.value.has(model.id) ||
@@ -204,6 +233,7 @@ function deleteGroup() {
         <colgroup>
           <col class="record-id-column" />
           <col class="group-name-column" />
+          <col class="group-quota-column" />
           <col class="group-status-column" />
           <col class="group-created-column" />
           <col class="group-remark-column" />
@@ -213,6 +243,7 @@ function deleteGroup() {
           <tr>
             <th>{{ t('common.id') }}</th>
             <th>{{ t('common.name') }}</th>
+            <th>{{ t('tokenQuota.column') }}</th>
             <th>{{ t('common.enableStatus') }}</th>
             <th>{{ t('common.created') }}</th>
             <th>{{ t('common.remark') }}</th>
@@ -229,6 +260,9 @@ function deleteGroup() {
               </div>
             </td>
             <td>
+              <TokenQuotaUsage :limit="group.monthlyTokenLimit" :status="quotaStatuses[group.id]" />
+            </td>
+            <td>
               <StatusSwitch
                 :value="group.status"
                 :name="group.name"
@@ -243,12 +277,28 @@ function deleteGroup() {
             </td>
             <td>
               <div class="row-actions">
-                <button class="text-button" @click="manage(group)">
+                <button class="text-button" :disabled="busy || loading" @click="manage(group)">
                   {{ t('groups.models') }}
                 </button>
-                <button class="text-button danger" @click="openDelete(group)">
-                  {{ t('groups.delete') }}
-                </button>
+                <RowActionMenu
+                  :label="t('common.moreActionsFor', { name: group.name })"
+                  :title="t('common.moreActions')"
+                >
+                  <button
+                    class="text-button"
+                    :disabled="busy || loading"
+                    @click="quotaTarget = group"
+                  >
+                    {{ t('tokenQuota.addAction') }}
+                  </button>
+                  <button
+                    class="text-button danger"
+                    :disabled="busy || loading"
+                    @click="openDelete(group)"
+                  >
+                    {{ t('groups.delete') }}
+                  </button>
+                </RowActionMenu>
               </div>
             </td>
           </tr>
@@ -277,6 +327,13 @@ function deleteGroup() {
       @page-size="setPageSize"
     />
   </section>
+  <AddTokenQuotaModal
+    v-if="quotaTarget"
+    :name="quotaTarget.name"
+    :path="`/groups/${quotaTarget.id}`"
+    @close="quotaTarget = null"
+    @saved="quotaSaved"
+  />
   <Modal v-if="creating" :title="t('groups.create')" :busy="busy" wide @close="creating = false"
     ><form class="group-form" @submit.prevent="create">
       <div class="group-form-fields">
@@ -431,11 +488,14 @@ function deleteGroup() {
 </template>
 <style scoped>
 .groups-table {
-  min-width: 960px;
+  min-width: 1042px;
   table-layout: fixed;
 }
 .group-name-column {
-  width: 24%;
+  width: 20%;
+}
+.group-quota-column {
+  width: 190px;
 }
 .group-status-column {
   width: 120px;
@@ -444,10 +504,10 @@ function deleteGroup() {
   width: 160px;
 }
 .group-remark-column {
-  width: calc(76% - 600px);
+  width: calc(80% - 712px);
 }
 .group-action-column {
-  width: 176px;
+  width: 132px;
 }
 .group-form-fields {
   display: grid;

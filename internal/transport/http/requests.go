@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -351,3 +352,23 @@ type UpdateStatusRequest struct {
 
 func (r *UpdateStatusRequest) Normalize() { r.Status = strings.TrimSpace(r.Status) }
 func (r UpdateStatusRequest) Valid() bool { return r.Status == "ACTIVE" || r.Status == "DISABLED" }
+
+type AddTokenQuotaRequest struct {
+	Amount string `json:"amount" binding:"required" example:"1000000"`
+	Reason string `json:"reason" binding:"required" example:"项目扩容"`
+}
+
+func (r *AddTokenQuotaRequest) Normalize() {
+	r.Amount = strings.TrimSpace(r.Amount)
+	r.Reason = strings.TrimSpace(r.Reason)
+}
+
+func (r AddTokenQuotaRequest) Valid() bool {
+	amount, err := strconv.ParseInt(r.Amount, 10, 64)
+	return err == nil && amount > 0 && validRequestText(r.Reason, 500, true)
+}
+
+func (r AddTokenQuotaRequest) TokenAmount() int64 {
+	amount, _ := strconv.ParseInt(r.Amount, 10, 64)
+	return amount
+}

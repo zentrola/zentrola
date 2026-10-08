@@ -197,6 +197,33 @@ func (q *Queries) CountManageResources(ctx context.Context) (int64, error) {
 	return column_1, err
 }
 
+const manageAddGroupTokenQuota = `-- name: ManageAddGroupTokenQuota :one
+UPDATE principal_group
+SET monthly_token_limit=COALESCE(monthly_token_limit, 0)+$1::bigint,
+    updated_by=$2,updated_at=$3
+WHERE id=$4 AND NOT is_deleted
+RETURNING monthly_token_limit
+`
+
+type ManageAddGroupTokenQuotaParams struct {
+	Amount    int64
+	UpdatedBy string
+	UpdatedAt pgtype.Timestamptz
+	GroupID   int64
+}
+
+func (q *Queries) ManageAddGroupTokenQuota(ctx context.Context, arg ManageAddGroupTokenQuotaParams) (*int64, error) {
+	row := q.db.QueryRow(ctx, manageAddGroupTokenQuota,
+		arg.Amount,
+		arg.UpdatedBy,
+		arg.UpdatedAt,
+		arg.GroupID,
+	)
+	var monthly_token_limit *int64
+	err := row.Scan(&monthly_token_limit)
+	return monthly_token_limit, err
+}
+
 const manageAddMember = `-- name: ManageAddMember :exec
 INSERT INTO principal_group_membership(id,group_id,principal_id,created_by,updated_by,created_at,updated_at)
 VALUES($1,$2,$3,$4,$4,$5,$5)
@@ -221,8 +248,35 @@ func (q *Queries) ManageAddMember(ctx context.Context, arg ManageAddMemberParams
 	return err
 }
 
+const manageAddPrincipalTokenQuota = `-- name: ManageAddPrincipalTokenQuota :one
+UPDATE principal
+SET monthly_token_limit=COALESCE(monthly_token_limit, 0)+$1::bigint,
+    updated_by=$2,updated_at=$3
+WHERE id=$4 AND NOT is_deleted AND principal_type IN ('MEMBER','APPLICATION')
+RETURNING monthly_token_limit
+`
+
+type ManageAddPrincipalTokenQuotaParams struct {
+	Amount      int64
+	UpdatedBy   string
+	UpdatedAt   pgtype.Timestamptz
+	PrincipalID int64
+}
+
+func (q *Queries) ManageAddPrincipalTokenQuota(ctx context.Context, arg ManageAddPrincipalTokenQuotaParams) (*int64, error) {
+	row := q.db.QueryRow(ctx, manageAddPrincipalTokenQuota,
+		arg.Amount,
+		arg.UpdatedBy,
+		arg.UpdatedAt,
+		arg.PrincipalID,
+	)
+	var monthly_token_limit *int64
+	err := row.Scan(&monthly_token_limit)
+	return monthly_token_limit, err
+}
+
 const manageApplication = `-- name: ManageApplication :one
-SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at FROM principal WHERE id=$1 AND is_deleted=false AND principal_type='APPLICATION'
+SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at, monthly_token_limit FROM principal WHERE id=$1 AND is_deleted=false AND principal_type='APPLICATION'
 `
 
 func (q *Queries) ManageApplication(ctx context.Context, id int64) (Principal, error) {
@@ -239,6 +293,7 @@ func (q *Queries) ManageApplication(ctx context.Context, id int64) (Principal, e
 		&i.UpdatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MonthlyTokenLimit,
 	)
 	return i, err
 }
@@ -329,7 +384,7 @@ func (q *Queries) ManageApplicationStatus(ctx context.Context, arg ManageApplica
 }
 
 const manageApplicationSuggestions = `-- name: ManageApplicationSuggestions :many
-SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at FROM principal
+SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at, monthly_token_limit FROM principal
 WHERE is_deleted=false AND principal_type='APPLICATION'
   AND strpos(lower(name), lower($1::text)) > 0
   AND (id<$2 OR $2=0)
@@ -362,6 +417,7 @@ func (q *Queries) ManageApplicationSuggestions(ctx context.Context, arg ManageAp
 			&i.UpdatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.MonthlyTokenLimit,
 		); err != nil {
 			return nil, err
 		}
@@ -374,7 +430,7 @@ func (q *Queries) ManageApplicationSuggestions(ctx context.Context, arg ManageAp
 }
 
 const manageApplications = `-- name: ManageApplications :many
-SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at FROM principal WHERE is_deleted=false AND principal_type='APPLICATION' AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2
+SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at, monthly_token_limit FROM principal WHERE is_deleted=false AND principal_type='APPLICATION' AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2
 `
 
 type ManageApplicationsParams struct {
@@ -402,6 +458,7 @@ func (q *Queries) ManageApplications(ctx context.Context, arg ManageApplications
 			&i.UpdatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.MonthlyTokenLimit,
 		); err != nil {
 			return nil, err
 		}
@@ -1022,7 +1079,7 @@ func (q *Queries) ManageGrantModel(ctx context.Context, arg ManageGrantModelPara
 }
 
 const manageGroup = `-- name: ManageGroup :one
-SELECT id, is_deleted, status, group_code, group_name, remark, created_by, updated_by, created_at, updated_at FROM principal_group WHERE id=$1 AND is_deleted=false
+SELECT id, is_deleted, status, group_code, group_name, remark, created_by, updated_by, created_at, updated_at, monthly_token_limit FROM principal_group WHERE id=$1 AND is_deleted=false
 `
 
 func (q *Queries) ManageGroup(ctx context.Context, id int64) (PrincipalGroup, error) {
@@ -1039,12 +1096,13 @@ func (q *Queries) ManageGroup(ctx context.Context, id int64) (PrincipalGroup, er
 		&i.UpdatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MonthlyTokenLimit,
 	)
 	return i, err
 }
 
 const manageGroupApplications = `-- name: ManageGroupApplications :many
-SELECT p.id, p.is_deleted, p.status, p.principal_type, p.name, p.remark, p.created_by, p.updated_by, p.created_at, p.updated_at FROM principal p JOIN principal_group_membership g ON g.principal_id=p.id
+SELECT p.id, p.is_deleted, p.status, p.principal_type, p.name, p.remark, p.created_by, p.updated_by, p.created_at, p.updated_at, p.monthly_token_limit FROM principal p JOIN principal_group_membership g ON g.principal_id=p.id
 WHERE g.group_id=$1 AND g.is_deleted=false AND p.is_deleted=false AND p.principal_type='APPLICATION' AND (p.id<$2 OR $2=0) ORDER BY p.id DESC LIMIT $3
 `
 
@@ -1074,6 +1132,7 @@ func (q *Queries) ManageGroupApplications(ctx context.Context, arg ManageGroupAp
 			&i.UpdatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.MonthlyTokenLimit,
 		); err != nil {
 			return nil, err
 		}
@@ -1086,7 +1145,7 @@ func (q *Queries) ManageGroupApplications(ctx context.Context, arg ManageGroupAp
 }
 
 const manageGroupMembers = `-- name: ManageGroupMembers :many
-SELECT p.id, p.is_deleted, p.status, p.principal_type, p.name, p.remark, p.created_by, p.updated_by, p.created_at, p.updated_at FROM principal p JOIN principal_group_membership g ON g.principal_id=p.id
+SELECT p.id, p.is_deleted, p.status, p.principal_type, p.name, p.remark, p.created_by, p.updated_by, p.created_at, p.updated_at, p.monthly_token_limit FROM principal p JOIN principal_group_membership g ON g.principal_id=p.id
 WHERE g.group_id=$1 AND g.is_deleted=false AND p.is_deleted=false AND p.principal_type='MEMBER' AND (p.id<$2 OR $2=0) ORDER BY p.id DESC LIMIT $3
 `
 
@@ -1116,6 +1175,7 @@ func (q *Queries) ManageGroupMembers(ctx context.Context, arg ManageGroupMembers
 			&i.UpdatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.MonthlyTokenLimit,
 		); err != nil {
 			return nil, err
 		}
@@ -1216,7 +1276,7 @@ func (q *Queries) ManageGroupStatus(ctx context.Context, arg ManageGroupStatusPa
 }
 
 const manageGroups = `-- name: ManageGroups :many
-SELECT id, is_deleted, status, group_code, group_name, remark, created_by, updated_by, created_at, updated_at FROM principal_group
+SELECT id, is_deleted, status, group_code, group_name, remark, created_by, updated_by, created_at, updated_at, monthly_token_limit FROM principal_group
 WHERE is_deleted=false
   AND ($1::text = '' OR status = $1::text)
   AND (id<$2 OR $2=0)
@@ -1250,6 +1310,7 @@ func (q *Queries) ManageGroups(ctx context.Context, arg ManageGroupsParams) ([]P
 			&i.UpdatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.MonthlyTokenLimit,
 		); err != nil {
 			return nil, err
 		}
@@ -1329,7 +1390,7 @@ func (q *Queries) ManageKeys(ctx context.Context, arg ManageKeysParams) ([]Manag
 }
 
 const manageMember = `-- name: ManageMember :one
-SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at FROM principal WHERE id=$1 AND is_deleted=false AND principal_type='MEMBER'
+SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at, monthly_token_limit FROM principal WHERE id=$1 AND is_deleted=false AND principal_type='MEMBER'
 `
 
 func (q *Queries) ManageMember(ctx context.Context, id int64) (Principal, error) {
@@ -1346,12 +1407,13 @@ func (q *Queries) ManageMember(ctx context.Context, id int64) (Principal, error)
 		&i.UpdatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MonthlyTokenLimit,
 	)
 	return i, err
 }
 
 const manageMemberGroups = `-- name: ManageMemberGroups :many
-SELECT g.id, g.is_deleted, g.status, g.group_code, g.group_name, g.remark, g.created_by, g.updated_by, g.created_at, g.updated_at FROM principal_group g JOIN principal_group_membership pg ON pg.group_id=g.id
+SELECT g.id, g.is_deleted, g.status, g.group_code, g.group_name, g.remark, g.created_by, g.updated_by, g.created_at, g.updated_at, g.monthly_token_limit FROM principal_group g JOIN principal_group_membership pg ON pg.group_id=g.id
 WHERE pg.principal_id=$1 AND pg.is_deleted=false AND g.is_deleted=false AND (g.id<$2 OR $2=0) ORDER BY g.id DESC LIMIT $3
 `
 
@@ -1381,6 +1443,7 @@ func (q *Queries) ManageMemberGroups(ctx context.Context, arg ManageMemberGroups
 			&i.UpdatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.MonthlyTokenLimit,
 		); err != nil {
 			return nil, err
 		}
@@ -1414,7 +1477,7 @@ func (q *Queries) ManageMemberStatus(ctx context.Context, arg ManageMemberStatus
 }
 
 const manageMemberSuggestions = `-- name: ManageMemberSuggestions :many
-SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at FROM principal
+SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at, monthly_token_limit FROM principal
 WHERE is_deleted=false
   AND principal_type='MEMBER'
   AND strpos(lower(name), lower($1::text)) > 0
@@ -1449,6 +1512,7 @@ func (q *Queries) ManageMemberSuggestions(ctx context.Context, arg ManageMemberS
 			&i.UpdatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.MonthlyTokenLimit,
 		); err != nil {
 			return nil, err
 		}
@@ -1461,7 +1525,7 @@ func (q *Queries) ManageMemberSuggestions(ctx context.Context, arg ManageMemberS
 }
 
 const manageMembers = `-- name: ManageMembers :many
-SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at FROM principal WHERE is_deleted=false AND principal_type='MEMBER' AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2
+SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at, monthly_token_limit FROM principal WHERE is_deleted=false AND principal_type='MEMBER' AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2
 `
 
 type ManageMembersParams struct {
@@ -1489,6 +1553,7 @@ func (q *Queries) ManageMembers(ctx context.Context, arg ManageMembersParams) ([
 			&i.UpdatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.MonthlyTokenLimit,
 		); err != nil {
 			return nil, err
 		}

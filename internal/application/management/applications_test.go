@@ -21,6 +21,7 @@ type applicationSessionStub struct {
 	checkedAt   time.Time
 	keyError    error
 	audits      []Audit
+	quotaAdds   int
 }
 
 func (s *applicationSessionStub) Application(context.Context, int64) (Application, error) {
@@ -44,6 +45,15 @@ func (s *applicationSessionStub) SetApplicationStatus(_ context.Context, _ int64
 func (s *applicationSessionStub) HasUsableApplicationKey(_ context.Context, _ int64, now time.Time) (bool, error) {
 	s.checkedAt = now
 	return s.usable, s.keyError
+}
+func (s *applicationSessionStub) AddPrincipalTokenQuota(_ context.Context, _ int64, amount int64) (int64, error) {
+	limit := amount
+	if s.application.MonthlyTokenLimit != nil {
+		limit += *s.application.MonthlyTokenLimit
+	}
+	s.application.MonthlyTokenLimit = &limit
+	s.quotaAdds++
+	return limit, nil
 }
 func (s *applicationSessionStub) Audit(_ context.Context, audit Audit, _ appsec.RequestMeta) error {
 	s.audits = append(s.audits, audit)
@@ -102,5 +112,22 @@ func TestEnableApplicationRequiresUsableKey(t *testing.T) {
 				t.Fatalf("status audit missing: %+v", session.audits)
 			}
 		})
+	}
+}
+
+func TestAddApplicationTokenQuotaUsesPrincipalAuditType(t *testing.T) {
+	session := &applicationSessionStub{application: Application{ID: 7, Name: "应用"}}
+	service := ApplicationService{store: applicationStoreStub{session: session}}
+	updated, err := service.AddTokenQuota(
+		context.Background(), admin.Identity{ID: 1}, 7, 800, "新应用上线", appsec.RequestMeta{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.MonthlyTokenLimit == nil || *updated.MonthlyTokenLimit != 800 || session.quotaAdds != 1 {
+		t.Fatalf("updated=%+v quotaAdds=%d", updated, session.quotaAdds)
+	}
+	if len(session.audits) != 1 || session.audits[0].Event != operation.PrincipalTokenQuotaAdd || session.audits[0].Target != "APPLICATION" {
+		t.Fatalf("unexpected audit: %+v", session.audits)
 	}
 }

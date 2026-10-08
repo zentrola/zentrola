@@ -8,6 +8,24 @@ AND NOT p.is_deleted AND p.status='ACTIVE' AND p.principal_type IN ('MEMBER','AP
 -- name: GatewayModel :one
 SELECT id,model_code,display_name,status FROM model WHERE model_code=$1 AND NOT is_deleted;
 
+-- name: GatewayTokenQuotaConfiguration :one
+SELECT p.monthly_token_limit,
+       COALESCE(
+           jsonb_agg(DISTINCT jsonb_build_object('id', g.id, 'limit', g.monthly_token_limit))
+               FILTER (WHERE permission.group_id IS NOT NULL),
+           '[]'::jsonb
+       )::text AS group_quotas
+FROM principal p
+LEFT JOIN principal_group_membership membership
+    ON membership.principal_id=p.id AND NOT membership.is_deleted
+LEFT JOIN principal_group g
+    ON g.id=membership.group_id AND NOT g.is_deleted AND g.status='ACTIVE'
+       AND g.monthly_token_limit IS NOT NULL
+LEFT JOIN principal_group_model_permission permission
+    ON permission.group_id=g.id AND permission.model_id=sqlc.arg(model_id) AND NOT permission.is_deleted
+WHERE p.id=sqlc.arg(principal_id) AND NOT p.is_deleted
+GROUP BY p.id, p.monthly_token_limit;
+
 -- name: GatewayCandidates :many
 SELECT pm.id AS provider_model_id,pm.provider_id,p.provider_name,pm.upstream_model_code,pe.base_url,pe.protocol_type,pe.network_scope,
        p.proxy_enabled,p.proxy_url_ciphertext,p.proxy_url_nonce,p.proxy_url_key_version,
