@@ -1160,6 +1160,8 @@ export default {
     CREDENTIAL_UNRECOVERABLE: 'The credential cannot be decrypted. Enter it again.',
     CREDENTIAL_EXPORT_UNSUPPORTED: 'Only OpenAI personal subscription credentials can be exported.',
     PROVIDER_CREDENTIAL_REQUIRED: 'Configure a provider key before enabling the provider.',
+    PROVIDER_CONNECTION_TEST_FAILED:
+      'Ensure at least one effective credential passes a connection test before enabling the provider.',
     MODEL_SYNC_CREDENTIAL_REQUIRED: 'Configure a provider key before synchronizing models.',
     PROXY_CONFIGURATION_UNRECOVERABLE:
       'The proxy configuration cannot be decrypted. Save the provider proxy configuration again.',

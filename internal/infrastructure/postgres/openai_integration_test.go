@@ -50,7 +50,7 @@ func TestOpenAIIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	cipher, _ := cryptosec.NewCredentials(master)
-	management := mgmt.New(NewManagementStore(pool, ids), ids, cipher, nil)
+	management := mgmt.New(NewManagementStore(pool, ids), ids, cipher, successfulConnectionTester())
 	flash := createActiveTestModel(t, ctx, management, actor, "deepseek-v4-flash", "DeepSeek V4 Flash", []string{"TEXT"})
 	pro := createActiveTestModel(t, ctx, management, actor, "deepseek-v4-pro", "DeepSeek V4 Pro", []string{"TEXT"})
 	claude := createActiveTestModel(t, ctx, management, actor, "claude-sonnet", "Claude Sonnet", []string{"TEXT", "IMAGE"})

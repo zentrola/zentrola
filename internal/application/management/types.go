@@ -21,6 +21,7 @@ var (
 	ErrCredential                   = errors.New("credential unrecoverable")
 	ErrProvider                     = errors.New("provider unavailable")
 	ErrProviderCredentialRequired   = errors.New("provider credential required")
+	ErrProviderConnectionTestFailed = errors.New("provider connection test failed")
 	ErrProviderModelMappingRequired = errors.New("provider model mapping required")
 	ErrModelSyncCredentialRequired  = errors.New("model sync credential required")
 	ErrCredentialExportUnsupported  = errors.New("credential export unsupported")
@@ -35,6 +36,7 @@ var publicErrors = []error{
 	ErrCredential,
 	ErrProvider,
 	ErrProviderCredentialRequired,
+	ErrProviderConnectionTestFailed,
 	ErrProviderModelMappingRequired,
 	ErrModelSyncCredentialRequired,
 	ErrCredentialExportUnsupported,
@@ -472,14 +474,15 @@ type Cipher interface {
 	DecryptProviderProxy(catalog.SealedCredential, catalog.ProviderProxyOwner) ([]byte, error)
 }
 type ConnectionResult struct {
-	OK                     bool                   `json:"ok"`
-	Code                   string                 `json:"code"`
-	HTTPStatus             int                    `json:"httpStatus,omitempty"`
-	LatencyMS              int64                  `json:"latencyMs"`
-	ProviderModelMappingID int64                  `json:"providerModelMappingId,string,omitempty"`
-	TestedModelID          int64                  `json:"testedModelId,string,omitempty"`
-	TestedModelCode        string                 `json:"testedModelCode,omitempty"`
-	ResetCredits           *RateLimitResetCredits `json:"resetCredits,omitempty"`
+	verifiedResourceVersion int64
+	OK                      bool                   `json:"ok"`
+	Code                    string                 `json:"code"`
+	HTTPStatus              int                    `json:"httpStatus,omitempty"`
+	LatencyMS               int64                  `json:"latencyMs"`
+	ProviderModelMappingID  int64                  `json:"providerModelMappingId,string,omitempty"`
+	TestedModelID           int64                  `json:"testedModelId,string,omitempty"`
+	TestedModelCode         string                 `json:"testedModelCode,omitempty"`
+	ResetCredits            *RateLimitResetCredits `json:"resetCredits,omitempty"`
 }
 
 type ResetCreditConsumeResult struct {

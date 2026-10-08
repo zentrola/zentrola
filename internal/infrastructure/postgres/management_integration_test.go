@@ -33,6 +33,12 @@ func (f connectionTestFunc) Test(ctx context.Context, target mgmt.ConnectionTarg
 	return f(ctx, target, key, proxy)
 }
 
+func successfulConnectionTester() mgmt.ConnectionTester {
+	return connectionTestFunc(func(context.Context, mgmt.ConnectionTarget, []byte, *catalog.OutboundProxy) mgmt.ConnectionResult {
+		return mgmt.ConnectionResult{OK: true, Code: "OK", HTTPStatus: 200}
+	})
+}
+
 type failedAuditIDs struct{}
 
 func (failedAuditIDs) NextID(context.Context) (int64, error) {

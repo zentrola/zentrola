@@ -75,19 +75,20 @@ func New(store Store, ids shared.IDGenerator, cipher Cipher, tester ConnectionTe
 	}
 	now := func() time.Time { return businessTime(configuration.now) }
 	subscriptions := append([]SubscriptionAdapter(nil), configuration.subscriptions...)
+	resourceService := ResourceService{
+		store: resourceStoreAdapter{Store: store}, ids: ids, cipher: cipher, tester: tester, now: now,
+		subscriptions: subscriptions,
+	}
 	return &Service{
 		MemberService: MemberService{store: memberStoreAdapter{Store: store}, ids: ids, now: now},
 		GroupService:  GroupService{store: groupStoreAdapter{Store: store}, ids: ids, now: now},
 		ModelService:  ModelService{store: modelStoreAdapter{Store: store}, ids: ids, now: now},
 		ProviderService: ProviderService{
 			store: providerStoreAdapter{Store: store}, ids: ids, cipher: cipher, now: now,
-			discoverer: configuration.discoverer, subscriptions: subscriptions,
+			connectionProbe: &resourceService, discoverer: configuration.discoverer, subscriptions: subscriptions,
 		},
-		ResourceService: ResourceService{
-			store: resourceStoreAdapter{Store: store}, ids: ids, cipher: cipher, tester: tester, now: now,
-			subscriptions: subscriptions,
-		},
-		PriceService: PriceService{store: configuration.priceStore, ids: ids, now: now},
+		ResourceService: resourceService,
+		PriceService:    PriceService{store: configuration.priceStore, ids: ids, now: now},
 		QueryService: QueryService{
 			store: store, discoverer: configuration.discoverer, subscriptions: subscriptions,
 		},

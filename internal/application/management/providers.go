@@ -22,22 +22,27 @@ import (
 
 // ProviderService 聚合服务商配置、初始化和模型发现用例。
 type ProviderService struct {
-	store         ProviderStore
-	ids           shared.IDGenerator
-	cipher        Cipher
-	now           func() time.Time
-	discoverer    ModelDiscoverer
-	subscriptions []SubscriptionAdapter
+	store           ProviderStore
+	ids             shared.IDGenerator
+	cipher          Cipher
+	connectionProbe resourceConnectionProbe
+	now             func() time.Time
+	discoverer      ModelDiscoverer
+	subscriptions   []SubscriptionAdapter
 }
 
 type ProviderReadSession interface {
 	ProviderReader
 	ResourceReader
+	ModelReader
+}
+
+type resourceConnectionProbe interface {
+	TestResource(context.Context, admin.Identity, int64, appsec.RequestMeta) (ConnectionResult, error)
 }
 
 type ProviderSession interface {
 	ProviderReadSession
-	ModelReader
 	ProviderWriter
 	ModelWriter
 	AuditWriter
@@ -571,6 +576,67 @@ func (s *ProviderService) SetProviderStatus(ctx context.Context, actor admin.Ide
 	if id <= 0 || !validStatus(status) {
 		return appsec.ErrInvalidArgument
 	}
+	var testedProviderUpdatedAt time.Time
+	var testedResourceID, testedResourceVersion, testedMappingID, testedModelID int64
+	if status == "ACTIVE" {
+		var provider Provider
+		var resourceIDs []int64
+		now := businessTime(s.now)
+		err := s.store.ReadProvider(ctx, actor, func(r ProviderReadSession) error {
+			var err error
+			provider, err = r.Provider(ctx, id)
+			if err != nil || provider.Status == "ACTIVE" {
+				return err
+			}
+			if err := providerActivationPrerequisites(ctx, r, id); err != nil {
+				return err
+			}
+			for after := int64(0); ; {
+				resources, err := r.Resources(ctx, Page{After: after, Limit: 100})
+				if err != nil {
+					return err
+				}
+				for _, resource := range resources {
+					if resource.ProviderID == id && resource.CredentialConfigured &&
+						(resource.EffectiveAt == nil || !resource.EffectiveAt.After(now)) &&
+						(resource.ExpiresAt == nil || resource.ExpiresAt.After(now)) {
+						resourceIDs = append(resourceIDs, resource.ID)
+					}
+				}
+				if len(resources) < 100 {
+					break
+				}
+				after = resources[len(resources)-1].ID
+			}
+			return nil
+		})
+		if err != nil || provider.Status == "ACTIVE" {
+			return err
+		}
+		if len(resourceIDs) == 0 {
+			return ErrProviderConnectionTestFailed
+		}
+		if s.connectionProbe == nil {
+			return appsec.ErrUnavailable
+		}
+		for _, resourceID := range resourceIDs {
+			result, err := s.connectionProbe.TestResource(ctx, actor, resourceID, meta)
+			if err != nil {
+				return err
+			}
+			if result.OK && result.verifiedResourceVersion > 0 {
+				testedResourceID = resourceID
+				testedResourceVersion = result.verifiedResourceVersion
+				testedMappingID = result.ProviderModelMappingID
+				testedModelID = result.TestedModelID
+				break
+			}
+		}
+		if testedResourceID == 0 {
+			return ErrProviderConnectionTestFailed
+		}
+		testedProviderUpdatedAt = provider.UpdatedAt
+	}
 	return s.store.WriteProvider(ctx, actor, func(w ProviderSession) error {
 		provider, err := w.Provider(ctx, id)
 		if err != nil {
@@ -580,23 +646,53 @@ func (s *ProviderService) SetProviderStatus(ctx context.Context, actor admin.Ide
 			return nil
 		}
 		if status == "ACTIVE" {
-			mappings, err := w.ProviderMappings(ctx, id)
+			if !provider.UpdatedAt.Equal(testedProviderUpdatedAt) {
+				return ErrConflict
+			}
+			if err := providerActivationPrerequisites(ctx, w, id); err != nil {
+				return err
+			}
+			resource, err := w.Resource(ctx, testedResourceID)
+			if errors.Is(err, appsec.ErrNotFound) {
+				return ErrConflict
+			}
 			if err != nil {
 				return err
 			}
-			models, err := readAllModels(ctx, w)
-			if err != nil {
-				return err
+			now := businessTime(s.now)
+			if resource.ProviderID != id || resource.Version != testedResourceVersion ||
+				(resource.EffectiveAt != nil && resource.EffectiveAt.After(now)) ||
+				(resource.ExpiresAt != nil && !resource.ExpiresAt.After(now)) {
+				return ErrConflict
 			}
-			if activeProviderMappingCount(mappings, models) == 0 {
-				return ErrProviderModelMappingRequired
-			}
-			configured, err := w.ProviderCredentialConfigured(ctx, id)
-			if err != nil {
-				return err
-			}
-			if !configured {
-				return ErrProviderCredentialRequired
+			if resource.AuthType == AuthTypeAPIKey {
+				if testedMappingID <= 0 || testedModelID <= 0 {
+					return ErrConflict
+				}
+				model, err := w.Model(ctx, testedModelID)
+				if errors.Is(err, appsec.ErrNotFound) {
+					return ErrConflict
+				}
+				if err != nil {
+					return err
+				}
+				if model.Status != "ACTIVE" {
+					return ErrConflict
+				}
+				mappings, err := w.ProviderMappings(ctx, id)
+				if err != nil {
+					return err
+				}
+				matched := false
+				for _, mapping := range mappings {
+					if mapping.ID == testedMappingID && mapping.ModelID == testedModelID {
+						matched = true
+						break
+					}
+				}
+				if !matched {
+					return ErrConflict
+				}
 			}
 		}
 		if err := w.SetProviderStatus(ctx, id, status); err != nil {
@@ -604,6 +700,28 @@ func (s *ProviderService) SetProviderStatus(ctx context.Context, actor admin.Ide
 		}
 		return w.Audit(ctx, Audit{Event: operation.ProviderStatusChange, Target: "PROVIDER", ID: id, Name: provider.Name, Before: map[string]string{"status": provider.Status}, After: map[string]string{"status": status}}, meta)
 	})
+}
+
+func providerActivationPrerequisites(ctx context.Context, r ProviderReadSession, id int64) error {
+	mappings, err := r.ProviderMappings(ctx, id)
+	if err != nil {
+		return err
+	}
+	models, err := readAllModels(ctx, r)
+	if err != nil {
+		return err
+	}
+	if activeProviderMappingCount(mappings, models) == 0 {
+		return ErrProviderModelMappingRequired
+	}
+	configured, err := r.ProviderCredentialConfigured(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !configured {
+		return ErrProviderCredentialRequired
+	}
+	return nil
 }
 
 func (s *ProviderService) DeleteProvider(ctx context.Context, actor admin.Identity, id int64, meta appsec.RequestMeta) error {

@@ -336,6 +336,15 @@ func TestProviderCredentialRequiredReturnsConflict(t *testing.T) {
 	}
 }
 
+func TestProviderConnectionTestFailedReturnsConflict(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/providers/8/status", nil)
+	securityError(recorder, request, mgmt.ErrProviderConnectionTestFailed)
+	if recorder.Code != http.StatusConflict || !strings.Contains(recorder.Body.String(), `"code":"PROVIDER_CONNECTION_TEST_FAILED"`) {
+		t.Fatalf("unexpected response: status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestMemberAccessKeyRequiredReturnsConflict(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPatch, "/api/v1/members/8/status", nil)

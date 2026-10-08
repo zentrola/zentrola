@@ -27,6 +27,7 @@ var managementErrorMappings = []applicationErrorMapping{
 	{mgmt.ErrCredential, http.StatusUnprocessableEntity, "CREDENTIAL_UNRECOVERABLE", "Replace the resource credential before enabling it."},
 	{mgmt.ErrProvider, http.StatusConflict, "PROVIDER_UNAVAILABLE", "Provider is unavailable."},
 	{mgmt.ErrProviderCredentialRequired, http.StatusConflict, "PROVIDER_CREDENTIAL_REQUIRED", "Configure a provider credential before enabling the provider."},
+	{mgmt.ErrProviderConnectionTestFailed, http.StatusConflict, "PROVIDER_CONNECTION_TEST_FAILED", "An effective provider credential must pass a connection test before enabling the provider."},
 	{mgmt.ErrProviderModelMappingRequired, http.StatusConflict, "PROVIDER_MODEL_MAPPING_REQUIRED", "Configure a mapping to an active model before enabling the provider."},
 	{mgmt.ErrModelSyncCredentialRequired, http.StatusConflict, "MODEL_SYNC_CREDENTIAL_REQUIRED", "Configure a provider credential before synchronizing models."},
 	{mgmt.ErrCredentialExportUnsupported, http.StatusConflict, "CREDENTIAL_EXPORT_UNSUPPORTED", "Only OpenAI personal subscription credentials can be exported."},

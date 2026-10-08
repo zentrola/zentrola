@@ -227,6 +227,11 @@ func (s *ResourceService) TestResourceSelection(ctx context.Context, actor admin
 			if err := w.RestoreResourceRuntime(auditCtx, id, expectedVersion, now); err != nil {
 				return err
 			}
+			verified, err := w.Resource(auditCtx, id)
+			if err != nil {
+				return err
+			}
+			result.verifiedResourceVersion = verified.Version
 		} else if reason := connectionBlockReason(result.Code); reason != "" {
 			var status *int32
 			if result.HTTPStatus > 0 {

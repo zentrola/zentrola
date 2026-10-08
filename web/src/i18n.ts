@@ -1148,6 +1148,7 @@ export const i18n = createI18n({
         CREDENTIAL_UNRECOVERABLE: '凭证无法解密，请重新录入。',
         CREDENTIAL_EXPORT_UNSUPPORTED: '仅 OpenAI 个人订阅凭据支持导出。',
         PROVIDER_CREDENTIAL_REQUIRED: '请先配置服务商密钥，再启用服务商。',
+        PROVIDER_CONNECTION_TEST_FAILED: '请确保至少一条已生效凭证连接测试通过，再启用服务商。',
         MODEL_SYNC_CREDENTIAL_REQUIRED: '请先配置服务商密钥，再同步模型。',
         PROXY_CONFIGURATION_UNRECOVERABLE: '代理配置无法解密，请重新保存服务商代理配置。',
         PROXY_AUTH_REJECTED: '代理拒绝认证，请检查代理用户名、密码或访问规则。',
