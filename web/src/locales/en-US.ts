@@ -177,6 +177,7 @@ export default {
     usageRanking: 'Usage ranking',
     usageRankingDescription:
       'Use token consumption to identify the busiest principals, models, and providers.',
+    highestUsage: 'Highest usage',
     requestCount: '{count} requests',
     callCount: '{count} calls',
     pendingRatingNotice:

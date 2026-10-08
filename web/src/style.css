@@ -1621,24 +1621,52 @@ tbody tr:hover {
 }
 .cost-usage-ranking li {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto;
+  grid-template-columns: 52px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 14px;
-  min-height: 66px;
-  padding: 10px 22px;
+  gap: 16px;
+  min-height: 70px;
+  padding: 10px 22px 10px 18px;
   border-bottom: 1px solid var(--line);
 }
 .cost-usage-ranking li:last-child {
   border-bottom: 0;
 }
-.cost-rank-number {
-  color: var(--color-text-tertiary, #8a98a8);
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
-  text-align: center;
+.cost-rank-marker {
+  display: flex;
+  align-self: stretch;
+  align-items: center;
+  border-right: 1px solid var(--line);
 }
-.cost-usage-ranking li:nth-child(-n + 3) .cost-rank-number {
-  color: var(--color-primary-hover);
+.cost-rank-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid #dbe3ec;
+  border-radius: 50%;
+  color: #64748b;
+  background: #f8fafc;
+  font-size: 13px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.cost-rank-marker.rank-1 .cost-rank-number {
+  border-color: #93c5fd;
+  color: #1e40af;
+  background: #dbeafe;
+  font-weight: 700;
+}
+.cost-rank-marker.rank-2 .cost-rank-number {
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+  background: #eff6ff;
+  font-weight: 700;
+}
+.cost-rank-marker.rank-3 .cost-rank-number {
+  border-color: #dbeafe;
+  color: #2563eb;
+  background: #f8fbff;
   font-weight: 700;
 }
 .cost-rank-identity,
@@ -1655,6 +1683,26 @@ tbody tr:hover {
 .cost-rank-value small {
   color: var(--color-text-secondary);
   font-size: 11px;
+}
+.cost-rank-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.cost-rank-meta > :first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cost-rank-highlight {
+  flex: none;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #1d4ed8;
+  background: #eff6ff;
+  font-size: 10px;
+  font-weight: 600;
 }
 .cost-rank-value {
   min-width: 170px;
@@ -1799,9 +1847,12 @@ tbody tr:hover {
     flex-basis: 100%;
   }
   .cost-usage-ranking li {
-    grid-template-columns: 28px minmax(0, 1fr);
+    grid-template-columns: 52px minmax(0, 1fr);
     gap: 10px;
-    padding: 10px 16px;
+    padding: 10px 16px 10px 14px;
+  }
+  .cost-rank-marker {
+    grid-row: 1 / span 2;
   }
   .cost-rank-value {
     grid-column: 2;

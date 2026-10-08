@@ -204,6 +204,7 @@ export const i18n = createI18n({
         emptyCurrentAttributionNoCosts: '当月暂无可归属的成本或 Token 用量。',
         usageRanking: '用量排行',
         usageRankingDescription: '按 Token 消耗识别使用量较高的主体、模型和服务商。',
+        highestUsage: '最高用量',
         requestCount: '{count} 次请求',
         callCount: '{count} 次调用',
         pendingRatingNotice: '有 {count} 条调用尚未完成核算，可使用核算状态筛选查看。',

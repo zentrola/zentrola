@@ -5560,7 +5560,10 @@ test('成本管理聚焦成本概览和计费明细', async ({ page }) => {
   await expect(ledger.getByText('$5.125', { exact: true })).toBeVisible()
   await expect(ledger.getByText('¥715.125')).toHaveCount(0)
   await expect(page.getByRole('heading', { name: '用量排行', exact: true })).toBeVisible()
-  await expect(page.locator('.cost-usage-ranking')).toContainText('林知远')
+  const usageRanking = page.locator('.cost-usage-ranking')
+  await expect(usageRanking).toContainText('林知远')
+  await expect(usageRanking.locator('.cost-rank-marker.rank-1')).toHaveText('1')
+  await expect(usageRanking.getByText('最高用量', { exact: true })).toBeVisible()
 
   await page.getByRole('tab', { name: '计费明细', exact: true }).click()
   await expect(

@@ -396,10 +396,17 @@ onBeforeUnmount(() => {
         </header>
         <ol v-if="usageRanking.length" class="cost-usage-ranking">
           <li v-for="(row, index) in usageRanking" :key="row.entityId">
-            <span class="cost-rank-number">{{ index + 1 }}</span>
+            <div class="cost-rank-marker" :class="`rank-${Math.min(index + 1, 4)}`">
+              <span class="cost-rank-number">{{ index + 1 }}</span>
+            </div>
             <div class="cost-rank-identity">
               <strong>{{ row.name }}</strong>
-              <small>{{ row.code || '-' }}</small>
+              <small class="cost-rank-meta">
+                <span>{{ row.code || '-' }}</span>
+                <span v-if="index === 0" class="cost-rank-highlight">
+                  {{ t('billing.highestUsage') }}
+                </span>
+              </small>
             </div>
             <div class="cost-rank-value">
               <strong>{{ count(row.tokens) }}</strong>
