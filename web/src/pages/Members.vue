@@ -542,26 +542,26 @@ async function copyKey() {
 
 <style scoped>
 .members-table {
-  min-width: 1146px;
+  min-width: 1000px;
   table-layout: fixed;
 }
 .member-name-column {
   width: 24%;
 }
 .member-quota-column {
-  width: 190px;
+  width: 176px;
 }
 .member-status-column {
-  width: 100px;
+  width: 96px;
 }
 .member-remark-column {
-  width: calc(76% - 686px);
+  width: calc(76% - 652px);
 }
 .member-created-column {
-  width: 140px;
+  width: 132px;
 }
 .member-action-column {
-  width: 176px;
+  width: 160px;
 }
 .members-table th,
 .members-table td {

@@ -5271,6 +5271,10 @@ test('14 寸屏幕默认展开侧栏并将横向溢出限制在表格内', async
     topbarHeight: 58,
     documentFits: true,
   })
+  const memberTableScroll = page.locator('.members-table').locator('..')
+  expect(
+    await memberTableScroll.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+  ).toBe(true)
   const modelLink = page.getByRole('link', { name: '模型', exact: true })
   await expect(modelLink).toBeVisible()
   await expect(modelLink.locator('span')).toBeVisible()
