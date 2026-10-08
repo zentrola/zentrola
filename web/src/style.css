@@ -519,12 +519,15 @@ label textarea {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 5px;
   flex: none;
   min-height: 0;
   padding: 1px;
   margin: 0;
   border-radius: 3px;
   color: inherit;
+  font-size: inherit;
+  letter-spacing: inherit;
 }
 .sidebar nav .community-source-link:hover {
   color: #fff;

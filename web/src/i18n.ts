@@ -38,7 +38,7 @@ export const i18n = createI18n({
         english: 'EN',
       },
       console: '管理控制台',
-      overview: '社区版',
+      communityRepositoryLabel: 'GitHub 仓库',
       communityRepository: '在新页面打开 Zentrola GitHub 仓库',
       governance: '基础配置',
       records: '使用记录',

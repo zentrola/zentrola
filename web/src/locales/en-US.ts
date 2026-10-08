@@ -7,7 +7,7 @@ export default {
     english: 'EN',
   },
   console: 'Admin Console',
-  overview: 'Overview',
+  communityRepositoryLabel: 'GitHub repository',
   communityRepository: 'Open the Zentrola GitHub repository in a new tab',
   governance: 'Basic configuration',
   records: 'Records',

@@ -5474,8 +5474,9 @@ test('用户页面使用明确术语并在紧凑侧栏展示菜单提示', async
   await expect(page.getByRole('columnheader', { name: '激活状态', exact: true })).toBeVisible()
   await expect(page.locator('.workspace-square')).toHaveCount(0)
   await expect(page.locator('.workspace-label')).toHaveCount(0)
-  await expect(page.locator('.nav-section')).toHaveText(['社区版', '基础配置', '使用记录'])
+  await expect(page.locator('.nav-section')).toHaveText(['GitHub 仓库', '基础配置', '使用记录'])
   const communityRepository = page.locator('.community-source-link')
+  await expect(communityRepository).toHaveText('GitHub 仓库')
   await expect(communityRepository).toHaveAttribute(
     'aria-label',
     '在新页面打开 Zentrola GitHub 仓库',
