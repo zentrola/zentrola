@@ -190,6 +190,7 @@ async function fixture(page: Page) {
       { modelName: 'DeepSeek V4 Flash', modelCode: 'deepseek-v4-flash', providerName: '深度求索' },
     ]
   const providerInputs: any[] = []
+  const providerActivationInputs: any[] = []
   const safeProviderProxy = (input: any) => {
     if (!input.proxyEnabled) return { proxyEnabled: false, proxyUrl: null, proxyHeaders: [] }
     const parsed = new URL(input.proxyUrl)
@@ -1221,6 +1222,31 @@ async function fixture(page: Page) {
         return reply({ deleted: true })
       }
     }
+    if (segments[0] === 'providers' && segments[2] === 'activate' && method === 'POST') {
+      providerActivationInputs.push(structuredClone(body))
+      const provider = providers.find((candidate) => candidate.id === segments[1])
+      const resource = resources.find((candidate) => candidate.id === body.resourceId)
+      const mapping = (providerMappings.get(segments[1]) || []).find(
+        (candidate) => candidate.id === body.providerModelMappingId,
+      )
+      const model = models.find((candidate) => candidate.id === mapping?.modelId)
+      if (
+        !provider ||
+        !resource ||
+        resource.providerId !== provider.id ||
+        (resource.authType !== 'SUBSCRIPTION' && (!body.protocol || !mapping || !model))
+      )
+        return reply(null, 400, 'INVALID_ARGUMENT')
+      if (!failedTest) provider.status = 'ACTIVE'
+      return reply({
+        ok: !failedTest,
+        code: failedTest ? 'UPSTREAM_AUTH_FAILED' : 'OK',
+        latencyMs: 12,
+        providerModelMappingId: mapping?.id,
+        testedModelId: model?.id,
+        testedModelCode: mapping?.upstreamModelCode || model?.code,
+      })
+    }
     if (segments[2] === 'status') {
       const list =
         segments[0] === 'members'
@@ -1445,6 +1471,7 @@ async function fixture(page: Page) {
       priceEndpointUnavailable = value
     },
     providerInputs,
+    providerActivationInputs,
     groups,
     resources,
     keys,
@@ -2981,6 +3008,8 @@ test('连接测试允许选择模型并显示实际测试模型', async ({ page 
 
   const selection = page.getByRole('dialog', { name: 'Google / 选择测试模型' })
   await expect(selection).toBeVisible()
+  await page.setViewportSize({ width: 390, height: 280 })
+  await expectOnlyModalBodyScrolls(selection)
   await expect(
     selection.getByRole('radio', { name: '使用 Gemini 3.6 Flash 测试连接' }),
   ).toBeChecked()
@@ -3048,6 +3077,7 @@ test('服务商启用开关分别提示缺少模型映射和认证凭据', async
     disabledProvider('84', '仅配置模型'),
     disabledProvider('85', '配置齐全'),
   )
+  state.providers.find((provider) => provider.id === '85')!.type = 'THIRD_PARTY'
   state.providerMappings.set('82', [])
   state.providerMappings.set('83', [])
   state.providerMappings.set('84', [
@@ -3107,7 +3137,30 @@ test('服务商启用开关分别提示缺少模型映射和认证凭据', async
   await expect(configuredRow.locator('.provider-runtime-state')).toHaveText('待启用')
   await expect(switchFor('配置齐全')).toBeEnabled()
   await switchFor('配置齐全').click()
+  const activation = page.getByRole('dialog', { name: '配置齐全 / 选择启用时验证的连接' })
+  await expect(activation).toBeVisible()
+  await page.setViewportSize({ width: 390, height: 420 })
+  await expectOnlyModalBodyScrolls(activation)
+  await expect(activation.getByRole('radio', { name: '使用 Anthropic 协议测试连接' })).toBeChecked()
+  await expect(
+    activation.getByRole('radio', { name: '使用 DeepSeek V4 Flash 测试连接' }),
+  ).toBeChecked()
+  await expect(switchFor('配置齐全')).not.toBeChecked()
+  await activation.getByRole('button', { name: '测试并启用' }).click()
+  await expect(page.getByRole('dialog', { name: '配置齐全 / 启用结果' })).toContainText(
+    '连接测试通过，服务商已启用',
+  )
+  expect(state.providerActivationInputs.at(-1)).toEqual({
+    resourceId: '90',
+    protocol: 'ANTHROPIC',
+    providerModelMappingId: '95',
+  })
   await expect(configuredRow.locator('.provider-runtime-state')).toHaveText('正常')
+  await page
+    .getByRole('dialog', { name: '配置齐全 / 启用结果' })
+    .getByRole('button', { name: '关闭', exact: true })
+    .last()
+    .click()
   const credentialOnlyRow = page.getByRole('row').filter({ hasText: '仅配置凭据' })
   await expect(credentialOnlyRow.locator('.provider-runtime-state')).toHaveText('未配置模型')
   await expect(credentialOnlyRow.locator('.provider-runtime-state')).toHaveAttribute(
@@ -3121,6 +3174,49 @@ test('服务商启用开关分别提示缺少模型映射和认证凭据', async
     'aria-selected',
     'true',
   )
+})
+
+test('启用服务商使用弹窗选定的协议，连接失败时保持停用', async ({ page }) => {
+  const state = await fixture(page)
+  state.providers[0].status = 'DISABLED'
+  state.models[1].publisherProviderId = '81'
+  state.providerMappings.get('81')!.push({
+    id: '93',
+    providerId: '81',
+    modelId: '72',
+    upstreamModelCode: 'alternate-model',
+    priority: 100,
+    createdAt: stamp,
+    updatedAt: stamp,
+  })
+  state.resources.push({
+    id: '88',
+    providerId: '81',
+    name: 'DeepSeek API Key',
+    authType: 'API_KEY',
+    authAdapter: 'API_KEY',
+    runtimeStatus: 'HEALTHY',
+    credentialConfigured: true,
+    createdAt: stamp,
+    updatedAt: stamp,
+  })
+  state.failTest()
+  await signIn(page, 'home')
+  await page.getByRole('link', { name: '服务商', exact: true }).click()
+  const status = page.getByRole('switch', { name: 'DeepSeek的启用状态' })
+  await status.click()
+  const selection = page.getByRole('dialog', { name: 'DeepSeek / 选择启用时验证的连接' })
+  await selection.getByRole('radio', { name: '使用 OpenAI 协议测试连接' }).check()
+  await selection.getByRole('radio', { name: '使用 Claude Sonnet 测试连接' }).check()
+  await selection.getByRole('button', { name: '测试并启用' }).click()
+  await expect(page.getByRole('dialog', { name: 'DeepSeek / 启用结果' })).toContainText(
+    '上游认证失败',
+  )
+  expect(state.providerActivationInputs).toEqual([
+    { resourceId: '88', protocol: 'OPENAI', providerModelMappingId: '93' },
+  ])
+  await expect(status).not.toBeChecked()
+  expect(state.providers[0].status).toBe('DISABLED')
 })
 
 test('服务商操作引导依次高亮配置入口', async ({ page }) => {
@@ -3912,8 +4008,13 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
 
   const renamedStatus = page.getByRole('switch', { name: '阿里云模型服务的启用状态' })
   await renamedStatus.click()
+  await page
+    .getByRole('dialog', { name: '阿里云模型服务 / 选择启用时验证的连接' })
+    .getByRole('button', { name: '测试并启用' })
+    .click()
   await expect(renamedStatus).toBeChecked()
   expect(created.status).toBe('ACTIVE')
+  await modal(page).getByRole('button', { name: '关闭', exact: true }).last().click()
   await expect(modal(page)).toHaveCount(0)
   await mkdir('../.cache/web-visual', { recursive: true })
   await renamedStatus.click()

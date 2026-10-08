@@ -1857,6 +1857,39 @@ func (q *Queries) ManageProvider(ctx context.Context, id int64) (Provider, error
 	return i, err
 }
 
+const manageProviderActivationResourceIDs = `-- name: ManageProviderActivationResourceIDs :many
+SELECT id FROM provider_credential
+WHERE provider_id=$1 AND is_deleted=false
+  AND (effective_at IS NULL OR effective_at<=$2::timestamptz)
+  AND (expires_at IS NULL OR expires_at>$2::timestamptz)
+ORDER BY id DESC
+`
+
+type ManageProviderActivationResourceIDsParams struct {
+	ProviderID int64
+	At         pgtype.Timestamptz
+}
+
+func (q *Queries) ManageProviderActivationResourceIDs(ctx context.Context, arg ManageProviderActivationResourceIDsParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, manageProviderActivationResourceIDs, arg.ProviderID, arg.At)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const manageProviderCredentialConfigured = `-- name: ManageProviderCredentialConfigured :one
 SELECT EXISTS(
     SELECT 1 FROM provider_credential

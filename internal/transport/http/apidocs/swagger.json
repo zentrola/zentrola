@@ -6193,6 +6193,100 @@
                 }
             }
         },
+        "/api/v1/providers/{id}/activate": {
+            "post": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "description": "使用指定凭据、协议和模型映射执行一次连接测试；只有测试通过且配置在测试期间未变化时才启用服务商。HTTP 200 后仍需检查 data.ok 和 data.code。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "模型与资源"
+                ],
+                "summary": "测试选定连接并启用服务商",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "服务商 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "连接测试选择",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.ActivateProviderRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/management.ConnectionResult"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/providers/{id}/status": {
             "patch": {
                 "security": [
@@ -9390,6 +9484,30 @@
                 },
                 "status": {
                     "type": "string"
+                }
+            }
+        },
+        "http.ActivateProviderRequest": {
+            "type": "object",
+            "required": [
+                "resourceId"
+            ],
+            "properties": {
+                "protocol": {
+                    "type": "string",
+                    "enum": [
+                        "ANTHROPIC",
+                        "OPENAI"
+                    ],
+                    "example": "OPENAI"
+                },
+                "providerModelMappingId": {
+                    "type": "string",
+                    "example": "456"
+                },
+                "resourceId": {
+                    "type": "string",
+                    "example": "123"
                 }
             }
         },

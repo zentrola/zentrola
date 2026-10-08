@@ -241,6 +241,9 @@ func (s *managementSession) ProviderMappings(ctx context.Context, providerID int
 func (s *managementSession) ProviderCredentialConfigured(ctx context.Context, providerID int64) (bool, error) {
 	return s.q.ManageProviderCredentialConfigured(ctx, providerID)
 }
+func (s *managementSession) ProviderActivationResourceIDs(ctx context.Context, providerID int64, at time.Time) ([]int64, error) {
+	return s.q.ManageProviderActivationResourceIDs(ctx, dbgen.ManageProviderActivationResourceIDsParams{ProviderID: providerID, At: pgTime(at)})
+}
 func (s *managementSession) Resources(ctx context.Context, p mgmt.Page) ([]mgmt.Resource, error) {
 	rows, err := s.q.ManageResources(ctx, dbgen.ManageResourcesParams{ID: p.After, Limit: managementPageLimit(p)})
 	if err != nil {

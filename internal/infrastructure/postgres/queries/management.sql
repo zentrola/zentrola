@@ -185,6 +185,12 @@ SELECT EXISTS(
     SELECT 1 FROM provider_credential
     WHERE provider_id=$1 AND is_deleted=false
 );
+-- name: ManageProviderActivationResourceIDs :many
+SELECT id FROM provider_credential
+WHERE provider_id=$1 AND is_deleted=false
+  AND (effective_at IS NULL OR effective_at<=sqlc.arg(at)::timestamptz)
+  AND (expires_at IS NULL OR expires_at>sqlc.arg(at)::timestamptz)
+ORDER BY id DESC;
 -- name: ManageProviderEndpoints :many
 SELECT * FROM provider_endpoint WHERE provider_id=$1 ORDER BY protocol_type;
 -- name: ManageProviderEndpointsByProviders :many

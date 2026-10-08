@@ -353,6 +353,32 @@ type UpdateStatusRequest struct {
 func (r *UpdateStatusRequest) Normalize() { r.Status = strings.TrimSpace(r.Status) }
 func (r UpdateStatusRequest) Valid() bool { return r.Status == "ACTIVE" || r.Status == "DISABLED" }
 
+type ActivateProviderRequest struct {
+	ResourceID             string `json:"resourceId" binding:"required" example:"123"`
+	Protocol               string `json:"protocol,omitempty" enums:"ANTHROPIC,OPENAI" example:"OPENAI"`
+	ProviderModelMappingID string `json:"providerModelMappingId,omitempty" example:"456"`
+}
+
+func (r *ActivateProviderRequest) Normalize() {
+	r.ResourceID = strings.TrimSpace(r.ResourceID)
+	r.Protocol = strings.TrimSpace(r.Protocol)
+	r.ProviderModelMappingID = strings.TrimSpace(r.ProviderModelMappingID)
+}
+
+func (r ActivateProviderRequest) Valid() bool {
+	if _, err := positiveID(r.ResourceID); err != nil {
+		return false
+	}
+	if r.Protocol != "" && r.Protocol != "ANTHROPIC" && r.Protocol != "OPENAI" {
+		return false
+	}
+	if r.ProviderModelMappingID != "" {
+		_, err := positiveID(r.ProviderModelMappingID)
+		return err == nil
+	}
+	return true
+}
+
 type AddTokenQuotaRequest struct {
 	Amount string `json:"amount" binding:"required" example:"1000000"`
 	Reason string `json:"reason" example:"项目扩容"`

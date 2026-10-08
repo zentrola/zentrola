@@ -82,6 +82,26 @@ func TestDecodeRequest(t *testing.T) {
 	}
 }
 
+func TestActivateProviderRequestValidation(t *testing.T) {
+	assertMissingParameter[ActivateProviderRequest](t, http.MethodPost, "/api/v1/providers/8/activate", `{}`, "resourceId")
+	for _, test := range []struct {
+		body string
+		want bool
+	}{
+		{body: `{"resourceId":"20","protocol":"OPENAI","providerModelMappingId":"11"}`, want: true},
+		{body: `{"resourceId":"0","protocol":"OPENAI","providerModelMappingId":"11"}`},
+		{body: `{"resourceId":"20","protocol":"INVALID","providerModelMappingId":"11"}`},
+		{body: `{"resourceId":"20","protocol":"OPENAI","providerModelMappingId":"-1"}`},
+	} {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/providers/8/activate", strings.NewReader(test.body))
+		_, ok := decodeRequest[ActivateProviderRequest](recorder, request)
+		if ok != test.want {
+			t.Fatalf("body=%s accepted=%v; want %v", test.body, ok, test.want)
+		}
+	}
+}
+
 func TestDecodeRequestUsesCredentialSpecificBodyLimit(t *testing.T) {
 	credential := strings.Repeat("x", 64<<10)
 	body, err := json.Marshal(map[string]any{

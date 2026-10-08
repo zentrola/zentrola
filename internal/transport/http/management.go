@@ -1226,6 +1226,42 @@ func (s *SecurityHandlers) mountManagementCommandRoutes(r chi.Router) {
 	// @Failure 503 {object} response
 	// @Router /api/v1/providers/{id}/status [patch]
 	r.Patch("/providers/{id}/status", statusEndpoint(m.SetProviderStatus))
+	// @Summary 测试选定连接并启用服务商
+	// @Tags 模型与资源
+	// @Description 使用指定凭据、协议和模型映射执行一次连接测试；只有测试通过且配置在测试期间未变化时才启用服务商。HTTP 200 后仍需检查 data.ok 和 data.code。
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "服务商 ID"
+	// @Accept json
+	// @Param body body ActivateProviderRequest true "连接测试选择"
+	// @Success 200 {object} response{data=mgmt.ConnectionResult}
+	// @Failure 400 {object} response
+	// @Failure 401 {object} response
+	// @Failure 404 {object} response
+	// @Failure 409 {object} response
+	// @Failure 422 {object} response
+	// @Failure 503 {object} response
+	// @Router /api/v1/providers/{id}/activate [post]
+	r.Post("/providers/{id}/activate", func(w http.ResponseWriter, req *http.Request) {
+		input, ok := decodeRequest[ActivateProviderRequest](w, req)
+		if !ok {
+			return
+		}
+		id, err := routeID(req, "id")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		resourceID, _ := positiveID(input.ResourceID)
+		mappingID := int64(0)
+		if input.ProviderModelMappingID != "" {
+			mappingID, _ = positiveID(input.ProviderModelMappingID)
+		}
+		data, err := m.ActivateProvider(req.Context(), adminFrom(req), id, mgmt.ProviderActivationSelection{
+			ResourceID: resourceID, Protocol: input.Protocol, ProviderModelMappingID: mappingID,
+		}, requestMeta(req))
+		adminResult(w, req, http.StatusOK, data, err)
+	})
 
 	// @Summary 添加分组成员
 	// @Tags 分组与授权

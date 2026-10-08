@@ -378,6 +378,7 @@ type ProviderReader interface {
 	Provider(context.Context, int64) (Provider, error)
 	ProviderMappings(context.Context, int64) ([]ProviderMapping, error)
 	ProviderCredentialConfigured(context.Context, int64) (bool, error)
+	ProviderActivationResourceIDs(context.Context, int64, time.Time) ([]int64, error)
 }
 
 type ResourceReader interface {

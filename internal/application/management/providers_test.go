@@ -38,6 +38,17 @@ func (w *providerStatusWriter) Provider(context.Context, int64) (Provider, error
 func (w *providerStatusWriter) ProviderCredentialConfigured(context.Context, int64) (bool, error) {
 	return w.credentialConfigured, nil
 }
+func (w *providerStatusWriter) ProviderActivationResourceIDs(_ context.Context, providerID int64, at time.Time) ([]int64, error) {
+	var ids []int64
+	for _, resource := range w.resources {
+		if resource.ProviderID == providerID && resource.CredentialConfigured &&
+			(resource.EffectiveAt == nil || !resource.EffectiveAt.After(at)) &&
+			(resource.ExpiresAt == nil || resource.ExpiresAt.After(at)) {
+			ids = append(ids, resource.ID)
+		}
+	}
+	return ids, nil
+}
 func (w *providerStatusWriter) ProviderMappings(context.Context, int64) ([]ProviderMapping, error) {
 	return append([]ProviderMapping(nil), w.mappings...), nil
 }
@@ -85,6 +96,18 @@ type providerConnectionProbeFunc func(context.Context, admin.Identity, int64, ap
 
 func (f providerConnectionProbeFunc) TestResource(ctx context.Context, actor admin.Identity, id int64, meta appsec.RequestMeta) (ConnectionResult, error) {
 	return f(ctx, actor, id, meta)
+}
+func (f providerConnectionProbeFunc) TestResourceSelection(ctx context.Context, actor admin.Identity, id int64, _ string, _ int64, meta appsec.RequestMeta) (ConnectionResult, error) {
+	return f(ctx, actor, id, meta)
+}
+
+type providerSelectionProbeFunc func(context.Context, admin.Identity, int64, string, int64, appsec.RequestMeta) (ConnectionResult, error)
+
+func (f providerSelectionProbeFunc) TestResource(context.Context, admin.Identity, int64, appsec.RequestMeta) (ConnectionResult, error) {
+	return ConnectionResult{}, errors.New("unexpected default connection test")
+}
+func (f providerSelectionProbeFunc) TestResourceSelection(ctx context.Context, actor admin.Identity, id int64, protocol string, mappingID int64, meta appsec.RequestMeta) (ConnectionResult, error) {
+	return f(ctx, actor, id, protocol, mappingID, meta)
 }
 
 func (w *mappingWriter) ProviderMappings(context.Context, int64) ([]ProviderMapping, error) {
@@ -320,6 +343,73 @@ func TestSetProviderStatusRequiresSuccessfulConnectionTest(t *testing.T) {
 	}
 	if len(writer.statusChanges) != 1 || writer.statusChanges[0] != "ACTIVE" {
 		t.Fatalf("successful second credential did not enable provider: %v", writer.statusChanges)
+	}
+}
+
+func TestActivateProviderUsesSelectedConnection(t *testing.T) {
+	writer := &providerStatusWriter{
+		provider: Provider{ID: 8, Status: "DISABLED"},
+		mappings: []ProviderMapping{
+			{ID: 10, ProviderID: 8, ModelID: 1, UpstreamModelCode: "unavailable-model"},
+			{ID: 11, ProviderID: 8, ModelID: 2, UpstreamModelCode: "working-model"},
+		},
+		models:               []Model{{ID: 1, Status: "ACTIVE"}, {ID: 2, Status: "ACTIVE"}},
+		credentialConfigured: true,
+		resources:            []Resource{{ID: 20, ProviderID: 8, Version: 1, AuthType: AuthTypeAPIKey, CredentialConfigured: true}},
+	}
+	service := New(providerStatusStore{writer: writer}, nil, nil, nil)
+	service.ProviderService.connectionProbe = providerSelectionProbeFunc(func(_ context.Context, _ admin.Identity, id int64, protocol string, mappingID int64, _ appsec.RequestMeta) (ConnectionResult, error) {
+		if id != 20 || protocol != "OPENAI" || mappingID != 11 {
+			t.Fatalf("selection = resource %d, protocol %s, mapping %d", id, protocol, mappingID)
+		}
+		return ConnectionResult{OK: true, Code: "OK", ProviderModelMappingID: 11, TestedModelID: 2, TestedModelCode: "working-model", verifiedResourceVersion: 1}, nil
+	})
+	result, err := service.ActivateProvider(context.Background(), admin.Identity{}, 8, ProviderActivationSelection{
+		ResourceID: 20, Protocol: "OPENAI", ProviderModelMappingID: 11,
+	}, appsec.RequestMeta{})
+	if err != nil || !result.OK || len(writer.statusChanges) != 1 || writer.statusChanges[0] != "ACTIVE" {
+		t.Fatalf("activation failed: result=%+v err=%v statuses=%v", result, err, writer.statusChanges)
+	}
+}
+
+func TestActivateProviderLeavesDisabledOnFailedTestOrChangedMapping(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		changeMapping bool
+	}{
+		{name: "failed test"},
+		{name: "mapping changed after test", changeMapping: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			writer := &providerStatusWriter{
+				provider:             Provider{ID: 8, Status: "DISABLED"},
+				mappings:             []ProviderMapping{{ID: 11, ProviderID: 8, ModelID: 2, UpstreamModelCode: "working-model"}},
+				models:               []Model{{ID: 2, Status: "ACTIVE"}},
+				credentialConfigured: true,
+				resources:            []Resource{{ID: 20, ProviderID: 8, Version: 1, AuthType: AuthTypeAPIKey, CredentialConfigured: true}},
+			}
+			service := New(providerStatusStore{writer: writer}, nil, nil, nil)
+			service.ProviderService.connectionProbe = providerSelectionProbeFunc(func(context.Context, admin.Identity, int64, string, int64, appsec.RequestMeta) (ConnectionResult, error) {
+				if test.changeMapping {
+					writer.mappings[0].UpstreamModelCode = "changed-model"
+					return ConnectionResult{OK: true, Code: "OK", ProviderModelMappingID: 11, TestedModelID: 2, TestedModelCode: "working-model", verifiedResourceVersion: 1}, nil
+				}
+				return ConnectionResult{Code: "UPSTREAM_AUTH_FAILED"}, nil
+			})
+			result, err := service.ActivateProvider(context.Background(), admin.Identity{}, 8, ProviderActivationSelection{
+				ResourceID: 20, Protocol: "OPENAI", ProviderModelMappingID: 11,
+			}, appsec.RequestMeta{})
+			if test.changeMapping {
+				if !errors.Is(err, ErrConflict) {
+					t.Fatalf("changed mapping error=%v; want conflict", err)
+				}
+			} else if err != nil || result.OK || result.Code != "UPSTREAM_AUTH_FAILED" {
+				t.Fatalf("failed test result=%+v err=%v", result, err)
+			}
+			if len(writer.statusChanges) != 0 || len(writer.audits) != 0 {
+				t.Fatalf("provider enabled after failed verification: statuses=%v audits=%v", writer.statusChanges, writer.audits)
+			}
+		})
 	}
 }
 

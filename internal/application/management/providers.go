@@ -39,6 +39,7 @@ type ProviderReadSession interface {
 
 type resourceConnectionProbe interface {
 	TestResource(context.Context, admin.Identity, int64, appsec.RequestMeta) (ConnectionResult, error)
+	TestResourceSelection(context.Context, admin.Identity, int64, string, int64, appsec.RequestMeta) (ConnectionResult, error)
 }
 
 type ProviderSession interface {
@@ -572,16 +573,93 @@ func (s *ProviderService) UpdateProvider(ctx context.Context, actor admin.Identi
 	return s.withProviderCapabilities(updated), err
 }
 
+type ProviderActivationSelection struct {
+	ResourceID             int64
+	Protocol               string
+	ProviderModelMappingID int64
+}
+
+type providerActivationVerification struct {
+	providerUpdatedAt time.Time
+	resourceID        int64
+	resourceVersion   int64
+	mappingID         int64
+	modelID           int64
+	testedModelCode   string
+}
+
+// ActivateProvider 使用管理员选定的凭证、协议和模型测试连接，通过后启用服务商。
+func (s *ProviderService) ActivateProvider(ctx context.Context, actor admin.Identity, id int64, selection ProviderActivationSelection, meta appsec.RequestMeta) (ConnectionResult, error) {
+	if id <= 0 || selection.ResourceID <= 0 || selection.ProviderModelMappingID < 0 ||
+		(selection.Protocol != "" && !validProviderProtocol(selection.Protocol)) {
+		return ConnectionResult{}, appsec.ErrInvalidArgument
+	}
+	if s.connectionProbe == nil {
+		return ConnectionResult{}, appsec.ErrUnavailable
+	}
+	var provider Provider
+	var resource ResourceRecord
+	err := s.store.ReadProvider(ctx, actor, func(r ProviderReadSession) error {
+		var err error
+		provider, err = r.Provider(ctx, id)
+		if err != nil {
+			return err
+		}
+		if provider.Status == "ACTIVE" {
+			return ErrConflict
+		}
+		if err := providerActivationPrerequisites(ctx, r, id); err != nil {
+			return err
+		}
+		resource, err = r.Resource(ctx, selection.ResourceID)
+		if err != nil {
+			return err
+		}
+		if resource.ProviderID != id || !resource.CredentialConfigured {
+			return appsec.ErrInvalidArgument
+		}
+		now := businessTime(s.now)
+		if (resource.EffectiveAt != nil && resource.EffectiveAt.After(now)) ||
+			(resource.ExpiresAt != nil && !resource.ExpiresAt.After(now)) {
+			return ErrConflict
+		}
+		if resource.AuthType == AuthTypeAPIKey {
+			if selection.Protocol == "" || selection.ProviderModelMappingID <= 0 {
+				return appsec.ErrInvalidArgument
+			}
+		} else if selection.Protocol != "" || selection.ProviderModelMappingID != 0 {
+			return appsec.ErrInvalidArgument
+		}
+		return nil
+	})
+	if err != nil {
+		return ConnectionResult{}, err
+	}
+	result, err := s.connectionProbe.TestResourceSelection(ctx, actor, selection.ResourceID, selection.Protocol, selection.ProviderModelMappingID, meta)
+	if err != nil || !result.OK {
+		return result, err
+	}
+	if result.verifiedResourceVersion <= 0 ||
+		(resource.AuthType == AuthTypeAPIKey &&
+			(result.ProviderModelMappingID != selection.ProviderModelMappingID || result.TestedModelID <= 0 || result.TestedModelCode == "")) {
+		return result, ErrConflict
+	}
+	verified := &providerActivationVerification{
+		providerUpdatedAt: provider.UpdatedAt, resourceID: selection.ResourceID,
+		resourceVersion: result.verifiedResourceVersion, mappingID: result.ProviderModelMappingID,
+		modelID: result.TestedModelID, testedModelCode: result.TestedModelCode,
+	}
+	return result, s.setProviderStatusVerified(ctx, actor, id, "ACTIVE", verified, meta)
+}
+
 func (s *ProviderService) SetProviderStatus(ctx context.Context, actor admin.Identity, id int64, status string, meta appsec.RequestMeta) error {
 	if id <= 0 || !validStatus(status) {
 		return appsec.ErrInvalidArgument
 	}
-	var testedProviderUpdatedAt time.Time
-	var testedResourceID, testedResourceVersion, testedMappingID, testedModelID int64
+	var verified *providerActivationVerification
 	if status == "ACTIVE" {
 		var provider Provider
 		var resourceIDs []int64
-		now := businessTime(s.now)
 		err := s.store.ReadProvider(ctx, actor, func(r ProviderReadSession) error {
 			var err error
 			provider, err = r.Provider(ctx, id)
@@ -591,24 +669,8 @@ func (s *ProviderService) SetProviderStatus(ctx context.Context, actor admin.Ide
 			if err := providerActivationPrerequisites(ctx, r, id); err != nil {
 				return err
 			}
-			for after := int64(0); ; {
-				resources, err := r.Resources(ctx, Page{After: after, Limit: 100})
-				if err != nil {
-					return err
-				}
-				for _, resource := range resources {
-					if resource.ProviderID == id && resource.CredentialConfigured &&
-						(resource.EffectiveAt == nil || !resource.EffectiveAt.After(now)) &&
-						(resource.ExpiresAt == nil || resource.ExpiresAt.After(now)) {
-						resourceIDs = append(resourceIDs, resource.ID)
-					}
-				}
-				if len(resources) < 100 {
-					break
-				}
-				after = resources[len(resources)-1].ID
-			}
-			return nil
+			resourceIDs, err = r.ProviderActivationResourceIDs(ctx, id, businessTime(s.now))
+			return err
 		})
 		if err != nil || provider.Status == "ACTIVE" {
 			return err
@@ -625,18 +687,22 @@ func (s *ProviderService) SetProviderStatus(ctx context.Context, actor admin.Ide
 				return err
 			}
 			if result.OK && result.verifiedResourceVersion > 0 {
-				testedResourceID = resourceID
-				testedResourceVersion = result.verifiedResourceVersion
-				testedMappingID = result.ProviderModelMappingID
-				testedModelID = result.TestedModelID
+				verified = &providerActivationVerification{
+					providerUpdatedAt: provider.UpdatedAt, resourceID: resourceID,
+					resourceVersion: result.verifiedResourceVersion, mappingID: result.ProviderModelMappingID,
+					modelID: result.TestedModelID, testedModelCode: result.TestedModelCode,
+				}
 				break
 			}
 		}
-		if testedResourceID == 0 {
+		if verified == nil {
 			return ErrProviderConnectionTestFailed
 		}
-		testedProviderUpdatedAt = provider.UpdatedAt
 	}
+	return s.setProviderStatusVerified(ctx, actor, id, status, verified, meta)
+}
+
+func (s *ProviderService) setProviderStatusVerified(ctx context.Context, actor admin.Identity, id int64, status string, verified *providerActivationVerification, meta appsec.RequestMeta) error {
 	return s.store.WriteProvider(ctx, actor, func(w ProviderSession) error {
 		provider, err := w.Provider(ctx, id)
 		if err != nil {
@@ -646,13 +712,13 @@ func (s *ProviderService) SetProviderStatus(ctx context.Context, actor admin.Ide
 			return nil
 		}
 		if status == "ACTIVE" {
-			if !provider.UpdatedAt.Equal(testedProviderUpdatedAt) {
+			if verified == nil || !provider.UpdatedAt.Equal(verified.providerUpdatedAt) {
 				return ErrConflict
 			}
 			if err := providerActivationPrerequisites(ctx, w, id); err != nil {
 				return err
 			}
-			resource, err := w.Resource(ctx, testedResourceID)
+			resource, err := w.Resource(ctx, verified.resourceID)
 			if errors.Is(err, appsec.ErrNotFound) {
 				return ErrConflict
 			}
@@ -660,16 +726,16 @@ func (s *ProviderService) SetProviderStatus(ctx context.Context, actor admin.Ide
 				return err
 			}
 			now := businessTime(s.now)
-			if resource.ProviderID != id || resource.Version != testedResourceVersion ||
+			if resource.ProviderID != id || resource.Version != verified.resourceVersion ||
 				(resource.EffectiveAt != nil && resource.EffectiveAt.After(now)) ||
 				(resource.ExpiresAt != nil && !resource.ExpiresAt.After(now)) {
 				return ErrConflict
 			}
 			if resource.AuthType == AuthTypeAPIKey {
-				if testedMappingID <= 0 || testedModelID <= 0 {
+				if verified.mappingID <= 0 || verified.modelID <= 0 {
 					return ErrConflict
 				}
-				model, err := w.Model(ctx, testedModelID)
+				model, err := w.Model(ctx, verified.modelID)
 				if errors.Is(err, appsec.ErrNotFound) {
 					return ErrConflict
 				}
@@ -685,7 +751,8 @@ func (s *ProviderService) SetProviderStatus(ctx context.Context, actor admin.Ide
 				}
 				matched := false
 				for _, mapping := range mappings {
-					if mapping.ID == testedMappingID && mapping.ModelID == testedModelID {
+					if mapping.ID == verified.mappingID && mapping.ModelID == verified.modelID &&
+						(verified.testedModelCode == "" || testedMappingCode(mapping, model) == verified.testedModelCode) {
 						matched = true
 						break
 					}
@@ -700,6 +767,13 @@ func (s *ProviderService) SetProviderStatus(ctx context.Context, actor admin.Ide
 		}
 		return w.Audit(ctx, Audit{Event: operation.ProviderStatusChange, Target: "PROVIDER", ID: id, Name: provider.Name, Before: map[string]string{"status": provider.Status}, After: map[string]string{"status": status}}, meta)
 	})
+}
+
+func testedMappingCode(mapping ProviderMapping, model Model) string {
+	if code := strings.TrimSpace(mapping.UpstreamModelCode); code != "" {
+		return code
+	}
+	return model.Code
 }
 
 func providerActivationPrerequisites(ctx context.Context, r ProviderReadSession, id int64) error {
