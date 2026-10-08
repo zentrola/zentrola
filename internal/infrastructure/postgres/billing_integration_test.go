@@ -14,6 +14,8 @@ func TestSubscriptionBillingSettlementCorrectionAndStatistics(t *testing.T) {
 	periodStart := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 	periodEnd := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
 	for _, statement := range []string{
+		`INSERT INTO admin_user (id,username,password_hash,display_name,status,created_by,updated_by,created_at,updated_at)
+         VALUES (9901,'cost-query-admin','test-hash','Cost Query Admin','ACTIVE','system','system',$1,$1)`,
 		`INSERT INTO principal (id,principal_type,name,status,created_by,updated_by,created_at,updated_at)
          VALUES (1001,'MEMBER','Alpha','ACTIVE','system','system',$1,$1),
                 (1002,'MEMBER','Beta','ACTIVE','system','system',$1,$1)`,
@@ -119,6 +121,25 @@ func TestSubscriptionBillingSettlementCorrectionAndStatistics(t *testing.T) {
 		t.Fatalf("all statistics=%+v err=%v", allStatistics, err)
 	}
 
+	costQuery := app.NewUsageCostQuery(NewBillingStore(pool))
+	costFilter := app.UsageCostFilter{From: periodStart, To: periodEnd, Limit: 50}
+	costSummary, err := costQuery.Summary(ctx, admin.Identity{ID: 9901}, costFilter)
+	if err != nil || costSummary.Attempts != 2 || costSummary.Shared != 2 || costSummary.Rated != 0 || len(costSummary.Totals) != 0 {
+		t.Fatalf("subscription usage cost summary=%+v err=%v", costSummary, err)
+	}
+	costPage, err := costQuery.Costs(ctx, admin.Identity{ID: 9901}, costFilter)
+	if err != nil || costPage.Total != 2 || len(costPage.Items) != 2 ||
+		costPage.Items[0].RatingStatus != "SUBSCRIPTION_SHARED" || costPage.Items[0].TotalCost != nil {
+		t.Fatalf("subscription usage costs=%+v err=%v", costPage, err)
+	}
+	subscriptionCost, err := costQuery.Cost(ctx, admin.Identity{ID: 9901}, 7001)
+	if err != nil || subscriptionCost.Subscription == nil || subscriptionCost.Subscription.PriceID != 6001 ||
+		subscriptionCost.Subscription.DocumentID == nil || *subscriptionCost.Subscription.DocumentID <= 0 ||
+		subscriptionCost.Subscription.PrincipalAmount == nil || *subscriptionCost.Subscription.PrincipalAmount != "560" ||
+		subscriptionCost.TotalCost != nil {
+		t.Fatalf("subscription usage cost detail=%+v err=%v", subscriptionCost, err)
+	}
+
 	documentsPage, err := service.Documents(ctx, admin.Identity{ID: 1}, app.DocumentFilter{
 		BillingType: "SUBSCRIPTION", From: periodStart, To: periodEnd, Limit: 1,
 	})
@@ -191,6 +212,8 @@ func TestAPIKeyUsageRatingSettlementCorrectionAndLateUsage(t *testing.T) {
 	periodStart := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
 	periodEnd := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 	for _, statement := range []string{
+		`INSERT INTO admin_user (id,username,password_hash,display_name,status,created_by,updated_by,created_at,updated_at)
+         VALUES (9901,'cost-query-admin','test-hash','Cost Query Admin','ACTIVE','system','system',$1,$1)`,
 		`INSERT INTO principal (id,principal_type,name,status,created_by,updated_by,created_at,updated_at)
          VALUES (1101,'MEMBER','API Alpha','ACTIVE','system','system',$1,$1),
                 (1102,'APPLICATION','API App','ACTIVE','system','system',$1,$1)`,
@@ -227,7 +250,8 @@ func TestAPIKeyUsageRatingSettlementCorrectionAndLateUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	service := app.New(NewBillingStore(pool), idgen.New(pool))
+	billingStore := NewBillingStore(pool)
+	service := app.New(billingStore, idgen.New(pool))
 	ratingSummary, err := service.RatePendingAPIKeyUsage(ctx, 100)
 	if err != nil || ratingSummary.Created != 2 {
 		t.Fatalf("rating summary=%+v err=%v", ratingSummary, err)
@@ -235,6 +259,13 @@ func TestAPIKeyUsageRatingSettlementCorrectionAndLateUsage(t *testing.T) {
 	var tinyCost string
 	if err := pool.QueryRow(ctx, `SELECT total_cost::text FROM usage_rating WHERE usage_record_id=7101`).Scan(&tinyCost); err != nil || tinyCost != "0.00002500000000" {
 		t.Fatalf("tiny cost=%q err=%v", tinyCost, err)
+	}
+	currentAttribution, err := billingStore.CurrentAPIKeyAttribution(ctx, periodStart, periodEnd)
+	if err != nil || len(currentAttribution) != 2 || currentAttribution[0].PrincipalID != 1102 ||
+		currentAttribution[0].Amount != "0.00054" || currentAttribution[0].Tokens != 120 ||
+		currentAttribution[1].PrincipalID != 1101 || currentAttribution[1].Amount != "0.000025" ||
+		currentAttribution[1].Tokens != 5 {
+		t.Fatalf("current API key attribution=%+v err=%v", currentAttribution, err)
 	}
 
 	settlement, err := service.SettleDueAPIKeys(ctx, periodEnd)
@@ -286,6 +317,24 @@ func TestAPIKeyUsageRatingSettlementCorrectionAndLateUsage(t *testing.T) {
 	var netTokens int64
 	if err := pool.QueryRow(ctx, `SELECT SUM(total_tokens) FROM billing_document WHERE billing_type='API_KEY'`).Scan(&netTokens); err != nil || netTokens != 130 {
 		t.Fatalf("net tokens=%d err=%v", netTokens, err)
+	}
+
+	costQuery := app.NewUsageCostQuery(NewBillingStore(pool))
+	costFilter := app.UsageCostFilter{From: periodStart, To: periodEnd, Limit: 50}
+	costSummary, err := costQuery.Summary(ctx, admin.Identity{ID: 9901}, costFilter)
+	if err != nil || costSummary.Attempts != 3 || costSummary.Rated != 3 || costSummary.Unrated != 0 ||
+		len(costSummary.Totals) != 1 || costSummary.Totals[0].Currency != "CNY" || costSummary.Totals[0].Amount != "0.00046" {
+		t.Fatalf("API key usage cost summary=%+v err=%v", costSummary, err)
+	}
+	costPage, err := costQuery.Costs(ctx, admin.Identity{ID: 9901}, costFilter)
+	if err != nil || costPage.Total != 3 || len(costPage.Items) != 3 {
+		t.Fatalf("API key usage costs=%+v err=%v", costPage, err)
+	}
+	ratedCost, err := costQuery.Cost(ctx, admin.Identity{ID: 9901}, 7101)
+	if err != nil || ratedCost.RatingStatus != "RATED" || ratedCost.RatingRevision == nil ||
+		*ratedCost.RatingRevision != 2 || len(ratedCost.Ratings) != 2 || ratedCost.Ratings[0].Revision != 2 ||
+		ratedCost.TotalCost == nil || *ratedCost.TotalCost != "0.00002" {
+		t.Fatalf("API key usage cost detail=%+v err=%v", ratedCost, err)
 	}
 
 	for _, statement := range []string{

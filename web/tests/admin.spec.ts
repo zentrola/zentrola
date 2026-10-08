@@ -199,7 +199,207 @@ async function fixture(page: Page) {
     if (path === '/me') return reply({ id: '1', username: 'admin', displayName: '管理员' })
     if (path === '/auth/logout') return reply({ clearToken: true })
     if (path === '/gateway/active-models') return reply(activeModelRows)
-    if (path === '/billing/statistics' && method === 'GET')
+    if (path === '/billing/usage-costs/summary' && method === 'GET')
+      return reply({
+        from: url.searchParams.get('from'),
+        to: url.searchParams.get('to'),
+        requests: 2,
+        attempts: 2,
+        successful: 2,
+        inputTokens: 2100,
+        cachedInputTokens: 100,
+        outputTokens: 900,
+        rated: 1,
+        shared: 1,
+        unrated: 0,
+        totals: [{ currency: 'USD', amount: '0.00800000', rated: 1 }],
+      })
+    if (path === '/billing/usage-costs' && method === 'GET')
+      return reply({
+        items: [
+          {
+            id: '901',
+            requestId: 'req_api_cost',
+            attemptNo: 1,
+            principalId: longID,
+            principalName: '林知远',
+            principalType: 'MEMBER',
+            modelId: '71',
+            modelName: 'DeepSeek V4 Flash',
+            providerId: '81',
+            providerName: 'DeepSeek',
+            providerModelId: '92',
+            resourceId: '88',
+            resourceName: 'DeepSeek API Key',
+            clientProtocol: 'OPENAI_RESPONSES',
+            status: 'SUCCESS',
+            errorType: null,
+            startedAt: stamp,
+            completedAt: '2026-09-06T07:30:01Z',
+            latencyMs: 1000,
+            inputTokens: 1200,
+            cachedInputTokens: 100,
+            outputTokens: 300,
+            billingType: 'API_KEY',
+            ratingStatus: 'RATED',
+            ratingId: '911',
+            ratingRevision: 2,
+            currency: 'USD',
+            totalCost: '0.00800000',
+            ratedAt: stamp,
+          },
+          {
+            id: '902',
+            requestId: 'req_subscription_cost',
+            attemptNo: 1,
+            principalId: longID,
+            principalName: '林知远',
+            principalType: 'MEMBER',
+            modelId: '72',
+            modelName: 'Claude Sonnet',
+            providerId: '81',
+            providerName: 'DeepSeek',
+            providerModelId: '93',
+            resourceId: '89',
+            resourceName: '团队订阅',
+            clientProtocol: 'ANTHROPIC_MESSAGES',
+            status: 'SUCCESS',
+            errorType: null,
+            startedAt: stamp,
+            completedAt: '2026-09-06T07:30:02Z',
+            latencyMs: 2000,
+            inputTokens: 900,
+            cachedInputTokens: 0,
+            outputTokens: 600,
+            billingType: 'SUBSCRIPTION',
+            ratingStatus: 'SUBSCRIPTION_SHARED',
+            ratingId: null,
+            ratingRevision: null,
+            currency: 'CNY',
+            totalCost: null,
+            ratedAt: null,
+          },
+        ],
+        nextCursor: null,
+        total: 2,
+      })
+    if (path === '/billing/usage-costs/901' && method === 'GET')
+      return reply({
+        id: '901',
+        requestId: 'req_api_cost',
+        attemptNo: 1,
+        principalId: longID,
+        principalName: '林知远',
+        principalType: 'MEMBER',
+        modelId: '71',
+        modelName: 'DeepSeek V4 Flash',
+        providerId: '81',
+        providerName: 'DeepSeek',
+        providerModelId: '92',
+        resourceId: '88',
+        resourceName: 'DeepSeek API Key',
+        clientProtocol: 'OPENAI_RESPONSES',
+        status: 'SUCCESS',
+        errorType: null,
+        startedAt: stamp,
+        completedAt: '2026-09-06T07:30:01Z',
+        latencyMs: 1000,
+        inputTokens: 1200,
+        cachedInputTokens: 100,
+        outputTokens: 300,
+        billingType: 'API_KEY',
+        ratingStatus: 'RATED',
+        ratingId: '911',
+        ratingRevision: 2,
+        currency: 'USD',
+        totalCost: '0.00800000',
+        ratedAt: stamp,
+        ratings: [
+          {
+            id: '910',
+            revision: 1,
+            modelPriceId: '920',
+            priceEffectiveAt: '2026-09-01T00:00:00Z',
+            inputPrice: '0.00000200',
+            cachedInputPrice: '0.00000100',
+            outputPrice: '0.00000800',
+            inputCost: '0.00240000',
+            cachedInputCost: '0.00010000',
+            outputCost: '0.00240000',
+            totalCost: '0.00490000',
+            currency: 'USD',
+            createdAt: stamp,
+          },
+          {
+            id: '911',
+            revision: 2,
+            modelPriceId: '921',
+            priceEffectiveAt: '2026-09-01T00:00:00Z',
+            inputPrice: '0.00000300',
+            cachedInputPrice: '0.00000100',
+            outputPrice: '0.00001400',
+            inputCost: '0.00360000',
+            cachedInputCost: '0.00010000',
+            outputCost: '0.00420000',
+            totalCost: '0.00790000',
+            currency: 'USD',
+            createdAt: stamp,
+          },
+        ],
+        subscription: null,
+      })
+    if (path === '/billing/usage-costs/902' && method === 'GET')
+      return reply({
+        id: '902',
+        requestId: 'req_subscription_cost',
+        attemptNo: 1,
+        principalId: longID,
+        principalName: '林知远',
+        principalType: 'MEMBER',
+        modelId: '72',
+        modelName: 'Claude Sonnet',
+        providerId: '81',
+        providerName: 'DeepSeek',
+        providerModelId: '93',
+        resourceId: '89',
+        resourceName: '团队订阅',
+        clientProtocol: 'ANTHROPIC_MESSAGES',
+        status: 'SUCCESS',
+        errorType: null,
+        startedAt: stamp,
+        completedAt: '2026-09-06T07:30:02Z',
+        latencyMs: 2000,
+        inputTokens: 900,
+        cachedInputTokens: 0,
+        outputTokens: 600,
+        billingType: 'SUBSCRIPTION',
+        ratingStatus: 'SUBSCRIPTION_SHARED',
+        ratingId: null,
+        ratingRevision: null,
+        currency: 'CNY',
+        totalCost: null,
+        ratedAt: null,
+        ratings: [],
+        subscription: {
+          priceId: '930',
+          currency: 'CNY',
+          periodAmount: '1000.00000000',
+          billingPeriod: 'MONTH',
+          effectiveAt: '2026-09-01T00:00:00Z',
+          documentId: '601',
+          periodStart: '2026-09-01T00:00:00Z',
+          periodEnd: '2026-10-01T00:00:00Z',
+          principalAmount: '700.00000000',
+        },
+      })
+    if (path === '/billing/usage-costs/export' && method === 'GET')
+      return route.fulfill({
+        status: 200,
+        contentType: 'text/csv; charset=utf-8',
+        headers: { 'Content-Disposition': 'attachment; filename="zentrola-usage-costs.csv"' },
+        body: '\ufeffusage_record_id,total_cost\r\n901,0.00800000\r\n',
+      })
+    if (path === '/billing/current-attribution' && method === 'GET')
       return reply({
         from: url.searchParams.get('from'),
         to: url.searchParams.get('to'),
@@ -207,18 +407,18 @@ async function fixture(page: Page) {
           {
             billingType: 'SUBSCRIPTION',
             currency: 'CNY',
-            totalAmount: '710.00000000',
-            allocatedAmount: '710.00000000',
+            totalAmount: '1000.00000000',
+            allocatedAmount: '1000.00000000',
             unallocatedAmount: '0',
-            totalTokens: 1000000,
+            totalTokens: 1500,
           },
           {
             billingType: 'API_KEY',
             currency: 'USD',
-            totalAmount: '5.12500000',
-            allocatedAmount: '5.12500000',
+            totalAmount: '0.00800000',
+            allocatedAmount: '0.00800000',
             unallocatedAmount: '0',
-            totalTokens: 2500000,
+            totalTokens: 1500,
           },
         ],
         items: [
@@ -228,11 +428,59 @@ async function fixture(page: Page) {
             principalType: 'MEMBER',
             billingType: 'SUBSCRIPTION',
             currency: 'CNY',
-            amount: '497.00000000',
-            tokens: 700000,
+            amount: '1000.00000000',
+            tokens: 1500,
+          },
+          {
+            principalId: longID,
+            principalName: '林知远',
+            principalType: 'MEMBER',
+            billingType: 'API_KEY',
+            currency: 'USD',
+            amount: '0.00800000',
+            tokens: 1500,
           },
         ],
-        total: 1,
+        total: 2,
+      })
+    if (path === '/billing/statistics' && method === 'GET')
+      return reply({
+        from: url.searchParams.get('from'),
+        to: url.searchParams.get('to'),
+        totals: url.searchParams.get('from')?.startsWith('2026-10-01')
+          ? []
+          : [
+              {
+                billingType: 'SUBSCRIPTION',
+                currency: 'CNY',
+                totalAmount: '710.00000000',
+                allocatedAmount: '710.00000000',
+                unallocatedAmount: '0',
+                totalTokens: 1000000,
+              },
+              {
+                billingType: 'API_KEY',
+                currency: 'USD',
+                totalAmount: '5.12500000',
+                allocatedAmount: '5.12500000',
+                unallocatedAmount: '0',
+                totalTokens: 2500000,
+              },
+            ],
+        items: url.searchParams.get('from')?.startsWith('2026-10-01')
+          ? []
+          : [
+              {
+                principalId: longID,
+                principalName: '林知远',
+                principalType: 'MEMBER',
+                billingType: 'SUBSCRIPTION',
+                currency: 'CNY',
+                amount: '497.00000000',
+                tokens: 700000,
+              },
+            ],
+        total: url.searchParams.get('from')?.startsWith('2026-10-01') ? 0 : 1,
       })
     if (path === '/billing/documents' && method === 'GET')
       return reply({
@@ -2900,8 +3148,8 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await providerSearch.getByRole('button', { name: '创建服务商', exact: true }).click()
   const createMenu = providerSearch.getByRole('menu', { name: '创建服务商' })
   await expect(createMenu.getByRole('menuitem', { name: /三方服务商/ })).toBeVisible()
-  await expect(createMenu.getByRole('menuitem', { name: /模型厂商/ })).toBeVisible()
-  await createMenu.getByRole('menuitem', { name: /模型厂商/ }).click()
+  await expect(createMenu.getByRole('menuitem', { name: /预设厂商/ })).toBeVisible()
+  await createMenu.getByRole('menuitem', { name: /预设厂商/ }).click()
   const initializeDialog = modal(page)
   await expect(initializeDialog.getByRole('heading', { name: '选择模型厂商' })).toBeVisible()
   await expect(initializeDialog.getByText('已选择 8 / 8', { exact: true })).toBeVisible()
@@ -2942,7 +3190,7 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await providerSearch.getByRole('button', { name: '创建服务商', exact: true }).click()
   await providerSearch
     .getByRole('menu', { name: '创建服务商' })
-    .getByRole('menuitem', { name: /模型厂商/ })
+    .getByRole('menuitem', { name: /预设厂商/ })
     .click()
   const repeatInitializeDialog = modal(page)
   await repeatInitializeDialog.getByRole('button', { name: '清空', exact: true }).click()
@@ -5233,31 +5481,162 @@ test('列表搜索覆盖全部分页并安全传递不透明游标', async ({ pa
   await expect(page.getByLabel('分页')).toBeVisible()
 })
 
-test('成本管理分币种展示概览、调整单详情和核算异常', async ({ page }) => {
-  await fixture(page)
+test('成本管理聚焦成本概览和计费明细', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-10-07T08:00:00Z') })
+  const state = await fixture(page)
+  state.resources.push({
+    id: '89',
+    providerId: '81',
+    name: 'DeepSeek 订阅',
+    authType: 'SUBSCRIPTION',
+    authAdapter: 'OPENAI_CODEX',
+    subscriptionType: 'PERSONAL',
+    effectiveAt: '2026-10-01T00:00:00Z',
+    expiresAt: null,
+    runtimeStatus: 'HEALTHY',
+    credentialConfigured: true,
+    createdAt: stamp,
+    updatedAt: stamp,
+  })
+  state.credentialPrices.set('89', {
+    modelPrices: [],
+    subscriptionPrices: [
+      {
+        id: '930',
+        providerCredentialId: '89',
+        currency: 'CNY',
+        periodAmount: '1000.00000000',
+        billingPeriod: 'MONTH',
+        effectiveAt: '2026-10-01T00:00:00Z',
+        createdAt: stamp,
+      },
+    ],
+    subscriptionPrice: {
+      id: '930',
+      providerCredentialId: '89',
+      currency: 'CNY',
+      periodAmount: '1000.00000000',
+      billingPeriod: 'MONTH',
+      effectiveAt: '2026-10-01T00:00:00Z',
+      createdAt: stamp,
+    },
+  })
   await signIn(page)
 
   await page.getByRole('link', { name: '成本管理', exact: true }).click()
   await expect(page.getByRole('heading', { name: '成本管理', exact: true })).toBeVisible()
-  await expect(page.getByRole('tab')).toHaveText(['成本概览', '成本单据', '核算异常'])
+  await expect(page.locator('.billing-tabs').getByRole('tab')).toHaveText(['成本概览', '计费明细'])
+  const overviewDateRange = page.getByRole('button', { name: '选择起止日期', exact: true })
+  await expect(overviewDateRange).toContainText('2026/10/01 — 2026/10/07')
+  await expect(page.getByText('当月实时口径', { exact: true })).toHaveCount(0)
   const ledger = page.locator('.cost-ledger')
   await expect(ledger.getByText('CNY', { exact: true })).toBeVisible()
   await expect(ledger.getByText('USD', { exact: true })).toBeVisible()
+  await expect(ledger.getByText('¥1,000', { exact: true })).toBeVisible()
+  await expect(ledger.getByText('$0.008', { exact: true })).toBeVisible()
+  await expect(ledger.getByText('1 项有效订阅', { exact: true })).toBeVisible()
+  const attribution = page.locator('.cost-attribution-panel')
+  await expect(attribution.getByRole('heading', { name: '费用分摊', exact: true })).toBeVisible()
+  await expect(attribution.getByText('预计分摊', { exact: true })).toHaveCount(0)
+  await expect(attribution.getByText('林知远', { exact: true })).toHaveCount(2)
+  await expect(attribution.getByText('¥1,000', { exact: true })).toBeVisible()
+  await expect(attribution.getByText('$0.008', { exact: true })).toBeVisible()
+  await expect(page.getByText('当月订阅尚未结算，暂未生成最终成本归属。')).toHaveCount(0)
+  await overviewDateRange.click()
+  const overviewDateDialog = page.getByRole('dialog', { name: '选择起止日期' })
+  await overviewDateDialog.getByRole('button', { name: '上个月' }).click()
+  await overviewDateDialog.getByRole('button', { name: '选择 2026-09-10' }).click()
+  await overviewDateDialog.getByRole('button', { name: '选择 2026-09-20' }).click()
+  await expect(overviewDateRange).toContainText('2026/09/10 — 2026/09/20')
+  const overviewRequest = page.waitForRequest((request) =>
+    request.url().includes('/billing/statistics?'),
+  )
+  await page.getByRole('button', { name: '查询', exact: true }).click()
+  const overviewSearch = new URL((await overviewRequest).url()).searchParams
+  expect(overviewSearch.get('from')).toBe('2026-09-10T00:00:00.000Z')
+  expect(overviewSearch.get('to')).toBe('2026-09-21T00:00:00.000Z')
+  await expect(page.getByText('已结算口径', { exact: true })).toBeVisible()
   await expect(ledger.getByText('¥710', { exact: true })).toBeVisible()
   await expect(ledger.getByText('$5.125', { exact: true })).toBeVisible()
   await expect(ledger.getByText('¥715.125')).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: '用量排行', exact: true })).toBeVisible()
+  await expect(page.locator('.cost-usage-ranking')).toContainText('林知远')
 
-  await page.getByRole('tab', { name: '成本单据', exact: true }).click()
-  await expect(page.getByRole('cell', { name: '成本调整单', exact: true })).toBeVisible()
-  await expect(page.getByText('-¥200', { exact: true })).toBeVisible()
+  await page.getByRole('tab', { name: '计费明细', exact: true }).click()
+  await expect(
+    page.locator('.billing-detail-metrics').getByText('$0.008', { exact: true }),
+  ).toBeVisible()
+  const usageTable = page.locator('.usage-cost-table')
+  await expect(usageTable.getByText('已核算', { exact: true })).toBeVisible()
+  await expect(usageTable.getByText('订阅账期分摊', { exact: true })).toBeVisible()
+
+  const costPanel = page.locator('.usage-cost-panel')
+  await expect(costPanel.getByLabel('用户分组')).toBeVisible()
+  await expect(costPanel.getByLabel('模型')).toBeVisible()
+  await expect(costPanel.getByLabel('服务商')).toBeVisible()
+  await expect(costPanel.getByLabel('核算状态')).toBeVisible()
+  await expect(costPanel.getByLabel('计费方式')).toBeVisible()
+  await expect(costPanel.getByLabel('主体类型')).toBeHidden()
+  const costDateRange = costPanel.getByRole('button', { name: '选择起止日期', exact: true })
+  await expect(costDateRange).toBeVisible()
+  await costDateRange.click()
+  const costDateDialog = costPanel.getByRole('dialog', { name: '选择起止日期' })
+  await costDateDialog.getByRole('button', { name: '选择 2026-10-02' }).click()
+  await costDateDialog.getByRole('button', { name: '选择 2026-10-05' }).click()
+  await expect(costDateRange).toContainText('2026/10/02 — 2026/10/05')
+  const costRequest = page.waitForRequest(
+    (request) =>
+      request.url().includes('/billing/usage-costs?') &&
+      new URL(request.url()).searchParams.get('modelId') === '71',
+  )
+  await costPanel.getByRole('button', { name: /更多筛选/ }).click()
+  await expect(costPanel.getByLabel('主体类型')).toBeVisible()
+  await costPanel.getByLabel('主体类型').selectOption('MEMBER')
+  await costPanel.getByLabel('主体 ID').fill(longID)
+  await costPanel.getByLabel('模型').selectOption('71')
+  await costPanel.getByLabel('服务商').selectOption('81')
+  await costPanel.getByLabel('客户端协议').selectOption('OPENAI_RESPONSES')
+  await costPanel.getByLabel('核算状态').selectOption('RATED')
+  await costPanel.getByLabel('计费方式').selectOption('API_KEY')
+  await costPanel.getByLabel('币种').selectOption('USD')
+  const collapseFilters = costPanel.getByRole('button', { name: /收起筛选/ })
+  await expect(collapseFilters.locator('.usage-cost-filter-count')).toHaveText('4')
+  await collapseFilters.click()
+  await expect(costPanel.getByLabel('主体类型')).toBeHidden()
+  await expect(costPanel.getByRole('button', { name: /更多筛选/ })).toContainText('4')
+  await costPanel.getByRole('button', { name: '查询', exact: true }).click()
+  const searched = new URL((await costRequest).url()).searchParams
+  expect(Object.fromEntries(searched)).toMatchObject({
+    from: '2026-10-02T00:00:00.000Z',
+    to: '2026-10-06T00:00:00.000Z',
+    principalType: 'MEMBER',
+    principalId: longID,
+    modelId: '71',
+    providerId: '81',
+    clientProtocol: 'OPENAI_RESPONSES',
+    ratingStatus: 'RATED',
+    billingType: 'API_KEY',
+    currency: 'USD',
+  })
+
   await page.getByRole('button', { name: '查看详情' }).first().click()
-  const detail = page.getByRole('dialog', { name: '成本单据详情' })
-  await expect(detail).toContainText('原单据')
-  await expect(detail).toContainText('601')
-  await expect(detail).toContainText('70%')
-  await detail.getByRole('button', { name: '关闭' }).click()
+  const usageDetail = page.getByRole('dialog', { name: '单次用量成本详情' })
+  await expect(usageDetail.locator('tbody tr').nth(0).locator('td').first()).toHaveText('1')
+  await expect(usageDetail.locator('tbody tr').nth(1).locator('td').first()).toHaveText('2')
+  await expect(usageDetail.getByText('$0.0036', { exact: true })).toBeVisible()
+  await expect(usageDetail.getByText('$0.0042', { exact: true })).toBeVisible()
+  await expect(usageDetail.getByText('$0.0079', { exact: true })).toBeVisible()
+  await usageDetail.getByRole('button', { name: '关闭' }).click()
 
-  await page.getByRole('tab', { name: '核算异常', exact: true }).click()
-  await expect(page.getByRole('table').getByText('Token 数据不完整', { exact: true })).toBeVisible()
-  await expect(page.getByRole('cell', { name: '-', exact: true })).toHaveCount(2)
+  await page.getByRole('button', { name: '查看详情' }).nth(1).click()
+  const subscriptionDetail = page.getByRole('dialog', { name: '单次用量成本详情' })
+  await expect(subscriptionDetail).toContainText('个人订阅按账期分摊')
+  await expect(subscriptionDetail).toContainText('¥1,000')
+  await expect(subscriptionDetail).toContainText('¥700')
+  await subscriptionDetail.getByRole('button', { name: '关闭' }).click()
+
+  const downloadPromise = page.waitForEvent('download')
+  await costPanel.getByRole('button', { name: '导出 CSV', exact: true }).click()
+  const exportDownload = await downloadPromise
+  expect(exportDownload.suggestedFilename()).toContain('zentrola-usage-costs-')
 })

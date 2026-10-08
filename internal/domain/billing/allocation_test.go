@@ -45,3 +45,10 @@ func TestSubtractAmounts(t *testing.T) {
 		t.Fatalf("got=%q err=%v", got, err)
 	}
 }
+
+func TestAddAmountsPreservesFixedPrecision(t *testing.T) {
+	got, err := Add("0.00000001", "999.99999999")
+	if err != nil || got != "1000" {
+		t.Fatalf("got=%q err=%v", got, err)
+	}
+}

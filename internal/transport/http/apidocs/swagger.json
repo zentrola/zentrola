@@ -1545,6 +1545,94 @@
                 }
             }
         },
+        "/api/v1/billing/current-attribution": {
+            "get": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "description": "对当前时间范围内生效的个人订阅按成功调用 Token 预计分摊，并合并已完成核算的 API Key 实时成本；历史账期的最终归属仍使用费用统计接口。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "成本管理"
+                ],
+                "summary": "当月预计费用分摊",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "起始时间（含），UTC RFC3339 Z",
+                        "name": "from",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "结束时间（不含），UTC RFC3339 Z；范围必须包含当前时间",
+                        "name": "to",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "minimum": 0,
+                        "type": "integer",
+                        "default": 0,
+                        "description": "归属统计偏移量",
+                        "name": "after",
+                        "in": "query"
+                    },
+                    {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer",
+                        "default": 50,
+                        "description": "归属统计数量",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/billing.Statistics"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/billing/documents": {
             "get": {
                 "security": [
@@ -1911,6 +1999,400 @@
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/billing/usage-costs": {
+            "get": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "成本管理"
+                ],
+                "summary": "单次用量成本列表",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "起始时间（含），UTC RFC3339 Z",
+                        "name": "from",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "结束时间（不含），UTC RFC3339 Z",
+                        "name": "to",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "MEMBER",
+                            "APPLICATION"
+                        ],
+                        "type": "string",
+                        "description": "主体类型",
+                        "name": "principalType",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "成员或应用 ID",
+                        "name": "principalId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "当前所属分组 ID",
+                        "name": "groupId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "逻辑模型 ID",
+                        "name": "modelId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "服务商 ID",
+                        "name": "providerId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "资源 ID",
+                        "name": "resourceId",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "OPENAI_CHAT",
+                            "OPENAI_RESPONSES",
+                            "OPENAI_IMAGES",
+                            "ANTHROPIC_MESSAGES"
+                        ],
+                        "type": "string",
+                        "description": "客户端协议",
+                        "name": "clientProtocol",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "SUCCESS",
+                            "FAILED",
+                            "CANCELLED"
+                        ],
+                        "type": "string",
+                        "description": "调用状态",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "RATED",
+                            "SUBSCRIPTION_SHARED",
+                            "INCOMPLETE_TOKENS",
+                            "MISSING_PRICE",
+                            "PENDING_RATING",
+                            "NOT_BILLABLE"
+                        ],
+                        "type": "string",
+                        "description": "核算状态",
+                        "name": "ratingStatus",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "API_KEY",
+                            "SUBSCRIPTION"
+                        ],
+                        "type": "string",
+                        "description": "计费类型",
+                        "name": "billingType",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "CNY",
+                            "USD"
+                        ],
+                        "type": "string",
+                        "description": "币种",
+                        "name": "currency",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "startedAt",
+                            "totalCost",
+                            "tokens",
+                            "latency"
+                        ],
+                        "type": "string",
+                        "description": "排序字段",
+                        "name": "sort",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "asc",
+                            "desc"
+                        ],
+                        "type": "string",
+                        "description": "排序方向",
+                        "name": "order",
+                        "in": "query"
+                    },
+                    {
+                        "minimum": 0,
+                        "type": "integer",
+                        "default": 0,
+                        "description": "排行偏移量",
+                        "name": "after",
+                        "in": "query"
+                    },
+                    {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer",
+                        "default": 50,
+                        "description": "每页数量",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/http.PageResponse-billing_UsageCostRow"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/billing/usage-costs/export": {
+            "get": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "produces": [
+                    "text/csv"
+                ],
+                "tags": [
+                    "成本管理"
+                ],
+                "summary": "导出单次用量成本",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/billing/usage-costs/summary": {
+            "get": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "description": "按同一组筛选条件汇总请求、上游尝试、成功调用、Token、核算状态和分币种按量成本。订阅调用只计入共享账期数量，不伪造单次成本。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "成本管理"
+                ],
+                "summary": "用量成本汇总",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "起始时间（含），UTC RFC3339 Z",
+                        "name": "from",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "结束时间（不含），UTC RFC3339 Z",
+                        "name": "to",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/billing.UsageCostSummary"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/billing/usage-costs/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "成本管理"
+                ],
+                "summary": "单次用量成本详情",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Usage Record ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/billing.UsageCostDetail"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
                         }
@@ -7904,6 +8386,40 @@
                 }
             }
         },
+        "billing.SubscriptionAllocation": {
+            "type": "object",
+            "properties": {
+                "billingPeriod": {
+                    "type": "string"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "documentId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "effectiveAt": {
+                    "type": "string"
+                },
+                "periodAmount": {
+                    "type": "string"
+                },
+                "periodEnd": {
+                    "type": "string"
+                },
+                "periodStart": {
+                    "type": "string"
+                },
+                "priceId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "principalAmount": {
+                    "type": "string"
+                }
+            }
+        },
         "billing.UnratedUsage": {
             "type": "object",
             "properties": {
@@ -7949,6 +8465,317 @@
                 },
                 "waitingSince": {
                     "type": "string"
+                }
+            }
+        },
+        "billing.UsageCostDetail": {
+            "type": "object",
+            "properties": {
+                "attemptNo": {
+                    "type": "integer"
+                },
+                "billingType": {
+                    "type": "string"
+                },
+                "cachedInputTokens": {
+                    "type": "integer"
+                },
+                "clientProtocol": {
+                    "type": "string"
+                },
+                "completedAt": {
+                    "type": "string"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "errorType": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "inputTokens": {
+                    "type": "integer"
+                },
+                "latencyMs": {
+                    "type": "integer"
+                },
+                "modelId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "modelName": {
+                    "type": "string"
+                },
+                "outputTokens": {
+                    "type": "integer"
+                },
+                "principalId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "principalName": {
+                    "type": "string"
+                },
+                "principalType": {
+                    "type": "string"
+                },
+                "providerId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "providerModelId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "providerName": {
+                    "type": "string"
+                },
+                "ratedAt": {
+                    "type": "string"
+                },
+                "ratingId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "ratingRevision": {
+                    "type": "integer"
+                },
+                "ratingStatus": {
+                    "type": "string"
+                },
+                "ratings": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/billing.UsageCostRating"
+                    }
+                },
+                "requestId": {
+                    "type": "string"
+                },
+                "resourceId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "resourceName": {
+                    "type": "string"
+                },
+                "startedAt": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "subscription": {
+                    "$ref": "#/definitions/billing.SubscriptionAllocation"
+                },
+                "totalCost": {
+                    "type": "string"
+                }
+            }
+        },
+        "billing.UsageCostRating": {
+            "type": "object",
+            "properties": {
+                "cachedInputCost": {
+                    "type": "string"
+                },
+                "cachedInputPrice": {
+                    "type": "string"
+                },
+                "createdAt": {
+                    "type": "string"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "inputCost": {
+                    "type": "string"
+                },
+                "inputPrice": {
+                    "type": "string"
+                },
+                "modelPriceId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "outputCost": {
+                    "type": "string"
+                },
+                "outputPrice": {
+                    "type": "string"
+                },
+                "priceEffectiveAt": {
+                    "type": "string"
+                },
+                "revision": {
+                    "type": "integer"
+                },
+                "totalCost": {
+                    "type": "string"
+                }
+            }
+        },
+        "billing.UsageCostRow": {
+            "type": "object",
+            "properties": {
+                "attemptNo": {
+                    "type": "integer"
+                },
+                "billingType": {
+                    "type": "string"
+                },
+                "cachedInputTokens": {
+                    "type": "integer"
+                },
+                "clientProtocol": {
+                    "type": "string"
+                },
+                "completedAt": {
+                    "type": "string"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "errorType": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "inputTokens": {
+                    "type": "integer"
+                },
+                "latencyMs": {
+                    "type": "integer"
+                },
+                "modelId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "modelName": {
+                    "type": "string"
+                },
+                "outputTokens": {
+                    "type": "integer"
+                },
+                "principalId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "principalName": {
+                    "type": "string"
+                },
+                "principalType": {
+                    "type": "string"
+                },
+                "providerId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "providerModelId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "providerName": {
+                    "type": "string"
+                },
+                "ratedAt": {
+                    "type": "string"
+                },
+                "ratingId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "ratingRevision": {
+                    "type": "integer"
+                },
+                "ratingStatus": {
+                    "type": "string"
+                },
+                "requestId": {
+                    "type": "string"
+                },
+                "resourceId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "resourceName": {
+                    "type": "string"
+                },
+                "startedAt": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "totalCost": {
+                    "type": "string"
+                }
+            }
+        },
+        "billing.UsageCostSummary": {
+            "type": "object",
+            "properties": {
+                "attempts": {
+                    "type": "integer"
+                },
+                "cachedInputTokens": {
+                    "type": "integer"
+                },
+                "from": {
+                    "type": "string"
+                },
+                "inputTokens": {
+                    "type": "integer"
+                },
+                "outputTokens": {
+                    "type": "integer"
+                },
+                "rated": {
+                    "type": "integer"
+                },
+                "requests": {
+                    "type": "integer"
+                },
+                "shared": {
+                    "type": "integer"
+                },
+                "successful": {
+                    "type": "integer"
+                },
+                "to": {
+                    "type": "string"
+                },
+                "totals": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/billing.UsageCostTotal"
+                    }
+                },
+                "unrated": {
+                    "type": "integer"
+                }
+            }
+        },
+        "billing.UsageCostTotal": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "string"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "rated": {
+                    "type": "integer"
                 }
             }
         },
@@ -8354,6 +9181,23 @@
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/billing.UnratedUsage"
+                    }
+                },
+                "nextCursor": {
+                    "type": "string"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "http.PageResponse-billing_UsageCostRow": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/billing.UsageCostRow"
                     }
                 },
                 "nextCursor": {

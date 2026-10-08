@@ -110,6 +110,18 @@ func Subtract(left, right string) (string, error) {
 	return formatAmount(new(big.Int).Sub(leftUnits, rightUnits)), nil
 }
 
+func Add(left, right string) (string, error) {
+	leftUnits, err := parseAmount(left)
+	if err != nil {
+		return "", err
+	}
+	rightUnits, err := parseAmount(right)
+	if err != nil {
+		return "", err
+	}
+	return formatAmount(new(big.Int).Add(leftUnits, rightUnits)), nil
+}
+
 func parseAmount(value string) (*big.Int, error) {
 	return parseFixed(value, amountScale)
 }

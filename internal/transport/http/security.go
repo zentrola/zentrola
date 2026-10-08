@@ -32,6 +32,7 @@ type SecurityHandlers struct {
 	ActiveModels    gw.ActiveModelReader
 	Usage           *usageapp.QueryService
 	Billing         *billingapp.Service
+	BillingCosts    *billingapp.UsageCostQueryService
 	UsageWriter     *usageapp.Writer
 	BodyReadTimeout time.Duration
 	logger          *slog.Logger
@@ -162,6 +163,9 @@ func (s *SecurityHandlers) mount(r chi.Router) {
 			}
 			if s.Billing != nil {
 				s.mountBilling(protected)
+			}
+			if s.BillingCosts != nil {
+				s.mountBillingCosts(protected)
 			}
 			if s.ActiveModels != nil {
 				s.mountActiveModels(protected)

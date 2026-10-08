@@ -29,6 +29,76 @@ GROUP BY principal_id
 HAVING SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)) > 0
 ORDER BY tokens DESC, principal_id;
 
+-- name: BillingPrincipalIdentities :many
+SELECT id, name, principal_type
+FROM principal
+WHERE id = ANY(sqlc.arg(principal_ids)::bigint[])
+ORDER BY id;
+
+-- name: BillingCurrentAPIKeyAttribution :many
+WITH raw AS (
+    SELECT usage.principal_id,
+           principal.name AS principal_name,
+           principal.principal_type,
+           usage.input_tokens,
+           usage.cached_input_tokens,
+           usage.output_tokens,
+           price.id AS effective_price_id,
+           price.currency AS effective_currency,
+           price.input_price AS effective_input_price,
+           price.cached_input_price AS effective_cached_input_price,
+           price.output_price AS effective_output_price,
+           rating.model_price_id,
+           rating.currency AS rating_currency,
+           rating.input_price AS rating_input_price,
+           rating.cached_input_price AS rating_cached_input_price,
+           rating.output_price AS rating_output_price,
+           rating.total_cost
+    FROM usage_record usage
+    JOIN principal ON principal.id = usage.principal_id
+    JOIN provider_credential credential
+      ON credential.id = usage.provider_credential_id
+     AND credential.auth_type = 'API_KEY'
+    LEFT JOIN LATERAL (
+        SELECT candidate.*
+        FROM provider_credential_model_price candidate
+        WHERE candidate.provider_credential_id = usage.provider_credential_id
+          AND candidate.provider_model_id = usage.provider_model_id
+          AND candidate.effective_at <= usage.started_at
+        ORDER BY candidate.effective_at DESC, candidate.id DESC
+        LIMIT 1
+    ) price ON TRUE
+    LEFT JOIN LATERAL (
+        SELECT candidate.*
+        FROM usage_rating candidate
+        WHERE candidate.usage_record_id = usage.id
+        ORDER BY candidate.revision DESC, candidate.id DESC
+        LIMIT 1
+    ) rating ON TRUE
+    WHERE usage.started_at >= sqlc.arg(from_time)::timestamptz
+      AND usage.started_at < sqlc.arg(to_time)::timestamptz
+      AND usage.status = 'SUCCESS'
+)
+SELECT principal_id,
+       principal_name,
+       principal_type,
+       rating_currency AS currency,
+       SUM(total_cost)::numeric AS amount,
+       SUM(input_tokens + output_tokens)::bigint AS tokens
+FROM raw
+WHERE input_tokens IS NOT NULL
+  AND cached_input_tokens IS NOT NULL
+  AND output_tokens IS NOT NULL
+  AND cached_input_tokens <= input_tokens
+  AND effective_price_id IS NOT NULL
+  AND model_price_id = effective_price_id
+  AND rating_currency = effective_currency
+  AND rating_input_price = effective_input_price
+  AND rating_cached_input_price = effective_cached_input_price
+  AND rating_output_price = effective_output_price
+GROUP BY principal_id, principal_name, principal_type, rating_currency
+ORDER BY tokens DESC, principal_id, rating_currency;
+
 -- name: BillingInsertDocument :execrows
 INSERT INTO billing_document (
     id, status, billing_type, document_type, provider_credential_id,
@@ -472,3 +542,523 @@ FROM filtered
 WHERE filtered.usage_record_id > sqlc.arg(after_id)::bigint
 ORDER BY filtered.usage_record_id
 LIMIT sqlc.arg(page_limit)::int;
+
+-- name: BillingUsageCostSummary :one
+WITH raw AS (
+    SELECT usage.id,
+           usage.request_id,
+           usage.status,
+           usage.input_tokens,
+           usage.cached_input_tokens,
+           usage.output_tokens,
+           credential.auth_type AS billing_type,
+           price.id AS effective_price_id,
+           price.currency AS effective_currency,
+           price.input_price AS effective_input_price,
+           price.cached_input_price AS effective_cached_input_price,
+           price.output_price AS effective_output_price,
+           subscription.currency AS subscription_currency,
+           rating.id AS rating_id,
+           rating.model_price_id,
+           rating.currency AS rating_currency,
+           rating.input_price AS rating_input_price,
+           rating.cached_input_price AS rating_cached_input_price,
+           rating.output_price AS rating_output_price,
+           rating.total_cost
+    FROM usage_record usage
+    JOIN principal ON principal.id = usage.principal_id
+    JOIN provider_credential credential ON credential.id = usage.provider_credential_id
+    LEFT JOIN LATERAL (
+        SELECT candidate.*
+        FROM provider_credential_model_price candidate
+        WHERE candidate.provider_credential_id = usage.provider_credential_id
+          AND candidate.provider_model_id = usage.provider_model_id
+          AND candidate.effective_at <= usage.started_at
+        ORDER BY candidate.effective_at DESC, candidate.id DESC
+        LIMIT 1
+    ) price ON credential.auth_type = 'API_KEY'
+    LEFT JOIN LATERAL (
+        SELECT candidate.*
+        FROM provider_credential_subscription_price candidate
+        WHERE candidate.provider_credential_id = usage.provider_credential_id
+          AND candidate.effective_at <= usage.started_at
+        ORDER BY candidate.effective_at DESC, candidate.id DESC
+        LIMIT 1
+    ) subscription ON credential.auth_type = 'SUBSCRIPTION'
+    LEFT JOIN LATERAL (
+        SELECT candidate.*
+        FROM usage_rating candidate
+        WHERE candidate.usage_record_id = usage.id
+        ORDER BY candidate.revision DESC, candidate.id DESC
+        LIMIT 1
+    ) rating ON TRUE
+    WHERE usage.started_at >= sqlc.arg(from_time)::timestamptz
+      AND usage.started_at < sqlc.arg(to_time)::timestamptz
+      AND (sqlc.narg(principal_id)::bigint IS NULL OR usage.principal_id = sqlc.narg(principal_id))
+      AND (sqlc.arg(principal_type)::text = '' OR principal.principal_type = sqlc.arg(principal_type)::text)
+      AND (sqlc.narg(group_id)::bigint IS NULL OR EXISTS (
+          SELECT 1 FROM principal_group_membership membership
+          WHERE membership.principal_id = usage.principal_id
+            AND membership.group_id = sqlc.narg(group_id)
+            AND membership.is_deleted = false
+      ))
+      AND (sqlc.narg(model_id)::bigint IS NULL OR usage.model_id = sqlc.narg(model_id))
+      AND (sqlc.narg(provider_id)::bigint IS NULL OR usage.provider_id = sqlc.narg(provider_id))
+      AND (sqlc.narg(resource_id)::bigint IS NULL OR usage.provider_credential_id = sqlc.narg(resource_id))
+      AND (sqlc.arg(client_protocol)::text = '' OR usage.client_protocol = sqlc.arg(client_protocol)::text)
+      AND (sqlc.arg(usage_status)::text = '' OR usage.status = sqlc.arg(usage_status)::text)
+), classified AS (
+    SELECT raw.*,
+           CASE
+               WHEN status <> 'SUCCESS' THEN 'NOT_BILLABLE'
+               WHEN billing_type = 'SUBSCRIPTION' THEN 'SUBSCRIPTION_SHARED'
+               WHEN input_tokens IS NULL OR cached_input_tokens IS NULL OR output_tokens IS NULL
+                 OR cached_input_tokens > input_tokens THEN 'INCOMPLETE_TOKENS'
+               WHEN effective_price_id IS NULL THEN 'MISSING_PRICE'
+               WHEN rating_id IS NULL OR model_price_id <> effective_price_id
+                 OR rating_currency <> effective_currency
+                 OR rating_input_price <> effective_input_price
+                 OR rating_cached_input_price <> effective_cached_input_price
+                 OR rating_output_price <> effective_output_price THEN 'PENDING_RATING'
+               ELSE 'RATED'
+           END::text AS rating_status,
+           CASE WHEN billing_type = 'SUBSCRIPTION' THEN subscription_currency ELSE effective_currency END AS currency
+    FROM raw
+), filtered AS (
+    SELECT * FROM classified
+    WHERE (sqlc.arg(rating_status)::text = '' OR rating_status = sqlc.arg(rating_status)::text)
+      AND (sqlc.arg(billing_type)::text = '' OR billing_type = sqlc.arg(billing_type)::text)
+      AND (sqlc.arg(currency)::text = '' OR currency = sqlc.arg(currency)::text)
+)
+SELECT COUNT(DISTINCT request_id)::bigint AS requests,
+       COUNT(*)::bigint AS attempts,
+       COUNT(*) FILTER (WHERE status = 'SUCCESS')::bigint AS successful,
+       COALESCE(SUM(input_tokens), 0)::bigint AS input_tokens,
+       COALESCE(SUM(cached_input_tokens), 0)::bigint AS cached_input_tokens,
+       COALESCE(SUM(output_tokens), 0)::bigint AS output_tokens,
+       COUNT(*) FILTER (WHERE rating_status = 'RATED')::bigint AS rated,
+       COUNT(*) FILTER (WHERE rating_status = 'SUBSCRIPTION_SHARED')::bigint AS shared,
+       COUNT(*) FILTER (WHERE rating_status NOT IN ('RATED', 'SUBSCRIPTION_SHARED', 'NOT_BILLABLE'))::bigint AS unrated
+FROM filtered;
+
+-- name: BillingUsageCostTotals :many
+WITH raw AS (
+    SELECT usage.id,
+           usage.status,
+           usage.input_tokens,
+           usage.cached_input_tokens,
+           usage.output_tokens,
+           credential.auth_type AS billing_type,
+           price.id AS effective_price_id,
+           price.currency AS effective_currency,
+           price.input_price AS effective_input_price,
+           price.cached_input_price AS effective_cached_input_price,
+           price.output_price AS effective_output_price,
+           subscription.currency AS subscription_currency,
+           rating.id AS rating_id,
+           rating.model_price_id,
+           rating.currency AS rating_currency,
+           rating.input_price AS rating_input_price,
+           rating.cached_input_price AS rating_cached_input_price,
+           rating.output_price AS rating_output_price,
+           rating.total_cost
+    FROM usage_record usage
+    JOIN principal ON principal.id = usage.principal_id
+    JOIN provider_credential credential ON credential.id = usage.provider_credential_id
+    LEFT JOIN LATERAL (
+        SELECT candidate.* FROM provider_credential_model_price candidate
+        WHERE candidate.provider_credential_id = usage.provider_credential_id
+          AND candidate.provider_model_id = usage.provider_model_id
+          AND candidate.effective_at <= usage.started_at
+        ORDER BY candidate.effective_at DESC, candidate.id DESC LIMIT 1
+    ) price ON credential.auth_type = 'API_KEY'
+    LEFT JOIN LATERAL (
+        SELECT candidate.* FROM provider_credential_subscription_price candidate
+        WHERE candidate.provider_credential_id = usage.provider_credential_id
+          AND candidate.effective_at <= usage.started_at
+        ORDER BY candidate.effective_at DESC, candidate.id DESC LIMIT 1
+    ) subscription ON credential.auth_type = 'SUBSCRIPTION'
+    LEFT JOIN LATERAL (
+        SELECT candidate.* FROM usage_rating candidate
+        WHERE candidate.usage_record_id = usage.id
+        ORDER BY candidate.revision DESC, candidate.id DESC LIMIT 1
+    ) rating ON TRUE
+    WHERE usage.started_at >= sqlc.arg(from_time)::timestamptz
+      AND usage.started_at < sqlc.arg(to_time)::timestamptz
+      AND (sqlc.narg(principal_id)::bigint IS NULL OR usage.principal_id = sqlc.narg(principal_id))
+      AND (sqlc.arg(principal_type)::text = '' OR principal.principal_type = sqlc.arg(principal_type)::text)
+      AND (sqlc.narg(group_id)::bigint IS NULL OR EXISTS (
+          SELECT 1 FROM principal_group_membership membership
+          WHERE membership.principal_id = usage.principal_id
+            AND membership.group_id = sqlc.narg(group_id)
+            AND membership.is_deleted = false
+      ))
+      AND (sqlc.narg(model_id)::bigint IS NULL OR usage.model_id = sqlc.narg(model_id))
+      AND (sqlc.narg(provider_id)::bigint IS NULL OR usage.provider_id = sqlc.narg(provider_id))
+      AND (sqlc.narg(resource_id)::bigint IS NULL OR usage.provider_credential_id = sqlc.narg(resource_id))
+      AND (sqlc.arg(client_protocol)::text = '' OR usage.client_protocol = sqlc.arg(client_protocol)::text)
+      AND (sqlc.arg(usage_status)::text = '' OR usage.status = sqlc.arg(usage_status)::text)
+), classified AS (
+    SELECT raw.*,
+           CASE
+               WHEN status <> 'SUCCESS' THEN 'NOT_BILLABLE'
+               WHEN billing_type = 'SUBSCRIPTION' THEN 'SUBSCRIPTION_SHARED'
+               WHEN input_tokens IS NULL OR cached_input_tokens IS NULL OR output_tokens IS NULL
+                 OR cached_input_tokens > input_tokens THEN 'INCOMPLETE_TOKENS'
+               WHEN effective_price_id IS NULL THEN 'MISSING_PRICE'
+               WHEN rating_id IS NULL OR model_price_id <> effective_price_id
+                 OR rating_currency <> effective_currency
+                 OR rating_input_price <> effective_input_price
+                 OR rating_cached_input_price <> effective_cached_input_price
+                 OR rating_output_price <> effective_output_price THEN 'PENDING_RATING'
+               ELSE 'RATED'
+           END::text AS rating_status,
+           CASE WHEN billing_type = 'SUBSCRIPTION' THEN subscription_currency ELSE effective_currency END AS currency
+    FROM raw
+), filtered AS (
+    SELECT * FROM classified
+    WHERE (sqlc.arg(rating_status)::text = '' OR rating_status = sqlc.arg(rating_status)::text)
+      AND (sqlc.arg(billing_type)::text = '' OR billing_type = sqlc.arg(billing_type)::text)
+      AND (sqlc.arg(currency)::text = '' OR currency = sqlc.arg(currency)::text)
+)
+SELECT rating_currency AS currency,
+       SUM(total_cost)::numeric AS amount,
+       COUNT(*)::bigint AS rated
+FROM filtered
+WHERE rating_status = 'RATED'
+GROUP BY rating_currency
+ORDER BY rating_currency;
+
+-- name: BillingUsageCosts :many
+WITH raw AS (
+    SELECT usage.id,
+           usage.request_id,
+           usage.attempt_no,
+           usage.principal_id,
+           principal.name AS principal_name,
+           principal.principal_type,
+           usage.model_id,
+           model.display_name AS model_name,
+           usage.provider_id,
+           provider.provider_name,
+           usage.provider_model_id,
+           usage.provider_credential_id AS resource_id,
+           credential.resource_name,
+           usage.client_protocol,
+           usage.status,
+           usage.error_type,
+           usage.started_at,
+           usage.completed_at,
+           usage.latency_ms,
+           usage.input_tokens,
+           usage.cached_input_tokens,
+           usage.output_tokens,
+           credential.auth_type AS billing_type,
+           price.id AS effective_price_id,
+           price.currency AS effective_currency,
+           price.input_price AS effective_input_price,
+           price.cached_input_price AS effective_cached_input_price,
+           price.output_price AS effective_output_price,
+           subscription.currency AS subscription_currency,
+           rating.id AS rating_id,
+           rating.revision AS rating_revision,
+           rating.model_price_id,
+           rating.currency AS rating_currency,
+           rating.input_price AS rating_input_price,
+           rating.cached_input_price AS rating_cached_input_price,
+           rating.output_price AS rating_output_price,
+           rating.total_cost,
+           rating.created_at AS rated_at
+    FROM usage_record usage
+    JOIN principal ON principal.id = usage.principal_id
+    JOIN model ON model.id = usage.model_id
+    JOIN provider ON provider.id = usage.provider_id
+    JOIN provider_credential credential ON credential.id = usage.provider_credential_id
+    LEFT JOIN LATERAL (
+        SELECT candidate.* FROM provider_credential_model_price candidate
+        WHERE candidate.provider_credential_id = usage.provider_credential_id
+          AND candidate.provider_model_id = usage.provider_model_id
+          AND candidate.effective_at <= usage.started_at
+        ORDER BY candidate.effective_at DESC, candidate.id DESC LIMIT 1
+    ) price ON credential.auth_type = 'API_KEY'
+    LEFT JOIN LATERAL (
+        SELECT candidate.* FROM provider_credential_subscription_price candidate
+        WHERE candidate.provider_credential_id = usage.provider_credential_id
+          AND candidate.effective_at <= usage.started_at
+        ORDER BY candidate.effective_at DESC, candidate.id DESC LIMIT 1
+    ) subscription ON credential.auth_type = 'SUBSCRIPTION'
+    LEFT JOIN LATERAL (
+        SELECT candidate.* FROM usage_rating candidate
+        WHERE candidate.usage_record_id = usage.id
+        ORDER BY candidate.revision DESC, candidate.id DESC LIMIT 1
+    ) rating ON TRUE
+    WHERE usage.started_at >= sqlc.arg(from_time)::timestamptz
+      AND usage.started_at < sqlc.arg(to_time)::timestamptz
+      AND (sqlc.narg(principal_id)::bigint IS NULL OR usage.principal_id = sqlc.narg(principal_id))
+      AND (sqlc.arg(principal_type)::text = '' OR principal.principal_type = sqlc.arg(principal_type)::text)
+      AND (sqlc.narg(group_id)::bigint IS NULL OR EXISTS (
+          SELECT 1 FROM principal_group_membership membership
+          WHERE membership.principal_id = usage.principal_id
+            AND membership.group_id = sqlc.narg(group_id)
+            AND membership.is_deleted = false
+      ))
+      AND (sqlc.narg(model_id)::bigint IS NULL OR usage.model_id = sqlc.narg(model_id))
+      AND (sqlc.narg(provider_id)::bigint IS NULL OR usage.provider_id = sqlc.narg(provider_id))
+      AND (sqlc.narg(resource_id)::bigint IS NULL OR usage.provider_credential_id = sqlc.narg(resource_id))
+      AND (sqlc.arg(client_protocol)::text = '' OR usage.client_protocol = sqlc.arg(client_protocol)::text)
+      AND (sqlc.arg(usage_status)::text = '' OR usage.status = sqlc.arg(usage_status)::text)
+), classified AS (
+    SELECT raw.*,
+           CASE
+               WHEN status <> 'SUCCESS' THEN 'NOT_BILLABLE'
+               WHEN billing_type = 'SUBSCRIPTION' THEN 'SUBSCRIPTION_SHARED'
+               WHEN input_tokens IS NULL OR cached_input_tokens IS NULL OR output_tokens IS NULL
+                 OR cached_input_tokens > input_tokens THEN 'INCOMPLETE_TOKENS'
+               WHEN effective_price_id IS NULL THEN 'MISSING_PRICE'
+               WHEN rating_id IS NULL OR model_price_id <> effective_price_id
+                 OR rating_currency <> effective_currency
+                 OR rating_input_price <> effective_input_price
+                 OR rating_cached_input_price <> effective_cached_input_price
+                 OR rating_output_price <> effective_output_price THEN 'PENDING_RATING'
+               ELSE 'RATED'
+           END::text AS rating_status,
+           CASE WHEN billing_type = 'SUBSCRIPTION' THEN subscription_currency ELSE effective_currency END AS currency
+    FROM raw
+), filtered AS (
+    SELECT *,
+           (COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0))::bigint AS total_tokens
+    FROM classified
+    WHERE (sqlc.arg(rating_status)::text = '' OR rating_status = sqlc.arg(rating_status)::text)
+      AND (sqlc.arg(billing_type)::text = '' OR billing_type = sqlc.arg(billing_type)::text)
+      AND (sqlc.arg(currency)::text = '' OR currency = sqlc.arg(currency)::text)
+)
+SELECT id,
+       request_id,
+       attempt_no,
+       principal_id,
+       principal_name,
+       principal_type,
+       model_id,
+       model_name,
+       provider_id,
+       provider_name,
+       provider_model_id,
+       resource_id,
+       resource_name,
+       client_protocol,
+       status,
+       error_type,
+       started_at,
+       completed_at,
+       latency_ms,
+       input_tokens,
+       cached_input_tokens,
+       output_tokens,
+       billing_type,
+       rating_status,
+       COALESCE(rating_id, 0)::bigint AS rating_id,
+       COALESCE(rating_revision, 0)::int AS rating_revision,
+       COALESCE(currency, '')::text AS currency,
+       COALESCE(total_cost, 0::numeric)::numeric AS total_cost,
+       COALESCE(rated_at, started_at)::timestamptz AS rated_at,
+       COUNT(*) OVER ()::bigint AS total_count
+FROM filtered
+ORDER BY
+    CASE WHEN sqlc.arg(sort_by)::text = 'startedAt' AND sqlc.arg(sort_order)::text = 'asc' THEN started_at END ASC,
+    CASE WHEN sqlc.arg(sort_by)::text = 'startedAt' AND sqlc.arg(sort_order)::text = 'desc' THEN started_at END DESC,
+    CASE WHEN sqlc.arg(sort_by)::text = 'totalCost' AND sqlc.arg(sort_order)::text = 'asc' THEN total_cost END ASC NULLS LAST,
+    CASE WHEN sqlc.arg(sort_by)::text = 'totalCost' AND sqlc.arg(sort_order)::text = 'desc' THEN total_cost END DESC NULLS LAST,
+    CASE WHEN sqlc.arg(sort_by)::text = 'tokens' AND sqlc.arg(sort_order)::text = 'asc' THEN total_tokens END ASC,
+    CASE WHEN sqlc.arg(sort_by)::text = 'tokens' AND sqlc.arg(sort_order)::text = 'desc' THEN total_tokens END DESC,
+    CASE WHEN sqlc.arg(sort_by)::text = 'latency' AND sqlc.arg(sort_order)::text = 'asc' THEN latency_ms END ASC,
+    CASE WHEN sqlc.arg(sort_by)::text = 'latency' AND sqlc.arg(sort_order)::text = 'desc' THEN latency_ms END DESC,
+    id DESC
+LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::bigint;
+
+-- name: BillingUsageCost :one
+WITH raw AS (
+    SELECT usage.id,
+           usage.request_id,
+           usage.attempt_no,
+           usage.principal_id,
+           principal.name AS principal_name,
+           principal.principal_type,
+           usage.model_id,
+           model.display_name AS model_name,
+           usage.provider_id,
+           provider.provider_name,
+           usage.provider_model_id,
+           usage.provider_credential_id AS resource_id,
+           credential.resource_name,
+           usage.client_protocol,
+           usage.status,
+           usage.error_type,
+           usage.started_at,
+           usage.completed_at,
+           usage.latency_ms,
+           usage.input_tokens,
+           usage.cached_input_tokens,
+           usage.output_tokens,
+           credential.auth_type AS billing_type,
+           price.id AS effective_price_id,
+           price.currency AS effective_currency,
+           price.input_price AS effective_input_price,
+           price.cached_input_price AS effective_cached_input_price,
+           price.output_price AS effective_output_price,
+           subscription.currency AS subscription_currency,
+           rating.id AS rating_id,
+           rating.revision AS rating_revision,
+           rating.model_price_id,
+           rating.currency AS rating_currency,
+           rating.input_price AS rating_input_price,
+           rating.cached_input_price AS rating_cached_input_price,
+           rating.output_price AS rating_output_price,
+           rating.total_cost,
+           rating.created_at AS rated_at
+    FROM usage_record usage
+    JOIN principal ON principal.id = usage.principal_id
+    JOIN model ON model.id = usage.model_id
+    JOIN provider ON provider.id = usage.provider_id
+    JOIN provider_credential credential ON credential.id = usage.provider_credential_id
+    LEFT JOIN LATERAL (
+        SELECT candidate.* FROM provider_credential_model_price candidate
+        WHERE candidate.provider_credential_id = usage.provider_credential_id
+          AND candidate.provider_model_id = usage.provider_model_id
+          AND candidate.effective_at <= usage.started_at
+        ORDER BY candidate.effective_at DESC, candidate.id DESC LIMIT 1
+    ) price ON credential.auth_type = 'API_KEY'
+    LEFT JOIN LATERAL (
+        SELECT candidate.* FROM provider_credential_subscription_price candidate
+        WHERE candidate.provider_credential_id = usage.provider_credential_id
+          AND candidate.effective_at <= usage.started_at
+        ORDER BY candidate.effective_at DESC, candidate.id DESC LIMIT 1
+    ) subscription ON credential.auth_type = 'SUBSCRIPTION'
+    LEFT JOIN LATERAL (
+        SELECT candidate.* FROM usage_rating candidate
+        WHERE candidate.usage_record_id = usage.id
+        ORDER BY candidate.revision DESC, candidate.id DESC LIMIT 1
+    ) rating ON TRUE
+    WHERE usage.id = sqlc.arg(usage_record_id)::bigint
+)
+SELECT id,
+       request_id,
+       attempt_no,
+       principal_id,
+       principal_name,
+       principal_type,
+       model_id,
+       model_name,
+       provider_id,
+       provider_name,
+       provider_model_id,
+       resource_id,
+       resource_name,
+       client_protocol,
+       status,
+       error_type,
+       started_at,
+       completed_at,
+       latency_ms,
+       input_tokens,
+       cached_input_tokens,
+       output_tokens,
+       billing_type,
+       CASE
+           WHEN status <> 'SUCCESS' THEN 'NOT_BILLABLE'
+           WHEN billing_type = 'SUBSCRIPTION' THEN 'SUBSCRIPTION_SHARED'
+           WHEN input_tokens IS NULL OR cached_input_tokens IS NULL OR output_tokens IS NULL
+             OR cached_input_tokens > input_tokens THEN 'INCOMPLETE_TOKENS'
+           WHEN effective_price_id IS NULL THEN 'MISSING_PRICE'
+           WHEN rating_id IS NULL OR model_price_id <> effective_price_id
+             OR rating_currency <> effective_currency
+             OR rating_input_price <> effective_input_price
+             OR rating_cached_input_price <> effective_cached_input_price
+             OR rating_output_price <> effective_output_price THEN 'PENDING_RATING'
+           ELSE 'RATED'
+       END::text AS rating_status,
+       COALESCE(rating_id, 0)::bigint AS rating_id,
+       COALESCE(rating_revision, 0)::int AS rating_revision,
+       COALESCE(CASE WHEN billing_type = 'SUBSCRIPTION' THEN subscription_currency ELSE effective_currency END, '')::text AS currency,
+       COALESCE(total_cost, 0::numeric)::numeric AS total_cost,
+       COALESCE(rated_at, started_at)::timestamptz AS rated_at
+FROM raw;
+
+-- name: BillingUsageCostRatings :many
+SELECT rating.id,
+       rating.revision,
+       rating.model_price_id,
+       price.effective_at AS price_effective_at,
+       rating.input_price,
+       rating.cached_input_price,
+       rating.output_price,
+       rating.input_cost,
+       rating.cached_input_cost,
+       rating.output_cost,
+       rating.total_cost,
+       rating.currency,
+       rating.created_at
+FROM usage_rating rating
+JOIN provider_credential_model_price price ON price.id = rating.model_price_id
+WHERE rating.usage_record_id = sqlc.arg(usage_record_id)::bigint
+ORDER BY rating.revision DESC, rating.id DESC;
+
+-- name: BillingUsageSubscriptionAllocation :one
+WITH selected AS (
+    SELECT usage.principal_id,
+           usage.provider_credential_id,
+           usage.started_at
+    FROM usage_record usage
+    JOIN provider_credential credential
+      ON credential.id = usage.provider_credential_id
+     AND credential.auth_type = 'SUBSCRIPTION'
+    WHERE usage.id = sqlc.arg(usage_record_id)::bigint
+), price AS (
+    SELECT candidate.*
+    FROM selected
+    JOIN LATERAL (
+        SELECT value.*
+        FROM provider_credential_subscription_price value
+        WHERE value.provider_credential_id = selected.provider_credential_id
+          AND value.effective_at <= selected.started_at
+        ORDER BY value.effective_at DESC, value.id DESC
+        LIMIT 1
+    ) candidate ON TRUE
+), base_document AS (
+    SELECT document.id, document.period_start, document.period_end
+    FROM selected
+    JOIN billing_document document
+      ON document.provider_credential_id = selected.provider_credential_id
+     AND document.billing_type = 'SUBSCRIPTION'
+     AND document.document_type = 'CHARGE'
+     AND document.status = 'CONFIRMED'
+     AND selected.started_at >= document.period_start
+     AND selected.started_at < document.period_end
+    ORDER BY document.id DESC
+    LIMIT 1
+), documents AS (
+    SELECT id FROM base_document
+    UNION ALL
+    SELECT adjustment.id
+    FROM base_document
+    JOIN billing_document adjustment
+      ON adjustment.original_document_id = base_document.id
+     AND adjustment.document_type = 'ADJUSTMENT'
+     AND adjustment.status = 'CONFIRMED'
+), allocation AS (
+    SELECT SUM(item.amount)::numeric AS principal_amount
+    FROM selected
+    JOIN billing_document_item item ON item.principal_id = selected.principal_id
+    JOIN documents ON documents.id = item.billing_document_id
+)
+SELECT price.id AS price_id,
+       price.currency,
+       price.period_amount,
+       price.billing_period,
+       price.effective_at,
+       base_document.id AS document_id,
+       base_document.period_start,
+       base_document.period_end,
+       allocation.principal_amount
+FROM price
+LEFT JOIN base_document ON TRUE
+LEFT JOIN allocation ON TRUE;

@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	billingapp "github.com/zentrola/zentrola/internal/application/billing"
 	gw "github.com/zentrola/zentrola/internal/application/gateway"
 	mgmt "github.com/zentrola/zentrola/internal/application/management"
 	appsec "github.com/zentrola/zentrola/internal/application/security"
@@ -72,6 +73,8 @@ func securityError(w http.ResponseWriter, r *http.Request, err error) {
 		status, code, message = http.StatusBadRequest, "INVALID_ARGUMENT", "Invalid request parameter."
 	case errors.Is(err, appsec.ErrNotFound):
 		status, code, message = http.StatusNotFound, "NOT_FOUND", "Object not found."
+	case errors.Is(err, billingapp.ErrExportTooLarge):
+		status, code, message = http.StatusUnprocessableEntity, "EXPORT_TOO_LARGE", "Narrow the filters before exporting."
 	default:
 		for _, mapping := range managementErrorMappings {
 			if errors.Is(err, mapping.err) {

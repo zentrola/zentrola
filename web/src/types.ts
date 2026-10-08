@@ -360,3 +360,91 @@ export interface UnratedUsage {
   reason: BillingIssueReason
   waitingSince: string
 }
+
+export type UsageCostRatingStatus =
+  | 'RATED'
+  | 'SUBSCRIPTION_SHARED'
+  | 'INCOMPLETE_TOKENS'
+  | 'MISSING_PRICE'
+  | 'PENDING_RATING'
+  | 'NOT_BILLABLE'
+export interface UsageCostTotal {
+  currency: BillingCurrency
+  amount: string
+  rated: number
+}
+export interface UsageCostSummary {
+  from: string
+  to: string
+  requests: number
+  attempts: number
+  successful: number
+  inputTokens: number
+  cachedInputTokens: number
+  outputTokens: number
+  rated: number
+  shared: number
+  unrated: number
+  totals: UsageCostTotal[]
+}
+export interface UsageCost {
+  id: string
+  requestId: string
+  attemptNo: number
+  principalId: string
+  principalName: string
+  principalType: 'MEMBER' | 'APPLICATION'
+  modelId: string
+  modelName: string
+  providerId: string
+  providerName: string
+  providerModelId: string
+  resourceId: string
+  resourceName: string
+  clientProtocol: string
+  status: string
+  errorType: string | null
+  startedAt: string
+  completedAt: string
+  latencyMs: number
+  inputTokens: number | null
+  cachedInputTokens: number | null
+  outputTokens: number | null
+  billingType: BillingType
+  ratingStatus: UsageCostRatingStatus
+  ratingId: string | null
+  ratingRevision: number | null
+  currency: BillingCurrency | null
+  totalCost: string | null
+  ratedAt: string | null
+}
+export interface UsageCostRating {
+  id: string
+  revision: number
+  modelPriceId: string
+  priceEffectiveAt: string
+  inputPrice: string
+  cachedInputPrice: string
+  outputPrice: string
+  inputCost: string
+  cachedInputCost: string
+  outputCost: string
+  totalCost: string
+  currency: BillingCurrency
+  createdAt: string
+}
+export interface SubscriptionAllocation {
+  priceId: string
+  currency: BillingCurrency
+  periodAmount: string
+  billingPeriod: 'MONTH' | 'YEAR'
+  effectiveAt: string
+  documentId: string | null
+  periodStart: string | null
+  periodEnd: string | null
+  principalAmount: string | null
+}
+export interface UsageCostDetail extends UsageCost {
+  ratings: UsageCostRating[]
+  subscription: SubscriptionAllocation | null
+}

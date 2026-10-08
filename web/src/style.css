@@ -1402,11 +1402,166 @@ tbody tr:hover {
 .billing-filters select {
   min-width: 138px;
 }
+.usage-cost-panel {
+  padding: 0;
+}
+.usage-cost-filters {
+  align-items: end;
+  padding: 18px 20px;
+}
+.usage-cost-filters label {
+  grid-template-columns: 1fr;
+  gap: 6px;
+  flex: 1 1 145px;
+  min-width: 135px;
+  max-width: 220px;
+}
+.usage-cost-filters .filter-label {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+.usage-cost-filters input,
+.usage-cost-filters select {
+  width: 100%;
+  min-width: 0;
+}
+.usage-cost-filter-disclosure {
+  display: flex;
+  flex: 1 1 100%;
+  align-items: center;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.usage-cost-more-toggle {
+  padding-left: 0;
+}
+.usage-cost-more-toggle svg {
+  transform: rotate(90deg);
+  transition: transform 0.15s ease;
+}
+.usage-cost-more-toggle[aria-expanded='true'] svg {
+  transform: rotate(-90deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .usage-cost-more-toggle svg {
+    transition: none;
+  }
+}
+.usage-cost-filter-count {
+  display: inline-grid;
+  min-width: 19px;
+  height: 19px;
+  place-items: center;
+  padding: 0 5px;
+  border-radius: 10px;
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+.usage-cost-advanced-filters {
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: #f8fafc;
+}
+.usage-cost-actions {
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  gap: 9px;
+  padding-top: 2px;
+}
+.billing-detail-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.billing-detail-metrics article {
+  display: grid;
+  align-content: center;
+  min-height: 105px;
+  padding: 17px 18px;
+}
+.billing-detail-metrics span,
+.billing-detail-metrics small {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+.billing-detail-metrics strong {
+  margin: 5px 0 3px;
+  color: var(--color-text);
+  font-size: 21px;
+  font-variant-numeric: tabular-nums;
+}
+.billing-rating-notice {
+  margin: 0 0 16px;
+  padding: 11px 14px;
+  border: 1px solid #fed7aa;
+  border-radius: 7px;
+  color: #9a3412;
+  background: #fff7ed;
+  font-size: 13px;
+}
 .billing-alert {
   margin-bottom: 16px;
 }
 .cost-ledger {
   margin-bottom: 16px;
+}
+.cost-overview-heading,
+.cost-section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 19px 22px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.cost-overview-heading h2,
+.cost-section-heading h2 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 16px;
+}
+.cost-overview-heading p,
+.cost-section-heading p {
+  max-width: 660px;
+  margin: 5px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.settled-badge {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border: 1px solid #bbf7d0;
+  border-radius: 999px;
+  color: #047857;
+  background: #f0fdf4;
+  font-size: 12px;
+  font-weight: 600;
+}
+.cost-empty-notice {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 12px 22px;
+  border-bottom: 1px solid #fed7aa;
+  color: #9a3412;
+  background: #fffaf5;
+  font-size: 12px;
+}
+.cost-empty-notice strong {
+  font-size: 13px;
 }
 .cost-ledger-row {
   display: grid;
@@ -1448,6 +1603,69 @@ tbody tr:hover {
 }
 .billing-table-panel {
   overflow: hidden;
+}
+.cost-attribution-panel {
+  margin-bottom: 16px;
+}
+.usage-ranking-panel {
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+.usage-ranking-heading {
+  align-items: center;
+}
+.cost-usage-ranking {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cost-usage-ranking li {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  min-height: 66px;
+  padding: 10px 22px;
+  border-bottom: 1px solid var(--line);
+}
+.cost-usage-ranking li:last-child {
+  border-bottom: 0;
+}
+.cost-rank-number {
+  color: var(--color-text-tertiary, #8a98a8);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.cost-usage-ranking li:nth-child(-n + 3) .cost-rank-number {
+  color: var(--color-primary-hover);
+  font-weight: 700;
+}
+.cost-rank-identity,
+.cost-rank-value {
+  display: grid;
+  gap: 3px;
+}
+.cost-rank-identity strong,
+.cost-rank-value strong {
+  color: var(--color-text);
+  font-size: 13px;
+}
+.cost-rank-identity small,
+.cost-rank-value small {
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}
+.cost-rank-value {
+  min-width: 170px;
+  text-align: right;
+}
+.cost-rank-value strong {
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+.cost-ranking-empty {
+  margin: 0;
 }
 .billing-table .numeric {
   text-align: right;
@@ -1495,13 +1713,52 @@ tbody tr:hover {
   color: #1d4ed8;
   background: #eff6ff;
 }
+.issue-badge.rated {
+  color: #047857;
+  background: #ecfdf5;
+}
+.issue-badge.subscription_shared {
+  color: #6d28d9;
+  background: #f5f3ff;
+}
+.issue-badge.not_billable {
+  color: #475569;
+  background: #f1f5f9;
+}
+.usage-cost-table {
+  min-width: 1120px;
+}
+.subscription-cost-note {
+  margin: 0 0 22px;
+  padding: 16px 18px;
+  border: 1px solid #ddd6fe;
+  border-radius: 8px;
+  background: #faf8ff;
+}
+.subscription-cost-note h3 {
+  margin: 0 0 6px;
+  color: #5b21b6;
+  font-size: 14px;
+}
+.subscription-cost-note > p {
+  margin: 0 0 16px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
 .billing-detail-grid {
   margin-bottom: 22px;
 }
-.detail-items-table {
-  min-width: 720px;
-}
 @media (max-width: 760px) {
+  .billing-detail-metrics {
+    grid-template-columns: 1fr;
+  }
+  .usage-cost-filters label {
+    flex-basis: calc(50% - 8px);
+    max-width: none;
+  }
+  .usage-cost-actions .button {
+    flex: 1;
+  }
   .cost-ledger-row {
     grid-template-columns: 64px 1fr;
   }
@@ -1515,6 +1772,41 @@ tbody tr:hover {
   .billing-filters input,
   .billing-filters select {
     width: 100%;
+  }
+  .cost-overview-heading,
+  .cost-section-heading {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .settled-badge {
+    align-self: flex-start;
+  }
+  .cost-empty-notice {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .usage-ranking-heading .dimension-tabs {
+    width: 100%;
+  }
+  .usage-ranking-heading .dimension-tabs button {
+    flex: 1;
+  }
+}
+@media (max-width: 480px) {
+  .usage-cost-filters label {
+    flex-basis: 100%;
+  }
+  .cost-usage-ranking li {
+    grid-template-columns: 28px minmax(0, 1fr);
+    gap: 10px;
+    padding: 10px 16px;
+  }
+  .cost-rank-value {
+    grid-column: 2;
+    min-width: 0;
+    text-align: left;
   }
 }
 .member-autocomplete,
