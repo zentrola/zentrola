@@ -204,15 +204,16 @@ func (s *QueryService) Provider(ctx context.Context, a admin.Identity, id int64)
 func providerSelectableModels(provider Provider, models []Model) []Model {
 	selectable := make([]Model, 0, len(models))
 	for _, model := range models {
+		if model.Status != "ACTIVE" {
+			continue
+		}
 		if provider.Type == string(catalog.Official) {
 			if model.PublisherProviderID != nil && *model.PublisherProviderID == provider.ID {
 				selectable = append(selectable, model)
 			}
 			continue
 		}
-		if model.Status == "ACTIVE" {
-			selectable = append(selectable, model)
-		}
+		selectable = append(selectable, model)
 	}
 	return selectable
 }

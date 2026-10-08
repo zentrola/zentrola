@@ -74,9 +74,9 @@ func TestProviderDetailReturnsModelsAllowedForProviderType(t *testing.T) {
 		wantModelIDs []int64
 	}{
 		{
-			name:         "official includes all of its own models",
+			name:         "official includes only its active models",
 			provider:     Provider{ID: officialID, Type: string(catalog.Official)},
-			wantModelIDs: []int64{30, 31},
+			wantModelIDs: []int64{30},
 		},
 		{
 			name:         "non-official includes every active model",
@@ -344,6 +344,24 @@ func TestSyncResourceModelsBackfillsPublisherWhenOfficialNameIsUnchanged(t *test
 	model := state.models[0]
 	if model.PublisherProviderID == nil || *model.PublisherProviderID != state.provider.ID || model.PublisherProviderName == nil || *model.PublisherProviderName != state.provider.Name {
 		t.Fatalf("publisher was not backfilled: %+v", model)
+	}
+}
+
+func TestSyncResourceModelsDoesNotMapDisabledModel(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	state := &syncState{
+		resource: ResourceRecord{Resource: Resource{ID: 10, ProviderID: 20, Name: "Official key", UpdatedAt: now}},
+		provider: Provider{ID: 20, Code: catalog.DeepSeekOfficialCode, Name: "DeepSeek"},
+		models:   []Model{{ID: 30, Code: "deepseek-disabled", Name: "Disabled", Status: "DISABLED"}},
+	}
+	discoverer := &syncDiscoverer{
+		models: []DiscoveredModel{{Code: "deepseek-disabled", Name: "Disabled"}},
+		result: ConnectionResult{OK: true, Code: "OK", HTTPStatus: 200},
+	}
+	service := New(syncStore{state}, &syncIDs{}, syncCipher{}, nil, WithModelDiscoverer(discoverer))
+	result, err := service.SyncResourceModels(context.Background(), admin.Identity{ID: 1}, 10, appsec.RequestMeta{})
+	if err != nil || result.Mapped != 0 || len(state.mappings) != 0 {
+		t.Fatalf("disabled model was mapped: result=%+v mappings=%+v err=%v", result, state.mappings, err)
 	}
 }
 

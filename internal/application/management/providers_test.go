@@ -16,6 +16,7 @@ import (
 type mappingWriter struct {
 	Writer
 	mappings []ProviderMapping
+	models   map[int64]Model
 	updated  []ProviderMapping
 	deleted  []int64
 }
@@ -64,7 +65,10 @@ func (w *mappingWriter) ProviderMappings(context.Context, int64) ([]ProviderMapp
 	return append([]ProviderMapping(nil), w.mappings...), nil
 }
 func (w *mappingWriter) Model(_ context.Context, id int64) (Model, error) {
-	return Model{ID: id}, nil
+	if model, exists := w.models[id]; exists {
+		return model, nil
+	}
+	return Model{ID: id, Status: "ACTIVE"}, nil
 }
 func (w *mappingWriter) UpdateProviderMapping(_ context.Context, mapping ProviderMapping) error {
 	w.updated = append(w.updated, mapping)
@@ -205,6 +209,23 @@ func TestReplaceProviderMappingsLogicallyDeletesUncheckedModels(t *testing.T) {
 	}
 	if len(writer.deleted) != 1 || writer.deleted[0] != 11 {
 		t.Fatalf("unchecked mapping was not logically deleted: %+v", writer.deleted)
+	}
+}
+
+func TestReplaceProviderMappingsRejectsDisabledModelWithoutChangingMappings(t *testing.T) {
+	writer := &mappingWriter{
+		mappings: []ProviderMapping{{ID: 10, ProviderID: 8, ModelID: 1}},
+		models:   map[int64]Model{2: {ID: 2, Status: "DISABLED"}},
+	}
+	service := &ProviderService{}
+	_, err := service.replaceProviderMappings(context.Background(), writer, Provider{ID: 8}, []ProviderMappingInput{
+		{ModelID: 1}, {ModelID: 2},
+	})
+	if !errors.Is(err, appsec.ErrInvalidArgument) {
+		t.Fatalf("error=%v; want invalid argument", err)
+	}
+	if len(writer.updated) != 0 || len(writer.deleted) != 0 {
+		t.Fatalf("rejected mapping changed state: updated=%+v deleted=%v", writer.updated, writer.deleted)
 	}
 }
 

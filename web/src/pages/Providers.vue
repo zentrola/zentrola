@@ -237,7 +237,9 @@ const form = reactive({
   mappings: [] as MappingDraft[],
 })
 const mappingQuery = ref('')
-const availableMappingModels = computed(() => models.value)
+const availableMappingModels = computed(() =>
+  models.value.filter((model) => model.status === 'ACTIVE'),
+)
 const mappingByModelID = computed(
   () => new Map(form.mappings.map((mapping) => [mapping.modelId, mapping])),
 )
@@ -491,7 +493,7 @@ function openEdit(provider: Provider | null = null) {
     const detail = provider ? await api<ProviderDetail>(`/providers/${provider.id}`) : null
     if (detail) models.value = detail.models
     else await loadActiveModels()
-    const modelIDs = new Set(models.value.map((model) => model.id))
+    const modelIDs = new Set(availableMappingModels.value.map((model) => model.id))
     assignForm(
       detail,
       (detail?.mappings ?? [])
@@ -1410,7 +1412,7 @@ function save() {
   else if (
     form.mappings.some(
       (mapping) =>
-        !models.value.some((model) => model.id === mapping.modelId) ||
+        !availableMappingModels.value.some((model) => model.id === mapping.modelId) ||
         (mapping.upstreamModelCode.trim() !== '' &&
           !validText(mapping.upstreamModelCode.trim(), 128)),
     )
@@ -1427,7 +1429,7 @@ function save() {
     else if (
       form.mappings.some(
         (mapping) =>
-          !models.value.some((model) => model.id === mapping.modelId) ||
+          !availableMappingModels.value.some((model) => model.id === mapping.modelId) ||
           (mapping.upstreamModelCode.trim() !== '' &&
             !validText(mapping.upstreamModelCode.trim(), 128)),
       )

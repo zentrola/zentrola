@@ -440,8 +440,12 @@ func (s *ProviderService) replaceProviderMappings(ctx context.Context, w Provide
 	validatedModels := make(map[int64]struct{}, len(inputs))
 	for _, input := range inputs {
 		if _, validated := validatedModels[input.ModelID]; !validated {
-			if _, err := w.Model(ctx, input.ModelID); err != nil {
+			model, err := w.Model(ctx, input.ModelID)
+			if err != nil {
 				return nil, err
+			}
+			if model.Status != "ACTIVE" {
+				return nil, appsec.ErrInvalidArgument
 			}
 			validatedModels[input.ModelID] = struct{}{}
 		}

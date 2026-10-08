@@ -3179,7 +3179,7 @@ test('服务商编辑模型列表在大量模型时可独立滚动', async ({ pa
       id: String(1000 + index),
       code: `deepseek-history-${index}`,
       name: `DeepSeek History ${index}`,
-      status: 'DISABLED',
+      status: 'ACTIVE',
       inputModalities: ['TEXT'],
       outputModalities: ['TEXT'],
       remark: '',
@@ -3240,6 +3240,50 @@ test('服务商编辑模型列表在大量模型时可独立滚动', async ({ pa
   const catalogBox = (await modal(page).locator('.mapping-catalog-pane').boundingBox())!
   const selectedBox = (await modal(page).locator('.mapping-selected-pane').boundingBox())!
   expect(selectedBox.y).toBeGreaterThan(catalogBox.y + catalogBox.height)
+})
+
+test('官方服务商编辑时不展示或提交停用模型映射', async ({ page }) => {
+  const state = await fixture(page)
+  state.models.push({
+    id: '73',
+    code: 'deepseek-disabled',
+    name: 'DeepSeek Disabled',
+    status: 'DISABLED',
+    inputModalities: ['TEXT'],
+    outputModalities: ['TEXT'],
+    remark: '',
+    publisherProviderId: '81',
+    publisherProviderName: 'DeepSeek',
+    createdAt: stamp,
+    updatedAt: stamp,
+  })
+  state.providerMappings.get('81')!.push({
+    id: '93',
+    providerId: '81',
+    modelId: '73',
+    upstreamModelCode: 'deepseek-disabled',
+    priority: 100,
+    createdAt: stamp,
+    updatedAt: stamp,
+  })
+
+  await signIn(page)
+  await page.getByRole('link', { name: '服务商', exact: true }).click()
+  await page
+    .getByRole('row')
+    .filter({ hasText: 'DeepSeek' })
+    .getByRole('button', { name: '编辑' })
+    .click()
+  const dialog = modal(page)
+  await expect(dialog.locator('.mapping-count-tag')).toHaveText('1')
+  await expect(dialog.getByRole('checkbox', { name: '启用 DeepSeek V4 Flash 映射' })).toBeChecked()
+  await expect(dialog.getByRole('checkbox', { name: '启用 DeepSeek Disabled 映射' })).toHaveCount(0)
+  await expect(dialog.getByText('DeepSeek Disabled', { exact: true })).toHaveCount(0)
+  await dialog.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  expect(state.providerInputs.at(-1)?.mappings).toEqual([
+    { modelId: '71', upstreamModelCode: 'deepseek-v4-flash' },
+  ])
 })
 
 test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => {
@@ -3387,10 +3431,10 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   const existingProviderModelCode = modal(page).getByLabel('DeepSeek V4 Flash 的服务商模型编码')
   await expect(existingProviderModelCode).toHaveValue('deepseek-v4-flash')
   await expect(modal(page).getByText('Claude Sonnet', { exact: true })).toHaveCount(0)
-  await expect(modal(page).getByText('DeepSeek V3 Legacy', { exact: true })).toBeVisible()
+  await expect(modal(page).getByText('DeepSeek V3 Legacy', { exact: true })).toHaveCount(0)
   await expect(
     modal(page).getByRole('checkbox', { name: '启用 DeepSeek V3 Legacy 映射' }),
-  ).not.toBeChecked()
+  ).toHaveCount(0)
   await expect(modal(page).getByLabel('DeepSeek V3 Legacy 的服务商模型编码')).toHaveCount(0)
   await expect(modal(page).getByText('模型列表', { exact: true })).toBeVisible()
   await expect(modal(page).getByText('已启用模型映射', { exact: true })).toHaveCount(0)
