@@ -1398,15 +1398,15 @@ tbody tr:hover {
   padding: 0;
 }
 .usage-cost-filters {
-  align-items: end;
+  align-items: center;
   padding: 18px 20px;
 }
 .usage-cost-filters label {
-  grid-template-columns: 1fr;
-  gap: 6px;
-  flex: 1 1 145px;
-  min-width: 135px;
-  max-width: 220px;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 10px;
+  flex: 1 1 205px;
+  min-width: 185px;
+  max-width: 275px;
 }
 .usage-cost-filters .filter-label {
   color: var(--color-text-secondary);
@@ -1414,22 +1414,26 @@ tbody tr:hover {
   font-weight: 600;
 }
 .usage-cost-principal-filter {
-  flex: 2 1 330px;
+  flex: 2 1 410px;
   min-width: 0;
-  max-width: 440px;
+  max-width: 520px;
   margin: 0;
-  padding: 0;
-  border: 0;
-}
-.usage-cost-principal-filter legend {
-  width: 100%;
-  margin-bottom: 6px;
-  padding: 0;
+  grid-template-columns: max-content minmax(0, 1fr);
 }
 .usage-cost-principal-controls {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
   gap: 8px;
+  min-width: 0;
+}
+.usage-cost-principal-filter .member-suggestions button {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 2px;
+}
+.usage-cost-principal-filter .member-suggestions small {
+  color: var(--muted);
+  font-size: 11px;
 }
 .usage-cost-filters input,
 .usage-cost-filters select {

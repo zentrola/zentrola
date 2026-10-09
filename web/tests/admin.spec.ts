@@ -180,6 +180,7 @@ async function fixture(page: Page) {
     providerQueries: URLSearchParams[] = [],
     memberListQueries: URLSearchParams[] = [],
     memberSuggestionQueries: URLSearchParams[] = [],
+    applicationSuggestionQueries: URLSearchParams[] = [],
     usageQueries: URLSearchParams[] = [],
     statisticQueries: URLSearchParams[] = [],
     modelSyncRequests: string[] = [],
@@ -688,6 +689,13 @@ async function fixture(page: Page) {
       memberSuggestionQueries.push(new URLSearchParams(url.searchParams))
       const name = url.searchParams.get('name') || ''
       return pageReply(members.filter((member) => member.name.includes(name)))
+    }
+    if (path === '/applications/suggestions' && method === 'GET') {
+      applicationSuggestionQueries.push(new URLSearchParams(url.searchParams))
+      const name = url.searchParams.get('name') || ''
+      return pageReply(
+        [{ id: '90071992547409944', name: '报表应用' }].filter((app) => app.name.includes(name)),
+      )
     }
     if (path === '/token-quotas' && method === 'GET') {
       const scopeType = url.searchParams.get('scopeType')
@@ -1488,6 +1496,7 @@ async function fixture(page: Page) {
     providerQueries,
     memberListQueries,
     memberSuggestionQueries,
+    applicationSuggestionQueries,
     usageQueries,
     statisticQueries,
     modelSyncRequests,
@@ -6003,19 +6012,28 @@ test('成本管理聚焦成本概览和计费明细', async ({ page }) => {
   await expect(usageTable.getByText('订阅账期分摊', { exact: true })).toBeVisible()
 
   const costPanel = page.locator('.usage-cost-panel')
-  const principalFilter = costPanel.getByRole('group', { name: '归属主体' })
-  await expect(principalFilter.getByLabel('主体类型')).toBeVisible()
-  await expect(principalFilter.getByLabel('主体 ID')).toBeVisible()
+  const principalFilter = costPanel.getByRole('group', { name: '调用方' })
+  const callerType = principalFilter.getByLabel('调用方类型')
+  const callerName = principalFilter.getByRole('combobox', { name: '用户' })
+  await expect(callerType).toBeVisible()
+  await expect(callerName).toBeDisabled()
   await expect(costPanel.getByLabel('模型')).toBeVisible()
   await expect(costPanel.getByLabel('核算状态')).toBeVisible()
   await expect(costPanel.getByLabel('计费方式')).toBeVisible()
   await expect(costPanel.getByLabel('用户分组')).toHaveCount(0)
   await expect(costPanel.getByLabel('服务商')).toHaveCount(0)
   await expect(costPanel.getByRole('button', { name: /更多筛选/ })).toHaveCount(0)
-  const principalTypeBounds = await principalFilter.getByLabel('主体类型').boundingBox()
-  const principalIdBounds = await principalFilter.getByLabel('主体 ID').boundingBox()
-  expect(principalIdBounds!.x).toBeGreaterThan(principalTypeBounds!.x)
-  expect(Math.abs(principalIdBounds!.y - principalTypeBounds!.y)).toBeLessThan(2)
+  const principalTypeBounds = await callerType.boundingBox()
+  const principalNameBounds = await callerName.boundingBox()
+  expect(principalNameBounds!.x).toBeGreaterThan(principalTypeBounds!.x)
+  expect(Math.abs(principalNameBounds!.y - principalTypeBounds!.y)).toBeLessThan(2)
+  for (const label of ['模型', '核算状态', '计费方式']) {
+    const field = costPanel.locator('label').filter({ hasText: label })
+    const labelBounds = await field.locator('.filter-label').boundingBox()
+    const controlBounds = await field.locator('select').boundingBox()
+    expect(controlBounds!.x).toBeGreaterThan(labelBounds!.x)
+    expect(Math.abs(controlBounds!.y - labelBounds!.y)).toBeLessThan(20)
+  }
   const costDateRange = costPanel.getByRole('button', { name: '选择起止日期', exact: true })
   await expect(costDateRange).toBeVisible()
   await costDateRange.click()
@@ -6028,8 +6046,27 @@ test('成本管理聚焦成本概览和计费明细', async ({ page }) => {
       request.url().includes('/billing/usage-costs?') &&
       new URL(request.url()).searchParams.get('modelId') === '71',
   )
-  await principalFilter.getByLabel('主体类型').selectOption('MEMBER')
-  await principalFilter.getByLabel('主体 ID').fill(longID)
+  await callerType.selectOption('APPLICATION')
+  const applicationName = principalFilter.getByRole('combobox', { name: '应用' })
+  await applicationName.fill('报表')
+  await principalFilter.getByRole('option', { name: '报表应用' }).click()
+  await expect(applicationName).toHaveValue('报表应用')
+  expect(state.applicationSuggestionQueries.at(-1)?.get('name')).toBe('报表')
+  const applicationCostRequest = page.waitForRequest(
+    (request) =>
+      request.url().includes('/billing/usage-costs?') &&
+      new URL(request.url()).searchParams.get('principalType') === 'APPLICATION',
+  )
+  await costPanel.getByRole('button', { name: '查询', exact: true }).click()
+  expect(new URL((await applicationCostRequest).url()).searchParams.get('principalId')).toBe(
+    '90071992547409944',
+  )
+  await callerType.selectOption('MEMBER')
+  await expect(callerName).toHaveValue('')
+  await callerName.fill('林知')
+  await principalFilter.getByRole('option', { name: '林知远' }).click()
+  await expect(callerName).toHaveValue('林知远')
+  expect(state.memberSuggestionQueries.at(-1)?.get('name')).toBe('林知')
   await costPanel.getByLabel('模型').selectOption('71')
   await costPanel.getByLabel('核算状态').selectOption('RATED')
   await costPanel.getByLabel('计费方式').selectOption('API_KEY')
@@ -6041,10 +6078,10 @@ test('成本管理聚焦成本概览和计费明细', async ({ page }) => {
   await expect
     .poll(() => costPanel.evaluate((panel) => panel.scrollWidth <= panel.clientWidth + 1))
     .toBe(true)
-  const mobileTypeBounds = await principalFilter.getByLabel('主体类型').boundingBox()
-  const mobileIdBounds = await principalFilter.getByLabel('主体 ID').boundingBox()
-  expect(mobileIdBounds!.x).toBeGreaterThan(mobileTypeBounds!.x)
-  expect(Math.abs(mobileIdBounds!.y - mobileTypeBounds!.y)).toBeLessThan(2)
+  const mobileTypeBounds = await callerType.boundingBox()
+  const mobileNameBounds = await callerName.boundingBox()
+  expect(mobileNameBounds!.x).toBeGreaterThan(mobileTypeBounds!.x)
+  expect(Math.abs(mobileNameBounds!.y - mobileTypeBounds!.y)).toBeLessThan(2)
   await page.setViewportSize(costDesktopViewport)
   await costPanel.getByRole('button', { name: '查询', exact: true }).click()
   const searched = new URL((await costRequest).url()).searchParams

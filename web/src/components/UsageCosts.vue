@@ -1,10 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { all, api, download, errorText } from '../api'
 import { count, date, dateOnly, useCollection } from '../composables'
 import { t } from '../i18n'
 import { showErrorToast } from '../toast'
-import type { BillingCurrency, Model, UsageCost, UsageCostDetail, UsageCostSummary } from '../types'
+import type {
+  BillingCurrency,
+  Member,
+  Model,
+  Page,
+  UsageCost,
+  UsageCostDetail,
+  UsageCostSummary,
+} from '../types'
 import DateRangePicker from './DateRangePicker.vue'
 import ListFooter from './ListFooter.vue'
 import Modal from './Modal.vue'
@@ -16,6 +24,12 @@ const from = ref('')
 const to = ref('')
 const principalType = ref('')
 const principalId = ref('')
+const callerName = ref('')
+const callerAutocomplete = ref<HTMLElement | null>(null)
+const callerSuggestionsOpen = ref(false)
+const callerSuggestionsLoading = ref(false)
+const callerSearchError = ref('')
+const callerSuggestions = ref<Member[]>([])
 const modelId = ref('')
 const ratingStatus = ref('')
 const billingType = ref('')
@@ -32,6 +46,8 @@ const detailLoading = ref(false)
 const detailError = ref('')
 let summaryRevision = 0
 let detailRevision = 0
+let callerSearchRevision = 0
+let callerSearchTimer: ReturnType<typeof setTimeout> | undefined
 
 const { items, cursor, page, pageSize, total, loading, error, load, previous, retry, setPageSize } =
   useCollection<UsageCost>(() => `/billing/usage-costs?${query.value}`)
@@ -49,6 +65,12 @@ function resetDates() {
   to.value = dateValue(now)
 }
 function params() {
+  if (callerName.value.trim() && !principalId.value) {
+    showErrorToast(
+      t(principalType.value === 'APPLICATION' ? 'usage.selectApplication' : 'usage.selectMember'),
+    )
+    return null
+  }
   const start = Date.parse(`${from.value}T00:00:00Z`)
   const endDate = new Date(`${to.value}T00:00:00Z`)
   endDate.setUTCDate(endDate.getUTCDate() + 1)
@@ -103,11 +125,75 @@ async function search() {
 function reset() {
   principalType.value = ''
   principalId.value = ''
+  callerName.value = ''
+  clearCallerSuggestions()
   modelId.value = ''
   ratingStatus.value = ''
   billingType.value = ''
   resetDates()
   void search()
+}
+function clearCallerSuggestions() {
+  clearTimeout(callerSearchTimer)
+  callerSearchRevision++
+  callerSuggestions.value = []
+  callerSuggestionsOpen.value = false
+  callerSuggestionsLoading.value = false
+  callerSearchError.value = ''
+}
+function changeCallerType() {
+  principalId.value = ''
+  callerName.value = ''
+  clearCallerSuggestions()
+}
+function onCallerInput() {
+  principalId.value = ''
+  callerSuggestions.value = []
+  callerSearchError.value = ''
+  scheduleCallerSearch()
+}
+function openCallerSuggestions() {
+  if (!callerName.value.trim() || principalId.value) return
+  callerSuggestionsOpen.value = true
+  if (!callerSuggestions.value.length) scheduleCallerSearch()
+}
+function scheduleCallerSearch() {
+  clearTimeout(callerSearchTimer)
+  const keyword = callerName.value.trim()
+  const revision = ++callerSearchRevision
+  if (!keyword || !principalType.value) {
+    callerSuggestionsOpen.value = false
+    callerSuggestionsLoading.value = false
+    return
+  }
+  callerSuggestionsOpen.value = true
+  callerSuggestionsLoading.value = true
+  callerSearchTimer = setTimeout(() => void loadCallerSuggestions(keyword, revision), 250)
+}
+async function loadCallerSuggestions(keyword: string, revision: number) {
+  const path = principalType.value === 'APPLICATION' ? 'applications' : 'members'
+  const params = new URLSearchParams({ name: keyword, limit: '8' })
+  try {
+    const result = await api<Page<Member>>(`/${path}/suggestions?${params}`)
+    if (revision !== callerSearchRevision || keyword !== callerName.value.trim()) return
+    callerSuggestions.value = result.items
+  } catch (reason) {
+    if (revision !== callerSearchRevision) return
+    callerSuggestions.value = []
+    callerSearchError.value = errorText(reason)
+  } finally {
+    if (revision === callerSearchRevision) callerSuggestionsLoading.value = false
+  }
+}
+function selectCaller(caller: Member) {
+  principalId.value = caller.id
+  callerName.value = caller.name
+  clearCallerSuggestions()
+}
+function closeCallerSuggestions(event: PointerEvent) {
+  if (event.target instanceof Node && !callerAutocomplete.value?.contains(event.target)) {
+    callerSuggestionsOpen.value = false
+  }
 }
 async function loadLookups() {
   lookupError.value = ''
@@ -176,9 +262,15 @@ async function exportCSV() {
 }
 
 onMounted(() => {
+  document.addEventListener('pointerdown', closeCallerSuggestions)
   resetDates()
   void loadLookups()
   void search()
+})
+onBeforeUnmount(() => {
+  clearTimeout(callerSearchTimer)
+  callerSearchRevision++
+  document.removeEventListener('pointerdown', closeCallerSuggestions)
 })
 </script>
 
@@ -186,22 +278,87 @@ onMounted(() => {
   <section class="panel billing-filter-panel usage-cost-panel">
     <form class="usage-filters usage-cost-filters" @submit.prevent="search">
       <DateRangePicker v-model:from="from" v-model:to="to" />
-      <fieldset class="usage-cost-principal-filter">
-        <legend class="filter-label">{{ t('billing.principal') }}</legend>
+      <div
+        class="filter-field usage-cost-principal-filter"
+        role="group"
+        :aria-label="t('billing.caller')"
+      >
+        <span class="filter-label">{{ t('billing.caller') }}</span>
         <div class="usage-cost-principal-controls">
-          <select v-model="principalType" :aria-label="t('billing.principalType')">
+          <select
+            v-model="principalType"
+            :aria-label="t('billing.callerType')"
+            @change="changeCallerType"
+          >
             <option value="">{{ t('common.all') }}</option>
             <option value="MEMBER">{{ t('billing.principalTypes.MEMBER') }}</option>
             <option value="APPLICATION">{{ t('billing.principalTypes.APPLICATION') }}</option>
           </select>
-          <input
-            v-model="principalId"
-            inputmode="numeric"
-            :aria-label="t('billing.principalId')"
-            :placeholder="t('billing.optionalId')"
-          />
+          <div
+            ref="callerAutocomplete"
+            class="member-autocomplete"
+            @keydown.esc="callerSuggestionsOpen = false"
+          >
+            <input
+              v-model="callerName"
+              type="search"
+              role="combobox"
+              autocomplete="off"
+              aria-autocomplete="list"
+              aria-controls="billing-caller-options"
+              :aria-expanded="callerSuggestionsOpen"
+              :aria-label="
+                t(principalType === 'APPLICATION' ? 'usage.application' : 'usage.member')
+              "
+              :placeholder="
+                t(
+                  principalType === 'APPLICATION'
+                    ? 'usage.applicationPlaceholder'
+                    : principalType === 'MEMBER'
+                      ? 'usage.memberPlaceholder'
+                      : 'billing.chooseCallerType',
+                )
+              "
+              :disabled="!principalType"
+              @input="onCallerInput"
+              @focus="openCallerSuggestions"
+            />
+            <div
+              v-if="callerSuggestionsOpen"
+              id="billing-caller-options"
+              class="member-suggestions"
+              role="listbox"
+            >
+              <button
+                v-for="caller in callerSuggestions"
+                :key="caller.id"
+                type="button"
+                role="option"
+                :aria-selected="caller.id === principalId"
+                @click="selectCaller(caller)"
+              >
+                <strong>{{ caller.name }}</strong>
+                <small>ID {{ caller.id }}</small>
+              </button>
+              <p v-if="callerSuggestionsLoading" class="autocomplete-empty">
+                {{ t('common.loading') }}
+              </p>
+              <p v-else-if="callerSearchError" class="autocomplete-empty error-text">
+                {{ callerSearchError }}
+              </p>
+              <p v-else-if="!callerSuggestions.length" class="autocomplete-empty">
+                {{
+                  t(
+                    principalType === 'APPLICATION'
+                      ? 'usage.noApplicationMatches'
+                      : 'usage.noMemberMatches',
+                  )
+                }}
+              </p>
+            </div>
+          </div>
         </div>
-      </fieldset>
+      </div>
       <label>
         <span class="filter-label">{{ t('billing.model') }}</span>
         <select v-model="modelId">
