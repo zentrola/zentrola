@@ -36,11 +36,18 @@ type Config struct {
 	Security             Security
 	Gateway              Gateway
 	Usage                Usage
+	Billing              Billing
 }
 
 type Usage struct {
 	QueueSize, BatchSize                         int
 	FlushInterval, WriteTimeout, ShutdownTimeout time.Duration
+}
+
+type Billing struct {
+	SettlementInterval, SettlementGrace, SettlementTimeout time.Duration
+	RatingInterval, RatingTimeout                          time.Duration
+	RatingPageSize                                         int32
 }
 
 type Gateway struct {
@@ -221,6 +228,13 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 		}
 		return value
 	}
+	durationAllowZero := func(key, fallback string) time.Duration {
+		value, err := time.ParseDuration(get(key, fallback))
+		if err != nil || value < 0 {
+			problems = append(problems, fmt.Errorf("%s must be a non-negative duration", key))
+		}
+		return value
+	}
 	boolean := func(key, fallback string) bool {
 		value, err := strconv.ParseBool(get(key, fallback))
 		if err != nil {
@@ -278,6 +292,14 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 		Usage: Usage{
 			QueueSize: integer("USAGE_QUEUE_SIZE", "10000", 1000000), BatchSize: integer("USAGE_BATCH_SIZE", "100", 10000),
 			FlushInterval: duration("USAGE_FLUSH_INTERVAL", "500ms"), WriteTimeout: duration("USAGE_WRITE_TIMEOUT", "3s"), ShutdownTimeout: duration("USAGE_SHUTDOWN_TIMEOUT", "5s"),
+		},
+		Billing: Billing{
+			SettlementInterval: duration("BILLING_SETTLEMENT_INTERVAL", "1h"),
+			SettlementGrace:    durationAllowZero("BILLING_SETTLEMENT_GRACE", "10m"),
+			SettlementTimeout:  duration("BILLING_SETTLEMENT_TIMEOUT", "5m"),
+			RatingInterval:     duration("BILLING_API_KEY_RATING_INTERVAL", "1m"),
+			RatingTimeout:      duration("BILLING_API_KEY_RATING_TIMEOUT", "50s"),
+			RatingPageSize:     int32(integer("BILLING_API_KEY_RATING_PAGE_SIZE", "500", 5000)),
 		},
 		Gateway: Gateway{
 			MaxBodyBytes:                         int64(integer("GATEWAY_MAX_BODY_BYTES", "33554432", 128<<20)),

@@ -68,11 +68,11 @@ func (q *Queries) AppendSecurityOperation(ctx context.Context, arg AppendSecurit
 }
 
 const authenticateAccessKey = `-- name: AuthenticateAccessKey :one
-SELECT k.id,k.principal_id,k.expires_at FROM principal_access_key k
+SELECT k.id,k.principal_id,p.principal_type,k.expires_at FROM principal_access_key k
 JOIN principal p ON p.id=k.principal_id
 WHERE k.key_hash=$1 AND k.is_deleted=false AND k.status='ACTIVE' AND k.revoked_at IS NULL
 AND (k.expires_at IS NULL OR k.expires_at > $2::timestamptz)
-AND p.is_deleted=false AND p.status='ACTIVE' AND p.principal_type='MEMBER'
+AND p.is_deleted=false AND p.status='ACTIVE' AND p.principal_type IN ('MEMBER','APPLICATION')
 `
 
 type AuthenticateAccessKeyParams struct {
@@ -81,15 +81,21 @@ type AuthenticateAccessKeyParams struct {
 }
 
 type AuthenticateAccessKeyRow struct {
-	ID          int64
-	PrincipalID int64
-	ExpiresAt   pgtype.Timestamptz
+	ID            int64
+	PrincipalID   int64
+	PrincipalType string
+	ExpiresAt     pgtype.Timestamptz
 }
 
 func (q *Queries) AuthenticateAccessKey(ctx context.Context, arg AuthenticateAccessKeyParams) (AuthenticateAccessKeyRow, error) {
 	row := q.db.QueryRow(ctx, authenticateAccessKey, arg.KeyHash, arg.Now)
 	var i AuthenticateAccessKeyRow
-	err := row.Scan(&i.ID, &i.PrincipalID, &i.ExpiresAt)
+	err := row.Scan(
+		&i.ID,
+		&i.PrincipalID,
+		&i.PrincipalType,
+		&i.ExpiresAt,
+	)
 	return i, err
 }
 
@@ -237,13 +243,18 @@ func (q *Queries) GetKeyForRevoke(ctx context.Context, id int64) (PrincipalAcces
 	return i, err
 }
 
-const getMemberForKey = `-- name: GetMemberForKey :one
-SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at FROM principal
-WHERE id=$1 AND principal_type='MEMBER' AND is_deleted=false FOR UPDATE
+const getPrincipalForKey = `-- name: GetPrincipalForKey :one
+SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at, monthly_token_limit FROM principal
+WHERE id=$1 AND principal_type=$2 AND is_deleted=false FOR UPDATE
 `
 
-func (q *Queries) GetMemberForKey(ctx context.Context, id int64) (Principal, error) {
-	row := q.db.QueryRow(ctx, getMemberForKey, id)
+type GetPrincipalForKeyParams struct {
+	PrincipalID   int64
+	PrincipalType string
+}
+
+func (q *Queries) GetPrincipalForKey(ctx context.Context, arg GetPrincipalForKeyParams) (Principal, error) {
+	row := q.db.QueryRow(ctx, getPrincipalForKey, arg.PrincipalID, arg.PrincipalType)
 	var i Principal
 	err := row.Scan(
 		&i.ID,
@@ -256,6 +267,7 @@ func (q *Queries) GetMemberForKey(ctx context.Context, id int64) (Principal, err
 		&i.UpdatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MonthlyTokenLimit,
 	)
 	return i, err
 }
@@ -365,18 +377,19 @@ func (q *Queries) ResetAdminPassword(ctx context.Context, arg ResetAdminPassword
 }
 
 const revokeAccessKey = `-- name: RevokeAccessKey :exec
-UPDATE principal_access_key SET status='REVOKED',revoked_at=$2,updated_by=$3,updated_at=$2
-WHERE id=$1 AND is_deleted=false
+UPDATE principal_access_key SET status='REVOKED',expires_at=$1,revoked_at=$1,
+updated_by=$2,updated_at=$1
+WHERE id=$3 AND is_deleted=false
 `
 
 type RevokeAccessKeyParams struct {
-	ID        int64
 	RevokedAt pgtype.Timestamptz
 	UpdatedBy string
+	ID        int64
 }
 
 func (q *Queries) RevokeAccessKey(ctx context.Context, arg RevokeAccessKeyParams) error {
-	_, err := q.db.Exec(ctx, revokeAccessKey, arg.ID, arg.RevokedAt, arg.UpdatedBy)
+	_, err := q.db.Exec(ctx, revokeAccessKey, arg.RevokedAt, arg.UpdatedBy, arg.ID)
 	return err
 }
 

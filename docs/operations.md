@@ -78,6 +78,34 @@ docker compose stop
 
 `docker compose down -v` permanently removes the named data volume and must not be used as a routine stop command.
 
+## Cost settlement and usage rating
+
+Zentrola starts two cost-processing workers with the Backend. Both run once during startup and then at their configured intervals:
+
+- The settlement worker finalizes ended personal-subscription and API-key billing periods. Personal-subscription fees are allocated by Token usage; API-key ratings are aggregated into monthly settlement records.
+- The API-key rating worker asynchronously calculates the input, cached-input, and output cost of individual calls from the price version effective at the call time.
+
+Configure prices for each provider credential in the Admin Web before relying on cost figures. A personal subscription needs a recurring period fee, while an API key needs per-million-token prices for its mapped models. Missing or incomplete price information leaves the related call unrated rather than inventing a cost.
+
+The workers use the following settings. Duration values use Go duration syntax such as `500ms`, `1m`, and `1h`.
+
+| Setting | Default | Constraint | Purpose |
+| --- | --- | --- | --- |
+| `BILLING_SETTLEMENT_INTERVAL` | `1h` | Positive duration | Interval between scans for ended billing periods. |
+| `BILLING_SETTLEMENT_GRACE` | `10m` | Non-negative duration | Delay after a period ends before it becomes eligible for settlement, allowing late usage records to arrive. Set `0s` only when delayed usage ingestion is not a concern. |
+| `BILLING_SETTLEMENT_TIMEOUT` | `5m` | Positive duration | Maximum duration of one settlement scan. |
+| `BILLING_API_KEY_RATING_INTERVAL` | `1m` | Positive duration | Interval between scans for API-key calls awaiting rating. |
+| `BILLING_API_KEY_RATING_TIMEOUT` | `50s` | Positive duration | Maximum duration of one API-key rating scan. |
+| `BILLING_API_KEY_RATING_PAGE_SIZE` | `500` | Integer from `1` to `5000` | Maximum number of pending usage records loaded per rating page. |
+
+The defaults are suitable for ordinary deployments. A larger rating page can reduce a backlog faster but increases database work per scan. A shorter interval improves freshness but causes more frequent database queries. Increasing the settlement grace is safer when usage persistence or upstream reporting can be delayed.
+
+In a multi-instance deployment, Redis locks allow only one Backend instance to run each worker at a time. These locks fail closed: if Redis is unavailable, cost rating and settlement pause and are retried by a later scan. Gateway traffic and persisted usage records remain available, but cost views may temporarily lag. Look for `BILLING_SETTLEMENT_LOCK_FAILED`, `SUBSCRIPTION_BILLING_FAILED`, `API_KEY_BILLING_FAILED`, `API_KEY_RATING_LOCK_FAILED`, or `API_KEY_RATING_FAILED` in Backend logs when processing does not advance.
+
+Monthly Token quotas do not use environment variables. Administrators configure or remove quota limits per user, application, or Group in the Admin Web. Usage totals are updated in the same PostgreSQL transaction as usage records; Group attribution is recorded at call time.
+
+Migration `00051` backfills the current UTC month's existing Group usage from membership and model permissions at upgrade time. Earlier membership changes cannot be reconstructed from pre-upgrade usage records.
+
 ## Logging
 
 Important settings:

@@ -51,7 +51,7 @@ func (s *UsageStore) WriteBatch(ctx context.Context, events []domain.Event) erro
 			if attemptNo <= 0 {
 				attemptNo = int32(index + 1)
 			}
-			attempts = append(attempts, map[string]any{"request_id": e.RequestID, "attempt_no": attemptNo, "client_protocol": e.ClientProtocol, "principal_id": e.PrincipalID, "provider_id": a.ProviderID, "provider_model_id": a.ProviderModelID, "provider_credential_id": a.ResourceID, "model_id": a.ModelID, "input_tokens": a.InputTokens, "output_tokens": a.OutputTokens, "cached_input_tokens": a.CachedInputTokens, "started_at": a.StartedAt, "completed_at": a.CompletedAt, "latency_ms": a.CompletedAt.Sub(a.StartedAt).Milliseconds(), "status": a.Status, "error_type": optionalError(a.ErrorType)})
+			attempts = append(attempts, map[string]any{"request_id": e.RequestID, "attempt_no": attemptNo, "client_protocol": e.ClientProtocol, "principal_id": e.PrincipalID, "provider_id": a.ProviderID, "provider_model_id": a.ProviderModelID, "provider_credential_id": a.ResourceID, "model_id": a.ModelID, "quota_group_ids": e.QuotaGroupIDs, "input_tokens": a.InputTokens, "output_tokens": a.OutputTokens, "cached_input_tokens": a.CachedInputTokens, "started_at": a.StartedAt, "completed_at": a.CompletedAt, "latency_ms": a.CompletedAt.Sub(a.StartedAt).Milliseconds(), "status": a.Status, "error_type": optionalError(a.ErrorType)})
 		}
 	}
 	if len(attempts) == 0 {
@@ -94,15 +94,15 @@ func (s *UsageStore) Query(ctx context.Context, actor admin.Identity, f app.Filt
 	if f.ProbeNext {
 		pageLimit++
 	}
-	rows, err := q.QueryUsage(ctx, dbgen.QueryUsageParams{AfterID: f.After, FromTime: ts(f.From), ToTime: ts(f.To), PrincipalID: f.PrincipalID, ModelID: f.ModelID, ProviderID: f.ProviderID, ResourceID: f.ResourceID, PageLimit: pageLimit})
+	rows, err := q.QueryUsage(ctx, dbgen.QueryUsageParams{AfterID: f.After, FromTime: ts(f.From), ToTime: ts(f.To), PrincipalID: f.PrincipalID, PrincipalType: f.PrincipalType, ModelID: f.ModelID, ProviderID: f.ProviderID, ResourceID: f.ResourceID, PageLimit: pageLimit})
 	if err != nil {
 		return app.Page{}, s.usageError(ctx, "query_usage", err)
 	}
 	result := make([]app.Row, 0, len(rows))
 	for _, r := range rows {
-		result = append(result, app.Row{ID: r.ID, RequestID: r.RequestID, ClientProtocol: r.ClientProtocol, PrincipalID: r.PrincipalID, PrincipalName: r.PrincipalName, ModelID: r.ModelID, RequestAt: r.StartedAt.Time.UTC(), CompletedAt: r.CompletedAt.Time.UTC(), LatencyMS: r.LatencyMs, Status: r.Status, ErrorType: r.ErrorType, AttemptNo: r.AttemptNo, ProviderID: r.ProviderID, ProviderModelID: r.ProviderModelID, ResourceID: r.ResourceID, InputTokens: r.InputTokens, OutputTokens: r.OutputTokens, CachedInputTokens: r.CachedInputTokens})
+		result = append(result, app.Row{ID: r.ID, RequestID: r.RequestID, ClientProtocol: r.ClientProtocol, PrincipalID: r.PrincipalID, PrincipalName: r.PrincipalName, PrincipalType: r.PrincipalType, ModelID: r.ModelID, RequestAt: r.StartedAt.Time.UTC(), CompletedAt: r.CompletedAt.Time.UTC(), LatencyMS: r.LatencyMs, Status: r.Status, ErrorType: r.ErrorType, AttemptNo: r.AttemptNo, ProviderID: r.ProviderID, ProviderModelID: r.ProviderModelID, ResourceID: r.ResourceID, InputTokens: r.InputTokens, OutputTokens: r.OutputTokens, CachedInputTokens: r.CachedInputTokens})
 	}
-	total, err := q.CountUsage(ctx, dbgen.CountUsageParams{FromTime: ts(f.From), ToTime: ts(f.To), PrincipalID: f.PrincipalID, ModelID: f.ModelID, ProviderID: f.ProviderID, ResourceID: f.ResourceID})
+	total, err := q.CountUsage(ctx, dbgen.CountUsageParams{FromTime: ts(f.From), ToTime: ts(f.To), PrincipalID: f.PrincipalID, PrincipalType: f.PrincipalType, ModelID: f.ModelID, ProviderID: f.ProviderID, ResourceID: f.ResourceID})
 	if err != nil {
 		return app.Page{}, s.usageError(ctx, "count_usage", err)
 	}
@@ -156,8 +156,12 @@ func (s *UsageStore) Statistics(ctx context.Context, actor admin.Identity, f app
 		total = totalCount
 	}
 	switch f.Dimension {
-	case app.StatisticMember:
-		rows, queryErr := q.UsageMemberStatistics(ctx, dbgen.UsageMemberStatisticsParams{FromTime: ts(f.From), ToTime: ts(f.To), PageOffset: f.After, PageLimit: pageLimit})
+	case app.StatisticMember, app.StatisticApplication:
+		principalType := "MEMBER"
+		if f.Dimension == app.StatisticApplication {
+			principalType = "APPLICATION"
+		}
+		rows, queryErr := q.UsageMemberStatistics(ctx, dbgen.UsageMemberStatisticsParams{FromTime: ts(f.From), ToTime: ts(f.To), PrincipalType: principalType, PageOffset: f.After, PageLimit: pageLimit})
 		if queryErr != nil {
 			return app.StatisticPage{}, s.usageError(ctx, "query_member_statistics", queryErr)
 		}

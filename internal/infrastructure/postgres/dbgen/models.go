@@ -42,6 +42,66 @@ type AdminUser struct {
 	UpdatedAt pgtype.Timestamptz
 }
 
+// 统一计费单据；按计费类型和 UTC 归属账期保存个人订阅与 API Key 的费用确认及调整结果
+type BillingDocument struct {
+	// 主键，由应用侧生成的正数 64-bit ID
+	ID int64
+	// 单据状态：CONFIRMED=已确认并参与统计；VOID=已作废且不参与统计
+	Status string
+	// 计费类型：SUBSCRIPTION=个人订阅；API_KEY=API Key 按量调用
+	BillingType string
+	// 单据类型：CHARGE=账期费用；ADJUSTMENT=对原单据的差额调整
+	DocumentType string
+	// 费用对应的实际供应方凭证 ID
+	ProviderCredentialID int64
+	// 费用来源类型：SUBSCRIPTION_PRICE=订阅价格版本；API_KEY_USAGE=API Key 用量核算汇总
+	SourceType string
+	// 费用来源记录 ID；订阅单据为价格版本 ID，API Key 汇总单据为 NULL
+	SourceID *int64
+	// 调整单对应的原始账期单据 ID；普通账期单据为 NULL
+	OriginalDocumentID *int64
+	// 费用归属账期起始时间，UTC，包含该时刻
+	PeriodStart pgtype.Timestamptz
+	// 费用归属账期结束时间，UTC，不包含该时刻
+	PeriodEnd pgtype.Timestamptz
+	// 单据新增确认的输入与输出 Token 数；价格纠错调整单为 0，晚到用量调整单可大于 0
+	TotalTokens int64
+	// 单据总金额；账期费用为非负数，调整金额可正可负
+	TotalAmount pgtype.Numeric
+	// 单据币种：CNY=人民币，USD=美元；不同币种不自动换算或合计
+	Currency string
+	// 单据创建时间，UTC
+	CreatedAt pgtype.Timestamptz
+}
+
+// 统一计费单据主体明细；保存个人订阅分摊结果或 API Key 按量费用结果，用于主体成本统计
+type BillingDocumentItem struct {
+	// 主键，由应用侧生成的正数 64-bit ID
+	ID int64
+	// 所属计费单据 ID
+	BillingDocumentID int64
+	// 费用归属的用户或应用主体 ID
+	PrincipalID int64
+	// 主体在该单据中新增确认的输入与输出 Token 数；价格纠错调整明细为 0
+	UsageTokens int64
+	// 个人订阅费用按 Token 计算的分摊比例；API Key 按量费用为 NULL；调整明细沿用原单据比例
+	AllocationRatio pgtype.Numeric
+	// 主体承担的费用金额；个人订阅为分摊金额，API Key 为按量核算金额，调整明细可正可负
+	Amount pgtype.Numeric
+	// 明细创建时间，UTC
+	CreatedAt pgtype.Timestamptz
+}
+
+// API Key 计费单据与单次调用核算 revision 的追加式审计关联
+type BillingDocumentUsageRating struct {
+	// 引用的 API Key 计费单据 ID
+	BillingDocumentID int64
+	// 被该单据首次确认的单次调用核算 revision ID
+	UsageRatingID int64
+	// 审计关联创建时间，UTC
+	CreatedAt pgtype.Timestamptz
+}
+
 // 平台稳定逻辑模型；发布厂商仅用于归属展示，与调用供应方映射解耦
 type Model struct {
 	// 主键，由应用侧生成的正数 64-bit ID
@@ -70,6 +130,18 @@ type Model struct {
 	CreatedAt pgtype.Timestamptz
 	// 更新时间，UTC
 	UpdatedAt pgtype.Timestamptz
+}
+
+// 与 Usage 写入事务同步维护的主体及 Group 每月 Token 累计量
+type MonthlyTokenUsage struct {
+	// 配额范围类型：PRINCIPAL 或 GROUP
+	ScopeType string
+	// 主体或 Group ID
+	ScopeID int64
+	// UTC 自然月起始时刻
+	PeriodStart pgtype.Timestamptz
+	// 该范围该月已写入 Usage 的输入与输出 Token 总量
+	UsedTokens int64
 }
 
 // 管理员与系统操作日志；Append Only，普通操作禁止更新和删除
@@ -124,7 +196,7 @@ type Principal struct {
 	IsDeleted bool
 	// 状态：ACTIVE=启用；DISABLED=停用
 	Status string
-	// 主体类型：MEMBER=成员；APPLICATION=应用，仅预留类型
+	// 主体类型：MEMBER=成员；APPLICATION=应用
 	PrincipalType string
 	// 主体名称
 	Name string
@@ -138,6 +210,8 @@ type Principal struct {
 	CreatedAt pgtype.Timestamptz
 	// 更新时间，UTC
 	UpdatedAt pgtype.Timestamptz
+	// 主体每个 UTC 自然月允许使用的 Token 上限；NULL 表示不限制
+	MonthlyTokenLimit *int64
 }
 
 // 调用主体访问凭证；仅识别主体，不存储权限或完整 Key
@@ -194,6 +268,8 @@ type PrincipalGroup struct {
 	CreatedAt pgtype.Timestamptz
 	// 更新时间，UTC
 	UpdatedAt pgtype.Timestamptz
+	// 分组内授权模型共享的每个 UTC 自然月 Token 上限；NULL 表示不限制
+	MonthlyTokenLimit *int64
 }
 
 // 调用主体与治理分组的多对多关系
@@ -346,6 +422,30 @@ type ProviderCredential struct {
 	Version int64
 }
 
+// 按量凭证按生效时间保留的模型计价版本
+type ProviderCredentialModelPrice struct {
+	// 主键，由应用侧生成的正数 64-bit ID
+	ID int64
+	// 计价所属的 API Key 凭证 ID
+	ProviderCredentialID int64
+	// 计价对应的供应方模型映射 ID
+	ProviderModelID int64
+	// 计价币种：CNY=人民币，USD=美元；不同币种不自动换算或合计
+	Currency string
+	// 普通输入每百万 Token 的价格
+	InputPrice pgtype.Numeric
+	// 输出每百万 Token 的价格
+	OutputPrice pgtype.Numeric
+	// 缓存命中输入每百万 Token 的价格
+	CachedInputPrice pgtype.Numeric
+	// 此版本价格的生效时间，UTC
+	EffectiveAt pgtype.Timestamptz
+	// 创建者引用：system、admin:<id> 或 principal:<id>
+	CreatedBy string
+	// 记录创建时间，UTC
+	CreatedAt pgtype.Timestamptz
+}
+
 // Provider 认证资源最近观测到的额度窗口；只保存当前状态，不作为 Usage 事实
 type ProviderCredentialQuotum struct {
 	// 所属 Provider 认证资源 ID
@@ -378,6 +478,26 @@ type ProviderCredentialQuotum struct {
 	CreatedAt pgtype.Timestamptz
 	// 额度窗口最近更新时间，UTC
 	UpdatedAt pgtype.Timestamptz
+}
+
+// 订阅凭证按生效时间保留的周期费用版本
+type ProviderCredentialSubscriptionPrice struct {
+	// 主键，由应用侧生成的正数 64-bit ID
+	ID int64
+	// 费用所属的订阅凭证 ID
+	ProviderCredentialID int64
+	// 费用币种：CNY=人民币，USD=美元；不同币种不自动换算或合计
+	Currency string
+	// 一个完整计费周期的固定费用，非每日分摊金额
+	PeriodAmount pgtype.Numeric
+	// 计费周期：MONTH=月，YEAR=年
+	BillingPeriod string
+	// 此版本费用的生效时间，UTC
+	EffectiveAt pgtype.Timestamptz
+	// 创建者引用：system、admin:<id> 或 principal:<id>
+	CreatedBy string
+	// 记录创建时间，UTC
+	CreatedAt pgtype.Timestamptz
 }
 
 // 服务商支持的协议及对应上游基础地址
@@ -424,6 +544,52 @@ type ProviderModel struct {
 	UpdatedAt pgtype.Timestamptz
 }
 
+// API Key 单次调用的计价快照；价格纠错时追加 revision，原核算记录永久保留
+type UsageRating struct {
+	// 主键，由应用侧生成的正数 64-bit ID
+	ID int64
+	// 被核算的原始上游调用用量记录 ID
+	UsageRecordID int64
+	// 同一用量记录的核算版本，从 1 开始连续递增
+	Revision int32
+	// 当前 revision 直接替代的上一核算记录 ID；首版为 NULL
+	SupersedesRatingID *int64
+	// 费用直接归属的用户或应用主体 ID
+	PrincipalID int64
+	// 实际调用的 API Key 凭证 ID
+	ProviderCredentialID int64
+	// 实际调用的供应方模型映射 ID
+	ProviderModelID int64
+	// 按调用发生时间命中的模型价格版本 ID
+	ModelPriceID int64
+	// 原始调用开始时间快照，UTC；用于确定价格版本和自然月账期
+	UsageStartedAt pgtype.Timestamptz
+	// 输入 Token 总数快照，包含缓存命中输入
+	InputTokens int64
+	// 缓存命中输入 Token 数快照
+	CachedInputTokens int64
+	// 输出 Token 数快照
+	OutputTokens int64
+	// 普通输入每百万 Token 价格快照，保留 8 位小数
+	InputPrice pgtype.Numeric
+	// 缓存命中输入每百万 Token 价格快照，保留 8 位小数
+	CachedInputPrice pgtype.Numeric
+	// 输出每百万 Token 价格快照，保留 8 位小数
+	OutputPrice pgtype.Numeric
+	// 普通输入成本，保留 14 位小数
+	InputCost pgtype.Numeric
+	// 缓存命中输入成本，保留 14 位小数
+	CachedInputCost pgtype.Numeric
+	// 输出成本，保留 14 位小数
+	OutputCost pgtype.Numeric
+	// 单次调用总成本，保留 14 位小数
+	TotalCost pgtype.Numeric
+	// 成本币种：CNY=人民币，USD=美元；不同币种分别结算
+	Currency string
+	// 核算记录创建时间，UTC
+	CreatedAt pgtype.Timestamptz
+}
+
 // 一次真实上游调用 Attempt 的原始用量事实；不保存价格与成本，无逻辑删除
 type UsageRecord struct {
 	// 主键，由应用侧生成的正数 64-bit ID
@@ -464,4 +630,6 @@ type UsageRecord struct {
 	ErrorType *string
 	// 事实记录创建时间，UTC
 	CreatedAt pgtype.Timestamptz
+	// 调用发生时具有该模型权限的有效 Group ID 快照，不受后续成员和授权变更影响
+	QuotaGroupIds []int64
 }

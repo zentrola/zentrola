@@ -78,6 +78,34 @@ docker compose stop
 
 `docker compose down -v` 会永久删除命名数据卷，不能作为日常停止命令使用。
 
+## 成本结算与用量核算
+
+Zentrola 会随 Backend 启动两个成本处理任务。两个任务都会在启动时立即执行一次，之后按照各自的间隔周期执行：
+
+- 账期结算任务处理已经结束的个人订阅和 API Key 账期。个人订阅费用按照 Token 用量分摊，API Key 核算结果按月汇总为结算记录。
+- API Key 核算任务根据调用发生时生效的价格版本，异步计算单次调用的输入、缓存输入和输出成本。
+
+使用成本数据前，应先在 Admin Web 中为相应 Provider Credential 配置价格。个人订阅需要配置周期费用，API Key 需要为其模型映射配置每百万 Token 单价。价格缺失或不完整时，相关调用会保持待核算状态，不会生成虚构成本。
+
+后台任务使用以下配置。时间值采用 Go duration 格式，例如 `500ms`、`1m` 和 `1h`。
+
+| 配置项 | 默认值 | 取值约束 | 作用 |
+| --- | --- | --- | --- |
+| `BILLING_SETTLEMENT_INTERVAL` | `1h` | 大于 `0` 的 duration | 扫描已结束账期的间隔。 |
+| `BILLING_SETTLEMENT_GRACE` | `10m` | 大于或等于 `0` 的 duration | 账期结束后的等待时间，为延迟写入的用量记录预留缓冲；只有确认不存在延迟写入时才建议设置为 `0s`。 |
+| `BILLING_SETTLEMENT_TIMEOUT` | `5m` | 大于 `0` 的 duration | 单轮账期结算的最长执行时间。 |
+| `BILLING_API_KEY_RATING_INTERVAL` | `1m` | 大于 `0` 的 duration | 扫描待核算 API Key 调用的间隔。 |
+| `BILLING_API_KEY_RATING_TIMEOUT` | `50s` | 大于 `0` 的 duration | 单轮 API Key 核算的最长执行时间。 |
+| `BILLING_API_KEY_RATING_PAGE_SIZE` | `500` | `1` 至 `5000` 的整数 | 每页最多读取的待核算用量记录数。 |
+
+普通部署建议保留默认值。增大核算页大小可以更快消化积压，但会增加单轮数据库压力；缩短执行间隔可以提高成本数据的新鲜度，但会增加查询频率。如果 Usage 持久化或上游用量上报可能延迟，应适当增加结算等待时间。
+
+多实例部署通过 Redis 锁保证每类任务同一时间只有一个 Backend 实例执行。这两个锁采用 fail-closed 策略：Redis 不可用时，成本核算和结算暂停，并在后续扫描时重试；Gateway 流量和已经持久化的 Usage 记录不受影响，但成本页面数据可能暂时滞后。如果处理没有推进，可在 Backend 日志中检查 `BILLING_SETTLEMENT_LOCK_FAILED`、`SUBSCRIPTION_BILLING_FAILED`、`API_KEY_BILLING_FAILED`、`API_KEY_RATING_LOCK_FAILED` 或 `API_KEY_RATING_FAILED`。
+
+月度 Token 配额不使用环境变量。管理员在 Admin Web 中按用户、应用或 Group 增加额度或取消额度限制。用量累计与 Usage 记录在同一 PostgreSQL 事务中提交；Group 归属按调用发生时的成员关系和模型授权保存。
+
+迁移 `00051` 会按升级时的成员关系和模型授权补齐当前 UTC 月的既有 Group 用量。升级前发生的历史成员变更无法从旧 Usage 记录中准确还原。
+
 ## 日志
 
 主要配置：

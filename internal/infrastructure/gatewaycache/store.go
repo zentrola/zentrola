@@ -152,6 +152,28 @@ func (s *ManagementStore) Write(ctx context.Context, actor admin.Identity, fn fu
 	return nil
 }
 
+func (s *ManagementStore) ReadApplication(ctx context.Context, actor admin.Identity, fn func(management.ApplicationReader) error) error {
+	next, ok := s.next.(management.ApplicationStore)
+	if !ok {
+		return appsec.ErrUnavailable
+	}
+	return next.ReadApplication(ctx, actor, fn)
+}
+
+func (s *ManagementStore) WriteApplication(ctx context.Context, actor admin.Identity, fn func(management.ApplicationSession) error) error {
+	next, ok := s.next.(management.ApplicationStore)
+	if !ok {
+		return appsec.ErrUnavailable
+	}
+	if err := next.WriteApplication(ctx, actor, fn); err != nil {
+		return err
+	}
+	s.logger.InfoContext(ctx, "application configuration updated; invalidating gateway cache",
+		"change_type", "application_write", "operator_id", actor.ID)
+	s.cache.Clear(ctx, "application_write")
+	return nil
+}
+
 // GatewayStore 缓存鉴权后的候选路由与模型列表；运行时状态变化后立即失效。
 type GatewayStore struct {
 	next       gw.Store

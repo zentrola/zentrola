@@ -8,9 +8,9 @@
 
 Zentrola 是面向研发团队的企业 AI Coding 能力治理平台（AI Coding Control Plane）。
 
-它位于 Codex、Claude Code 等 AI Coding Client 与企业模型订阅之间。研发人员继续使用熟悉的客户端，管理员则统一管理服务商、凭据、逻辑模型、访问权限、Virtual Key、用量和操作记录。
+它位于 Codex、Claude Code 等 AI Coding Client 与企业模型订阅之间。研发人员继续使用熟悉的客户端，管理员则统一管理服务商、凭据、逻辑模型、访问权限、用户与应用密钥、Token 配额、用量成本和操作记录。
 
-> Zentrola 正在持续开发。当前版本聚焦 Model Governance MVP；Tool、Knowledge、Skill、Cost、计费、SSO 和 APPLICATION Principal 等能力尚未形成完整闭环。
+> Zentrola 正在持续开发。`1.1.0` 版本在 Model Governance MVP 基础上增加了应用接入、用量成本核算和月度 Token 配额。Tool、Knowledge、Skill、SSO 和完整高可用方案仍属于后续工作。
 
 ![Zentrola 管理控制台](docs/assets/admin-console.png)
 
@@ -21,37 +21,39 @@ Zentrola 是面向研发团队的企业 AI Coding 能力治理平台（AI Coding
 - 通过成员、Group 和逻辑模型授权，不再共享上游 API Key。
 - 更换服务商、上游模型或凭据时，无需修改客户端使用的逻辑模型编码。
 - 统一承接 OpenAI 与 Anthropic 兼容流量，并提供协议转换和服务商故障切换。
-- 将调用用量归属到成员、逻辑模型、服务商和凭据。
+- 将调用用量和成本归属到用户、应用、逻辑模型、服务商和凭据。
+- 通过相互独立的用户、应用和 Group 月度配额控制 Token 消耗。
 - 记录重要管理操作，便于追踪和审计。
 
 ## 工作方式
 
 ```text
-Codex / Claude Code / OpenAI 兼容客户端
-                    │
-               Virtual Key
-                    ▼
-┌──────────────── Zentrola ────────────────┐
-│ 身份认证 → Group 权限 → 逻辑模型         │
-│          → Provider 路由 → Usage 记录    │
-└──────────────────────────────────────────┘
-                    │
-        OpenAI / Anthropic / 兼容服务商
-                    │
-             PostgreSQL / Redis
+Codex / Claude Code / OpenAI 兼容客户端 / 应用
+                         │
+                Virtual Key / App Key
+                         ▼
+┌──────────────────── Zentrola ────────────────────┐
+│ 身份认证 → Group 权限 → Token 配额 → 逻辑模型    │
+│          → Provider 路由 → Usage 与成本记录      │
+└──────────────────────────────────────────────────┘
+                         │
+             OpenAI / Anthropic / 兼容服务商
+                         │
+                  PostgreSQL / Redis
 ```
 
 管理面与调用面使用相互独立的认证域：
 
 - 管理员使用 Admin Web 和 Admin API，通过 Admin JWT 登录。
-- 普通成员使用 Virtual Key 调用 Gateway API。
-- Admin JWT 不能调用 Gateway。Virtual Key 不能访问管理员管理接口，但可以访问 `/api/v1/me` 下的成员自助接口。
+- 用户使用 Virtual Key、应用使用 App Key 调用 Gateway API。
+- Admin JWT 不能调用 Gateway。Gateway Key 不能访问管理员管理接口；符合条件的用户 Virtual Key 可以访问 `/api/v1/me` 下的成员自助接口。
 
 ## 当前能力
 
 - 首位管理员初始化、登录、退出、修改密码和管理员密码重置
 - MEMBER 创建、状态管理和删除
-- Group 成员管理和 Group Model Allowlist
+- 应用生命周期管理，以及 App Key 的签发、有效期管理和撤销
+- 用户与应用的 Group 归属和 Group Model Allowlist
 - 服务商初始化，以及 OpenAI/Anthropic 兼容端点维护
 - API Key 加密存储，以及受支持的 ChatGPT/Codex 和 Claude Code 个人订阅认证
 - Provider 出站代理配置和 Endpoint 公网/私网范围
@@ -61,7 +63,10 @@ Codex / Claude Code / OpenAI 兼容客户端
 - Anthropic Messages、Count Tokens、SSE 和工具调用
 - OpenAI Models、Chat Completions、Responses、Images API、SSE 和工具调用
 - 同协议优先、异协议转换和服务商故障切换
-- Usage 仪表盘和 Operation Log
+- 用户与应用 Usage 仪表盘和 Operation Log
+- 带生效时间的个人订阅周期费用和 API Key 每百万 Token 单价
+- 默认展示当月的成本概览、订阅费用分摊、用量排行，以及支持筛选、CSV 导出和单次调用成本拆解的计费明细
+- 用户、应用和 Group 相互独立的月度 Token 配额，包括用量等级、Gateway 准入控制、带审计的额度增加和取消限制
 - Admin Web 中英文界面
 
 模型目录同步目前为 OpenAI、Google、DeepSeek、智谱 AI、月之暗面、通义千问和 xAI 提供专用适配器。其他 OpenAI 或 Anthropic 兼容服务商可以手动配置。
@@ -106,9 +111,25 @@ WEB_API_BASE_URL=http://127.0.0.1:9527
 WEB_GATEWAY_BASE_URL=http://127.0.0.1:9527
 ```
 
+成本处理默认使用以下配置。这些配置不是必填项；只有需要调整扫描间隔、超时时间或批量大小时，才需要将其加入所选配置文件：
+
+```dotenv
+# 个人订阅与 API Key 月度结算：每小时扫描一次，账期结束 10 分钟后结算，单轮最长 5 分钟。
+BILLING_SETTLEMENT_INTERVAL=1h
+BILLING_SETTLEMENT_GRACE=10m
+BILLING_SETTLEMENT_TIMEOUT=5m
+
+# API Key 单次调用异步核算：每分钟扫描，每轮最长 50 秒，每页最多处理 500 条待核算记录。
+BILLING_API_KEY_RATING_INTERVAL=1m
+BILLING_API_KEY_RATING_TIMEOUT=50s
+BILLING_API_KEY_RATING_PAGE_SIZE=500
+```
+
+两个后台任务都使用 Redis 锁，确保每类任务同一时间只有一个 Backend 实例执行。取值约束、故障行为和调优建议见[部署与运维](docs/operations.zh-CN.md#成本结算与用量核算)。
+
 `ADMIN_JWT_SECRET`、`MASTER_KEY`、数据库密码和 Provider Credential 必须彼此独立。`MASTER_KEY` 只从 Backend 选定的通用配置文件读取；二进制部署默认使用 `.env`，Compose 会将文件顶部填写的值以内联配置挂载为 `/app/.env`。该值必须与数据库一起备份；丢失后已有 Provider Credential 无法恢复。
 
-仓库中的 `compose.yaml` 会使用 `longjianghu/zentrola:1.0.0` 启动 Backend、Admin Web、PostgreSQL 和 Redis。使用 Docker Compose 2.23.1 或更高版本，直接修改文件顶部 `x-required-settings` 中的四个密码和密钥，然后运行：
+仓库中的 `compose.yaml` 会使用 `longjianghu/zentrola:latest` 启动 Backend、Admin Web、PostgreSQL 和 Redis。使用 Docker Compose 2.23.1 或更高版本，直接修改文件顶部 `x-required-settings` 中的四个密码和密钥，然后运行：
 
 ```shell
 docker compose up -d
@@ -149,6 +170,8 @@ Windows PowerShell：
 6. 为成员签发 Virtual Key。
 7. 将 Gateway 地址、Virtual Key 和逻辑模型编码交给成员。
 
+如需为系统间调用提供独立身份，可以改为创建应用，将应用加入一个或多个 Group 后签发 App Key。用户与应用都会继承所属 Group 的模型权限。
+
 验证 OpenAI 兼容模型列表：
 
 ```bash
@@ -186,10 +209,9 @@ Anthropic 兼容客户端使用 `http://127.0.0.1:9527/anthropic` 作为 Base UR
 
 ## 项目状态与边界
 
-当前 MVP 适合验证以成员和 Group 为单位的模型治理。以下能力仍属于后续工作：
+当前版本支持以用户、应用和 Group 为单位的模型治理、基础用量成本核算和月度 Token 管控。成本数据用于企业内部掌握和分摊支出，不定位为客户计费、开票或财务总账系统。以下能力仍属于后续工作：
 
-- APPLICATION Principal 与 App Key
-- Cost、Budget、计费，以及按成本和延迟动态路由
+- 按成本和延迟动态路由，以及更完整的资源健康自动化
 - Enterprise Knowledge、Skill Registry 和 Managed MCP
 - SSO、OIDC、LDAP 和 SCIM
 - 完整的高可用部署方案

@@ -11,12 +11,24 @@ export interface Identity {
 export interface Member {
   id: string
   name: string
+  monthlyTokenLimit: string | null
   remark: string | null
   status: string
   createdAt: string
 }
 export interface Group extends Member {
   code: string
+}
+export interface TokenQuotaStatus {
+  scopeType: 'PRINCIPAL' | 'GROUP'
+  scopeId: string
+  monthlyTokenLimit: string
+  usedTokens: string
+  remainingTokens: string
+  usedPercent: number
+  level: 'NORMAL' | 'NOTICE' | 'WARNING' | 'EXHAUSTED'
+  periodStart: string
+  periodEnd: string
 }
 export interface Model {
   id: string
@@ -106,8 +118,40 @@ export interface Resource {
   lastHttpStatus: number | null
   lastErrorCode: string | null
   credentialConfigured: boolean
+  subscriptionPrice: SubscriptionPriceSummary | null
   createdAt: string
   updatedAt: string
+}
+export interface SubscriptionPriceSummary {
+  currency: 'CNY' | 'USD'
+  periodAmount: string
+  billingPeriod: 'MONTH' | 'YEAR'
+  effectiveAt: string
+}
+export interface ModelPrice {
+  id: string
+  providerCredentialId: string
+  providerModelId: string
+  currency: 'CNY' | 'USD'
+  inputPrice: string
+  outputPrice: string
+  cachedInputPrice: string
+  effectiveAt: string
+  createdAt: string
+}
+export interface SubscriptionPrice {
+  id: string
+  providerCredentialId: string
+  currency: 'CNY' | 'USD'
+  periodAmount: string
+  billingPeriod: 'MONTH' | 'YEAR'
+  effectiveAt: string
+  createdAt: string
+}
+export interface CredentialPrices {
+  modelPrices: ModelPrice[]
+  subscriptionPrices: SubscriptionPrice[]
+  subscriptionPrice: SubscriptionPrice | null
 }
 export interface ResourceQuota {
   code: string
@@ -179,6 +223,7 @@ export interface Usage {
   clientProtocol: string
   principalId: string
   principalName: string
+  principalType: 'MEMBER' | 'APPLICATION'
   modelId: string
   resourceId: string
   providerId: string
@@ -251,4 +296,167 @@ export interface Operation {
   createdAt: string
   before: unknown
   after: unknown
+}
+
+export type BillingType = 'SUBSCRIPTION' | 'API_KEY'
+export type BillingCurrency = 'CNY' | 'USD'
+export type BillingDocumentType = 'CHARGE' | 'ADJUSTMENT'
+
+export interface BillingCurrencyTotal {
+  billingType: BillingType
+  currency: BillingCurrency
+  totalAmount: string
+  allocatedAmount: string
+  unallocatedAmount: string
+  totalTokens: number
+}
+export interface BillingPrincipalTotal {
+  principalId: string
+  principalName: string
+  principalType: 'MEMBER' | 'APPLICATION'
+  billingType: BillingType
+  currency: BillingCurrency
+  amount: string
+  tokens: number
+}
+export interface BillingStatistics {
+  from: string
+  to: string
+  totals: BillingCurrencyTotal[]
+  items: BillingPrincipalTotal[]
+  total: number
+}
+export interface BillingDocument {
+  id: string
+  billingType: BillingType
+  documentType: BillingDocumentType
+  status: string
+  credentialId: string
+  credentialName: string
+  originalDocumentId: string | null
+  periodStart: string
+  periodEnd: string
+  totalTokens: number
+  totalAmount: string
+  currency: BillingCurrency
+  createdAt: string
+}
+export interface BillingDocumentItem {
+  id: string
+  principalId: string
+  principalName: string
+  principalType: 'MEMBER' | 'APPLICATION'
+  usageTokens: number
+  allocationRatio: string | null
+  amount: string
+}
+export interface BillingDocumentDetail extends BillingDocument {
+  items: BillingDocumentItem[]
+  original: BillingDocument | null
+  adjustments: BillingDocument[]
+  ratingCount: number
+}
+export type BillingIssueReason = 'INCOMPLETE_TOKENS' | 'MISSING_PRICE' | 'PENDING_RATING'
+export interface UnratedUsage {
+  usageRecordId: string
+  principalId: string
+  principalName: string
+  principalType: 'MEMBER' | 'APPLICATION'
+  credentialId: string
+  credentialName: string
+  providerModelId: string
+  startedAt: string
+  inputTokens: number | null
+  cachedInputTokens: number | null
+  outputTokens: number | null
+  reason: BillingIssueReason
+  waitingSince: string
+}
+
+export type UsageCostRatingStatus =
+  | 'RATED'
+  | 'SUBSCRIPTION_SHARED'
+  | 'INCOMPLETE_TOKENS'
+  | 'MISSING_PRICE'
+  | 'PENDING_RATING'
+  | 'NOT_BILLABLE'
+export interface UsageCostTotal {
+  currency: BillingCurrency
+  amount: string
+  rated: number
+}
+export interface UsageCostSummary {
+  from: string
+  to: string
+  requests: number
+  attempts: number
+  successful: number
+  inputTokens: number
+  cachedInputTokens: number
+  outputTokens: number
+  rated: number
+  shared: number
+  unrated: number
+  totals: UsageCostTotal[]
+}
+export interface UsageCost {
+  id: string
+  requestId: string
+  attemptNo: number
+  principalId: string
+  principalName: string
+  principalType: 'MEMBER' | 'APPLICATION'
+  modelId: string
+  modelName: string
+  providerId: string
+  providerName: string
+  providerModelId: string
+  resourceId: string
+  resourceName: string
+  clientProtocol: string
+  status: string
+  errorType: string | null
+  startedAt: string
+  completedAt: string
+  latencyMs: number
+  inputTokens: number | null
+  cachedInputTokens: number | null
+  outputTokens: number | null
+  billingType: BillingType
+  ratingStatus: UsageCostRatingStatus
+  ratingId: string | null
+  ratingRevision: number | null
+  currency: BillingCurrency | null
+  totalCost: string | null
+  ratedAt: string | null
+}
+export interface UsageCostRating {
+  id: string
+  revision: number
+  modelPriceId: string
+  priceEffectiveAt: string
+  inputPrice: string
+  cachedInputPrice: string
+  outputPrice: string
+  inputCost: string
+  cachedInputCost: string
+  outputCost: string
+  totalCost: string
+  currency: BillingCurrency
+  createdAt: string
+}
+export interface SubscriptionAllocation {
+  priceId: string
+  currency: BillingCurrency
+  periodAmount: string
+  billingPeriod: 'MONTH' | 'YEAR'
+  effectiveAt: string
+  documentId: string | null
+  periodStart: string | null
+  periodEnd: string | null
+  principalAmount: string | null
+}
+export interface UsageCostDetail extends UsageCost {
+  ratings: UsageCostRating[]
+  subscription: SubscriptionAllocation | null
 }

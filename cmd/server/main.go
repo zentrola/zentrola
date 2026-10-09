@@ -15,9 +15,11 @@ import (
 	"syscall"
 	"time"
 
+	billingapp "github.com/zentrola/zentrola/internal/application/billing"
 	"github.com/zentrola/zentrola/internal/application/gateway"
 	"github.com/zentrola/zentrola/internal/application/health"
 	"github.com/zentrola/zentrola/internal/application/management"
+	quotaapp "github.com/zentrola/zentrola/internal/application/quota"
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	usageapp "github.com/zentrola/zentrola/internal/application/usage"
 	"github.com/zentrola/zentrola/internal/domain/admin"
@@ -296,11 +298,14 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 		openaicodex.WithRefreshAhead(cfg.Gateway.SubscriptionRefreshAhead),
 	)
 	claudeSubscription := anthropicclaude.New()
+	postgresManagementStore := postgres.NewManagementStore(pool, ids, logger)
+	managementStore := gatewaycache.NewManagementStore(postgresManagementStore, gatewayCache, logger)
 	managementService := management.New(
-		gatewaycache.NewManagementStore(postgres.NewManagementStore(pool, ids, logger), gatewayCache, logger), ids, credentials, connectionTester,
+		managementStore, ids, credentials, connectionTester,
 		management.WithModelDiscoverer(modelcatalog.NewDiscoverer(logger)),
 		management.WithSubscriptionAdapter(codexSubscription),
 		management.WithSubscriptionAdapter(claudeSubscription),
+		management.WithPriceStore(postgresManagementStore),
 	)
 	anthropicClient := anthropic.NewGatewayClient(cfg.Gateway.HeaderTimeout, logger)
 	defer anthropicClient.CloseIdleConnections()
@@ -314,9 +319,11 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 		logger.Warn("route state Redis unavailable; cooldown state will fail open", "error_code", "REDIS_UNAVAILABLE")
 	}
 	redisProbeCancel()
+	quotaService := quotaapp.New(postgres.NewQuotaStore(pool, logger), logger)
 	gatewayService := gateway.New(
 		gatewaycache.NewGatewayStore(postgres.NewGatewayStore(pool, logger), gatewayCache, logger), credentials, compatibleUpstream,
 		gateway.WithRouteState(routeState),
+		gateway.WithTokenQuotaAdmission(quotaService),
 		gateway.WithActiveRouteRecorder(gatewayCache),
 		gateway.WithSubscriptionRefreshCoordinator(routeState),
 		gateway.WithCredentialRefreshTimeout(cfg.Gateway.SubscriptionRefreshCredentialTimeout),
@@ -358,6 +365,44 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 		m := usageWriter.Metrics()
 		logger.Info("usage writer stopped", "persisted", m.Persisted, "failed", m.Failed, "pending", m.Pending)
 	}()
+	billingStore := postgres.NewBillingStore(pool)
+	billingService := billingapp.New(billingStore, ids)
+	ratingWorker, err := billingapp.NewRatingWorker(
+		billingService, routeState, logger, cfg.Billing.RatingInterval,
+		cfg.Billing.RatingTimeout, cfg.Billing.RatingPageSize,
+	)
+	if err != nil {
+		return err
+	}
+	logger.Info("api key usage rating worker started",
+		"interval", cfg.Billing.RatingInterval,
+		"run_timeout", cfg.Billing.RatingTimeout,
+		"page_size", cfg.Billing.RatingPageSize)
+	defer func() {
+		workerShutdown, workerCancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+		defer workerCancel()
+		if err := ratingWorker.Close(workerShutdown); err != nil {
+			runErr = errors.Join(runErr, errors.New("cannot stop api key usage rating worker"))
+		}
+	}()
+	billingWorker, err := billingapp.NewWorker(
+		billingService, routeState, logger, cfg.Billing.SettlementInterval,
+		cfg.Billing.SettlementGrace, cfg.Billing.SettlementTimeout,
+	)
+	if err != nil {
+		return err
+	}
+	logger.Info("billing settlement worker started",
+		"interval", cfg.Billing.SettlementInterval,
+		"grace", cfg.Billing.SettlementGrace,
+		"run_timeout", cfg.Billing.SettlementTimeout)
+	defer func() {
+		workerShutdown, workerCancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+		defer workerCancel()
+		if err := billingWorker.Close(workerShutdown); err != nil {
+			runErr = errors.Join(runErr, errors.New("cannot stop billing settlement worker"))
+		}
+	}()
 	gatewayOptions := httptransport.GatewayOptions{
 		MaxBodyBytes: cfg.Gateway.MaxBodyBytes, RequestTimeout: cfg.Gateway.RequestTimeout,
 		BodyReadTimeout: cfg.Gateway.BodyReadTimeout, WriteTimeout: cfg.Gateway.WriteTimeout,
@@ -375,7 +420,7 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 	var active sync.WaitGroup
 	var admission sync.Mutex
 	stopping := false
-	router := httptransport.NewRouter(logger, readiness, httptransport.CORSOptions{Enabled: cfg.CORS.Enabled, Origins: cfg.CORS.Origins}, cfg.HealthTimeout, cfg.Environment, &httptransport.SecurityHandlers{Admin: adminService, Keys: keyService, Management: managementService, Gateway: gatewayHandler, OpenAI: openaiHandler, ActiveModels: gatewayCache, Usage: usageapp.NewQuery(usageStore), UsageWriter: usageWriter, BodyReadTimeout: cfg.BodyReadTimeout})
+	router := httptransport.NewRouter(logger, readiness, httptransport.CORSOptions{Enabled: cfg.CORS.Enabled, Origins: cfg.CORS.Origins}, cfg.HealthTimeout, cfg.Environment, &httptransport.SecurityHandlers{Admin: adminService, Keys: keyService, Management: managementService, Applications: management.NewApplications(managementStore, ids), Gateway: gatewayHandler, OpenAI: openaiHandler, ActiveModels: gatewayCache, Usage: usageapp.NewQuery(usageStore), TokenQuotas: quotaService, UsageWriter: usageWriter, Billing: billingService, BillingCosts: billingapp.NewUsageCostQuery(billingStore), BodyReadTimeout: cfg.BodyReadTimeout})
 	server := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

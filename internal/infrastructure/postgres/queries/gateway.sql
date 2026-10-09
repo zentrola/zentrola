@@ -3,10 +3,27 @@ SELECT EXISTS (SELECT 1 FROM principal_access_key k
 JOIN principal p ON p.id=k.principal_id
 WHERE k.id=sqlc.arg(access_key_id) AND k.principal_id=sqlc.arg(principal_id)
 AND NOT k.is_deleted AND k.status='ACTIVE' AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>now())
-AND NOT p.is_deleted AND p.status='ACTIVE' AND p.principal_type='MEMBER');
+AND NOT p.is_deleted AND p.status='ACTIVE' AND p.principal_type IN ('MEMBER','APPLICATION'));
 
 -- name: GatewayModel :one
 SELECT id,model_code,display_name,status FROM model WHERE model_code=$1 AND NOT is_deleted;
+
+-- name: GatewayTokenQuotaConfiguration :one
+SELECT p.monthly_token_limit,
+       COALESCE(
+           jsonb_agg(DISTINCT jsonb_build_object('id', g.id, 'limit', g.monthly_token_limit))
+               FILTER (WHERE permission.group_id IS NOT NULL),
+           '[]'::jsonb
+       )::text AS group_quotas
+FROM principal p
+LEFT JOIN principal_group_membership membership
+    ON membership.principal_id=p.id AND NOT membership.is_deleted
+LEFT JOIN principal_group g
+    ON g.id=membership.group_id AND NOT g.is_deleted AND g.status='ACTIVE'
+LEFT JOIN principal_group_model_permission permission
+    ON permission.group_id=g.id AND permission.model_id=sqlc.arg(model_id) AND NOT permission.is_deleted
+WHERE p.id=sqlc.arg(principal_id) AND NOT p.is_deleted
+GROUP BY p.id, p.monthly_token_limit;
 
 -- name: GatewayCandidates :many
 SELECT pm.id AS provider_model_id,pm.provider_id,p.provider_name,pm.upstream_model_code,pe.base_url,pe.protocol_type,pe.network_scope,

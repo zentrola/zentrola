@@ -10,6 +10,7 @@ import (
 
 type Filter struct {
 	PrincipalID, ModelID, ProviderID, ResourceID *int64
+	PrincipalType                                string
 	From, To                                     time.Time
 	After                                        int64
 	Limit                                        int32
@@ -21,6 +22,7 @@ type Row struct {
 	RequestID         string    `json:"requestId"`
 	PrincipalID       int64     `json:"principalId,string"`
 	PrincipalName     string    `json:"principalName"`
+	PrincipalType     string    `json:"principalType"`
 	ModelID           int64     `json:"modelId,string"`
 	RequestAt         time.Time `json:"requestAt"`
 	CompletedAt       time.Time `json:"completedAt"`
@@ -42,9 +44,10 @@ type Page struct {
 type StatisticDimension string
 
 const (
-	StatisticMember   StatisticDimension = "member"
-	StatisticModel    StatisticDimension = "model"
-	StatisticProvider StatisticDimension = "provider"
+	StatisticMember      StatisticDimension = "member"
+	StatisticApplication StatisticDimension = "application"
+	StatisticModel       StatisticDimension = "model"
+	StatisticProvider    StatisticDimension = "provider"
 )
 
 type StatisticFilter struct {
@@ -114,6 +117,9 @@ func (s *QueryService) Query(ctx context.Context, a admin.Identity, f Filter) (P
 	if f.After < 0 || f.Limit < 1 || f.Limit > 100 || f.From.IsZero() || !f.To.After(f.From) || f.To.Sub(f.From) > 366*24*time.Hour {
 		return Page{}, appsec.ErrInvalidArgument
 	}
+	if f.PrincipalType != "" && f.PrincipalType != "MEMBER" && f.PrincipalType != "APPLICATION" {
+		return Page{}, appsec.ErrInvalidArgument
+	}
 	for _, id := range []*int64{f.PrincipalID, f.ModelID, f.ProviderID, f.ResourceID} {
 		if id != nil && *id <= 0 {
 			return Page{}, appsec.ErrInvalidArgument
@@ -127,7 +133,7 @@ func (s *QueryService) Statistics(ctx context.Context, a admin.Identity, f Stati
 	if a.ID <= 0 {
 		return StatisticPage{}, appsec.ErrUnauthenticated
 	}
-	if (f.Dimension != StatisticMember && f.Dimension != StatisticModel && f.Dimension != StatisticProvider) ||
+	if (f.Dimension != StatisticMember && f.Dimension != StatisticApplication && f.Dimension != StatisticModel && f.Dimension != StatisticProvider) ||
 		f.After < 0 || f.Limit < 1 || f.Limit > 100 || f.From.IsZero() || !f.To.After(f.From) || f.To.Sub(f.From) > 366*24*time.Hour {
 		return StatisticPage{}, appsec.ErrInvalidArgument
 	}

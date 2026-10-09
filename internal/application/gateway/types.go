@@ -9,6 +9,7 @@ import (
 
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	"github.com/zentrola/zentrola/internal/domain/catalog"
+	domainquota "github.com/zentrola/zentrola/internal/domain/quota"
 	"github.com/zentrola/zentrola/internal/domain/usage"
 )
 
@@ -52,6 +53,7 @@ var (
 	ErrUpstream       = &Failure{"UPSTREAM_UNAVAILABLE", "api_error", "The upstream model provider is unavailable. Retry later.", 502}
 	ErrTimeout        = &Failure{"UPSTREAM_TIMEOUT", "api_error", "The upstream model provider timed out. Retry later.", 504}
 	ErrCancelled      = &Failure{"REQUEST_CANCELLED", "api_error", "The request was cancelled before completion.", 499}
+	ErrBudgetExceeded = &Failure{"BUDGET_EXCEEDED", "rate_limit_error", "The monthly token quota has been reached. Ask an administrator to add quota or retry next month.", 429}
 )
 
 type Route struct {
@@ -67,6 +69,8 @@ type Route struct {
 	ProxyEnabled                                           bool
 	ProxyURL, ProxyHeaders                                 catalog.SealedCredential
 	Proxy                                                  *catalog.OutboundProxy
+	QuotaScopes                                            []domainquota.Scope
+	QuotaGroupIDs                                          []int64
 }
 
 const AnthropicProtocol = "ANTHROPIC_MESSAGES"
@@ -176,6 +180,9 @@ type RouteState interface {
 	Cooldown(context.Context, Route, time.Duration) error
 	Healthy(context.Context, Route) error
 }
+type TokenQuotaAdmission interface {
+	Check(context.Context, []domainquota.Scope, time.Time) (domainquota.Decision, error)
+}
 type Cipher interface {
 	Decrypt(catalog.SealedCredential, catalog.CredentialOwner) ([]byte, error)
 	DecryptProviderProxy(catalog.SealedCredential, catalog.ProviderProxyOwner) ([]byte, error)
@@ -237,6 +244,7 @@ type Service struct {
 	refresh            []SubscriptionRefresher
 	refreshCoordinator SubscriptionRefreshCoordinator
 	refreshTimeout     time.Duration
+	quotaAdmission     TokenQuotaAdmission
 }
 
 type Option func(*Service)
@@ -254,6 +262,9 @@ func WithCredentialRefreshTimeout(timeout time.Duration) Option {
 			service.refreshTimeout = timeout
 		}
 	}
+}
+func WithTokenQuotaAdmission(admission TokenQuotaAdmission) Option {
+	return func(service *Service) { service.quotaAdmission = admission }
 }
 func WithSubscriptionRefresher(refresh SubscriptionRefresher) Option {
 	return func(service *Service) {
@@ -321,6 +332,19 @@ func (s *Service) Forward(ctx context.Context, identity appsec.PrincipalIdentity
 	}
 	if request.Trace != nil && len(routes) > 0 {
 		request.Trace.ModelID = routes[0].ModelID
+		if request.Path != "/v1/messages/count_tokens" && request.Protocol != OpenAIImagesProtocol {
+			request.Trace.QuotaGroupIDs = append([]int64(nil), routes[0].QuotaGroupIDs...)
+		}
+	}
+	if s.quotaAdmission != nil && len(routes) > 0 && len(routes[0].QuotaScopes) > 0 &&
+		request.Path != "/v1/messages/count_tokens" && request.Protocol != OpenAIImagesProtocol {
+		decision, quotaErr := s.quotaAdmission.Check(ctx, routes[0].QuotaScopes, time.Now().UTC())
+		if quotaErr != nil {
+			return nil, ErrUnavailable
+		}
+		if !decision.Allowed {
+			return nil, ErrBudgetExceeded
+		}
 	}
 	response, err := s.forwardCandidates(ctx, identity, request, parsed, routes)
 	if response != nil {

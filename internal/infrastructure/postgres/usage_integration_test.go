@@ -70,7 +70,7 @@ func TestStage5Integration(t *testing.T) {
 		t.Fatal(err)
 	}
 	cipher, _ := cryptosec.NewCredentials(master)
-	management := mgmt.New(NewManagementStore(pool, ids), ids, cipher, nil)
+	management := mgmt.New(NewManagementStore(pool, ids), ids, cipher, successfulConnectionTester())
 	sonnet := createActiveTestModel(t, ctx, management, actor, "claude-sonnet", "Claude Sonnet", []string{"TEXT", "IMAGE"})
 	opus := createActiveTestModel(t, ctx, management, actor, "claude-opus", "Claude Opus", []string{"TEXT", "IMAGE"})
 	provider, err := management.CreateProvider(ctx, actor, mgmt.ProviderInput{

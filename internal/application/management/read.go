@@ -133,16 +133,31 @@ func (s *QueryService) GroupModels(ctx context.Context, a admin.Identity, id int
 		return r.GroupModels(ctx, id, p)
 	}, func(r Reader) (int64, error) { return r.CountGroupModels(ctx, id) })
 }
-func (s *QueryService) Keys(ctx context.Context, a admin.Identity, id int64, p Page) (PageData[Key], error) {
+func keyExpiryIncludesExpired(expiry string) (bool, error) {
+	switch expiry {
+	case "", "all":
+		return true, nil
+	case "unexpired":
+		return false, nil
+	default:
+		return false, appsec.ErrInvalidArgument
+	}
+}
+
+func (s *QueryService) Keys(ctx context.Context, a admin.Identity, id int64, p Page, expiry string) (PageData[Key], error) {
 	if id <= 0 || !validPage(p) {
 		return PageData[Key]{}, appsec.ErrInvalidArgument
+	}
+	includeExpired, err := keyExpiryIncludesExpired(expiry)
+	if err != nil {
+		return PageData[Key]{}, err
 	}
 	return readPage(ctx, s, a, func(r Reader) ([]Key, error) {
 		if _, err := r.Member(ctx, id); err != nil {
 			return nil, err
 		}
-		return r.Keys(ctx, id, p)
-	}, func(r Reader) (int64, error) { return r.CountKeys(ctx, id) })
+		return r.Keys(ctx, id, p, includeExpired)
+	}, func(r Reader) (int64, error) { return r.CountKeys(ctx, id, includeExpired) })
 }
 func (s *QueryService) Member(ctx context.Context, a admin.Identity, id int64) (Member, error) {
 	if id <= 0 {
@@ -204,15 +219,16 @@ func (s *QueryService) Provider(ctx context.Context, a admin.Identity, id int64)
 func providerSelectableModels(provider Provider, models []Model) []Model {
 	selectable := make([]Model, 0, len(models))
 	for _, model := range models {
+		if model.Status != "ACTIVE" {
+			continue
+		}
 		if provider.Type == string(catalog.Official) {
 			if model.PublisherProviderID != nil && *model.PublisherProviderID == provider.ID {
 				selectable = append(selectable, model)
 			}
 			continue
 		}
-		if model.Status == "ACTIVE" {
-			selectable = append(selectable, model)
-		}
+		selectable = append(selectable, model)
 	}
 	return selectable
 }

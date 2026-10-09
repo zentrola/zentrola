@@ -12,6 +12,7 @@ type Event struct {
 	RequestAt, CompletedAt time.Time
 	Status                 Status
 	ErrorType              string
+	QuotaGroupIDs          []int64
 	Attempt                *Attempt
 	Attempts               []Attempt
 }

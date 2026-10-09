@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
+
+	redis "github.com/redis/go-redis/v9"
 )
 
 func TestRouteStateKeysAreResourceScopedAndSeparated(t *testing.T) {
@@ -29,6 +32,31 @@ func TestRedisFailureTemporarilySuppressesCalls(t *testing.T) {
 func TestSubscriptionLockFailsClosedWithoutRedisClient(t *testing.T) {
 	state := &State{}
 	_, acquired, err := state.AcquireSubscriptionRefreshScheduler(context.Background())
+	if err == nil || acquired {
+		t.Fatalf("acquired=%v err=%v", acquired, err)
+	}
+}
+
+func TestBillingSettlementLockFailsClosedWithoutRedisClient(t *testing.T) {
+	state := &State{}
+	_, acquired, err := state.AcquireBillingSettlement(context.Background(), time.Minute)
+	if err == nil || acquired {
+		t.Fatalf("acquired=%v err=%v", acquired, err)
+	}
+}
+
+func TestAPIKeyRatingLockFailsClosedWithoutRedisClient(t *testing.T) {
+	state := &State{}
+	_, acquired, err := state.AcquireAPIKeyRating(context.Background(), time.Minute)
+	if err == nil || acquired {
+		t.Fatalf("acquired=%v err=%v", acquired, err)
+	}
+}
+
+func TestLockRejectsInvalidTTLBeforeCallingRedis(t *testing.T) {
+	state := &State{client: redis.NewClient(&redis.Options{Addr: "127.0.0.1:0"})}
+	defer state.Close()
+	_, acquired, err := state.AcquireBillingSettlement(context.Background(), 0)
 	if err == nil || acquired {
 		t.Fatalf("acquired=%v err=%v", acquired, err)
 	}

@@ -12,10 +12,18 @@ import ConfirmDialog from './ConfirmDialog.vue'
 import TableScroll from './TableScroll.vue'
 import TechnicalValue from './TechnicalValue.vue'
 
-const props = defineProps<{ member: Member }>()
+const props = withDefaults(defineProps<{ member: Member; kind?: 'member' | 'application' }>(), {
+  kind: 'member',
+})
+const local = (key: string, values: Record<string, string | number> = {}) =>
+  t(`${props.kind === 'application' ? 'applications' : 'members'}.${key}`, values)
 defineEmits<{ close: [] }>()
+const expiry = ref<'unexpired' | 'all'>('unexpired')
 const { items, cursor, page, pageSize, total, loading, error, load, previous, retry, setPageSize } =
-  useCollection<AccessKey>(() => `/members/${props.member.id}/keys`)
+  useCollection<AccessKey>(
+    () =>
+      `/${props.kind === 'application' ? 'applications' : 'members'}/${props.member.id}/keys?expiry=${expiry.value}`,
+  )
 const { busy, error: actionError, run } = useAction()
 const revokeTarget = ref<AccessKey | null>(null),
   now = ref(Date.now())
@@ -32,7 +40,21 @@ function scheduleExpiryUpdate() {
     timer = undefined
     return
   }
-  timer = setTimeout(scheduleExpiryUpdate, Math.min(nextExpiry - now.value + 1, 2147483647))
+  const delay = nextExpiry - now.value + 1
+  timer = setTimeout(
+    delay > 2147483647 ? scheduleExpiryUpdate : refreshExpiredKeys,
+    Math.min(delay, 2147483647),
+  )
+}
+function refreshExpiredKeys() {
+  now.value = Date.now()
+  if (expiry.value !== 'unexpired') {
+    scheduleExpiryUpdate()
+  } else if (loading.value) {
+    timer = setTimeout(refreshExpiredKeys, 250)
+  } else {
+    void load()
+  }
 }
 onMounted(() => {
   void load()
@@ -48,7 +70,13 @@ function canRevoke(key: AccessKey) {
 }
 function expiryDate(key: AccessKey) {
   const expiredAt = key.revokedAt ?? key.expiresAt
-  return expiredAt ? dateOnly(expiredAt) : t('members.noExpiry')
+  return expiredAt ? dateOnly(expiredAt) : local('noExpiry')
+}
+function changeExpiry(event: Event) {
+  const value = (event.target as HTMLSelectElement).value
+  if (value !== 'unexpired' && value !== 'all') return
+  expiry.value = value
+  void load()
 }
 function openRevoke(key: AccessKey) {
   now.value = Date.now()
@@ -65,24 +93,31 @@ function revoke() {
   }
   void run(async () => {
     await api(`/access-keys/${key.id}/revoke`, 'POST')
-    key.status = 'REVOKED'
-    key.revokedAt = new Date().toISOString()
     revokeTarget.value = null
-    showSuccessToast(t('members.revoked'))
+    await load()
+    showSuccessToast(local('revoked'))
   })
 }
 </script>
 
 <template>
   <Modal
-    :title="t('members.keyListTitle', { name: member.name })"
+    :title="local('keyListTitle', { name: member.name })"
     :busy="busy"
+    body-class="member-keys-body"
     medium
     @close="$emit('close')"
   >
     <div class="context-note masked-key-note" role="note">
-      <Icon name="shield" :size="18" /><span>{{ t('members.maskedKeyHint') }}</span>
+      <Icon name="shield" :size="18" /><span>{{ local('maskedKeyHint') }}</span>
     </div>
+    <label class="key-expiry-filter">
+      <span>{{ local('keyExpiryFilter') }}</span>
+      <select :value="expiry" :disabled="loading || busy" @change="changeExpiry">
+        <option value="unexpired">{{ local('unexpiredKeys') }}</option>
+        <option value="all">{{ local('allKeys') }}</option>
+      </select>
+    </label>
     <div v-if="error" class="alert error" role="alert">
       {{ error }}
       <button class="text-button" :disabled="loading" @click="retry">
@@ -94,10 +129,10 @@ function revoke() {
       <table class="key-list">
         <thead>
           <tr>
-            <th>{{ t('members.keyDisplayName') }}</th>
-            <th>{{ t('members.assignedKeys') }}</th>
-            <th>{{ t('members.expiryDate') }}</th>
-            <th class="align-right">{{ t('common.actions') }}</th>
+            <th>{{ local('keyDisplayName') }}</th>
+            <th>{{ local('assignedKeys') }}</th>
+            <th>{{ local('expiryDate') }}</th>
+            <th class="key-action-cell">{{ t('common.actions') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -107,21 +142,24 @@ function revoke() {
               <TechnicalValue :value="key.maskedKey" :copyable="false" />
             </td>
             <td>{{ expiryDate(key) }}</td>
-            <td class="align-right">
+            <td class="key-action-cell">
               <button
                 v-if="canRevoke(key)"
                 class="text-button danger"
                 :disabled="busy || loading"
                 @click="openRevoke(key)"
               >
-                {{ t('members.revoke') }}
+                {{ local('revoke') }}
               </button>
+              <span v-else class="muted">-</span>
             </td>
           </tr>
         </tbody>
       </table>
     </TableScroll>
-    <p v-else-if="!loading && !error" class="muted">{{ t('members.noKeys') }}</p>
+    <p v-else-if="!loading && !error" class="muted">
+      {{ local(expiry === 'unexpired' ? 'noUnexpiredKeys' : 'noKeys') }}
+    </p>
     <ListFooter
       v-if="!error && items.length"
       :cursor="cursor"
@@ -137,10 +175,10 @@ function revoke() {
   </Modal>
   <ConfirmDialog
     v-if="revokeTarget"
-    :title="t('members.revokeTitle')"
-    :message="t('members.revokeQuestion', { name: revokeTarget.name })"
-    :hint="t('members.revokeConsequence')"
-    :confirm-label="t('members.revoke')"
+    :title="local('revokeTitle')"
+    :message="local('revokeQuestion', { name: revokeTarget.name })"
+    :hint="local('revokeConsequence')"
+    :confirm-label="local('revoke')"
     :busy="busy"
     tone="danger"
     @close="revokeTarget = null"
@@ -149,6 +187,10 @@ function revoke() {
 </template>
 
 <style scoped>
+:global(.modal-body.member-keys-body),
+:global(.member-keys-body .table-scroll) {
+  scrollbar-gutter: auto;
+}
 .key-list {
   min-width: 520px;
 }
@@ -157,7 +199,24 @@ function revoke() {
   overflow-wrap: anywhere;
   max-width: 240px;
 }
+.key-action-cell {
+  text-align: center;
+}
 .masked-key-note {
   margin-bottom: 16px;
+}
+.key-expiry-filter {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 12px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+.key-expiry-filter select {
+  width: auto;
+  min-width: 112px;
 }
 </style>

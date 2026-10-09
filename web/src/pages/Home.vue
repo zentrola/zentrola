@@ -20,7 +20,6 @@ const healthResources = ref<Resource[]>([])
 const activeModels = ref<ActiveModel[]>([])
 const loading = ref(false)
 const error = ref('')
-const activeModelsLoading = ref(false)
 const activeModelsError = ref('')
 const providerHealthLoading = ref(false)
 const providerHealthError = ref('')
@@ -188,18 +187,15 @@ async function loadDashboard(current: number) {
 }
 
 async function loadActiveModels(current: number) {
-  activeModelsLoading.value = true
-  activeModelsError.value = ''
+  if (current === revision) activeModelsError.value = ''
   try {
     const result = await api<ActiveModel[]>('/gateway/active-models')
     if (current === revision) activeModels.value = Array.isArray(result) ? result : []
-  } catch (e) {
+  } catch (reason) {
     if (current === revision) {
       activeModels.value = []
-      activeModelsError.value = errorText(e)
+      activeModelsError.value = errorText(reason)
     }
-  } finally {
-    if (current === revision) activeModelsLoading.value = false
   }
 }
 
@@ -425,19 +421,22 @@ onMounted(load)
     </section>
   </div>
 
-  <section class="active-models-panel" :aria-label="t('home.activeModels')">
+  <div v-if="activeModelsError" class="alert error active-models-error" role="alert">
+    {{ t('home.activeModels') }}: {{ activeModelsError }}
+    <button type="button" class="text-button" @click="loadActiveModels(revision)">
+      {{ t('common.retry') }}
+    </button>
+  </div>
+  <section
+    v-if="activeModels.length"
+    class="active-models-panel"
+    :aria-label="t('home.activeModels')"
+  >
     <div class="active-models-head">
       <h2>{{ t('home.activeModels') }}</h2>
-      <span v-if="activeModels.length">
-        {{ t('home.activeModelsCount', { count: count(activeModels.length) }) }}
-      </span>
+      <span>{{ t('home.activeModelsCount', { count: count(activeModels.length) }) }}</span>
     </div>
-    <div
-      v-if="activeModels.length"
-      class="active-models-table-wrap"
-      tabindex="0"
-      :aria-label="t('home.activeModelsList')"
-    >
+    <div class="active-models-table-wrap" tabindex="0" :aria-label="t('home.activeModelsList')">
       <table class="active-models-table">
         <thead>
           <tr>
@@ -463,21 +462,6 @@ onMounted(load)
           </tr>
         </tbody>
       </table>
-    </div>
-    <div v-else class="active-models-empty" :aria-busy="activeModelsLoading">
-      <p>
-        {{
-          activeModelsLoading ? t('common.loading') : activeModelsError || t('home.noActiveModels')
-        }}
-      </p>
-      <button
-        v-if="activeModelsError && !activeModelsLoading"
-        type="button"
-        class="text-button"
-        @click="loadActiveModels(revision)"
-      >
-        {{ t('common.retry') }}
-      </button>
     </div>
   </section>
 
@@ -808,6 +792,9 @@ onMounted(load)
   background: var(--color-surface);
   box-shadow: var(--shadow-card);
 }
+.active-models-error {
+  margin-bottom: 18px;
+}
 
 .active-models-head {
   display: flex;
@@ -910,16 +897,6 @@ onMounted(load)
   color: var(--color-text-secondary);
   font-size: 13px;
   font-weight: 500;
-}
-
-.active-models-empty {
-  display: flex;
-  min-height: 72px;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  color: var(--muted);
-  font-size: 13px;
 }
 
 @media (max-width: 560px) {

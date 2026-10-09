@@ -5,10 +5,10 @@ type Type string
 
 const (
 	Member      Type = "MEMBER"
-	Application Type = "APPLICATION" // 仅保留类型，不提供 MVP 创建或调用流程。
+	Application Type = "APPLICATION"
 )
 
-func (t Type) SupportedInMVP() bool { return t == Member }
+func (t Type) CanUseGateway() bool { return t == Member || t == Application }
 
 type KeyStatus string
 

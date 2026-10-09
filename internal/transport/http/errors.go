@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	billingapp "github.com/zentrola/zentrola/internal/application/billing"
 	gw "github.com/zentrola/zentrola/internal/application/gateway"
 	mgmt "github.com/zentrola/zentrola/internal/application/management"
 	appsec "github.com/zentrola/zentrola/internal/application/security"
@@ -21,10 +22,12 @@ type applicationErrorMapping struct {
 var managementErrorMappings = []applicationErrorMapping{
 	{mgmt.ErrConflict, http.StatusConflict, "CONFLICT", "The request conflicts with the current state."},
 	{mgmt.ErrMemberAccessKeyRequired, http.StatusConflict, "MEMBER_ACCESS_KEY_REQUIRED", "Create an access key before enabling the member."},
+	{mgmt.ErrApplicationKeyRequired, http.StatusConflict, "APPLICATION_KEY_REQUIRED", "Create an App Key before enabling the application."},
 	{mgmt.ErrSubscriptionAccountExists, http.StatusConflict, "SUBSCRIPTION_ACCOUNT_ALREADY_EXISTS", "A credential for this subscription account already exists."},
 	{mgmt.ErrCredential, http.StatusUnprocessableEntity, "CREDENTIAL_UNRECOVERABLE", "Replace the resource credential before enabling it."},
 	{mgmt.ErrProvider, http.StatusConflict, "PROVIDER_UNAVAILABLE", "Provider is unavailable."},
 	{mgmt.ErrProviderCredentialRequired, http.StatusConflict, "PROVIDER_CREDENTIAL_REQUIRED", "Configure a provider credential before enabling the provider."},
+	{mgmt.ErrProviderConnectionTestFailed, http.StatusConflict, "PROVIDER_CONNECTION_TEST_FAILED", "An effective provider credential must pass a connection test before enabling the provider."},
 	{mgmt.ErrProviderModelMappingRequired, http.StatusConflict, "PROVIDER_MODEL_MAPPING_REQUIRED", "Configure a mapping to an active model before enabling the provider."},
 	{mgmt.ErrModelSyncCredentialRequired, http.StatusConflict, "MODEL_SYNC_CREDENTIAL_REQUIRED", "Configure a provider credential before synchronizing models."},
 	{mgmt.ErrCredentialExportUnsupported, http.StatusConflict, "CREDENTIAL_EXPORT_UNSUPPORTED", "Only OpenAI personal subscription credentials can be exported."},
@@ -71,6 +74,8 @@ func securityError(w http.ResponseWriter, r *http.Request, err error) {
 		status, code, message = http.StatusBadRequest, "INVALID_ARGUMENT", "Invalid request parameter."
 	case errors.Is(err, appsec.ErrNotFound):
 		status, code, message = http.StatusNotFound, "NOT_FOUND", "Object not found."
+	case errors.Is(err, billingapp.ErrExportTooLarge):
+		status, code, message = http.StatusUnprocessableEntity, "EXPORT_TOO_LARGE", "Narrow the filters before exporting."
 	default:
 		for _, mapping := range managementErrorMappings {
 			if errors.Is(err, mapping.err) {

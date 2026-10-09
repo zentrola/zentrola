@@ -217,6 +217,9 @@ func (s *ProviderService) persistDiscoveredModels(ctx context.Context, actor adm
 				modelsByCode[model.Code] = model
 				result.Updated++
 			}
+			if model.Status != "ACTIVE" {
+				continue
+			}
 			if _, exists := mappedModels[model.ID]; exists {
 				continue
 			}

@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { all, api } from '../api'
+import { computed, onMounted, ref, watch } from 'vue'
+import { all, api, errorText } from '../api'
 import { useCollection, useAction, useListSearch, date, validText } from '../composables'
 import { t } from '../i18n'
 import { showErrorToast, showSuccessToast } from '../toast'
-import type { Member, Group, CreatedKey } from '../types'
+import type { Member, Group, CreatedKey, TokenQuotaStatus } from '../types'
 import Icon from '../components/Icon.vue'
 import StatusSwitch from '../components/StatusSwitch.vue'
 import Modal from '../components/Modal.vue'
@@ -14,6 +14,14 @@ import ListSearch from '../components/ListSearch.vue'
 import MemberKeys from '../components/MemberKeys.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import TableScroll from '../components/TableScroll.vue'
+import TechnicalValue from '../components/TechnicalValue.vue'
+import TokenQuotaUsage from '../components/TokenQuotaUsage.vue'
+import AddTokenQuotaModal from '../components/AddTokenQuotaModal.vue'
+import RowActionMenu from '../components/RowActionMenu.vue'
+const { kind = 'member' } = defineProps<{ kind?: 'member' | 'application' }>()
+const basePath = computed(() => (kind === 'application' ? '/applications' : '/members'))
+const local = (key: string, values: Record<string, string | number> = {}) =>
+  t(`${kind === 'application' ? 'applications' : 'members'}.${key}`, values)
 const {
   items,
   cursor,
@@ -27,7 +35,7 @@ const {
   previous,
   retry,
   setPageSize,
-} = useCollection<Member>(() => '/members')
+} = useCollection<Member>(() => basePath.value)
 const { busy, error: actionError, run } = useAction()
 const creating = ref(false),
   editing = ref<Member | null>(null),
@@ -40,18 +48,55 @@ const creating = ref(false),
 const statusTarget = ref<Member | null>(null),
   selected = ref<Member | null>(null),
   viewingKeys = ref<Member | null>(null),
-  deleteTarget = ref<Member | null>(null)
+  deleteTarget = ref<Member | null>(null),
+  quotaTarget = ref<Member | null>(null),
+  quotaRemovalTarget = ref<Member | null>(null)
+const quotaStatuses = ref<Record<string, TokenQuotaStatus>>({})
+let quotaRevision = 0
 const keyName = ref(''),
   expires = ref(''),
   createdKey = ref<CreatedKey | null>(null)
 const { keyword, query, visible, search, reset, searching, searchingAll } = useListSearch(
   items,
   (m) => `${m.name} ${m.id} ${m.remark || ''}`,
-  () => '/members',
+  () => basePath.value,
   loading,
 )
 const originalGroupIDSet = computed(() => new Set(originalGroupIDs.value))
 onMounted(() => load())
+watch(visible, (rows) => void loadQuotaStatuses(rows), { immediate: true })
+
+async function loadQuotaStatuses(rows: Member[]) {
+  const revision = ++quotaRevision
+  const ids = rows.filter((member) => member.monthlyTokenLimit).map((member) => member.id)
+  if (!ids.length) {
+    quotaStatuses.value = {}
+    return
+  }
+  try {
+    const params = new URLSearchParams({ scopeType: 'PRINCIPAL', scopeIds: ids.join(',') })
+    const statuses = await api<TokenQuotaStatus[]>(`/token-quotas?${params}`)
+    if (revision !== quotaRevision) return
+    quotaStatuses.value = Object.fromEntries(statuses.map((status) => [status.scopeId, status]))
+  } catch (error) {
+    if (revision === quotaRevision) showErrorToast(errorText(error))
+  }
+}
+
+async function quotaSaved() {
+  quotaTarget.value = null
+  await refresh()
+}
+function removeTokenQuota() {
+  if (!quotaRemovalTarget.value) return
+  const memberID = quotaRemovalTarget.value.id
+  void run(async () => {
+    await api(`${basePath.value}/${memberID}/token-quota`, 'DELETE')
+    quotaRemovalTarget.value = null
+    await refresh()
+    showSuccessToast(t('tokenQuota.removed'))
+  })
+}
 function newMember() {
   editing.value = null
   name.value = ''
@@ -65,7 +110,7 @@ function newMember() {
   void run(async () => {
     await loadMemberGroups()
     if (!groupCandidates.value.length) {
-      showErrorToast(t('members.addGroupFirst'))
+      showErrorToast(local('addGroupFirst'))
       return
     }
     creating.value = true
@@ -76,7 +121,7 @@ async function loadMemberGroups() {
   const member = editing.value
   const [groups, current] = await Promise.all([
     all<Group>('/groups?status=ACTIVE'),
-    member ? all<Group>(`/members/${member.id}/groups`) : Promise.resolve([]),
+    member ? all<Group>(`${basePath.value}/${member.id}/groups`) : Promise.resolve([]),
   ])
   groupCandidates.value = groups
   const activeGroupIDs = new Set(groups.map((group) => group.id))
@@ -108,7 +153,7 @@ function saveMember() {
     return
   }
   if (creating.value && !selectedGroupIDs.value.length) {
-    showErrorToast(t('members.groupRequired'))
+    showErrorToast(local('groupRequired'))
     return
   }
   if (!validText(name.value, 128) || !validText(remark.value, 2000, false)) {
@@ -117,7 +162,7 @@ function saveMember() {
   }
   void run(async () => {
     const member = editing.value
-    await api(member ? `/members/${member.id}` : '/members', member ? 'PUT' : 'POST', {
+    await api(member ? `${basePath.value}/${member.id}` : basePath.value, member ? 'PUT' : 'POST', {
       name: name.value,
       remark: remark.value,
       groupIds: selectedGroupIDs.value,
@@ -132,7 +177,7 @@ function changeStatus(member: Member) {
   statusTarget.value = member
   void run(async () => {
     try {
-      await api(`/members/${member.id}/status`, 'PATCH', {
+      await api(`${basePath.value}/${member.id}/status`, 'PATCH', {
         status: member.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE',
       })
       await refresh()
@@ -154,10 +199,10 @@ function openDelete(member: Member) {
 }
 function deleteMember() {
   void run(async () => {
-    await api(`/members/${deleteTarget.value!.id}`, 'DELETE')
+    await api(`${basePath.value}/${deleteTarget.value!.id}`, 'DELETE')
     deleteTarget.value = null
     await load()
-    showSuccessToast(t('members.deleted'))
+    showSuccessToast(local('deleted'))
   })
 }
 function issueKey() {
@@ -168,19 +213,19 @@ function issueKey() {
   // 日期按浏览器本地时区解释，选中当天仍可使用至当天结束。
   const expiresAt = expires.value ? new Date(`${expires.value}T23:59:59.999`) : null
   if (expiresAt && (!Number.isFinite(expiresAt.getTime()) || expiresAt.getTime() <= Date.now())) {
-    showErrorToast(t('members.future'))
+    showErrorToast(local('future'))
     return
   }
   void run(async () => {
     const memberID = selected.value!.id
-    createdKey.value = await api<CreatedKey>(`/members/${memberID}/keys`, 'POST', {
+    createdKey.value = await api<CreatedKey>(`${basePath.value}/${memberID}/keys`, 'POST', {
       name: keyName.value,
       ...(expiresAt ? { expiresAt: expiresAt.toISOString() } : {}),
     })
     keyName.value = ''
     expires.value = ''
     selected.value = null
-    showSuccessToast(t('members.keyCreated'))
+    showSuccessToast(local('keyCreated'))
   })
 }
 async function copyKey() {
@@ -193,20 +238,20 @@ async function copyKey() {
 }
 </script>
 <template>
-  <PageHeader name="members" />
+  <PageHeader :name="kind === 'application' ? 'applications' : 'members'" />
   <section class="panel">
     <ListSearch
       v-model="keyword"
       :loading="loading || searching"
-      :label="t('members.member')"
-      :placeholder="t('members.searchPlaceholder')"
+      :label="local('member')"
+      :placeholder="local('searchPlaceholder')"
       @search="search"
       @reset="reset"
     >
       <template #actions>
         <div class="list-toolbar-actions">
           <button type="button" class="button primary" @click="newMember">
-            <Icon name="plus" :size="18" />{{ t('members.create') }}
+            <Icon name="plus" :size="18" />{{ local('create') }}
           </button>
         </div>
       </template>
@@ -216,10 +261,21 @@ async function copyKey() {
     </div>
     <TableScroll has-actions>
       <table class="members-table">
+        <colgroup>
+          <col class="record-id-column" />
+          <col class="member-name-column" />
+          <col class="member-status-column" />
+          <col class="member-quota-column" />
+          <col class="member-remark-column" />
+          <col class="member-created-column" />
+          <col class="member-action-column" />
+        </colgroup>
         <thead>
           <tr>
-            <th>{{ t('members.member') }}</th>
-            <th>{{ t('members.activationStatus') }}</th>
+            <th>{{ t('common.id') }}</th>
+            <th>{{ local('member') }}</th>
+            <th>{{ local('activationStatus') }}</th>
+            <th>{{ t('tokenQuota.column') }}</th>
             <th>{{ t('common.remark') }}</th>
             <th>{{ t('common.created') }}</th>
             <th class="align-right">{{ t('common.actions') }}</th>
@@ -227,6 +283,7 @@ async function copyKey() {
         </thead>
         <tbody>
           <tr v-for="member in visible" :key="member.id">
+            <td class="record-id-cell"><TechnicalValue :value="member.id" :copyable="false" /></td>
             <td>
               <div class="person">
                 <span class="avatar">{{ member.name.slice(0, 1) }}</span>
@@ -236,8 +293,8 @@ async function copyKey() {
                     <button
                       type="button"
                       class="icon-button view-keys"
-                      :aria-label="t('members.viewKeys')"
-                      :title="t('members.viewKeys')"
+                      :aria-label="local('viewKeys')"
+                      :title="local('viewKeys')"
                       @click="viewingKeys = member"
                     >
                       <Icon name="shield" :size="16" />
@@ -250,31 +307,57 @@ async function copyKey() {
               <StatusSwitch
                 :value="member.status"
                 :name="member.name"
-                :aria-label="t('members.statusFor', { name: member.name })"
+                :aria-label="local('statusFor', { name: member.name })"
                 :disabled="busy || loading"
                 :busy="busy && statusTarget?.id === member.id"
                 @change="changeStatus(member)"
               />
             </td>
+            <td>
+              <TokenQuotaUsage
+                :limit="member.monthlyTokenLimit"
+                :status="quotaStatuses[member.id]"
+              />
+            </td>
             <td class="remark-cell" :title="member.remark || ''">
-              {{ member.remark || t('members.none') }}
+              {{ member.remark || local('none') }}
             </td>
             <td>{{ date(member.createdAt) }}</td>
             <td>
               <div class="row-actions">
                 <button class="text-button" :disabled="busy || loading" @click="openEdit(member)">
-                  {{ t('members.edit') }}
-                </button>
-                <button
-                  class="text-button danger"
-                  :disabled="busy || loading"
-                  @click="openDelete(member)"
-                >
-                  {{ t('members.delete') }}
+                  {{ local('edit') }}
                 </button>
                 <button class="text-button" :disabled="busy || loading" @click="openKeys(member)">
-                  {{ t('members.assignKey') }}
+                  {{ local('assignKey') }}
                 </button>
+                <RowActionMenu
+                  :label="t('common.moreActionsFor', { name: member.name })"
+                  :title="t('common.moreActions')"
+                >
+                  <button
+                    class="text-button"
+                    :disabled="busy || loading"
+                    @click="quotaTarget = member"
+                  >
+                    {{ t('tokenQuota.addAction') }}
+                  </button>
+                  <button
+                    v-if="member.monthlyTokenLimit"
+                    class="text-button"
+                    :disabled="busy || loading"
+                    @click="quotaRemovalTarget = member"
+                  >
+                    {{ t('tokenQuota.removeAction') }}
+                  </button>
+                  <button
+                    class="text-button danger"
+                    :disabled="busy || loading"
+                    @click="openDelete(member)"
+                  >
+                    {{ local('delete') }}
+                  </button>
+                </RowActionMenu>
               </div>
             </td>
           </tr>
@@ -282,13 +365,13 @@ async function copyKey() {
       </table>
     </TableScroll>
     <div v-if="!visible.length" class="empty-state">
-      <Icon name="members" :size="32" />
+      <Icon :name="kind === 'application' ? 'applications' : 'members'" :size="32" />
       <h3>
         {{
           t(loading || searching ? 'common.loading' : query ? 'common.noResults' : 'common.empty')
         }}
       </h3>
-      <p v-if="!loading && !searching && !query">{{ t('members.empty') }}</p>
+      <p v-if="!loading && !searching && !query">{{ local('empty') }}</p>
     </div>
     <ListFooter
       v-if="!searchingAll"
@@ -303,18 +386,25 @@ async function copyKey() {
       @page-size="setPageSize"
     />
   </section>
-  <MemberKeys v-if="viewingKeys" :member="viewingKeys" @close="viewingKeys = null" />
+  <MemberKeys v-if="viewingKeys" :member="viewingKeys" :kind="kind" @close="viewingKeys = null" />
+  <AddTokenQuotaModal
+    v-if="quotaTarget"
+    :name="quotaTarget.name"
+    :path="`${basePath}/${quotaTarget.id}`"
+    @close="quotaTarget = null"
+    @saved="quotaSaved"
+  />
   <Modal
     v-if="creating || editing"
-    :title="editing ? t('members.editTitle', { name: editing.name }) : t('members.create')"
+    :title="editing ? local('editTitle', { name: editing.name }) : local('create')"
     :busy="busy"
     medium
     @close="closeMemberForm"
-    ><form class="member-form" @submit.prevent="saveMember">
+    ><form id="member-form" class="member-form" @submit.prevent="saveMember">
       <div class="member-form-fields">
         <div class="member-form-row">
           <label class="member-form-label required-label" for="member-name-input">{{
-            t('members.member')
+            local('member')
           }}</label>
           <div class="member-form-control">
             <input id="member-name-input" v-model="name" required autofocus :disabled="busy" />
@@ -326,7 +416,7 @@ async function copyKey() {
             class="member-form-label"
             :class="{ 'required-label': creating }"
           >
-            {{ t('members.groups') }}
+            {{ local('groups') }}
           </div>
           <section
             class="member-form-control member-group-field"
@@ -339,7 +429,7 @@ async function copyKey() {
                   v-model="selectedGroupIDs"
                   type="checkbox"
                   :value="group.id"
-                  :aria-label="t('members.groupSelection', { name: group.name })"
+                  :aria-label="local('groupSelection', { name: group.name })"
                   :disabled="
                     busy ||
                     !groupsReady ||
@@ -351,7 +441,7 @@ async function copyKey() {
               </label>
               <p v-if="busy && !groupsReady" class="empty-compact">{{ t('common.loading') }}</p>
               <p v-else-if="groupsReady && !groupCandidates.length" class="empty-compact">
-                {{ t('members.noGroups') }}
+                {{ local('noGroups') }}
               </p>
             </div>
           </section>
@@ -375,21 +465,38 @@ async function copyKey() {
           {{ t('common.retry') }}
         </button>
       </div>
-      <footer class="form-footer">
-        <button type="button" class="button" :disabled="busy" @click="closeMemberForm">
-          {{ t('common.cancel') }}</button
-        ><button class="button primary" :disabled="busy || !groupsReady">
-          {{ t(busy ? 'common.working' : editing ? 'common.save' : 'common.create') }}
-        </button>
-      </footer>
-    </form></Modal
+    </form>
+    <template #footer>
+      <button type="button" class="button" :disabled="busy" @click="closeMemberForm">
+        {{ t('common.cancel') }}
+      </button>
+      <button
+        type="submit"
+        form="member-form"
+        class="button primary"
+        :disabled="busy || !groupsReady"
+      >
+        {{ t(busy ? 'common.working' : editing ? 'common.save' : 'common.create') }}
+      </button>
+    </template></Modal
   >
   <ConfirmDialog
+    v-if="quotaRemovalTarget"
+    :title="t('tokenQuota.removeTitle')"
+    :message="t('tokenQuota.removeQuestion', { name: quotaRemovalTarget.name })"
+    :hint="t('tokenQuota.removeHint')"
+    :confirm-label="t('tokenQuota.removeAction')"
+    :busy="busy"
+    tone="warning"
+    @close="quotaRemovalTarget = null"
+    @confirm="removeTokenQuota"
+  />
+  <ConfirmDialog
     v-if="deleteTarget"
-    :title="t('members.deleteTitle')"
-    :message="t('members.deleteQuestion', { name: deleteTarget.name })"
-    :hint="t('members.deleteConsequence')"
-    :confirm-label="t('members.delete')"
+    :title="local('deleteTitle')"
+    :message="local('deleteQuestion', { name: deleteTarget.name })"
+    :hint="local('deleteConsequence')"
+    :confirm-label="local('delete')"
     :busy="busy"
     tone="danger"
     @close="deleteTarget = null"
@@ -397,67 +504,68 @@ async function copyKey() {
   />
   <Modal
     v-if="selected"
-    :title="t('members.keyTitle', { name: selected.name })"
+    :title="local('keyTitle', { name: selected.name })"
     :busy="busy"
     @close="selected = null"
   >
-    <p class="muted">{{ t('members.keyHint') }}</p>
-    <form @submit.prevent="issueKey">
+    <p class="muted">{{ local('keyHint') }}</p>
+    <form id="member-key-form" @submit.prevent="issueKey">
       <label
-        >{{ t('members.keyName') }}<input v-model="keyName" required autofocus :disabled="busy"
+        >{{ local('keyName') }}<input v-model="keyName" required autofocus :disabled="busy"
       /></label>
-      <label
-        >{{ t('members.expires') }}<input v-model="expires" type="date" :disabled="busy"
-      /></label>
-      <p class="muted">{{ t('members.expiresHint') }}</p>
-      <footer class="form-footer">
-        <button type="button" class="button" :disabled="busy" @click="selected = null">
-          {{ t('common.cancel') }}
-        </button>
-        <button class="button primary" :disabled="busy">
-          {{ t(busy ? 'common.working' : 'members.assignKey') }}
-        </button>
-      </footer>
+      <label>{{ local('expires') }}<input v-model="expires" type="date" :disabled="busy" /></label>
+      <p class="muted">{{ local('expiresHint') }}</p>
     </form>
+    <template #footer>
+      <button type="button" class="button" :disabled="busy" @click="selected = null">
+        {{ t('common.cancel') }}
+      </button>
+      <button type="submit" form="member-key-form" class="button primary" :disabled="busy">
+        {{ busy ? t('common.working') : local(kind === 'application' ? 'issueKey' : 'assignKey') }}
+      </button>
+    </template>
   </Modal>
-  <Modal v-if="createdKey" :title="t('members.oneTime')" locked
-    ><p>{{ t('members.oneTimeHint') }}</p>
+  <Modal v-if="createdKey" :title="local('oneTime')" locked
+    ><p>{{ local('oneTimeHint') }}</p>
     <textarea
       class="secret-output"
       :value="createdKey.key"
-      :aria-label="t('members.oneTime')"
+      :aria-label="local('oneTime')"
       readonly
       spellcheck="false"
       rows="3"
     ></textarea>
-    <footer class="form-footer">
+    <template #footer>
       <button class="button" @click="copyKey">{{ t('common.copy') }}</button
       ><button class="button primary" @click="createdKey = null">
-        {{ t('members.acknowledged') }}
+        {{ local('acknowledged') }}
       </button>
-    </footer></Modal
+    </template></Modal
   >
 </template>
 
 <style scoped>
 .members-table {
-  min-width: 820px;
+  min-width: 1000px;
   table-layout: fixed;
 }
-.members-table th:nth-child(1) {
-  width: 260px;
+.member-name-column {
+  width: 24%;
 }
-.members-table th:nth-child(2) {
-  width: 100px;
-}
-.members-table th:nth-child(3) {
-  width: 164px;
-}
-.members-table th:nth-child(4) {
-  width: 140px;
-}
-.members-table th:nth-child(5) {
+.member-quota-column {
   width: 176px;
+}
+.member-status-column {
+  width: 96px;
+}
+.member-remark-column {
+  width: calc(76% - 652px);
+}
+.member-created-column {
+  width: 132px;
+}
+.member-action-column {
+  width: 160px;
 }
 .members-table th,
 .members-table td {
@@ -555,10 +663,6 @@ async function copyKey() {
 }
 .member-group-list > .empty-compact {
   flex-basis: 100%;
-}
-.member-form .form-footer {
-  margin-top: 16px;
-  padding-top: 14px;
 }
 @media (max-width: 640px) {
   .member-form-row {

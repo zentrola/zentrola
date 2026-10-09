@@ -10,6 +10,27 @@ ORDER BY id DESC
 LIMIT sqlc.arg(page_limit);
 -- name: ManageMember :one
 SELECT * FROM principal WHERE id=$1 AND is_deleted=false AND principal_type='MEMBER';
+-- name: ManageApplications :many
+SELECT * FROM principal WHERE is_deleted=false AND principal_type='APPLICATION' AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2;
+-- name: ManageApplication :one
+SELECT * FROM principal WHERE id=$1 AND is_deleted=false AND principal_type='APPLICATION';
+-- name: ManageApplicationSuggestions :many
+SELECT * FROM principal
+WHERE is_deleted=false AND principal_type='APPLICATION'
+  AND strpos(lower(name), lower(sqlc.arg(application_name)::text)) > 0
+  AND (id<sqlc.arg(after_id) OR sqlc.arg(after_id)=0)
+ORDER BY id DESC LIMIT sqlc.arg(page_limit);
+-- name: ManageCreateApplication :exec
+INSERT INTO principal(id,principal_type,name,remark,status,created_by,updated_by,created_at,updated_at)
+VALUES($1,'APPLICATION',$2,$3,'DISABLED',$4,$4,$5,$5);
+-- name: ManageUpdateApplication :exec
+UPDATE principal SET name=$2,remark=$3,updated_by=$4,updated_at=$5
+WHERE id=$1 AND is_deleted=false AND principal_type='APPLICATION';
+-- name: ManageApplicationStatus :exec
+UPDATE principal SET status=$2,updated_by=$3,updated_at=$4 WHERE id=$1 AND is_deleted=false AND principal_type='APPLICATION';
+-- name: ManageDeleteApplication :exec
+UPDATE principal SET is_deleted=true,status='DISABLED',updated_by=$2,updated_at=$3
+WHERE id=$1 AND is_deleted=false AND principal_type='APPLICATION';
 -- name: ManageCreateMember :exec
 INSERT INTO principal(id,principal_type,name,remark,status,created_by,updated_by,created_at,updated_at)
 VALUES($1,'MEMBER',$2,$3,'DISABLED',$4,$4,$5,$5);
@@ -19,6 +40,18 @@ WHERE id=$1 AND is_deleted=false AND principal_type='MEMBER';
 -- name: ManageMemberStatus :exec
 UPDATE principal SET status=$2,updated_by=$3,updated_at=$4 WHERE id=$1 AND is_deleted=false AND principal_type='MEMBER';
 
+-- name: ManageAddPrincipalTokenQuota :one
+UPDATE principal
+SET monthly_token_limit=COALESCE(monthly_token_limit, 0)+sqlc.arg(amount)::bigint,
+    updated_by=sqlc.arg(updated_by),updated_at=sqlc.arg(updated_at)
+WHERE id=sqlc.arg(principal_id) AND NOT is_deleted AND principal_type IN ('MEMBER','APPLICATION')
+RETURNING monthly_token_limit;
+
+-- name: ManageClearPrincipalTokenQuota :exec
+UPDATE principal
+SET monthly_token_limit=NULL,updated_by=sqlc.arg(updated_by),updated_at=sqlc.arg(updated_at)
+WHERE id=sqlc.arg(principal_id) AND NOT is_deleted AND principal_type IN ('MEMBER','APPLICATION');
+
 -- name: ManageDeleteMember :exec
 UPDATE principal SET is_deleted=true,status='DISABLED',updated_by=$2,updated_at=$3
 WHERE id=$1 AND is_deleted=false AND principal_type='MEMBER';
@@ -26,8 +59,9 @@ WHERE id=$1 AND is_deleted=false AND principal_type='MEMBER';
 UPDATE principal_group_membership SET is_deleted=true,updated_by=$2,updated_at=$3
 WHERE principal_id=$1 AND is_deleted=false;
 -- name: ManageRevokeMemberKeys :exec
-UPDATE principal_access_key SET status='REVOKED',revoked_at=$3,updated_by=$2,updated_at=$3
-WHERE principal_id=$1 AND is_deleted=false AND status<>'REVOKED';
+UPDATE principal_access_key SET status='REVOKED',expires_at=sqlc.arg(revoked_at),revoked_at=sqlc.arg(revoked_at),
+updated_by=sqlc.arg(updated_by),updated_at=sqlc.arg(revoked_at)
+WHERE principal_id=sqlc.arg(principal_id) AND is_deleted=false AND status<>'REVOKED';
 
 -- name: ManageGroups :many
 SELECT * FROM principal_group
@@ -47,6 +81,17 @@ WHERE id=$1 AND is_deleted=false;
 -- name: ManageGroupStatus :exec
 UPDATE principal_group SET status=$2,updated_by=$3,updated_at=$4
 WHERE id=$1 AND is_deleted=false;
+-- name: ManageAddGroupTokenQuota :one
+UPDATE principal_group
+SET monthly_token_limit=COALESCE(monthly_token_limit, 0)+sqlc.arg(amount)::bigint,
+    updated_by=sqlc.arg(updated_by),updated_at=sqlc.arg(updated_at)
+WHERE id=sqlc.arg(group_id) AND NOT is_deleted
+RETURNING monthly_token_limit;
+
+-- name: ManageClearGroupTokenQuota :exec
+UPDATE principal_group
+SET monthly_token_limit=NULL,updated_by=sqlc.arg(updated_by),updated_at=sqlc.arg(updated_at)
+WHERE id=sqlc.arg(group_id) AND NOT is_deleted;
 -- name: ManageDeleteGroup :exec
 UPDATE principal_group SET is_deleted=true,status='DISABLED',updated_by=$2,updated_at=$3
 WHERE id=$1 AND is_deleted=false;
@@ -59,6 +104,9 @@ WHERE group_id=$1 AND is_deleted=false;
 -- name: ManageGroupMembers :many
 SELECT p.* FROM principal p JOIN principal_group_membership g ON g.principal_id=p.id
 WHERE g.group_id=$1 AND g.is_deleted=false AND p.is_deleted=false AND p.principal_type='MEMBER' AND (p.id<$2 OR $2=0) ORDER BY p.id DESC LIMIT $3;
+-- name: ManageGroupApplications :many
+SELECT p.* FROM principal p JOIN principal_group_membership g ON g.principal_id=p.id
+WHERE g.group_id=$1 AND g.is_deleted=false AND p.is_deleted=false AND p.principal_type='APPLICATION' AND (p.id<$2 OR $2=0) ORDER BY p.id DESC LIMIT $3;
 -- name: ManageMemberGroups :many
 SELECT g.* FROM principal_group g JOIN principal_group_membership pg ON pg.group_id=g.id
 WHERE pg.principal_id=$1 AND pg.is_deleted=false AND g.is_deleted=false AND (g.id<$2 OR $2=0) ORDER BY g.id DESC LIMIT $3;
@@ -138,6 +186,12 @@ SELECT EXISTS(
     SELECT 1 FROM provider_credential
     WHERE provider_id=$1 AND is_deleted=false
 );
+-- name: ManageProviderActivationResourceIDs :many
+SELECT id FROM provider_credential
+WHERE provider_id=$1 AND is_deleted=false
+  AND (effective_at IS NULL OR effective_at<=sqlc.arg(at)::timestamptz)
+  AND (expires_at IS NULL OR expires_at>sqlc.arg(at)::timestamptz)
+ORDER BY id DESC;
 -- name: ManageProviderEndpoints :many
 SELECT * FROM provider_endpoint WHERE provider_id=$1 ORDER BY protocol_type;
 -- name: ManageProviderEndpointsByProviders :many
@@ -195,12 +249,24 @@ SET is_deleted=true,updated_by=$3,updated_at=$4
 WHERE id=$1 AND provider_id=$2 AND is_deleted=false;
 
 -- name: ManageResources :many
-SELECT id,provider_id,resource_name,auth_type,auth_adapter,subscription_type,plan_code,
-       external_account_ref,priority,effective_at,expires_at,quota_status,quota_checked_at,
-       quota_resets_at,credential_refreshed_at,credential_expires_at,
-       runtime_status,blocked_reason,blocked_at,last_error_at,last_http_status,
-       last_error_code,version,created_at,updated_at FROM provider_credential
-WHERE is_deleted=false AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2;
+SELECT r.id,r.provider_id,r.resource_name,r.auth_type,r.auth_adapter,r.subscription_type,r.plan_code,
+       r.external_account_ref,r.priority,r.effective_at,r.expires_at,r.quota_status,r.quota_checked_at,
+       r.quota_resets_at,r.credential_refreshed_at,r.credential_expires_at,
+       r.runtime_status,r.blocked_reason,r.blocked_at,r.last_error_at,r.last_http_status,
+       r.last_error_code,r.version,r.created_at,r.updated_at,
+       COALESCE(price.currency,'') AS subscription_price_currency,
+       price.period_amount AS subscription_period_amount,
+       COALESCE(price.billing_period,'') AS subscription_billing_period,
+       price.effective_at AS subscription_price_effective_at
+FROM provider_credential r
+LEFT JOIN LATERAL (
+    SELECT currency,period_amount,billing_period,effective_at
+    FROM provider_credential_subscription_price
+    WHERE provider_credential_id=r.id AND effective_at<=CURRENT_TIMESTAMP
+    ORDER BY effective_at DESC,id DESC
+    LIMIT 1
+) price ON r.auth_type='SUBSCRIPTION'
+WHERE r.is_deleted=false AND (r.id<$1 OR $1=0) ORDER BY r.id DESC LIMIT $2;
 -- name: ManageResource :one
 SELECT * FROM provider_credential WHERE id=$1 AND is_deleted=false;
 -- name: ManageCreateResource :exec
@@ -261,15 +327,36 @@ WHERE id=$1 AND is_deleted=false AND version=sqlc.arg(expected_version);
 
 -- name: ManageKeys :many
 SELECT id,name,masked_key,status,expires_at,revoked_at,created_at FROM principal_access_key
-WHERE principal_id=$1 AND is_deleted=false AND (id<$2 OR $2=0) ORDER BY id DESC LIMIT $3;
+WHERE principal_id=$1 AND is_deleted=false
+  AND (sqlc.arg(include_expired)::boolean OR
+       (status='ACTIVE' AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>sqlc.arg(at)::timestamptz)))
+  AND (id<$2 OR $2=0) ORDER BY id DESC LIMIT $3;
+-- name: ManageHasUsableApplicationKey :one
+SELECT EXISTS(SELECT 1 FROM principal_access_key
+WHERE principal_id=sqlc.arg(principal_id) AND is_deleted=false AND status='ACTIVE' AND revoked_at IS NULL
+  AND (expires_at IS NULL OR expires_at>sqlc.arg(now)::timestamptz));
 -- name: ManageOperations :many
 SELECT id,operator_name,operation_type,target_type,target_id,target_name,request_id,result,error_code,before_data,after_data,created_at
 FROM operation_log WHERE (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2;
+-- name: ManageApplicationOperations :many
+SELECT id,operator_name,operation_type,target_type,target_id,target_name,request_id,result,error_code,before_data,after_data,created_at
+FROM operation_log
+WHERE (id<sqlc.arg(after_id) OR sqlc.arg(after_id)=0)
+  AND ((target_type='APPLICATION' AND target_id=sqlc.arg(application_id))
+    OR (target_type='ACCESS_KEY' AND after_data->>'principalId'=sqlc.arg(application_id)::text)
+    OR (target_type='GROUP' AND after_data->>'applicationId'=sqlc.arg(application_id)::text))
+ORDER BY id DESC LIMIT sqlc.arg(page_limit);
 
 -- 分页总数不受 after cursor 影响；过滤口径必须与对应列表查询保持一致。
 -- name: CountManageMembers :one
 SELECT COUNT(*)::bigint FROM principal
 WHERE is_deleted=false AND principal_type='MEMBER';
+-- name: CountManageApplications :one
+SELECT COUNT(*)::bigint FROM principal WHERE is_deleted=false AND principal_type='APPLICATION';
+-- name: CountManageApplicationSuggestions :one
+SELECT COUNT(*)::bigint FROM principal
+WHERE is_deleted=false AND principal_type='APPLICATION'
+  AND strpos(lower(name), lower(sqlc.arg(application_name)::text)) > 0;
 
 -- name: CountManageMemberSuggestions :one
 SELECT COUNT(*)::bigint FROM principal
@@ -298,10 +385,17 @@ WHERE is_deleted=false;
 
 -- name: CountManageKeys :one
 SELECT COUNT(*)::bigint FROM principal_access_key
-WHERE principal_id=$1 AND is_deleted=false;
+WHERE principal_id=$1 AND is_deleted=false
+  AND (sqlc.arg(include_expired)::boolean OR
+       (status='ACTIVE' AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>sqlc.arg(at)::timestamptz)));
 
 -- name: CountManageOperations :one
 SELECT COUNT(*)::bigint FROM operation_log;
+-- name: CountManageApplicationOperations :one
+SELECT COUNT(*)::bigint FROM operation_log
+WHERE (target_type='APPLICATION' AND target_id=sqlc.arg(application_id))
+   OR (target_type='ACCESS_KEY' AND after_data->>'principalId'=sqlc.arg(application_id)::text)
+   OR (target_type='GROUP' AND after_data->>'applicationId'=sqlc.arg(application_id)::text);
 
 -- name: CountManageGroupMembers :one
 SELECT COUNT(*)::bigint

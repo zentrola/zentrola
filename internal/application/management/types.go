@@ -16,10 +16,12 @@ import (
 var (
 	ErrConflict                     = errors.New("conflict")
 	ErrMemberAccessKeyRequired      = errors.New("member access key required")
+	ErrApplicationKeyRequired       = errors.New("application app key required")
 	ErrSubscriptionAccountExists    = errors.New("subscription account already exists")
 	ErrCredential                   = errors.New("credential unrecoverable")
 	ErrProvider                     = errors.New("provider unavailable")
 	ErrProviderCredentialRequired   = errors.New("provider credential required")
+	ErrProviderConnectionTestFailed = errors.New("provider connection test failed")
 	ErrProviderModelMappingRequired = errors.New("provider model mapping required")
 	ErrModelSyncCredentialRequired  = errors.New("model sync credential required")
 	ErrCredentialExportUnsupported  = errors.New("credential export unsupported")
@@ -29,10 +31,12 @@ var (
 var publicErrors = []error{
 	ErrConflict,
 	ErrMemberAccessKeyRequired,
+	ErrApplicationKeyRequired,
 	ErrSubscriptionAccountExists,
 	ErrCredential,
 	ErrProvider,
 	ErrProviderCredentialRequired,
+	ErrProviderConnectionTestFailed,
 	ErrProviderModelMappingRequired,
 	ErrModelSyncCredentialRequired,
 	ErrCredentialExportUnsupported,
@@ -75,19 +79,22 @@ type PageData[T any] struct {
 	Total int64
 }
 type Member struct {
-	ID        int64     `json:"id,string"`
-	Name      string    `json:"name"`
-	Remark    *string   `json:"remark"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"createdAt"`
+	ID                int64     `json:"id,string"`
+	Name              string    `json:"name"`
+	MonthlyTokenLimit *int64    `json:"monthlyTokenLimit,string"`
+	Remark            *string   `json:"remark"`
+	Status            string    `json:"status"`
+	CreatedAt         time.Time `json:"createdAt"`
 }
+type Application Member
 type Group struct {
-	ID        int64     `json:"id,string"`
-	Code      string    `json:"code"`
-	Name      string    `json:"name"`
-	Remark    *string   `json:"remark"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"createdAt"`
+	ID                int64     `json:"id,string"`
+	Code              string    `json:"code"`
+	Name              string    `json:"name"`
+	MonthlyTokenLimit *int64    `json:"monthlyTokenLimit,string"`
+	Remark            *string   `json:"remark"`
+	Status            string    `json:"status"`
+	CreatedAt         time.Time `json:"createdAt"`
 }
 type Model struct {
 	ID                    int64     `json:"id,string"`
@@ -189,33 +196,40 @@ type ProviderInitializeResult struct {
 	Updated  int `json:"updated"`
 	Existing int `json:"existing"`
 }
+type SubscriptionPriceSummary struct {
+	Currency      string    `json:"currency"`
+	PeriodAmount  string    `json:"periodAmount"`
+	BillingPeriod string    `json:"billingPeriod"`
+	EffectiveAt   time.Time `json:"effectiveAt"`
+}
 type Resource struct {
-	ID                    int64      `json:"id,string"`
-	Version               int64      `json:"version,string" example:"1"`
-	ProviderID            int64      `json:"providerId,string"`
-	Name                  string     `json:"name"`
-	AuthType              string     `json:"authType"`
-	AuthAdapter           string     `json:"authAdapter"`
-	SubscriptionType      *string    `json:"subscriptionType"`
-	PlanCode              *string    `json:"planCode"`
-	ExternalAccountRef    *string    `json:"externalAccountRef"`
-	Priority              int32      `json:"priority"`
-	EffectiveAt           *time.Time `json:"effectiveAt"`
-	ExpiresAt             *time.Time `json:"expiresAt"`
-	QuotaStatus           string     `json:"quotaStatus"`
-	QuotaCheckedAt        *time.Time `json:"quotaCheckedAt"`
-	QuotaResetsAt         *time.Time `json:"quotaResetsAt"`
-	CredentialRefreshedAt *time.Time `json:"-"`
-	CredentialExpiresAt   *time.Time `json:"-"`
-	RuntimeStatus         string     `json:"runtimeStatus"`
-	BlockedReason         *string    `json:"blockedReason"`
-	BlockedAt             *time.Time `json:"blockedAt"`
-	LastErrorAt           *time.Time `json:"lastErrorAt"`
-	LastHTTPStatus        *int32     `json:"lastHttpStatus"`
-	LastErrorCode         *string    `json:"lastErrorCode"`
-	CredentialConfigured  bool       `json:"credentialConfigured"`
-	CreatedAt             time.Time  `json:"createdAt"`
-	UpdatedAt             time.Time  `json:"updatedAt"`
+	ID                    int64                     `json:"id,string"`
+	Version               int64                     `json:"version,string" example:"1"`
+	ProviderID            int64                     `json:"providerId,string"`
+	Name                  string                    `json:"name"`
+	AuthType              string                    `json:"authType"`
+	AuthAdapter           string                    `json:"authAdapter"`
+	SubscriptionType      *string                   `json:"subscriptionType"`
+	PlanCode              *string                   `json:"planCode"`
+	ExternalAccountRef    *string                   `json:"externalAccountRef"`
+	Priority              int32                     `json:"priority"`
+	EffectiveAt           *time.Time                `json:"effectiveAt"`
+	ExpiresAt             *time.Time                `json:"expiresAt"`
+	QuotaStatus           string                    `json:"quotaStatus"`
+	QuotaCheckedAt        *time.Time                `json:"quotaCheckedAt"`
+	QuotaResetsAt         *time.Time                `json:"quotaResetsAt"`
+	CredentialRefreshedAt *time.Time                `json:"-"`
+	CredentialExpiresAt   *time.Time                `json:"-"`
+	RuntimeStatus         string                    `json:"runtimeStatus"`
+	BlockedReason         *string                   `json:"blockedReason"`
+	BlockedAt             *time.Time                `json:"blockedAt"`
+	LastErrorAt           *time.Time                `json:"lastErrorAt"`
+	LastHTTPStatus        *int32                    `json:"lastHttpStatus"`
+	LastErrorCode         *string                   `json:"lastErrorCode"`
+	CredentialConfigured  bool                      `json:"credentialConfigured"`
+	SubscriptionPrice     *SubscriptionPriceSummary `json:"subscriptionPrice"`
+	CreatedAt             time.Time                 `json:"createdAt"`
+	UpdatedAt             time.Time                 `json:"updatedAt"`
 }
 type ResourceQuota struct {
 	Code                  string     `json:"code"`
@@ -338,8 +352,8 @@ type MemberReader interface {
 	Member(context.Context, int64) (Member, error)
 	MemberGroups(context.Context, int64, Page) ([]Group, error)
 	CountMemberGroups(context.Context, int64) (int64, error)
-	Keys(context.Context, int64, Page) ([]Key, error)
-	CountKeys(context.Context, int64) (int64, error)
+	Keys(context.Context, int64, Page, bool) ([]Key, error)
+	CountKeys(context.Context, int64, bool) (int64, error)
 }
 
 type GroupReader interface {
@@ -364,6 +378,7 @@ type ProviderReader interface {
 	Provider(context.Context, int64) (Provider, error)
 	ProviderMappings(context.Context, int64) ([]ProviderMapping, error)
 	ProviderCredentialConfigured(context.Context, int64) (bool, error)
+	ProviderActivationResourceIDs(context.Context, int64, time.Time) ([]int64, error)
 }
 
 type ResourceReader interface {
@@ -394,6 +409,8 @@ type MemberWriter interface {
 	UpdateMember(context.Context, Member) error
 	SetMemberStatus(context.Context, int64, string) error
 	DeleteMember(context.Context, int64) error
+	AddPrincipalTokenQuota(context.Context, int64, int64) (int64, error)
+	ClearPrincipalTokenQuota(context.Context, int64) error
 }
 
 type GroupWriter interface {
@@ -401,6 +418,8 @@ type GroupWriter interface {
 	UpdateGroup(context.Context, Group) error
 	SetGroupStatus(context.Context, int64, string) error
 	DeleteGroup(context.Context, int64) error
+	AddGroupTokenQuota(context.Context, int64, int64) (int64, error)
+	ClearGroupTokenQuota(context.Context, int64) error
 	SetGroupMember(context.Context, int64, int64, bool) (bool, error)
 	SetGroupModel(context.Context, int64, int64, bool) (bool, error)
 }
@@ -456,14 +475,15 @@ type Cipher interface {
 	DecryptProviderProxy(catalog.SealedCredential, catalog.ProviderProxyOwner) ([]byte, error)
 }
 type ConnectionResult struct {
-	OK                     bool                   `json:"ok"`
-	Code                   string                 `json:"code"`
-	HTTPStatus             int                    `json:"httpStatus,omitempty"`
-	LatencyMS              int64                  `json:"latencyMs"`
-	ProviderModelMappingID int64                  `json:"providerModelMappingId,string,omitempty"`
-	TestedModelID          int64                  `json:"testedModelId,string,omitempty"`
-	TestedModelCode        string                 `json:"testedModelCode,omitempty"`
-	ResetCredits           *RateLimitResetCredits `json:"resetCredits,omitempty"`
+	verifiedResourceVersion int64
+	OK                      bool                   `json:"ok"`
+	Code                    string                 `json:"code"`
+	HTTPStatus              int                    `json:"httpStatus,omitempty"`
+	LatencyMS               int64                  `json:"latencyMs"`
+	ProviderModelMappingID  int64                  `json:"providerModelMappingId,string,omitempty"`
+	TestedModelID           int64                  `json:"testedModelId,string,omitempty"`
+	TestedModelCode         string                 `json:"testedModelCode,omitempty"`
+	ResetCredits            *RateLimitResetCredits `json:"resetCredits,omitempty"`
 }
 
 type ResetCreditConsumeResult struct {

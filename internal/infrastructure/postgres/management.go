@@ -32,9 +32,10 @@ func NewManagementStore(pool *pgxpool.Pool, ids shared.IDGenerator, loggers ...*
 }
 
 type managementSession struct {
-	q     *dbgen.Queries
-	actor admin.Identity
-	store *ManagementStore
+	q      *dbgen.Queries
+	actor  admin.Identity
+	store  *ManagementStore
+	readAt time.Time
 }
 
 func (s *ManagementStore) Read(ctx context.Context, a admin.Identity, fn func(mgmt.Reader) error) error {
@@ -65,7 +66,7 @@ func (s *ManagementStore) run(ctx context.Context, a admin.Identity, write bool,
 	if err != nil {
 		return s.managementError(ctx, "validate_actor", err)
 	}
-	if err = fn(&managementSession{q: q, actor: a, store: s}); err != nil {
+	if err = fn(&managementSession{q: q, actor: a, store: s, readAt: time.Now().UTC()}); err != nil {
 		return s.managementError(ctx, "execute_callback", err)
 	}
 	return s.managementError(ctx, "commit_transaction", tx.Commit(ctx))
@@ -241,6 +242,9 @@ func (s *managementSession) ProviderMappings(ctx context.Context, providerID int
 func (s *managementSession) ProviderCredentialConfigured(ctx context.Context, providerID int64) (bool, error) {
 	return s.q.ManageProviderCredentialConfigured(ctx, providerID)
 }
+func (s *managementSession) ProviderActivationResourceIDs(ctx context.Context, providerID int64, at time.Time) ([]int64, error) {
+	return s.q.ManageProviderActivationResourceIDs(ctx, dbgen.ManageProviderActivationResourceIDsParams{ProviderID: providerID, At: pgTime(at)})
+}
 func (s *managementSession) Resources(ctx context.Context, p mgmt.Page) ([]mgmt.Resource, error) {
 	rows, err := s.q.ManageResources(ctx, dbgen.ManageResourcesParams{ID: p.After, Limit: managementPageLimit(p)})
 	if err != nil {
@@ -298,8 +302,10 @@ func (s *managementSession) GroupModels(ctx context.Context, id int64, p mgmt.Pa
 	}
 	return result, nil
 }
-func (s *managementSession) Keys(ctx context.Context, id int64, p mgmt.Page) ([]mgmt.Key, error) {
-	rows, err := s.q.ManageKeys(ctx, dbgen.ManageKeysParams{PrincipalID: id, ID: p.After, Limit: managementPageLimit(p)})
+func (s *managementSession) Keys(ctx context.Context, id int64, p mgmt.Page, includeExpired bool) ([]mgmt.Key, error) {
+	rows, err := s.q.ManageKeys(ctx, dbgen.ManageKeysParams{
+		PrincipalID: id, ID: p.After, Limit: managementPageLimit(p), At: pgTime(s.readAt), IncludeExpired: includeExpired,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -339,8 +345,8 @@ func (s *managementSession) CountMemberGroups(ctx context.Context, id int64) (in
 func (s *managementSession) CountGroupModels(ctx context.Context, id int64) (int64, error) {
 	return s.q.CountManageGroupModels(ctx, id)
 }
-func (s *managementSession) CountKeys(ctx context.Context, id int64) (int64, error) {
-	return s.q.CountManageKeys(ctx, id)
+func (s *managementSession) CountKeys(ctx context.Context, id int64, includeExpired bool) (int64, error) {
+	return s.q.CountManageKeys(ctx, dbgen.CountManageKeysParams{PrincipalID: id, At: pgTime(s.readAt), IncludeExpired: includeExpired})
 }
 func (s *managementSession) Member(ctx context.Context, id int64) (mgmt.Member, error) {
 	row, err := s.q.ManageMember(ctx, id)
@@ -408,6 +414,20 @@ func (s *managementSession) UpdateMember(ctx context.Context, m mgmt.Member) err
 func (s *managementSession) SetMemberStatus(ctx context.Context, id int64, status string) error {
 	return s.q.ManageMemberStatus(ctx, dbgen.ManageMemberStatusParams{ID: id, Status: status, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(time.Now().UTC())})
 }
+func (s *managementSession) AddPrincipalTokenQuota(ctx context.Context, id, amount int64) (int64, error) {
+	limit, err := s.q.ManageAddPrincipalTokenQuota(ctx, dbgen.ManageAddPrincipalTokenQuotaParams{
+		PrincipalID: id, Amount: amount, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(time.Now().UTC()),
+	})
+	if err != nil || limit == nil {
+		return 0, err
+	}
+	return *limit, nil
+}
+func (s *managementSession) ClearPrincipalTokenQuota(ctx context.Context, id int64) error {
+	return s.q.ManageClearPrincipalTokenQuota(ctx, dbgen.ManageClearPrincipalTokenQuotaParams{
+		PrincipalID: id, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(time.Now().UTC()),
+	})
+}
 func (s *managementSession) DeleteMember(ctx context.Context, id int64) error {
 	now, actor := pgTime(time.Now().UTC()), actorRef(s.actor.ID)
 	// 先锁定并删除成员，和签发 Key 的成员行锁串行化；所有更改与审计同事务提交。
@@ -427,6 +447,20 @@ func (s *managementSession) UpdateGroup(ctx context.Context, g mgmt.Group) error
 }
 func (s *managementSession) SetGroupStatus(ctx context.Context, id int64, status string) error {
 	return s.q.ManageGroupStatus(ctx, dbgen.ManageGroupStatusParams{ID: id, Status: status, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(time.Now().UTC())})
+}
+func (s *managementSession) AddGroupTokenQuota(ctx context.Context, id, amount int64) (int64, error) {
+	limit, err := s.q.ManageAddGroupTokenQuota(ctx, dbgen.ManageAddGroupTokenQuotaParams{
+		GroupID: id, Amount: amount, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(time.Now().UTC()),
+	})
+	if err != nil || limit == nil {
+		return 0, err
+	}
+	return *limit, nil
+}
+func (s *managementSession) ClearGroupTokenQuota(ctx context.Context, id int64) error {
+	return s.q.ManageClearGroupTokenQuota(ctx, dbgen.ManageClearGroupTokenQuotaParams{
+		GroupID: id, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(time.Now().UTC()),
+	})
 }
 func (s *managementSession) DeleteGroup(ctx context.Context, id int64) error {
 	now, actor := pgTime(time.Now().UTC()), actorRef(s.actor.ID)

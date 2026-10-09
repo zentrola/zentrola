@@ -1,8 +1,40 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Locator, type Page } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
 
 const stamp = '2026-09-06T07:30:00Z'
 const longID = '90071992547409931'
+async function expectOnlyModalBodyScrolls(dialog: Locator) {
+  const layout = await dialog.evaluate((element) => {
+    const body = element.querySelector('.modal-body') as HTMLElement
+    const head = element.querySelector('.modal-head') as HTMLElement
+    const footer = element.querySelector('.modal-footer') as HTMLElement
+    const before = {
+      headTop: head.getBoundingClientRect().top,
+      footerTop: footer.getBoundingClientRect().top,
+      dialogTop: element.getBoundingClientRect().top,
+    }
+    body.scrollTop = body.scrollHeight
+    return {
+      scrollable: body.scrollHeight > body.clientHeight,
+      scrollTop: body.scrollTop,
+      bodyOverflow: getComputedStyle(body).overflowY,
+      dialogOverflow: getComputedStyle(element).overflowY,
+      headTopUnchanged: head.getBoundingClientRect().top === before.headTop,
+      footerTopUnchanged: footer.getBoundingClientRect().top === before.footerTop,
+      dialogTopUnchanged: element.getBoundingClientRect().top === before.dialogTop,
+    }
+  })
+  expect(layout).toEqual({
+    scrollable: true,
+    scrollTop: expect.any(Number),
+    bodyOverflow: 'auto',
+    dialogOverflow: 'hidden',
+    headTopUnchanged: true,
+    footerTopUnchanged: true,
+    dialogTopUnchanged: true,
+  })
+  expect(layout.scrollTop).toBeGreaterThan(0)
+}
 async function fixture(page: Page) {
   let nextID = 100n
   const next = () => (90071992547409900n + nextID++).toString()
@@ -91,6 +123,11 @@ async function fixture(page: Page) {
       ],
     ],
   ])
+  const credentialPrices = new Map<
+    string,
+    { modelPrices: any[]; subscriptionPrices: any[]; subscriptionPrice: any | null }
+  >()
+  let priceEndpointUnavailable = false
   const operations: any[] = [
     {
       id: '203',
@@ -143,6 +180,7 @@ async function fixture(page: Page) {
     providerQueries: URLSearchParams[] = [],
     memberListQueries: URLSearchParams[] = [],
     memberSuggestionQueries: URLSearchParams[] = [],
+    applicationSuggestionQueries: URLSearchParams[] = [],
     usageQueries: URLSearchParams[] = [],
     statisticQueries: URLSearchParams[] = [],
     modelSyncRequests: string[] = [],
@@ -153,6 +191,7 @@ async function fixture(page: Page) {
       { modelName: 'DeepSeek V4 Flash', modelCode: 'deepseek-v4-flash', providerName: '深度求索' },
     ]
   const providerInputs: any[] = []
+  const providerActivationInputs: any[] = []
   const safeProviderProxy = (input: any) => {
     if (!input.proxyEnabled) return { proxyEnabled: false, proxyUrl: null, proxyHeaders: [] }
     const parsed = new URL(input.proxyUrl)
@@ -194,6 +233,392 @@ async function fixture(page: Page) {
     if (path === '/me') return reply({ id: '1', username: 'admin', displayName: '管理员' })
     if (path === '/auth/logout') return reply({ clearToken: true })
     if (path === '/gateway/active-models') return reply(activeModelRows)
+    if (path === '/billing/usage-costs/summary' && method === 'GET')
+      return reply({
+        from: url.searchParams.get('from'),
+        to: url.searchParams.get('to'),
+        requests: 2,
+        attempts: 2,
+        successful: 2,
+        inputTokens: 2100,
+        cachedInputTokens: 100,
+        outputTokens: 900,
+        rated: 1,
+        shared: 1,
+        unrated: 0,
+        totals: [{ currency: 'USD', amount: '0.00800000', rated: 1 }],
+      })
+    if (path === '/billing/usage-costs' && method === 'GET')
+      return reply({
+        items: [
+          {
+            id: '901',
+            requestId: 'req_api_cost',
+            attemptNo: 1,
+            principalId: longID,
+            principalName: '林知远',
+            principalType: 'MEMBER',
+            modelId: '71',
+            modelName: 'DeepSeek V4 Flash',
+            providerId: '81',
+            providerName: 'DeepSeek',
+            providerModelId: '92',
+            resourceId: '88',
+            resourceName: 'DeepSeek API Key',
+            clientProtocol: 'OPENAI_RESPONSES',
+            status: 'SUCCESS',
+            errorType: null,
+            startedAt: stamp,
+            completedAt: '2026-09-06T07:30:01Z',
+            latencyMs: 1000,
+            inputTokens: 1200,
+            cachedInputTokens: 100,
+            outputTokens: 300,
+            billingType: 'API_KEY',
+            ratingStatus: 'RATED',
+            ratingId: '911',
+            ratingRevision: 2,
+            currency: 'USD',
+            totalCost: '0.00800000',
+            ratedAt: stamp,
+          },
+          {
+            id: '902',
+            requestId: 'req_subscription_cost',
+            attemptNo: 1,
+            principalId: longID,
+            principalName: '林知远',
+            principalType: 'MEMBER',
+            modelId: '72',
+            modelName: 'Claude Sonnet',
+            providerId: '81',
+            providerName: 'DeepSeek',
+            providerModelId: '93',
+            resourceId: '89',
+            resourceName: '团队订阅',
+            clientProtocol: 'ANTHROPIC_MESSAGES',
+            status: 'SUCCESS',
+            errorType: null,
+            startedAt: stamp,
+            completedAt: '2026-09-06T07:30:02Z',
+            latencyMs: 2000,
+            inputTokens: 900,
+            cachedInputTokens: 0,
+            outputTokens: 600,
+            billingType: 'SUBSCRIPTION',
+            ratingStatus: 'SUBSCRIPTION_SHARED',
+            ratingId: null,
+            ratingRevision: null,
+            currency: 'CNY',
+            totalCost: null,
+            ratedAt: null,
+          },
+        ],
+        nextCursor: null,
+        total: 2,
+      })
+    if (path === '/billing/usage-costs/901' && method === 'GET')
+      return reply({
+        id: '901',
+        requestId: 'req_api_cost',
+        attemptNo: 1,
+        principalId: longID,
+        principalName: '林知远',
+        principalType: 'MEMBER',
+        modelId: '71',
+        modelName: 'DeepSeek V4 Flash',
+        providerId: '81',
+        providerName: 'DeepSeek',
+        providerModelId: '92',
+        resourceId: '88',
+        resourceName: 'DeepSeek API Key',
+        clientProtocol: 'OPENAI_RESPONSES',
+        status: 'SUCCESS',
+        errorType: null,
+        startedAt: stamp,
+        completedAt: '2026-09-06T07:30:01Z',
+        latencyMs: 1000,
+        inputTokens: 1200,
+        cachedInputTokens: 100,
+        outputTokens: 300,
+        billingType: 'API_KEY',
+        ratingStatus: 'RATED',
+        ratingId: '911',
+        ratingRevision: 2,
+        currency: 'USD',
+        totalCost: '0.00800000',
+        ratedAt: stamp,
+        ratings: [
+          {
+            id: '910',
+            revision: 1,
+            modelPriceId: '920',
+            priceEffectiveAt: '2026-09-01T00:00:00Z',
+            inputPrice: '0.00000200',
+            cachedInputPrice: '0.00000100',
+            outputPrice: '0.00000800',
+            inputCost: '0.00240000',
+            cachedInputCost: '0.00010000',
+            outputCost: '0.00240000',
+            totalCost: '0.00490000',
+            currency: 'USD',
+            createdAt: stamp,
+          },
+          {
+            id: '911',
+            revision: 2,
+            modelPriceId: '921',
+            priceEffectiveAt: '2026-09-01T00:00:00Z',
+            inputPrice: '0.00000300',
+            cachedInputPrice: '0.00000100',
+            outputPrice: '0.00001400',
+            inputCost: '0.00360000',
+            cachedInputCost: '0.00010000',
+            outputCost: '0.00420000',
+            totalCost: '0.00790000',
+            currency: 'USD',
+            createdAt: stamp,
+          },
+        ],
+        subscription: null,
+      })
+    if (path === '/billing/usage-costs/902' && method === 'GET')
+      return reply({
+        id: '902',
+        requestId: 'req_subscription_cost',
+        attemptNo: 1,
+        principalId: longID,
+        principalName: '林知远',
+        principalType: 'MEMBER',
+        modelId: '72',
+        modelName: 'Claude Sonnet',
+        providerId: '81',
+        providerName: 'DeepSeek',
+        providerModelId: '93',
+        resourceId: '89',
+        resourceName: '团队订阅',
+        clientProtocol: 'ANTHROPIC_MESSAGES',
+        status: 'SUCCESS',
+        errorType: null,
+        startedAt: stamp,
+        completedAt: '2026-09-06T07:30:02Z',
+        latencyMs: 2000,
+        inputTokens: 900,
+        cachedInputTokens: 0,
+        outputTokens: 600,
+        billingType: 'SUBSCRIPTION',
+        ratingStatus: 'SUBSCRIPTION_SHARED',
+        ratingId: null,
+        ratingRevision: null,
+        currency: 'CNY',
+        totalCost: null,
+        ratedAt: null,
+        ratings: [],
+        subscription: {
+          priceId: '930',
+          currency: 'CNY',
+          periodAmount: '1000.00000000',
+          billingPeriod: 'MONTH',
+          effectiveAt: '2026-09-01T00:00:00Z',
+          documentId: '601',
+          periodStart: '2026-09-01T00:00:00Z',
+          periodEnd: '2026-10-01T00:00:00Z',
+          principalAmount: '700.00000000',
+        },
+      })
+    if (path === '/billing/usage-costs/export' && method === 'GET')
+      return route.fulfill({
+        status: 200,
+        contentType: 'text/csv; charset=utf-8',
+        headers: { 'Content-Disposition': 'attachment; filename="zentrola-usage-costs.csv"' },
+        body: '\ufeffusage_record_id,total_cost\r\n901,0.00800000\r\n',
+      })
+    if (path === '/billing/current-attribution' && method === 'GET')
+      return reply({
+        from: url.searchParams.get('from'),
+        to: url.searchParams.get('to'),
+        totals: [
+          {
+            billingType: 'SUBSCRIPTION',
+            currency: 'CNY',
+            totalAmount: '1000.00000000',
+            allocatedAmount: '1000.00000000',
+            unallocatedAmount: '0',
+            totalTokens: 1500,
+          },
+          {
+            billingType: 'API_KEY',
+            currency: 'USD',
+            totalAmount: '0.00800000',
+            allocatedAmount: '0.00800000',
+            unallocatedAmount: '0',
+            totalTokens: 1500,
+          },
+        ],
+        items: [
+          {
+            principalId: longID,
+            principalName: '林知远',
+            principalType: 'MEMBER',
+            billingType: 'SUBSCRIPTION',
+            currency: 'CNY',
+            amount: '1000.00000000',
+            tokens: 1500,
+          },
+          {
+            principalId: longID,
+            principalName: '林知远',
+            principalType: 'MEMBER',
+            billingType: 'API_KEY',
+            currency: 'USD',
+            amount: '0.00800000',
+            tokens: 1500,
+          },
+        ],
+        total: 2,
+      })
+    if (path === '/billing/statistics' && method === 'GET')
+      return reply({
+        from: url.searchParams.get('from'),
+        to: url.searchParams.get('to'),
+        totals: url.searchParams.get('from')?.startsWith('2026-10-01')
+          ? []
+          : [
+              {
+                billingType: 'SUBSCRIPTION',
+                currency: 'CNY',
+                totalAmount: '710.00000000',
+                allocatedAmount: '710.00000000',
+                unallocatedAmount: '0',
+                totalTokens: 1000000,
+              },
+              {
+                billingType: 'API_KEY',
+                currency: 'USD',
+                totalAmount: '5.12500000',
+                allocatedAmount: '5.12500000',
+                unallocatedAmount: '0',
+                totalTokens: 2500000,
+              },
+            ],
+        items: url.searchParams.get('from')?.startsWith('2026-10-01')
+          ? []
+          : [
+              {
+                principalId: longID,
+                principalName: '林知远',
+                principalType: 'MEMBER',
+                billingType: 'SUBSCRIPTION',
+                currency: 'CNY',
+                amount: '497.00000000',
+                tokens: 700000,
+              },
+            ],
+        total: url.searchParams.get('from')?.startsWith('2026-10-01') ? 0 : 1,
+      })
+    if (path === '/billing/documents' && method === 'GET')
+      return reply({
+        items: [
+          {
+            id: '602',
+            billingType: 'SUBSCRIPTION',
+            documentType: 'ADJUSTMENT',
+            status: 'CONFIRMED',
+            credentialId: '88',
+            credentialName: '个人订阅主账号',
+            originalDocumentId: '601',
+            periodStart: '2026-09-01T00:00:00Z',
+            periodEnd: '2026-10-01T00:00:00Z',
+            totalTokens: 0,
+            totalAmount: '-200.00000000',
+            currency: 'CNY',
+            createdAt: stamp,
+          },
+          {
+            id: '601',
+            billingType: 'SUBSCRIPTION',
+            documentType: 'CHARGE',
+            status: 'CONFIRMED',
+            credentialId: '88',
+            credentialName: '个人订阅主账号',
+            originalDocumentId: null,
+            periodStart: '2026-09-01T00:00:00Z',
+            periodEnd: '2026-10-01T00:00:00Z',
+            totalTokens: 1000000,
+            totalAmount: '1000.00000000',
+            currency: 'CNY',
+            createdAt: stamp,
+          },
+        ],
+        nextCursor: null,
+        total: 2,
+      })
+    if (path === '/billing/documents/602' && method === 'GET')
+      return reply({
+        id: '602',
+        billingType: 'SUBSCRIPTION',
+        documentType: 'ADJUSTMENT',
+        status: 'CONFIRMED',
+        credentialId: '88',
+        credentialName: '个人订阅主账号',
+        originalDocumentId: '601',
+        periodStart: '2026-09-01T00:00:00Z',
+        periodEnd: '2026-10-01T00:00:00Z',
+        totalTokens: 0,
+        totalAmount: '-200.00000000',
+        currency: 'CNY',
+        createdAt: stamp,
+        original: {
+          id: '601',
+          billingType: 'SUBSCRIPTION',
+          documentType: 'CHARGE',
+          status: 'CONFIRMED',
+          credentialId: '88',
+          credentialName: '个人订阅主账号',
+          originalDocumentId: null,
+          periodStart: '2026-09-01T00:00:00Z',
+          periodEnd: '2026-10-01T00:00:00Z',
+          totalTokens: 1000000,
+          totalAmount: '1000.00000000',
+          currency: 'CNY',
+          createdAt: stamp,
+        },
+        adjustments: [],
+        ratingCount: 0,
+        items: [
+          {
+            id: '701',
+            principalId: longID,
+            principalName: '林知远',
+            principalType: 'MEMBER',
+            usageTokens: 0,
+            allocationRatio: '0.7000000000000000',
+            amount: '-140.00000000',
+          },
+        ],
+      })
+    if (path === '/billing/unrated-usage' && method === 'GET')
+      return reply({
+        items: [
+          {
+            usageRecordId: '801',
+            principalId: longID,
+            principalName: '林知远',
+            principalType: 'MEMBER',
+            credentialId: '89',
+            credentialName: 'DeepSeek API Key',
+            providerModelId: '92',
+            startedAt: stamp,
+            inputTokens: null,
+            cachedInputTokens: null,
+            outputTokens: 5,
+            reason: 'INCOMPLETE_TOKENS',
+            waitingSince: stamp,
+          },
+        ],
+        nextCursor: null,
+        total: 1,
+      })
     if (path === '/usage/dashboard')
       return reply({
         activeMemberCount: 2,
@@ -265,6 +690,41 @@ async function fixture(page: Page) {
       const name = url.searchParams.get('name') || ''
       return pageReply(members.filter((member) => member.name.includes(name)))
     }
+    if (path === '/applications/suggestions' && method === 'GET') {
+      applicationSuggestionQueries.push(new URLSearchParams(url.searchParams))
+      const name = url.searchParams.get('name') || ''
+      return pageReply(
+        [{ id: '90071992547409944', name: '报表应用' }].filter((app) => app.name.includes(name)),
+      )
+    }
+    if (path === '/token-quotas' && method === 'GET') {
+      const scopeType = url.searchParams.get('scopeType')
+      const ids = (url.searchParams.get('scopeIds') || '').split(',').filter(Boolean)
+      const source = scopeType === 'GROUP' ? groups : members
+      return reply(
+        ids.flatMap((id) => {
+          const item = source.find((entry) => entry.id === id)
+          if (!item?.monthlyTokenLimit) return []
+          const usedTokens = item.quotaUsedTokens || '600'
+          const limit = BigInt(item.monthlyTokenLimit)
+          const used = BigInt(usedTokens)
+          return [
+            {
+              scopeType,
+              scopeId: id,
+              monthlyTokenLimit: item.monthlyTokenLimit,
+              usedTokens,
+              remainingTokens: String(limit > used ? limit - used : 0n),
+              usedPercent: Number((used * 10000n) / limit) / 100,
+              level:
+                used >= limit ? 'EXHAUSTED' : used * 100n >= limit * 80n ? 'WARNING' : 'NOTICE',
+              periodStart: '2026-09-01T00:00:00Z',
+              periodEnd: '2026-10-01T00:00:00Z',
+            },
+          ]
+        }),
+      )
+    }
     if (segments.length === 1 && method === 'GET') {
       if (path === '/members') {
         memberListQueries.push(new URLSearchParams(url.searchParams))
@@ -297,7 +757,12 @@ async function fixture(page: Page) {
         return pageReply([...filtered].sort((a, b) => (BigInt(a.id) > BigInt(b.id) ? -1 : 1)))
       }
       if (path === '/resources')
-        return pageReply(resources.map(({ credential: _, quotaDetails: __, ...row }) => row))
+        return pageReply(
+          resources.map(({ credential: _, quotaDetails: __, ...row }) => ({
+            ...row,
+            subscriptionPrice: credentialPrices.get(row.id)?.subscriptionPrice ?? null,
+          })),
+        )
       if (path === '/operation-logs') return pageReply(operations)
       if (path === '/usage') {
         usageQueries.push(url.searchParams)
@@ -597,6 +1062,30 @@ async function fixture(page: Page) {
       relationships.set(`groups/${row.id}/models`, new Set(modelIds))
       return reply(row)
     }
+    if (
+      (segments[0] === 'members' || segments[0] === 'groups') &&
+      segments[2] === 'token-quota' &&
+      segments[3] === 'add' &&
+      method === 'POST'
+    ) {
+      const source = segments[0] === 'groups' ? groups : members
+      const row = source.find((entry) => entry.id === segments[1])
+      if (!row) return reply(null, 404, 'NOT_FOUND')
+      row.monthlyTokenLimit = String(BigInt(row.monthlyTokenLimit || '0') + BigInt(body.amount))
+      return reply(row)
+    }
+    if (
+      (segments[0] === 'members' || segments[0] === 'groups') &&
+      segments[2] === 'token-quota' &&
+      segments.length === 3 &&
+      method === 'DELETE'
+    ) {
+      const source = segments[0] === 'groups' ? groups : members
+      const row = source.find((entry) => entry.id === segments[1])
+      if (!row) return reply(null, 404, 'NOT_FOUND')
+      row.monthlyTokenLimit = null
+      return reply(row)
+    }
     if (segments[0] === 'members' && segments.length === 2 && method === 'PUT') {
       if (conflict) return reply(null, 409, 'CONFLICT')
       const row = members.find((member) => member.id === segments[1])
@@ -659,6 +1148,113 @@ async function fixture(page: Page) {
       resources.splice(index, 1)
       return reply({ deleted: true })
     }
+    if (segments[0] === 'resources' && segments.length === 2 && method === 'GET') {
+      const resource = resources.find((candidate) => candidate.id === segments[1])
+      if (!resource) return reply(null, 404, 'NOT_FOUND')
+      const { credential: _, quotaDetails: __, ...safe } = resource
+      return reply(safe)
+    }
+    if (segments[0] === 'resources' && segments[2] === 'prices') {
+      if (priceEndpointUnavailable) return reply(null, 404, 'NOT_FOUND')
+      const resource = resources.find((candidate) => candidate.id === segments[1])
+      if (!resource) return reply(null, 404, 'NOT_FOUND')
+      const prices = credentialPrices.get(resource.id) ?? {
+        modelPrices: [],
+        subscriptionPrices: [],
+        subscriptionPrice: null,
+      }
+      if (segments.length === 3 && method === 'GET') return reply(prices)
+      if (segments[3] === 'models' && segments.length === 5 && method === 'PUT') {
+        const saved = {
+          ...body,
+          id: next(),
+          providerCredentialId: resource.id,
+          providerModelId: segments[4],
+          effectiveAt: body.effectiveAt,
+          createdAt: stamp,
+        }
+        prices.modelPrices = [saved, ...prices.modelPrices.filter((price) => price.id !== saved.id)]
+        credentialPrices.set(resource.id, prices)
+        return reply(saved)
+      }
+      if (segments[3] === 'models' && segments.length === 6 && method === 'PUT') {
+        const index = prices.modelPrices.findIndex((price) => price.id === segments[5])
+        if (index < 0) return reply(null, 404, 'NOT_FOUND')
+        const saved = { ...prices.modelPrices[index], ...body }
+        prices.modelPrices[index] = saved
+        credentialPrices.set(resource.id, prices)
+        return reply(saved)
+      }
+      if (segments[3] === 'models' && segments.length === 6 && method === 'DELETE') {
+        const before = prices.modelPrices.length
+        prices.modelPrices = prices.modelPrices.filter((price) => price.id !== segments[5])
+        if (prices.modelPrices.length === before) return reply(null, 404, 'NOT_FOUND')
+        credentialPrices.set(resource.id, prices)
+        return reply({ deleted: true })
+      }
+      if (segments[3] === 'subscription' && segments.length === 4 && method === 'PUT') {
+        const saved = {
+          ...body,
+          id: next(),
+          providerCredentialId: resource.id,
+          createdAt: stamp,
+        }
+        prices.subscriptionPrices = [saved, ...prices.subscriptionPrices]
+        prices.subscriptionPrice = [...prices.subscriptionPrices]
+          .sort((left, right) => right.effectiveAt.localeCompare(left.effectiveAt))
+          .find((price) => price.effectiveAt <= new Date().toISOString())
+        credentialPrices.set(resource.id, prices)
+        return reply(saved)
+      }
+      if (segments[3] === 'subscription' && segments.length === 5 && method === 'PUT') {
+        const index = prices.subscriptionPrices.findIndex((price) => price.id === segments[4])
+        if (index < 0) return reply(null, 404, 'NOT_FOUND')
+        const saved = { ...prices.subscriptionPrices[index], ...body }
+        prices.subscriptionPrices[index] = saved
+        prices.subscriptionPrice = [...prices.subscriptionPrices]
+          .sort((left, right) => right.effectiveAt.localeCompare(left.effectiveAt))
+          .find((price) => price.effectiveAt <= new Date().toISOString())
+        credentialPrices.set(resource.id, prices)
+        return reply(saved)
+      }
+      if (segments[3] === 'subscription' && segments.length === 5 && method === 'DELETE') {
+        const before = prices.subscriptionPrices.length
+        prices.subscriptionPrices = prices.subscriptionPrices.filter(
+          (price) => price.id !== segments[4],
+        )
+        if (prices.subscriptionPrices.length === before) return reply(null, 404, 'NOT_FOUND')
+        prices.subscriptionPrice = [...prices.subscriptionPrices]
+          .sort((left, right) => right.effectiveAt.localeCompare(left.effectiveAt))
+          .find((price) => price.effectiveAt <= new Date().toISOString())
+        credentialPrices.set(resource.id, prices)
+        return reply({ deleted: true })
+      }
+    }
+    if (segments[0] === 'providers' && segments[2] === 'activate' && method === 'POST') {
+      providerActivationInputs.push(structuredClone(body))
+      const provider = providers.find((candidate) => candidate.id === segments[1])
+      const resource = resources.find((candidate) => candidate.id === body.resourceId)
+      const mapping = (providerMappings.get(segments[1]) || []).find(
+        (candidate) => candidate.id === body.providerModelMappingId,
+      )
+      const model = models.find((candidate) => candidate.id === mapping?.modelId)
+      if (
+        !provider ||
+        !resource ||
+        resource.providerId !== provider.id ||
+        (resource.authType !== 'SUBSCRIPTION' && (!body.protocol || !mapping || !model))
+      )
+        return reply(null, 400, 'INVALID_ARGUMENT')
+      if (!failedTest) provider.status = 'ACTIVE'
+      return reply({
+        ok: !failedTest,
+        code: failedTest ? 'UPSTREAM_AUTH_FAILED' : 'OK',
+        latencyMs: 12,
+        providerModelMappingId: mapping?.id,
+        testedModelId: model?.id,
+        testedModelCode: mapping?.upstreamModelCode || model?.code,
+      })
+    }
     if (segments[2] === 'status') {
       const list =
         segments[0] === 'members'
@@ -689,7 +1285,14 @@ async function fixture(page: Page) {
       if (method === 'GET') {
         const limit = Number(url.searchParams.get('limit') || '50')
         const after = url.searchParams.get('after')
-        const matching = keys.filter((key) => key.memberID === segments[1])
+        const matching = keys.filter(
+          (key) =>
+            key.memberID === segments[1] &&
+            (url.searchParams.get('expiry') !== 'unexpired' ||
+              (key.status === 'ACTIVE' &&
+                !key.revokedAt &&
+                (!key.expiresAt || Date.parse(key.expiresAt) > Date.now()))),
+        )
         const items = matching
           .filter((key) => !after || BigInt(key.id) < BigInt(after))
           .sort((a, b) => (BigInt(a.id) > BigInt(b.id) ? -1 : 1))
@@ -878,7 +1481,12 @@ async function fixture(page: Page) {
     models,
     providers,
     providerMappings,
+    credentialPrices,
+    setPriceEndpointUnavailable(value: boolean) {
+      priceEndpointUnavailable = value
+    },
     providerInputs,
+    providerActivationInputs,
     groups,
     resources,
     keys,
@@ -888,6 +1496,7 @@ async function fixture(page: Page) {
     providerQueries,
     memberListQueries,
     memberSuggestionQueries,
+    applicationSuggestionQueries,
     usageQueries,
     statisticQueries,
     modelSyncRequests,
@@ -915,6 +1524,175 @@ async function signIn(page: Page, destination: 'home' | 'members' = 'members') {
   await expect(page.getByRole('heading', { name: '用户管理', exact: true })).toBeVisible()
 }
 const modal = (page: Page) => page.locator('dialog').last()
+test('应用管理签发仅展示一次的 App Key', async ({ page }) => {
+  const state = await fixture(page)
+  state.groups.push({
+    id: '51',
+    code: 'engineering',
+    name: '研发组',
+    status: 'ACTIVE',
+    createdAt: stamp,
+  })
+  const applications: any[] = []
+  await page.route('**/api/v1/applications**', async (route) => {
+    const request = route.request()
+    const url = new URL(request.url())
+    const path = url.pathname.replace('/api/v1', '')
+    const reply = (data: unknown, status = 200) =>
+      route.fulfill({
+        status,
+        contentType: 'application/json',
+        body: JSON.stringify({ code: 'OK', data }),
+      })
+    if (path === '/applications' && request.method() === 'GET')
+      return reply({ items: applications, total: applications.length, nextCursor: null })
+    if (path === '/applications' && request.method() === 'POST') {
+      const input = request.postDataJSON()
+      const created = {
+        id: '71',
+        name: input.name,
+        remark: input.remark,
+        status: 'DISABLED',
+        createdAt: stamp,
+      }
+      applications.push(created)
+      return reply(created, 201)
+    }
+    if (path === '/applications/71/keys' && request.method() === 'POST')
+      return reply(
+        {
+          id: '81',
+          key: 'ak-once-only-secret',
+          maskedKey: 'ak-******',
+          name: request.postDataJSON().name,
+          expiresAt: null,
+        },
+        201,
+      )
+    if (path === '/applications/71/keys' && request.method() === 'GET') {
+      const keys = [
+        {
+          id: '82',
+          name: '已过期',
+          maskedKey: 'ak-expired******',
+          status: 'ACTIVE',
+          expiresAt: '2020-01-01T00:00:00Z',
+          revokedAt: null,
+          createdAt: stamp,
+        },
+        {
+          id: '81',
+          name: '生产调用',
+          maskedKey: 'ak-active******',
+          status: 'ACTIVE',
+          expiresAt: null,
+          revokedAt: null,
+          createdAt: stamp,
+        },
+        {
+          id: '80',
+          name: '已撤销',
+          maskedKey: 'ak-revoked******',
+          status: 'REVOKED',
+          expiresAt: null,
+          revokedAt: '2026-09-20T09:12:26Z',
+          createdAt: stamp,
+        },
+      ]
+      const items = url.searchParams.get('expiry') === 'unexpired' ? keys.slice(1, 2) : keys
+      return reply({ items, total: items.length, nextCursor: null })
+    }
+    return reply(null, 404)
+  })
+
+  await signIn(page, 'home')
+  const memberNavigation = page.getByRole('link', { name: '用户管理', exact: true })
+  const applicationNavigation = page.getByRole('link', { name: '应用管理', exact: true })
+  await expect(memberNavigation).toBeVisible()
+  await expect(applicationNavigation).toBeVisible()
+  await applicationNavigation.click()
+  await expect(page).toHaveURL(/#\/applications$/)
+  await expect(applicationNavigation).toHaveClass(/router-link-active/)
+  await expect(memberNavigation).not.toHaveClass(/router-link-active/)
+  await expect(page.getByRole('tab', { name: '应用管理' })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: '应用管理', exact: true })).toBeVisible()
+  await expect(page.getByRole('columnheader').first()).toHaveText('ID')
+  await page.getByRole('button', { name: '创建应用' }).click()
+  const dialog = modal(page)
+  await dialog.getByLabel('应用名称').fill('自动化服务')
+  await dialog.getByRole('checkbox', { name: '选择分组 研发组' }).check()
+  await dialog.getByRole('button', { name: '创建', exact: true }).click()
+  const row = page.getByRole('row').filter({ hasText: '自动化服务' })
+  await expect(row).toBeVisible()
+  await row.hover()
+  await expect(row.getByRole('cell').first()).toHaveCSS('background-color', 'rgb(248, 250, 252)')
+  await expect(row.getByRole('cell').last()).toHaveCSS('background-color', 'rgb(248, 250, 252)')
+  const applicationMoreActions = row.locator('summary')
+  await expect(applicationMoreActions).toHaveAttribute('aria-label', '自动化服务 的更多操作')
+  await expect(applicationMoreActions).toHaveText('⋮')
+  await expect(row.getByRole('button', { name: '增加配额', exact: true })).toBeHidden()
+  const tableScroll = page.locator('.table-scroll').first()
+  const scrollHeightBeforeMenu = await tableScroll.evaluate((element) => element.scrollHeight)
+  await applicationMoreActions.click()
+  const quotaAction = row.getByRole('button', { name: '增加配额', exact: true })
+  const deleteAction = row.getByRole('button', { name: '删除', exact: true })
+  await expect(quotaAction).toBeVisible()
+  await expect(deleteAction).toBeVisible()
+  const menuBox = (await row.locator('.row-action-more-menu').boundingBox())!
+  const quotaActionBox = (await quotaAction.boundingBox())!
+  const deleteActionBox = (await deleteAction.boundingBox())!
+  expect(deleteActionBox.y).toBeGreaterThan(quotaActionBox.y)
+  expect(quotaActionBox.x).toBeGreaterThanOrEqual(menuBox.x)
+  expect(deleteActionBox.x + deleteActionBox.width).toBeLessThanOrEqual(menuBox.x + menuBox.width)
+  expect(await tableScroll.evaluate((element) => element.scrollHeight)).toBe(scrollHeightBeforeMenu)
+  await applicationMoreActions.press('Escape')
+  await expect(row.getByRole('button', { name: '增加配额', exact: true })).toBeHidden()
+  await expect(row.getByRole('cell').first().locator('code')).toHaveText('71')
+  await expect(row.getByRole('cell').first().locator('.technical-value-copy')).toHaveCount(0)
+  await mkdir('../.cache/web-visual', { recursive: true })
+  await page.screenshot({
+    path: '../.cache/web-visual/application-id-first.png',
+    animations: 'disabled',
+  })
+  await expect(row.getByRole('link', { name: '审计记录' })).toHaveCount(0)
+  await row.getByRole('button', { name: 'App Key', exact: true }).click()
+  await modal(page).getByLabel('Key 名称').fill('生产调用')
+  await modal(page).getByRole('button', { name: '签发 App Key' }).click()
+  await expect(modal(page).getByRole('textbox', { name: '完整 App Key 仅展示这一次' })).toHaveValue(
+    'ak-once-only-secret',
+  )
+  await modal(page).getByRole('button', { name: '我已保存，关闭' }).click()
+  await expect(page.getByText('ak-once-only-secret')).toHaveCount(0)
+  await row.getByRole('button', { name: '查看 App Key 记录' }).click()
+  const expiryFilter = modal(page).getByRole('combobox', { name: '查看范围' })
+  await expect(expiryFilter).toHaveValue('unexpired')
+  await expect(modal(page).locator('tbody tr td:first-child')).toHaveText(['生产调用'])
+  await expiryFilter.selectOption('all')
+  await expect(modal(page).locator('tbody tr td:first-child')).toHaveText([
+    '已过期',
+    '生产调用',
+    '已撤销',
+  ])
+  await expect(
+    modal(page).getByRole('row').filter({ hasText: '已撤销' }).locator('td').nth(2),
+  ).toHaveText('2026年9月20日')
+  await expect(
+    modal(page).getByRole('row').filter({ hasText: '已撤销' }).locator('td').nth(3),
+  ).toHaveText('-')
+  await modal(page).getByRole('button', { name: '关闭' }).click()
+  await memberNavigation.click()
+  await expect(page).toHaveURL(/#\/members$/)
+  await expect(page.getByRole('heading', { name: '用户管理', exact: true })).toBeVisible()
+  await page.goto('/#/applications')
+  await expect(applicationNavigation).toHaveClass(/router-link-active/)
+  await expect(page.getByRole('row').filter({ hasText: '自动化服务' })).toBeVisible()
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.locator('.workspace')).toHaveCSS('margin-left', '0px')
+  await page.getByRole('button', { name: '打开导航' }).click()
+  await expect(memberNavigation).toBeVisible()
+  await expect(applicationNavigation).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+})
 test('仪表盘初始化向导依次高亮配置入口', async ({ page }) => {
   await fixture(page)
   await signIn(page, 'home')
@@ -1170,6 +1948,45 @@ test('首页展示本月指标、应用接入、配置脚本和分项排行榜',
   await page.screenshot({ path: '../.cache/web-visual/home-setup-mobile.png', fullPage: true })
 })
 
+test('没有当前模型服务商时隐藏整个区块', async ({ page }) => {
+  const state = await fixture(page)
+  state.activeModelRows.splice(0)
+  const activeModelsResponse = page.waitForResponse((response) =>
+    new URL(response.url()).pathname.endsWith('/gateway/active-models'),
+  )
+  await signIn(page, 'home')
+  await activeModelsResponse
+
+  await expect(page.getByRole('region', { name: '当前模型服务商' })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: '用户 Token 消耗排行' })).toBeVisible()
+})
+
+test('当前模型服务商加载失败时提示并允许重试', async ({ page }) => {
+  await fixture(page)
+  let attempts = 0
+  await page.route('**/api/v1/gateway/active-models', async (route) => {
+    attempts++
+    await route.fulfill({
+      status: attempts === 1 ? 503 : 200,
+      json: {
+        code: attempts === 1 ? 'UNAVAILABLE' : 'OK',
+        data:
+          attempts === 1
+            ? null
+            : [{ modelCode: 'test-model', modelName: '测试模型', providerName: '测试服务商' }],
+      },
+    })
+  })
+  await signIn(page, 'home')
+  const alert = page.getByRole('alert').filter({ hasText: '当前模型服务商' })
+  await expect(alert).toBeVisible()
+  await expect(page.getByRole('region', { name: '当前模型服务商' })).toHaveCount(0)
+  await alert.getByRole('button', { name: '重试' }).click()
+  await expect(page.getByRole('region', { name: '当前模型服务商' })).toContainText('测试模型')
+  await expect(alert).toHaveCount(0)
+  expect(attempts).toBe(2)
+})
+
 test('当前模型服务商在大量记录时限制卡片高度并内部滚动', async ({ page }) => {
   const state = await fixture(page)
   state.activeModelRows.splice(
@@ -1202,6 +2019,251 @@ test('当前模型服务商在大量记录时限制卡片高度并内部滚动',
   expect(dimensions.clientHeight).toBeLessThanOrEqual(280)
   expect(dimensions.scrollHeight).toBeGreaterThan(dimensions.clientHeight)
   await page.screenshot({ path: '../.cache/web-visual/home-active-models-100.png', fullPage: true })
+})
+
+test('凭证内可按生效时间保留 API Key 单价历史并修改订阅费用', async ({ page }) => {
+  const state = await fixture(page)
+  state.resources.push(
+    {
+      id: '88',
+      providerId: '81',
+      name: 'DeepSeek API Key',
+      authType: 'API_KEY',
+      authAdapter: 'API_KEY',
+      runtimeStatus: 'HEALTHY',
+      credentialConfigured: true,
+      createdAt: stamp,
+      updatedAt: stamp,
+    },
+    {
+      id: '89',
+      providerId: '81',
+      name: 'DeepSeek 订阅',
+      authType: 'SUBSCRIPTION',
+      authAdapter: 'OPENAI_CODEX',
+      runtimeStatus: 'HEALTHY',
+      credentialConfigured: true,
+      createdAt: stamp,
+      updatedAt: stamp,
+    },
+  )
+  await signIn(page)
+  await page.getByRole('link', { name: '服务商', exact: true }).click()
+  await page.getByRole('button', { name: '管理 DeepSeek 的认证凭据' }).click()
+  await modal(page)
+    .getByRole('row')
+    .filter({ hasText: 'DeepSeek API Key' })
+    .getByRole('button', { name: '计费设置' })
+    .click()
+  await expect(modal(page).getByRole('heading', { name: '凭证计费设置' })).toBeVisible()
+  await modal(page).getByRole('button', { name: '配置价格' }).click()
+  let priceDialog = page.getByRole('dialog', { name: '新增 DeepSeek V4 Flash 的价格' })
+  await expect(priceDialog).toBeVisible()
+  await priceDialog.getByRole('button', { name: '取消' }).click()
+  await expect(priceDialog).toBeHidden()
+  await expect(modal(page).getByRole('heading', { name: '凭证计费设置' })).toBeVisible()
+  await modal(page).getByRole('button', { name: '配置价格' }).click()
+  priceDialog = page.getByRole('dialog', { name: '新增 DeepSeek V4 Flash 的价格' })
+  await expect(priceDialog.getByLabel('币种')).toHaveValue('')
+  await expect(priceDialog.getByRole('textbox', { name: '普通输入' })).toHaveValue('')
+  await expect(priceDialog.getByRole('textbox', { name: '输出' })).toHaveValue('')
+  await expect(priceDialog.getByRole('textbox', { name: '缓存输入' })).toHaveValue('')
+  await expect(priceDialog.getByLabel('生效日期（UTC）')).toHaveValue('')
+  await priceDialog.getByLabel('币种').selectOption('CNY')
+  await priceDialog.getByRole('textbox', { name: '普通输入' }).fill('1.25')
+  await priceDialog.getByRole('textbox', { name: '输出' }).fill('2.5')
+  await priceDialog.getByRole('textbox', { name: '缓存输入' }).fill('0.5')
+  await priceDialog.getByLabel('生效日期（UTC）').fill('2026-09-20')
+  await priceDialog.getByRole('button', { name: '保存' }).click()
+  await expect(priceDialog).toBeHidden()
+  await expect(modal(page)).toContainText('¥ 1.25 / 2.5 / 0.5')
+  await modal(page).getByRole('button', { name: '新增价格' }).click()
+  priceDialog = page.getByRole('dialog', { name: '新增 DeepSeek V4 Flash 的价格' })
+  await expect(priceDialog.getByLabel('币种')).toHaveValue('')
+  await expect(priceDialog.getByRole('textbox', { name: '普通输入' })).toHaveValue('')
+  await expect(priceDialog.getByRole('textbox', { name: '输出' })).toHaveValue('')
+  await expect(priceDialog.getByRole('textbox', { name: '缓存输入' })).toHaveValue('')
+  await expect(priceDialog.getByLabel('生效日期（UTC）')).toHaveValue('')
+  await priceDialog.getByLabel('币种').selectOption('CNY')
+  await priceDialog.getByRole('textbox', { name: '普通输入' }).fill('1.25')
+  await priceDialog.getByRole('textbox', { name: '输出' }).fill('3')
+  await priceDialog.getByRole('textbox', { name: '缓存输入' }).fill('0.5')
+  await priceDialog.getByLabel('生效日期（UTC）').fill('2026-10-02')
+  await priceDialog.getByRole('button', { name: '保存' }).click()
+  expect(state.credentialPrices.get('88')?.modelPrices[0].outputPrice).toBe('3')
+  expect(state.credentialPrices.get('88')?.modelPrices).toHaveLength(2)
+  await expect(modal(page).getByLabel('价格历史').locator('.price-history-item')).toHaveCount(2)
+  await expect(modal(page).getByText('未配置', { exact: true })).toHaveCount(0)
+  await expect(modal(page).getByLabel('价格历史')).not.toContainText('08:00')
+  await expect(modal(page).getByText('¥ 1.25 / 2.5 / 0.5', { exact: true })).toBeVisible()
+  const olderPrice = modal(page).getByLabel('价格历史').locator('.price-history-item').nth(1)
+  await olderPrice.getByRole('button', { name: '修改' }).click()
+  priceDialog = page.getByRole('dialog', { name: '修改 DeepSeek V4 Flash 的价格' })
+  await expect(priceDialog).toBeVisible()
+  await priceDialog.getByRole('textbox', { name: '输出' }).fill('2.75')
+  await priceDialog.getByRole('button', { name: '保存' }).click()
+  await expect(modal(page).getByText('¥ 1.25 / 2.75 / 0.5', { exact: true })).toBeVisible()
+  await modal(page)
+    .getByLabel('价格历史')
+    .locator('.price-history-item')
+    .nth(1)
+    .getByRole('button', { name: '删除' })
+    .click()
+  await page.getByRole('dialog', { name: '删除价格' }).getByRole('button', { name: '删除' }).click()
+  await expect(modal(page).getByLabel('价格历史').locator('.price-history-item')).toHaveCount(1)
+
+  await modal(page).getByRole('button', { name: '返回凭证' }).click()
+  await modal(page)
+    .getByRole('row')
+    .filter({ hasText: 'DeepSeek 订阅' })
+    .getByRole('button', { name: '计费设置' })
+    .click()
+  await expect(modal(page).getByText('价格列表', { exact: true })).toBeVisible()
+  await expect(modal(page).locator('.price-subscription-empty')).toHaveText('-')
+  await modal(page).getByRole('button', { name: '配置订阅费用' }).click()
+  let subscriptionDialog = page.getByRole('dialog', { name: '新增「DeepSeek 订阅」的订阅费用' })
+  await expect(subscriptionDialog).toBeVisible()
+  await subscriptionDialog.getByRole('button', { name: '取消' }).click()
+  await expect(subscriptionDialog).toBeHidden()
+  await modal(page).getByRole('button', { name: '配置订阅费用' }).click()
+  subscriptionDialog = page.getByRole('dialog', { name: '新增「DeepSeek 订阅」的订阅费用' })
+  await expect(subscriptionDialog.getByLabel('计费周期起始日（UTC）')).toHaveCount(0)
+  await expect(subscriptionDialog.getByLabel('币种')).toHaveValue('')
+  await expect(subscriptionDialog.getByRole('textbox', { name: '周期费用' })).toHaveValue('')
+  await expect(subscriptionDialog.getByLabel('计费周期')).toHaveValue('')
+  await expect(subscriptionDialog.getByLabel('生效日期（UTC）')).toHaveValue('')
+  await subscriptionDialog.getByLabel('币种').selectOption('CNY')
+  await subscriptionDialog.getByRole('textbox', { name: '周期费用' }).fill('100')
+  await subscriptionDialog.getByLabel('计费周期').selectOption('MONTH')
+  await subscriptionDialog.getByLabel('生效日期（UTC）').fill('2026-09-20')
+  await subscriptionDialog.getByRole('button', { name: '保存' }).click()
+  await expect(subscriptionDialog).toBeHidden()
+  expect(state.credentialPrices.get('89')?.subscriptionPrice.periodAmount).toBe('100')
+  await modal(page).getByRole('button', { name: '新增价格' }).click()
+  subscriptionDialog = page.getByRole('dialog', { name: '新增「DeepSeek 订阅」的订阅费用' })
+  await expect(subscriptionDialog.getByLabel('币种')).toHaveValue('')
+  await expect(subscriptionDialog.getByRole('textbox', { name: '周期费用' })).toHaveValue('')
+  await expect(subscriptionDialog.getByLabel('计费周期')).toHaveValue('')
+  await expect(subscriptionDialog.getByLabel('生效日期（UTC）')).toHaveValue('')
+  await subscriptionDialog.getByLabel('币种').selectOption('CNY')
+  await subscriptionDialog.getByRole('textbox', { name: '周期费用' }).fill('100')
+  await subscriptionDialog.getByLabel('计费周期').selectOption('MONTH')
+  await subscriptionDialog.getByLabel('生效日期（UTC）').fill('2026-09-20')
+  await subscriptionDialog.getByRole('button', { name: '保存' }).click()
+  await expect(subscriptionDialog.getByRole('alert')).toHaveText(
+    '该生效日期已存在，请选择其他日期。',
+  )
+  expect(state.credentialPrices.get('89')?.subscriptionPrices).toHaveLength(1)
+  await subscriptionDialog.getByRole('textbox', { name: '周期费用' }).fill('120')
+  await subscriptionDialog.getByLabel('生效日期（UTC）').fill('2026-10-02')
+  await subscriptionDialog.getByRole('button', { name: '保存' }).click()
+  expect(state.credentialPrices.get('89')?.subscriptionPrices).toHaveLength(2)
+  const subscriptionHistory = modal(page).getByLabel('价格历史')
+  await expect(subscriptionHistory.locator('.price-history-item')).toHaveCount(2)
+  const olderSubscriptionPrice = subscriptionHistory.locator('.price-history-item').nth(1)
+  await olderSubscriptionPrice.getByRole('button', { name: '修改' }).click()
+  subscriptionDialog = page.getByRole('dialog', { name: '修改「DeepSeek 订阅」的订阅费用' })
+  await expect(subscriptionDialog.getByRole('textbox', { name: '周期费用' })).toHaveValue('100')
+  await subscriptionDialog.getByRole('textbox', { name: '周期费用' }).fill('110')
+  await subscriptionDialog.getByLabel('生效日期（UTC）').fill('2026-10-02')
+  await subscriptionDialog.getByRole('button', { name: '保存' }).click()
+  await expect(subscriptionDialog.getByRole('alert')).toHaveText(
+    '该生效日期已存在，请选择其他日期。',
+  )
+  await subscriptionDialog.getByLabel('生效日期（UTC）').fill('2026-09-20')
+  await subscriptionDialog.getByRole('button', { name: '保存' }).click()
+  expect(state.credentialPrices.get('89')?.subscriptionPrice.periodAmount).toBe('120')
+  await subscriptionHistory
+    .locator('.price-history-item')
+    .nth(1)
+    .getByRole('button', { name: '删除' })
+    .click()
+  await page
+    .getByRole('dialog', { name: '删除订阅费用' })
+    .getByRole('button', { name: '删除' })
+    .click()
+  await expect(subscriptionHistory.locator('.price-history-item')).toHaveCount(1)
+  await modal(page).getByRole('button', { name: '返回凭证' }).click()
+  const subscriptionRow = modal(page).getByRole('row').filter({ hasText: 'DeepSeek 订阅' })
+  await expect(subscriptionRow).toContainText('当前订阅费用 · ¥120 / 月')
+  await expect(subscriptionRow).toContainText('生效日期（UTC） · 2026-10-02')
+})
+
+test('价格接口未更新时不误报模型映射缺失', async ({ page }) => {
+  const state = await fixture(page)
+  state.setPriceEndpointUnavailable(true)
+  state.resources.push({
+    id: '88',
+    providerId: '81',
+    name: 'DeepSeek API Key',
+    authType: 'API_KEY',
+    authAdapter: 'API_KEY',
+    runtimeStatus: 'HEALTHY',
+    credentialConfigured: true,
+    createdAt: stamp,
+    updatedAt: stamp,
+  })
+  await signIn(page)
+  await page.getByRole('link', { name: '服务商', exact: true }).click()
+  await page.getByRole('button', { name: '管理 DeepSeek 的认证凭据' }).click()
+  await modal(page)
+    .getByRole('row')
+    .filter({ hasText: 'DeepSeek API Key' })
+    .getByRole('button', { name: '计费设置' })
+    .click()
+
+  await expect(modal(page)).toContainText('凭证仍然存在，但价格接口不可用')
+  await expect(modal(page)).toContainText('DeepSeek V4 Flash')
+  await expect(modal(page)).not.toContainText('该服务商尚未配置模型映射')
+  await expect(modal(page).getByRole('button', { name: '配置价格' })).toBeDisabled()
+})
+
+test('价格历史较多时默认折叠并可独立展开', async ({ page }) => {
+  const state = await fixture(page)
+  state.resources.push({
+    id: '88',
+    providerId: '81',
+    name: 'DeepSeek API Key',
+    authType: 'API_KEY',
+    authAdapter: 'API_KEY',
+    runtimeStatus: 'HEALTHY',
+    credentialConfigured: true,
+    createdAt: stamp,
+    updatedAt: stamp,
+  })
+  state.credentialPrices.set('88', {
+    modelPrices: Array.from({ length: 6 }, (_, index) => ({
+      id: String(900 + index),
+      providerCredentialId: '88',
+      providerModelId: '92',
+      currency: 'CNY',
+      inputPrice: '5',
+      outputPrice: '4',
+      cachedInputPrice: String(index + 1),
+      effectiveAt: `2026-09-${String(index + 1).padStart(2, '0')}T00:00:00Z`,
+      createdAt: stamp,
+    })),
+    subscriptionPrices: [],
+    subscriptionPrice: null,
+  })
+  await signIn(page)
+  await page.getByRole('link', { name: '服务商', exact: true }).click()
+  await page.getByRole('button', { name: '管理 DeepSeek 的认证凭据' }).click()
+  await modal(page)
+    .getByRole('row')
+    .filter({ hasText: 'DeepSeek API Key' })
+    .getByRole('button', { name: '计费设置' })
+    .click()
+
+  await expect(modal(page).getByLabel('价格历史')).toHaveCount(0)
+  await modal(page).getByRole('button', { name: '展开 DeepSeek V4 Flash 的价格' }).click()
+  const history = modal(page).getByLabel('价格历史')
+  await expect(history.locator('.price-history-item')).toHaveCount(3)
+  await modal(page).getByRole('button', { name: '查看全部 6 条价格' }).click()
+  await expect(history.locator('.price-history-item')).toHaveCount(6)
+  await expect(history).toHaveCSS('max-height', '320px')
+  await modal(page).getByRole('button', { name: '收起价格历史' }).click()
+  await expect(history.locator('.price-history-item')).toHaveCount(3)
 })
 
 test('首页在启用服务商不可用时提醒管理员', async ({ page }) => {
@@ -1399,12 +2461,37 @@ test('成员列表按需查看 Key 并处理删除和失败恢复', async ({ pag
       revokedAt: null,
       createdAt: '2019-02-01T00:00:00Z',
     },
+    {
+      id: '803',
+      memberID: longID,
+      name: '已撤销的 Key',
+      maskedKey: 'vk-revoked********1234',
+      status: 'REVOKED',
+      expiresAt: null,
+      revokedAt: '2026-09-20T09:12:26Z',
+      createdAt: '2019-03-01T00:00:00Z',
+    },
   )
   await signIn(page)
   const row = page.getByRole('row').filter({ hasText: '林知远' })
+  await expect(page.getByRole('columnheader').first()).toHaveText('ID')
   await expect(page.getByRole('button', { name: '管理 Key' })).toHaveCount(0)
   await expect(page.getByRole('columnheader', { name: '访问密钥', exact: true })).toHaveCount(0)
-  await expect(row.locator('code')).toHaveCount(0)
+  await expect(row.getByRole('cell').first().locator('code')).toHaveText(longID)
+  await expect(row.getByRole('cell').first().locator('.technical-value-copy')).toHaveCount(0)
+  expect(
+    await row
+      .getByRole('cell')
+      .first()
+      .locator('code')
+      .evaluate((element) => {
+        return element.scrollWidth > element.clientWidth
+      }),
+  ).toBe(true)
+  await expect(row.getByRole('cell').first().locator('.technical-value')).toHaveAttribute(
+    'title',
+    longID,
+  )
   await expect(row).not.toContainText('vk-work1234')
   await expect(row).not.toContainText('zt_vk_temp')
   await expect(row.getByText('工作站', { exact: true })).toHaveCount(0)
@@ -1417,30 +2504,58 @@ test('成员列表按需查看 Key 并处理删除和失败恢复', async ({ pag
   await viewKeys.click()
   await expect(modal(page)).toHaveAccessibleName('林知远的 Key 记录')
   await expect(modal(page)).toContainText('完整 Key 仅在分配成功时展示一次')
+  const expiryFilter = modal(page).getByRole('combobox', { name: '查看范围' })
+  await expect(expiryFilter).toHaveValue('unexpired')
+  await expect(modal(page).locator('tbody tr td:first-child')).toHaveText(['工作站'])
+  await expiryFilter.selectOption('all')
+  await expect(modal(page).locator('tbody tr td:first-child')).toHaveText([
+    '已撤销的 Key',
+    '临时测试',
+    '工作站',
+  ])
   await expect(modal(page).getByRole('columnheader')).toHaveText([
     '显示名称',
     '访问密钥',
     '过期日期',
     '操作',
   ])
-  await expect(modal(page).locator('tbody tr td:first-child')).toHaveText(['临时测试', '工作站'])
+  await expect(modal(page).getByRole('columnheader', { name: '操作' })).toHaveCSS(
+    'text-align',
+    'center',
+  )
+  const actionCenters = await modal(page)
+    .locator('tbody tr td:last-child > *')
+    .evaluateAll((elements) =>
+      elements.map((element) => {
+        const bounds = element.getBoundingClientRect()
+        return bounds.left + bounds.width / 2
+      }),
+    )
+  expect(Math.max(...actionCenters) - Math.min(...actionCenters)).toBeLessThan(2)
   await expect(modal(page).locator('code')).toHaveText([
+    'vk-revoked********1234',
     'zt_vk_temp********temp',
     'vk-work1234********1234',
   ])
   const maskedKey = modal(page).getByRole('row').filter({ hasText: '工作站' })
   await expect(maskedKey.getByRole('button', { name: '复制', exact: true })).toHaveCount(0)
-  await expect(modal(page)).toContainText('长期有效')
+  await expect(maskedKey.locator('td').nth(2)).toHaveText('长期有效')
   await expect(modal(page)).toContainText('2020年1月1日')
-  await expect(modal(page).locator('tbody tr').first().locator('td').nth(2)).toHaveText(
-    '2020年1月1日',
-  )
+  await expect(
+    modal(page).getByRole('row').filter({ hasText: '临时测试' }).locator('td').nth(2),
+  ).toHaveText('2020年1月1日')
+  await expect(
+    modal(page).getByRole('row').filter({ hasText: '已撤销的 Key' }).locator('td').nth(2),
+  ).toHaveText('2026年9月20日')
   await expect(
     modal(page)
       .getByRole('row')
       .filter({ hasText: '临时测试' })
       .getByRole('button', { name: '撤销' }),
   ).toHaveCount(0)
+  await expect(
+    modal(page).getByRole('row').filter({ hasText: '临时测试' }).locator('td').nth(3),
+  ).toHaveText('-')
   const historyDialog = page.getByRole('dialog', { name: '林知远的 Key 记录', exact: true })
   const historyRevoke = historyDialog
     .getByRole('row')
@@ -1462,7 +2577,7 @@ test('成员列表按需查看 Key 并处理删除和失败恢复', async ({ pag
   await expect(page.locator('.toast-success')).toContainText('Key 已撤销')
   await expect(historyDialog.locator('.notice')).toHaveCount(0)
   await expect(historyRevoke).toHaveCount(0)
-  await expect(maskedKey).not.toContainText('长期有效')
+  await expect(maskedKey.locator('td').nth(3)).toHaveText('-')
   expect(state.keys[0].status).toBe('REVOKED')
   expect(state.keys[1].status).toBe('ACTIVE')
   await mkdir('../.cache/web-visual', { recursive: true })
@@ -1502,10 +2617,10 @@ test('成员列表按需查看 Key 并处理删除和失败恢复', async ({ pag
   await modal(page).getByRole('button', { name: '我已保存，关闭' }).click()
   await expect(page.locator('dialog')).toHaveCount(0)
   await expect(row).not.toContainText('vk-fixture1')
-  await expect(row.locator('code')).toHaveCount(0)
+  await expect(row.getByRole('cell').first().locator('code')).toHaveText(longID)
   await expect(row).not.toContainText('zt_vk_temp')
   await expect(row).not.toContainText('2020年1月1日')
-  expect(state.keys).toHaveLength(3)
+  expect(state.keys).toHaveLength(4)
   await expect(row).not.toContainText('2099年12月31日')
   expect(
     await page.evaluate((value) => {
@@ -1523,9 +2638,11 @@ test('成员列表按需查看 Key 并处理删除和失败恢复', async ({ pag
   ).toEqual([2099, 12, 31, 23, 59, 59, 999])
   await mkdir('../.cache/web-visual', { recursive: true })
   await page.screenshot({ path: '../.cache/web-visual/members-keys.png', fullPage: true })
+  await row.locator('summary').click()
   await row.getByRole('button', { name: '删除', exact: true }).click()
   await modal(page).getByRole('button', { name: '取消' }).click()
   expect(state.members).toHaveLength(3)
+  await row.locator('summary').click()
   await row.getByRole('button', { name: '删除', exact: true }).click()
   state.conflict(true)
   await modal(page).getByRole('button', { name: '删除', exact: true }).click()
@@ -1537,6 +2654,43 @@ test('成员列表按需查看 Key 并处理删除和失败恢复', async ({ pag
   await expect(page.locator('.toast-success')).toContainText('用户已删除')
   await expect(page.locator('.notice')).toHaveCount(0)
   expect(state.members).toHaveLength(2)
+})
+
+test('密钥在弹窗打开期间到期后刷新有效期内列表', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-10-09T08:00:00Z') })
+  await fixture(page)
+  let requests = 0
+  await page.route(`**/api/v1/members/${longID}/keys*`, async (route) => {
+    requests++
+    const items =
+      requests === 1
+        ? [
+            {
+              id: '801',
+              name: '即将过期',
+              maskedKey: 'vk-expiring********1234',
+              status: 'ACTIVE',
+              expiresAt: '2026-10-09T08:00:01Z',
+              revokedAt: null,
+              createdAt: stamp,
+            },
+          ]
+        : []
+    await route.fulfill({
+      json: { code: 'OK', data: { items, total: items.length, nextCursor: null } },
+    })
+  })
+  await signIn(page)
+  await page
+    .getByRole('row')
+    .filter({ hasText: '林知远' })
+    .getByRole('button', { name: '查看 Key 记录' })
+    .click()
+  await expect(modal(page).getByText('即将过期')).toBeVisible()
+  await page.clock.fastForward(2000)
+  await expect(modal(page).getByText('即将过期')).toHaveCount(0)
+  await expect(modal(page)).toContainText('没有有效的访问密钥。')
+  expect(requests).toBe(2)
 })
 
 test('成员列表不预查密钥且分配密钥后可激活', async ({ page }) => {
@@ -1560,6 +2714,61 @@ test('成员列表不预查密钥且分配密钥后可激活', async ({ page }) 
   await expect(modal(page)).toHaveCount(0)
   await expect(status).toHaveText('')
   expect(state.members.find((member) => member.name === '周予安')?.status).toBe('ACTIVE')
+})
+
+test('用户月度额度展示已用与剩余并支持增量调整和取消限制', async ({ page }) => {
+  const state = await fixture(page)
+  state.members[0].monthlyTokenLimit = '1000'
+  state.members[0].quotaUsedTokens = '600'
+  await signIn(page)
+
+  const row = page.getByRole('row').filter({ hasText: '林知远' })
+  const quotaCell = row.getByRole('cell').nth(3)
+  await expect(quotaCell).toContainText(/600\s*\/\s*1,000/)
+  await expect(quotaCell).toContainText('剩余 400')
+
+  const moreActions = row.locator('summary')
+  await expect(moreActions).toHaveAttribute('aria-label', '林知远 的更多操作')
+  await expect(row.getByRole('button', { name: '增加配额', exact: true })).toBeHidden()
+  await moreActions.click()
+  const otherRow = page.getByRole('row').filter({ hasText: '陈清和' })
+  await otherRow.locator('summary').click()
+  await expect(row.locator('.row-action-more-menu')).toBeHidden()
+  await expect(otherRow.locator('.row-action-more-menu')).toBeVisible()
+  await expect(page.locator('.row-action-more-menu:popover-open')).toHaveCount(1)
+  await moreActions.click()
+  await row.getByRole('button', { name: '增加配额', exact: true }).click()
+  const quotaDialog = modal(page)
+  await expect(quotaDialog.getByRole('group', { name: '常用额度' }).getByRole('button')).toHaveText(
+    ['100 万', '1000 万', '1 亿'],
+  )
+  await quotaDialog.getByRole('button', { name: '1 亿', exact: true }).click()
+  await expect(quotaDialog.getByLabel('增加 Token 数')).toHaveValue('100000000')
+  await expect(quotaDialog.getByText('约 1亿 Token', { exact: true })).toBeVisible()
+  await quotaDialog.getByLabel('增加 Token 数').fill('10000000')
+  await expect(quotaDialog.getByText('约 1000万 Token', { exact: true })).toBeVisible()
+  await quotaDialog.getByLabel('增加 Token 数').fill('500')
+  await expect(quotaDialog.getByLabel('调整原因（选填）')).toHaveAttribute(
+    'placeholder',
+    '例如：项目扩容',
+  )
+  await modal(page).getByRole('button', { name: '增加配额', exact: true }).click()
+
+  await expect(page.locator('.toast-success')).toContainText('配额已增加')
+  await expect(modal(page)).toHaveCount(0)
+  await expect(quotaCell).toContainText(/600\s*\/\s*1,500/)
+  await expect(quotaCell).toContainText('剩余 900')
+  expect(state.members[0].monthlyTokenLimit).toBe('1500')
+
+  await moreActions.click()
+  await row.getByRole('button', { name: '取消额度限制', exact: true }).click()
+  await expect(modal(page)).toContainText('取消后将不再按月度 Token 用量拒绝请求')
+  await modal(page).getByRole('button', { name: '取消额度限制', exact: true }).click()
+
+  await expect(page.locator('.toast-success')).toContainText('额度限制已取消')
+  await expect(modal(page)).toHaveCount(0)
+  await expect(quotaCell).toHaveText('-')
+  expect(state.members[0].monthlyTokenLimit).toBeNull()
 })
 
 test('成员 Key 弹层加载失败可重试', async ({ page }) => {
@@ -1648,6 +2857,7 @@ test('模型新增编辑、模态校验、冲突恢复和窄屏表单', async ({
   await page.getByRole('link', { name: '模型', exact: true }).click()
   await expect.poll(() => state.providerQueries.at(-1)?.get('type')).toBe('OFFICIAL')
   await expect(page.getByRole('columnheader')).toHaveText([
+    'ID',
     '模型名称',
     '模型厂商',
     '启用状态',
@@ -1659,8 +2869,12 @@ test('模型新增编辑、模态校验、冲突恢复和窄屏表单', async ({
   const existingModelRow = page.getByRole('row').filter({ hasText: 'DeepSeek V4 Flash' })
   await expect(existingModelRow.locator('.person strong')).toHaveText('DeepSeek V4 Flash')
   await expect(existingModelRow.locator('.person small')).toHaveText('deepseek-v4-flash')
-  await expect(existingModelRow.getByRole('cell')).toHaveCount(7)
-  await expect(existingModelRow.getByRole('cell').nth(1)).toHaveText('DeepSeek')
+  await expect(existingModelRow.getByRole('cell')).toHaveCount(8)
+  await expect(existingModelRow.getByRole('cell').first().locator('code')).toHaveText('71')
+  await expect(
+    existingModelRow.getByRole('cell').first().locator('.technical-value-copy'),
+  ).toHaveCount(0)
+  await expect(existingModelRow.getByRole('cell').nth(2)).toHaveText('DeepSeek')
   const publisherFilter = page.getByRole('combobox', { name: '模型厂商', exact: true })
   await expect(publisherFilter.locator('..')).toHaveCSS('flex-direction', 'row')
   await expect(publisherFilter.locator('option')).toHaveText(['全部', 'DeepSeek'])
@@ -1713,7 +2927,7 @@ test('模型新增编辑、模态校验、冲突恢复和窄屏表单', async ({
   expect(created.status).toBe('DISABLED')
   expect(created.publisherProviderId).toBe('81')
   expect(created.publisherProviderName).toBe('DeepSeek')
-  await expect(row.getByRole('cell').nth(1)).toHaveText('DeepSeek')
+  await expect(row.getByRole('cell').nth(2)).toHaveText('DeepSeek')
   await row.getByRole('button', { name: '编辑', exact: true }).click()
   await expect(dialog.getByLabel('发布方编码', { exact: true })).toHaveCount(0)
   await expect(dialog.getByLabel('模型厂商', { exact: true })).toHaveValue('81')
@@ -1725,6 +2939,9 @@ test('模型新增编辑、模态校验、冲突恢复和窄屏表单', async ({
   await dialog.getByLabel('模型编码', { exact: true }).fill('official-test-v2')
   await expect(dialog.getByRole('status')).toContainText('客户端需要使用新编码')
   await dialog.getByRole('group', { name: '输出类型' }).getByLabel('音频', { exact: true }).check()
+  await page.setViewportSize({ width: 390, height: 480 })
+  await expectOnlyModalBodyScrolls(dialog)
+  await expect(dialog.locator('.modal-footer').getByRole('button', { name: '保存' })).toBeVisible()
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(dialog.getByRole('button', { name: '保存', exact: true })).toBeVisible()
   expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
@@ -1749,7 +2966,8 @@ test('模型新增编辑、模态校验、冲突恢复和窄屏表单', async ({
   await expect(page.getByRole('row').filter({ hasText: 'official-test-v2' })).toHaveCount(1)
   await page.screenshot({ path: '../.cache/web-visual/model-catalog-desktop.png' })
   const updatedRow = page.getByRole('row').filter({ hasText: 'official-test-v2' })
-  await expect(updatedRow.getByRole('cell').nth(1)).toHaveText('-')
+  await expect(updatedRow.getByRole('cell').nth(2)).toHaveText('-')
+  await updatedRow.locator('summary').click()
   await updatedRow.getByRole('button', { name: '删除', exact: true }).click()
   const deleteDialog = modal(page)
   await expect(deleteDialog).toContainText('相关服务商映射和分组授权将同时失效')
@@ -1764,6 +2982,9 @@ test('服务商同步入口只由后端能力参数控制', async ({ page }) => 
   await page.getByRole('link', { name: '服务商', exact: true }).click()
 
   const row = page.getByRole('row').filter({ hasText: 'DeepSeek' })
+  await expect(page.getByRole('columnheader').first()).toHaveText('ID')
+  await expect(row.getByRole('cell').first().locator('code')).toHaveText('81')
+  await expect(row.getByRole('cell').first().locator('.technical-value-copy')).toHaveCount(0)
   const syncModelsButton = row.getByRole('button', {
     name: '同步 DeepSeek 的官方模型',
     exact: true,
@@ -1968,6 +3189,8 @@ test('连接测试允许选择模型并显示实际测试模型', async ({ page 
 
   const selection = page.getByRole('dialog', { name: 'Google / 选择测试模型' })
   await expect(selection).toBeVisible()
+  await page.setViewportSize({ width: 390, height: 280 })
+  await expectOnlyModalBodyScrolls(selection)
   await expect(
     selection.getByRole('radio', { name: '使用 Gemini 3.6 Flash 测试连接' }),
   ).toBeChecked()
@@ -2035,6 +3258,7 @@ test('服务商启用开关分别提示缺少模型映射和认证凭据', async
     disabledProvider('84', '仅配置模型'),
     disabledProvider('85', '配置齐全'),
   )
+  state.providers.find((provider) => provider.id === '85')!.type = 'THIRD_PARTY'
   state.providerMappings.set('82', [])
   state.providerMappings.set('83', [])
   state.providerMappings.set('84', [
@@ -2094,7 +3318,30 @@ test('服务商启用开关分别提示缺少模型映射和认证凭据', async
   await expect(configuredRow.locator('.provider-runtime-state')).toHaveText('待启用')
   await expect(switchFor('配置齐全')).toBeEnabled()
   await switchFor('配置齐全').click()
+  const activation = page.getByRole('dialog', { name: '配置齐全 / 选择启用时验证的连接' })
+  await expect(activation).toBeVisible()
+  await page.setViewportSize({ width: 390, height: 420 })
+  await expectOnlyModalBodyScrolls(activation)
+  await expect(activation.getByRole('radio', { name: '使用 Anthropic 协议测试连接' })).toBeChecked()
+  await expect(
+    activation.getByRole('radio', { name: '使用 DeepSeek V4 Flash 测试连接' }),
+  ).toBeChecked()
+  await expect(switchFor('配置齐全')).not.toBeChecked()
+  await activation.getByRole('button', { name: '测试并启用' }).click()
+  await expect(page.getByRole('dialog', { name: '配置齐全 / 启用结果' })).toContainText(
+    '连接测试通过，服务商已启用',
+  )
+  expect(state.providerActivationInputs.at(-1)).toEqual({
+    resourceId: '90',
+    protocol: 'ANTHROPIC',
+    providerModelMappingId: '95',
+  })
   await expect(configuredRow.locator('.provider-runtime-state')).toHaveText('正常')
+  await page
+    .getByRole('dialog', { name: '配置齐全 / 启用结果' })
+    .getByRole('button', { name: '关闭', exact: true })
+    .last()
+    .click()
   const credentialOnlyRow = page.getByRole('row').filter({ hasText: '仅配置凭据' })
   await expect(credentialOnlyRow.locator('.provider-runtime-state')).toHaveText('未配置模型')
   await expect(credentialOnlyRow.locator('.provider-runtime-state')).toHaveAttribute(
@@ -2108,6 +3355,49 @@ test('服务商启用开关分别提示缺少模型映射和认证凭据', async
     'aria-selected',
     'true',
   )
+})
+
+test('启用服务商使用弹窗选定的协议，连接失败时保持停用', async ({ page }) => {
+  const state = await fixture(page)
+  state.providers[0].status = 'DISABLED'
+  state.models[1].publisherProviderId = '81'
+  state.providerMappings.get('81')!.push({
+    id: '93',
+    providerId: '81',
+    modelId: '72',
+    upstreamModelCode: 'alternate-model',
+    priority: 100,
+    createdAt: stamp,
+    updatedAt: stamp,
+  })
+  state.resources.push({
+    id: '88',
+    providerId: '81',
+    name: 'DeepSeek API Key',
+    authType: 'API_KEY',
+    authAdapter: 'API_KEY',
+    runtimeStatus: 'HEALTHY',
+    credentialConfigured: true,
+    createdAt: stamp,
+    updatedAt: stamp,
+  })
+  state.failTest()
+  await signIn(page, 'home')
+  await page.getByRole('link', { name: '服务商', exact: true }).click()
+  const status = page.getByRole('switch', { name: 'DeepSeek的启用状态' })
+  await status.click()
+  const selection = page.getByRole('dialog', { name: 'DeepSeek / 选择启用时验证的连接' })
+  await selection.getByRole('radio', { name: '使用 OpenAI 协议测试连接' }).check()
+  await selection.getByRole('radio', { name: '使用 Claude Sonnet 测试连接' }).check()
+  await selection.getByRole('button', { name: '测试并启用' }).click()
+  await expect(page.getByRole('dialog', { name: 'DeepSeek / 启用结果' })).toContainText(
+    '上游认证失败',
+  )
+  expect(state.providerActivationInputs).toEqual([
+    { resourceId: '88', protocol: 'OPENAI', providerModelMappingId: '93' },
+  ])
+  await expect(status).not.toBeChecked()
+  expect(state.providers[0].status).toBe('DISABLED')
 })
 
 test('服务商操作引导依次高亮配置入口', async ({ page }) => {
@@ -2201,7 +3491,7 @@ test('服务商编辑模型列表在大量模型时可独立滚动', async ({ pa
       id: String(1000 + index),
       code: `deepseek-history-${index}`,
       name: `DeepSeek History ${index}`,
-      status: 'DISABLED',
+      status: 'ACTIVE',
       inputModalities: ['TEXT'],
       outputModalities: ['TEXT'],
       remark: '',
@@ -2264,6 +3554,50 @@ test('服务商编辑模型列表在大量模型时可独立滚动', async ({ pa
   expect(selectedBox.y).toBeGreaterThan(catalogBox.y + catalogBox.height)
 })
 
+test('官方服务商编辑时不展示或提交停用模型映射', async ({ page }) => {
+  const state = await fixture(page)
+  state.models.push({
+    id: '73',
+    code: 'deepseek-disabled',
+    name: 'DeepSeek Disabled',
+    status: 'DISABLED',
+    inputModalities: ['TEXT'],
+    outputModalities: ['TEXT'],
+    remark: '',
+    publisherProviderId: '81',
+    publisherProviderName: 'DeepSeek',
+    createdAt: stamp,
+    updatedAt: stamp,
+  })
+  state.providerMappings.get('81')!.push({
+    id: '93',
+    providerId: '81',
+    modelId: '73',
+    upstreamModelCode: 'deepseek-disabled',
+    priority: 100,
+    createdAt: stamp,
+    updatedAt: stamp,
+  })
+
+  await signIn(page)
+  await page.getByRole('link', { name: '服务商', exact: true }).click()
+  await page
+    .getByRole('row')
+    .filter({ hasText: 'DeepSeek' })
+    .getByRole('button', { name: '编辑' })
+    .click()
+  const dialog = modal(page)
+  await expect(dialog.locator('.mapping-count-tag')).toHaveText('1')
+  await expect(dialog.getByRole('checkbox', { name: '启用 DeepSeek V4 Flash 映射' })).toBeChecked()
+  await expect(dialog.getByRole('checkbox', { name: '启用 DeepSeek Disabled 映射' })).toHaveCount(0)
+  await expect(dialog.getByText('DeepSeek Disabled', { exact: true })).toHaveCount(0)
+  await dialog.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  expect(state.providerInputs.at(-1)?.mappings).toEqual([
+    { modelId: '71', upstreamModelCode: 'deepseek-v4-flash' },
+  ])
+})
+
 test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => {
   const state = await fixture(page)
   state.models.push({
@@ -2307,8 +3641,8 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await providerSearch.getByRole('button', { name: '创建服务商', exact: true }).click()
   const createMenu = providerSearch.getByRole('menu', { name: '创建服务商' })
   await expect(createMenu.getByRole('menuitem', { name: /三方服务商/ })).toBeVisible()
-  await expect(createMenu.getByRole('menuitem', { name: /模型厂商/ })).toBeVisible()
-  await createMenu.getByRole('menuitem', { name: /模型厂商/ }).click()
+  await expect(createMenu.getByRole('menuitem', { name: /预设厂商/ })).toBeVisible()
+  await createMenu.getByRole('menuitem', { name: /预设厂商/ }).click()
   const initializeDialog = modal(page)
   await expect(initializeDialog.getByRole('heading', { name: '选择模型厂商' })).toBeVisible()
   await expect(initializeDialog.getByText('已选择 8 / 8', { exact: true })).toBeVisible()
@@ -2349,7 +3683,7 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await providerSearch.getByRole('button', { name: '创建服务商', exact: true }).click()
   await providerSearch
     .getByRole('menu', { name: '创建服务商' })
-    .getByRole('menuitem', { name: /模型厂商/ })
+    .getByRole('menuitem', { name: /预设厂商/ })
     .click()
   const repeatInitializeDialog = modal(page)
   await repeatInitializeDialog.getByRole('button', { name: '清空', exact: true }).click()
@@ -2391,11 +3725,10 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   const moreActions = deepSeekRow.locator('td').last().locator('summary')
   await expect(moreActions).toHaveAttribute('aria-label', '深度求索 的更多操作')
   await moreActions.click()
-  await expect(deepSeekRow.locator('.provider-more-menu')).toBeVisible()
-  const moreMenuBox = (await deepSeekRow.locator('.provider-more-menu').boundingBox())!
-  const tableBox = (await page.locator('.table-scroll').boundingBox())!
-  expect(moreMenuBox.x).toBeGreaterThanOrEqual(tableBox.x)
-  expect(moreMenuBox.y).toBeGreaterThanOrEqual(tableBox.y)
+  await expect(deepSeekRow.locator('.row-action-more-menu')).toBeVisible()
+  const moreMenuBox = (await deepSeekRow.locator('.row-action-more-menu').boundingBox())!
+  expect(moreMenuBox.x).toBeGreaterThanOrEqual(8)
+  expect(moreMenuBox.y).toBeGreaterThanOrEqual(8)
   await moreActions.click()
   expect(state.modelQueries).toHaveLength(0)
   await deepSeekRow.getByRole('button', { name: '编辑', exact: true }).click()
@@ -2410,10 +3743,10 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   const existingProviderModelCode = modal(page).getByLabel('DeepSeek V4 Flash 的服务商模型编码')
   await expect(existingProviderModelCode).toHaveValue('deepseek-v4-flash')
   await expect(modal(page).getByText('Claude Sonnet', { exact: true })).toHaveCount(0)
-  await expect(modal(page).getByText('DeepSeek V3 Legacy', { exact: true })).toBeVisible()
+  await expect(modal(page).getByText('DeepSeek V3 Legacy', { exact: true })).toHaveCount(0)
   await expect(
     modal(page).getByRole('checkbox', { name: '启用 DeepSeek V3 Legacy 映射' }),
-  ).not.toBeChecked()
+  ).toHaveCount(0)
   await expect(modal(page).getByLabel('DeepSeek V3 Legacy 的服务商模型编码')).toHaveCount(0)
   await expect(modal(page).getByText('模型列表', { exact: true })).toBeVisible()
   await expect(modal(page).getByText('已启用模型映射', { exact: true })).toHaveCount(0)
@@ -2723,7 +4056,7 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
       upstreamModelCode: 'aliyun-deepseek-v4-flash',
     }),
   ])
-  const providerNameCellBox = await row.getByRole('cell').first().boundingBox()
+  const providerNameCellBox = await row.getByRole('cell').nth(1).boundingBox()
   expect(providerNameCellBox).not.toBeNull()
   expect(providerNameCellBox!.width).toBeGreaterThanOrEqual(245)
   const endpoint = row.locator('.endpoint')
@@ -2741,8 +4074,8 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
   await expect(row.getByText('OpenAI', { exact: true })).toBeVisible()
   await expect(row.locator('.endpoint-protocol')).toHaveText(['OpenAI'])
   await expect(row.getByText('Anthropic', { exact: true })).toHaveCount(0)
-  const proxyCellBox = await row.getByRole('cell').nth(3).boundingBox()
-  const endpointCellBox = await row.getByRole('cell').nth(4).boundingBox()
+  const proxyCellBox = await row.getByRole('cell').nth(4).boundingBox()
+  const endpointCellBox = await row.getByRole('cell').nth(5).boundingBox()
   expect(proxyCellBox).not.toBeNull()
   expect(endpointCellBox).not.toBeNull()
   expect(proxyCellBox!.width).toBeLessThan(80)
@@ -2856,8 +4189,13 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
 
   const renamedStatus = page.getByRole('switch', { name: '阿里云模型服务的启用状态' })
   await renamedStatus.click()
+  await page
+    .getByRole('dialog', { name: '阿里云模型服务 / 选择启用时验证的连接' })
+    .getByRole('button', { name: '测试并启用' })
+    .click()
   await expect(renamedStatus).toBeChecked()
   expect(created.status).toBe('ACTIVE')
+  await modal(page).getByRole('button', { name: '关闭', exact: true }).last().click()
   await expect(modal(page)).toHaveCount(0)
   await mkdir('../.cache/web-visual', { recursive: true })
   await renamedStatus.click()
@@ -2957,6 +4295,81 @@ test('服务商列表展示凭证聚合运行状态和错误原因', async ({ pa
   await modal(page).screenshot({
     path: '../.cache/web-visual/provider-credential-config-mobile.png',
   })
+})
+
+test('个人订阅额度刷新失败时展示 Codex 可执行文件配置项', async ({ page }) => {
+  const state = await fixture(page)
+  state.providers.push({
+    id: '82',
+    name: 'OpenAI',
+    code: 'openai-official',
+    type: 'OFFICIAL',
+    status: 'ACTIVE',
+    website: 'https://openai.com',
+    endpoints: [{ protocolType: 'OPENAI', baseUrl: 'https://api.openai.com/v1' }],
+    proxyEnabled: false,
+    proxyUrl: null,
+    proxyHeaders: [],
+    modelSyncSupported: false,
+    authAdapters: ['API_KEY', 'OPENAI_CODEX'],
+    createdAt: stamp,
+    updatedAt: stamp,
+  })
+  state.resources.push({
+    id: '89',
+    providerId: '82',
+    name: 'OpenAI 个人订阅 · ccount',
+    authType: 'SUBSCRIPTION',
+    authAdapter: 'OPENAI_CODEX',
+    subscriptionType: 'PERSONAL',
+    planCode: 'plus',
+    externalAccountRef: 'fixture-account',
+    priority: 100,
+    effectiveAt: null,
+    expiresAt: null,
+    quotaStatus: 'UNKNOWN',
+    quotaCheckedAt: null,
+    quotaResetsAt: null,
+    runtimeStatus: 'HEALTHY',
+    blockedReason: null,
+    blockedAt: null,
+    lastErrorAt: null,
+    lastHttpStatus: null,
+    lastErrorCode: null,
+    credentialConfigured: true,
+    subscriptionPrice: null,
+    createdAt: stamp,
+    updatedAt: stamp,
+  })
+  await page.route('**/api/v1/resources/89/test-connection', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        code: 'OK',
+        data: {
+          ok: false,
+          code: 'CODEX_APP_SERVER_UNAVAILABLE',
+          httpStatus: null,
+          latencyMs: 0,
+        },
+        requestId: 'req_codex_app_server_unavailable',
+      }),
+    }),
+  )
+
+  await signIn(page)
+  await page.getByRole('link', { name: '服务商', exact: true }).click()
+  await page
+    .getByRole('row')
+    .filter({ hasText: 'OpenAI' })
+    .getByRole('button', { name: '管理 OpenAI 的认证凭据', exact: true })
+    .click()
+
+  const subscriptionRow = modal(page).getByRole('row').filter({ hasText: '个人订阅' })
+  await expect(subscriptionRow.locator('.credential-quota-feedback')).toHaveText(
+    '额度刷新失败 · Codex App Server 无法启动，请检查 Codex 可执行文件配置（CODEX_EXECUTABLE）并重启后端。',
+  )
 })
 
 test('服务商支持个人订阅优先并保留 API Key 兜底', async ({ page }) => {
@@ -3348,7 +4761,7 @@ test('状态 switch 直接生效且危险操作仍需确认', async ({ page }) =
   await status.click()
   await expect(status).not.toBeChecked()
   await expect(modal(page)).toHaveCount(0)
-  await row.locator('summary', { hasText: '⋯' }).click()
+  await row.locator('summary', { hasText: '⋮' }).click()
   await row.getByRole('button', { name: 'Delete', exact: true }).click()
 
   const dialog = modal(page)
@@ -3704,19 +5117,32 @@ test('分组列表按最新记录倒序显示并提示输入分组名称', async
   await page.getByRole('link', { name: '用户分组', exact: true }).click()
 
   await expect(page.getByRole('columnheader')).toHaveText([
+    'ID',
     '名称',
     '启用状态',
+    '月度额度',
     '创建时间',
     '备注',
     '操作',
   ])
   await expect(page.locator('tbody tr .person strong')).toHaveText(['最新分组', '较早分组'])
+  await expect(
+    page.getByRole('row').filter({ hasText: '最新分组' }).getByRole('cell').first().locator('code'),
+  ).toHaveText('52')
+  await expect(
+    page
+      .getByRole('row')
+      .filter({ hasText: '最新分组' })
+      .getByRole('cell')
+      .first()
+      .locator('.technical-value-copy'),
+  ).toHaveCount(0)
   await expect(page.locator('tbody tr .avatar')).toHaveText(['最', '较'])
   await expect(
-    page.getByRole('row').filter({ hasText: '最新分组' }).getByRole('cell').nth(3),
+    page.getByRole('row').filter({ hasText: '最新分组' }).getByRole('cell').nth(5),
   ).toHaveText('-')
   await expect(
-    page.getByRole('row').filter({ hasText: '较早分组' }).getByRole('cell').nth(3),
+    page.getByRole('row').filter({ hasText: '较早分组' }).getByRole('cell').nth(5),
   ).toHaveText('核心服务组')
   await expect(page.getByRole('searchbox', { name: '分组名称' })).toHaveAttribute(
     'placeholder',
@@ -3785,7 +5211,7 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
     errors: string[] = []
   page.on('pageerror', (e) => errors.push(e.message))
   await signIn(page)
-  await expect(page.getByText(longID, { exact: true })).toHaveCount(0)
+  await expect(page.getByText(longID, { exact: true })).toBeVisible()
   const memberSearch = page.getByRole('searchbox', { name: '用户名' })
   await expect(memberSearch).toHaveAttribute('placeholder', '请输入用户名')
   await expect(page.locator('.list-search-label')).toHaveText('用户名')
@@ -3888,11 +5314,9 @@ test('管理员通过网页完成配置、Key 生命周期和用量查询', asyn
   await modelGrant.click()
   await expect(modelGrant).toBeChecked()
   await modal(page).getByRole('button', { name: '关闭', exact: true }).click()
-  await page
-    .getByRole('row')
-    .filter({ hasText: '平台研发组' })
-    .getByRole('button', { name: '删除', exact: true })
-    .click()
+  const createdGroupRow = page.getByRole('row').filter({ hasText: '平台研发组' })
+  await createdGroupRow.locator('summary').click()
+  await createdGroupRow.getByRole('button', { name: '删除', exact: true }).click()
   await expect(modal(page)).toContainText('用户关联和模型授权将失效')
   await modal(page).getByRole('button', { name: '删除', exact: true }).click()
   await expect(page.getByRole('row').filter({ hasText: '平台研发组' })).toHaveCount(0)
@@ -4208,6 +5632,10 @@ test('14 寸屏幕默认展开侧栏并将横向溢出限制在表格内', async
     topbarHeight: 58,
     documentFits: true,
   })
+  const memberTableScroll = page.locator('.members-table').locator('..')
+  expect(
+    await memberTableScroll.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+  ).toBe(true)
   const modelLink = page.getByRole('link', { name: '模型', exact: true })
   await expect(modelLink).toBeVisible()
   await expect(modelLink.locator('span')).toBeVisible()
@@ -4239,13 +5667,37 @@ test('高密度表格在常用桌面分辨率保持稳定列宽和单行技术�
     await expect(page.getByRole('heading', { name: '服务商', exact: true })).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     const scroll = page.locator('.providers-table').locator('..')
-    expect(await scroll.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(
-      true,
+    expect(await scroll.evaluate((element) => element.scrollWidth > element.clientWidth + 1)).toBe(
+      width < 1920,
     )
     const headers = page.locator('.providers-table th')
-    expect((await headers.nth(2).boundingBox())!.width).toBeGreaterThanOrEqual(120)
-    expect((await headers.nth(5).boundingBox())!.width).toBeGreaterThanOrEqual(170)
+    expect((await headers.nth(3).boundingBox())!.width).toBeGreaterThanOrEqual(120)
+    expect((await headers.nth(6).boundingBox())!.width).toBeGreaterThanOrEqual(170)
   }
+
+  const managementPages = [
+    { name: '用户管理', path: 'members' },
+    { name: '用户分组', path: 'groups' },
+    { name: '模型', path: 'models' },
+    { name: '服务商', path: 'providers' },
+  ]
+  const idColumnWidths: Array<{ name: string; width: number }> = []
+  for (const { name, path } of managementPages) {
+    await page.getByRole('link', { name, exact: true }).click()
+    await expect(page).toHaveURL(new RegExp(`#/${path}$`))
+    const idHeader = page.getByRole('columnheader', { name: 'ID', exact: true }).first()
+    await expect(idHeader).toBeVisible()
+    idColumnWidths.push({
+      name,
+      width: Math.round((await idHeader.boundingBox())!.width),
+    })
+  }
+  expect(idColumnWidths).toEqual(
+    managementPages.map(({ name }) => ({
+      name,
+      width: 88,
+    })),
+  )
 
   const endpoint = page.locator('.providers-table .endpoint').first()
   await expect(endpoint).toHaveAttribute('title', /https:\/\//)
@@ -4383,8 +5835,9 @@ test('用户页面使用明确术语并在紧凑侧栏展示菜单提示', async
   await expect(page.getByRole('columnheader', { name: '激活状态', exact: true })).toBeVisible()
   await expect(page.locator('.workspace-square')).toHaveCount(0)
   await expect(page.locator('.workspace-label')).toHaveCount(0)
-  await expect(page.locator('.nav-section')).toHaveText(['社区版', '基础配置', '使用记录'])
+  await expect(page.locator('.nav-section')).toHaveText(['GitHub 仓库', '基础配置', '使用记录'])
   const communityRepository = page.locator('.community-source-link')
+  await expect(communityRepository).toHaveText('GitHub 仓库')
   await expect(communityRepository).toHaveAttribute(
     'aria-label',
     '在新页面打开 Zentrola GitHub 仓库',
@@ -4527,4 +5980,253 @@ test('列表搜索覆盖全部分页并安全传递不透明游标', async ({ pa
   expect(searchRequests[1].searchParams.get('after')).toBe(opaqueCursor)
   await page.getByRole('button', { name: '重置', exact: true }).click()
   await expect(page.getByLabel('分页')).toBeVisible()
+})
+
+test('成本管理聚焦成本概览和计费明细', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-10-07T08:00:00Z') })
+  const state = await fixture(page)
+  state.resources.push({
+    id: '89',
+    providerId: '81',
+    name: 'DeepSeek 订阅',
+    authType: 'SUBSCRIPTION',
+    authAdapter: 'OPENAI_CODEX',
+    subscriptionType: 'PERSONAL',
+    effectiveAt: '2026-10-01T00:00:00Z',
+    expiresAt: null,
+    runtimeStatus: 'HEALTHY',
+    credentialConfigured: true,
+    createdAt: stamp,
+    updatedAt: stamp,
+  })
+  state.credentialPrices.set('89', {
+    modelPrices: [],
+    subscriptionPrices: [
+      {
+        id: '930',
+        providerCredentialId: '89',
+        currency: 'CNY',
+        periodAmount: '1000.00000000',
+        billingPeriod: 'MONTH',
+        effectiveAt: '2026-10-01T00:00:00Z',
+        createdAt: stamp,
+      },
+    ],
+    subscriptionPrice: {
+      id: '930',
+      providerCredentialId: '89',
+      currency: 'CNY',
+      periodAmount: '1000.00000000',
+      billingPeriod: 'MONTH',
+      effectiveAt: '2026-10-01T00:00:00Z',
+      createdAt: stamp,
+    },
+  })
+  await signIn(page)
+
+  await page.getByRole('link', { name: '成本管理', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '成本管理', exact: true })).toBeVisible()
+  await expect(page.locator('.billing-tabs').getByRole('tab')).toHaveText(['成本概览', '计费明细'])
+  const overviewDateRange = page.getByRole('button', { name: '选择起止日期', exact: true })
+  await expect(overviewDateRange).toContainText('2026/10/01 — 2026/10/07')
+  await expect(page.getByText('当月实时口径', { exact: true })).toHaveCount(0)
+  const ledger = page.locator('.cost-ledger')
+  await expect(ledger.getByText('CNY', { exact: true })).toBeVisible()
+  await expect(ledger.getByText('USD', { exact: true })).toBeVisible()
+  await expect(ledger.getByText('¥1,000', { exact: true })).toBeVisible()
+  await expect(ledger.getByText('$0.008', { exact: true })).toBeVisible()
+  await expect(ledger.getByText('1 项有效订阅', { exact: true })).toBeVisible()
+  const attribution = page.locator('.cost-attribution-panel')
+  await expect(attribution.getByRole('heading', { name: '费用分摊', exact: true })).toBeVisible()
+  await expect(attribution.getByText('预计分摊', { exact: true })).toHaveCount(0)
+  await expect(attribution.getByText('林知远', { exact: true })).toHaveCount(2)
+  await expect(attribution.getByText('¥1,000', { exact: true })).toBeVisible()
+  await expect(attribution.getByText('$0.008', { exact: true })).toBeVisible()
+  await expect(page.getByText('当月订阅尚未结算，暂未生成最终成本归属。')).toHaveCount(0)
+  await overviewDateRange.click()
+  const overviewDateDialog = page.getByRole('dialog', { name: '选择起止日期' })
+  await overviewDateDialog.getByRole('button', { name: '上个月' }).click()
+  await overviewDateDialog.getByRole('button', { name: '选择 2026-09-10' }).click()
+  await overviewDateDialog.getByRole('button', { name: '选择 2026-09-20' }).click()
+  await expect(overviewDateRange).toContainText('2026/09/10 — 2026/09/20')
+  const overviewRequest = page.waitForRequest((request) =>
+    request.url().includes('/billing/statistics?'),
+  )
+  await page.getByRole('button', { name: '查询', exact: true }).click()
+  const overviewSearch = new URL((await overviewRequest).url()).searchParams
+  expect(overviewSearch.get('from')).toBe('2026-09-10T00:00:00.000Z')
+  expect(overviewSearch.get('to')).toBe('2026-09-21T00:00:00.000Z')
+  await expect(page.getByText('已结算口径', { exact: true })).toBeVisible()
+  await expect(ledger.getByText('¥710', { exact: true })).toBeVisible()
+  await expect(ledger.getByText('$5.125', { exact: true })).toBeVisible()
+  await expect(ledger.getByText('¥715.125')).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: '用量排行', exact: true })).toBeVisible()
+  const usageRanking = page.locator('.cost-usage-ranking')
+  await expect(usageRanking).toContainText('林知远')
+  await expect(usageRanking.locator('.cost-rank-marker.rank-1')).toHaveText('1')
+  await expect(usageRanking.getByText('最高用量', { exact: true })).toBeVisible()
+
+  await page.getByRole('tab', { name: '计费明细', exact: true }).click()
+  await expect(page.locator('.billing-detail-metrics')).toHaveCount(0)
+  const usageTable = page.locator('.usage-cost-table')
+  await expect(usageTable.getByText('按 Token 调用计费', { exact: true })).toBeVisible()
+  await expect(usageTable.getByText('个人订阅分摊', { exact: true })).toBeVisible()
+
+  const costPanel = page.locator('.usage-cost-panel')
+  const principalFilter = costPanel.getByRole('group', { name: '调用方' })
+  const callerType = principalFilter.getByLabel('调用方类型')
+  const callerName = principalFilter.getByRole('combobox', { name: '用户' })
+  await expect(callerType).toBeVisible()
+  await expect(callerName).toBeDisabled()
+  await expect(costPanel.getByLabel('模型')).toBeVisible()
+  await expect(costPanel.getByLabel('核算状态')).toHaveCount(0)
+  await expect(costPanel.getByLabel('计费方式')).toBeVisible()
+  await expect(costPanel.getByLabel('用户分组')).toHaveCount(0)
+  await expect(costPanel.getByLabel('服务商')).toHaveCount(0)
+  await expect(costPanel.getByRole('button', { name: /更多筛选/ })).toHaveCount(0)
+  const principalTypeBounds = await callerType.boundingBox()
+  const principalNameBounds = await callerName.boundingBox()
+  expect(principalNameBounds!.x).toBeGreaterThan(principalTypeBounds!.x)
+  expect(Math.abs(principalNameBounds!.y - principalTypeBounds!.y)).toBeLessThan(2)
+  for (const label of ['模型', '计费方式']) {
+    const field = costPanel.locator('label').filter({ hasText: label })
+    const labelBounds = await field.locator('.filter-label').boundingBox()
+    const controlBounds = await field.locator('select').boundingBox()
+    expect(controlBounds!.x).toBeGreaterThan(labelBounds!.x)
+    expect(Math.abs(controlBounds!.y - labelBounds!.y)).toBeLessThan(20)
+  }
+  const costDateRange = costPanel.getByRole('button', { name: '选择起止日期', exact: true })
+  await expect(costDateRange).toBeVisible()
+  await costDateRange.click()
+  const costDateDialog = costPanel.getByRole('dialog', { name: '选择起止日期' })
+  await costDateDialog.getByRole('button', { name: '选择 2026-10-02' }).click()
+  await costDateDialog.getByRole('button', { name: '选择 2026-10-05' }).click()
+  await expect(costDateRange).toContainText('2026/10/02 — 2026/10/05')
+  const costRequest = page.waitForRequest(
+    (request) =>
+      request.url().includes('/billing/usage-costs?') &&
+      new URL(request.url()).searchParams.get('modelId') === '71',
+  )
+  await callerType.selectOption('APPLICATION')
+  const applicationName = principalFilter.getByRole('combobox', { name: '应用' })
+  await applicationName.fill('报表')
+  await principalFilter.getByRole('option', { name: '报表应用' }).click()
+  await expect(applicationName).toHaveValue('报表应用')
+  expect(state.applicationSuggestionQueries.at(-1)?.get('name')).toBe('报表')
+  const applicationCostRequest = page.waitForRequest(
+    (request) =>
+      request.url().includes('/billing/usage-costs?') &&
+      new URL(request.url()).searchParams.get('principalType') === 'APPLICATION',
+  )
+  await costPanel.getByRole('button', { name: '查询', exact: true }).click()
+  expect(new URL((await applicationCostRequest).url()).searchParams.get('principalId')).toBe(
+    '90071992547409944',
+  )
+  await callerType.selectOption('MEMBER')
+  await expect(callerName).toHaveValue('')
+  await callerName.fill('林知')
+  await principalFilter.getByRole('option', { name: '林知远' }).click()
+  await expect(callerName).toHaveValue('林知远')
+  expect(state.memberSuggestionQueries.at(-1)?.get('name')).toBe('林知')
+  await costPanel.getByLabel('模型').selectOption('71')
+  await costPanel.getByLabel('计费方式').selectOption('API_KEY')
+  const billingTypeBounds = await costPanel.getByLabel('计费方式').boundingBox()
+  const searchButtonBounds = await costPanel
+    .getByRole('button', { name: '查询', exact: true })
+    .boundingBox()
+  expect(Math.abs(searchButtonBounds!.y - billingTypeBounds!.y)).toBeLessThan(4)
+  await mkdir('../.cache/web-visual', { recursive: true })
+  await costPanel.screenshot({ path: '../.cache/web-visual/usage-cost-filters.png' })
+  const costDesktopViewport = page.viewportSize()!
+  await page.setViewportSize({ width: 390, height: 844 })
+  await costPanel.screenshot({ path: '../.cache/web-visual/usage-cost-filters-mobile.png' })
+  await expect
+    .poll(() => costPanel.evaluate((panel) => panel.scrollWidth <= panel.clientWidth + 1))
+    .toBe(true)
+  const mobileTypeBounds = await callerType.boundingBox()
+  const mobileNameBounds = await callerName.boundingBox()
+  expect(mobileNameBounds!.x).toBeGreaterThan(mobileTypeBounds!.x)
+  expect(Math.abs(mobileNameBounds!.y - mobileTypeBounds!.y)).toBeLessThan(2)
+  await page.setViewportSize(costDesktopViewport)
+  await costPanel.getByRole('button', { name: '查询', exact: true }).click()
+  const searched = new URL((await costRequest).url()).searchParams
+  expect(Object.fromEntries(searched)).toMatchObject({
+    from: '2026-10-02T00:00:00.000Z',
+    to: '2026-10-06T00:00:00.000Z',
+    principalType: 'MEMBER',
+    principalId: longID,
+    modelId: '71',
+    billingType: 'API_KEY',
+  })
+  for (const removed of [
+    'groupId',
+    'providerId',
+    'resourceId',
+    'clientProtocol',
+    'status',
+    'ratingStatus',
+    'currency',
+  ])
+    expect(searched.has(removed)).toBe(false)
+
+  await page.getByRole('button', { name: '查看详情' }).first().click()
+  const usageDetail = page.getByRole('dialog', { name: '详情', exact: true })
+  await expect(usageDetail.locator('.billing-detail-grid > div')).toHaveCount(11)
+  const detailColumns = await usageDetail
+    .locator('.billing-detail-grid > div')
+    .evaluateAll((fields) => fields.map((field) => field.getBoundingClientRect().left))
+  expect(Math.max(...detailColumns) - Math.min(...detailColumns)).toBeGreaterThan(350)
+  await expect(usageDetail.locator('tbody tr').nth(0).locator('td').first()).toHaveText('1')
+  await expect(usageDetail.locator('tbody tr').nth(1).locator('td').first()).toHaveText('2')
+  await expect(usageDetail.getByText('$0.0036', { exact: true })).toBeVisible()
+  await expect(usageDetail.getByText('$0.0042', { exact: true })).toBeVisible()
+  await expect(usageDetail.getByText('$0.0079', { exact: true })).toBeVisible()
+  await usageDetail.getByRole('button', { name: '关闭' }).click()
+
+  await page.getByRole('button', { name: '查看详情' }).nth(1).click()
+  const subscriptionDetail = page.getByRole('dialog', { name: '详情', exact: true })
+  await expect(subscriptionDetail).toContainText('个人订阅按账期分摊')
+  await expect(subscriptionDetail).toContainText('¥1,000')
+  await expect(subscriptionDetail).toContainText('¥700')
+  await mkdir('../.cache/web-visual', { recursive: true })
+  await page.screenshot({ path: '../.cache/web-visual/usage-cost-detail.png', fullPage: true })
+  const desktopViewport = page.viewportSize()!
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(
+    await subscriptionDetail.evaluate((dialog) => dialog.scrollWidth <= dialog.clientWidth + 1),
+  ).toBe(true)
+  await page.screenshot({
+    path: '../.cache/web-visual/usage-cost-detail-mobile.png',
+    fullPage: true,
+  })
+  await page.setViewportSize(desktopViewport)
+  await subscriptionDetail.getByRole('button', { name: '关闭' }).click()
+
+  const exportRequest = page.waitForRequest((request) =>
+    request.url().includes('/billing/usage-costs/export?'),
+  )
+  const downloadPromise = page.waitForEvent('download')
+  await costPanel.getByRole('button', { name: '导出 CSV', exact: true }).click()
+  const exportDownload = await downloadPromise
+  expect(exportDownload.suggestedFilename()).toContain('zentrola-usage-costs-')
+  const exported = new URL((await exportRequest).url()).searchParams
+  expect((await exportRequest).headers()['accept-language']).toBe(
+    await page.locator('html').getAttribute('lang'),
+  )
+  expect(Object.fromEntries(exported)).toMatchObject({
+    principalType: 'MEMBER',
+    principalId: longID,
+    modelId: '71',
+    billingType: 'API_KEY',
+  })
+  for (const removed of [
+    'groupId',
+    'providerId',
+    'resourceId',
+    'clientProtocol',
+    'status',
+    'ratingStatus',
+    'currency',
+  ])
+    expect(exported.has(removed)).toBe(false)
 })

@@ -1,6 +1,4 @@
-# syntax=docker/dockerfile:1
-
-ARG APP_VERSION=1.0.1
+ARG APP_VERSION=1.1.0
 ARG BASE_IMAGE=longjianghu/zentrola-codex-base:0.154.0
 
 FROM ${BASE_IMAGE}

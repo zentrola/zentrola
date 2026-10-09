@@ -11,6 +11,44 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countManageApplicationOperations = `-- name: CountManageApplicationOperations :one
+SELECT COUNT(*)::bigint FROM operation_log
+WHERE (target_type='APPLICATION' AND target_id=$1)
+   OR (target_type='ACCESS_KEY' AND after_data->>'principalId'=$1::text)
+   OR (target_type='GROUP' AND after_data->>'applicationId'=$1::text)
+`
+
+func (q *Queries) CountManageApplicationOperations(ctx context.Context, applicationID *int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countManageApplicationOperations, applicationID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countManageApplicationSuggestions = `-- name: CountManageApplicationSuggestions :one
+SELECT COUNT(*)::bigint FROM principal
+WHERE is_deleted=false AND principal_type='APPLICATION'
+  AND strpos(lower(name), lower($1::text)) > 0
+`
+
+func (q *Queries) CountManageApplicationSuggestions(ctx context.Context, applicationName string) (int64, error) {
+	row := q.db.QueryRow(ctx, countManageApplicationSuggestions, applicationName)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countManageApplications = `-- name: CountManageApplications :one
+SELECT COUNT(*)::bigint FROM principal WHERE is_deleted=false AND principal_type='APPLICATION'
+`
+
+func (q *Queries) CountManageApplications(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countManageApplications)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countManageGroupMembers = `-- name: CountManageGroupMembers :one
 SELECT COUNT(*)::bigint
 FROM principal p
@@ -58,10 +96,18 @@ func (q *Queries) CountManageGroups(ctx context.Context, status string) (int64, 
 const countManageKeys = `-- name: CountManageKeys :one
 SELECT COUNT(*)::bigint FROM principal_access_key
 WHERE principal_id=$1 AND is_deleted=false
+  AND ($2::boolean OR
+       (status='ACTIVE' AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>$3::timestamptz)))
 `
 
-func (q *Queries) CountManageKeys(ctx context.Context, principalID int64) (int64, error) {
-	row := q.db.QueryRow(ctx, countManageKeys, principalID)
+type CountManageKeysParams struct {
+	PrincipalID    int64
+	IncludeExpired bool
+	At             pgtype.Timestamptz
+}
+
+func (q *Queries) CountManageKeys(ctx context.Context, arg CountManageKeysParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countManageKeys, arg.PrincipalID, arg.IncludeExpired, arg.At)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -159,6 +205,33 @@ func (q *Queries) CountManageResources(ctx context.Context) (int64, error) {
 	return column_1, err
 }
 
+const manageAddGroupTokenQuota = `-- name: ManageAddGroupTokenQuota :one
+UPDATE principal_group
+SET monthly_token_limit=COALESCE(monthly_token_limit, 0)+$1::bigint,
+    updated_by=$2,updated_at=$3
+WHERE id=$4 AND NOT is_deleted
+RETURNING monthly_token_limit
+`
+
+type ManageAddGroupTokenQuotaParams struct {
+	Amount    int64
+	UpdatedBy string
+	UpdatedAt pgtype.Timestamptz
+	GroupID   int64
+}
+
+func (q *Queries) ManageAddGroupTokenQuota(ctx context.Context, arg ManageAddGroupTokenQuotaParams) (*int64, error) {
+	row := q.db.QueryRow(ctx, manageAddGroupTokenQuota,
+		arg.Amount,
+		arg.UpdatedBy,
+		arg.UpdatedAt,
+		arg.GroupID,
+	)
+	var monthly_token_limit *int64
+	err := row.Scan(&monthly_token_limit)
+	return monthly_token_limit, err
+}
+
 const manageAddMember = `-- name: ManageAddMember :exec
 INSERT INTO principal_group_membership(id,group_id,principal_id,created_by,updated_by,created_at,updated_at)
 VALUES($1,$2,$3,$4,$4,$5,$5)
@@ -181,6 +254,228 @@ func (q *Queries) ManageAddMember(ctx context.Context, arg ManageAddMemberParams
 		arg.CreatedAt,
 	)
 	return err
+}
+
+const manageAddPrincipalTokenQuota = `-- name: ManageAddPrincipalTokenQuota :one
+UPDATE principal
+SET monthly_token_limit=COALESCE(monthly_token_limit, 0)+$1::bigint,
+    updated_by=$2,updated_at=$3
+WHERE id=$4 AND NOT is_deleted AND principal_type IN ('MEMBER','APPLICATION')
+RETURNING monthly_token_limit
+`
+
+type ManageAddPrincipalTokenQuotaParams struct {
+	Amount      int64
+	UpdatedBy   string
+	UpdatedAt   pgtype.Timestamptz
+	PrincipalID int64
+}
+
+func (q *Queries) ManageAddPrincipalTokenQuota(ctx context.Context, arg ManageAddPrincipalTokenQuotaParams) (*int64, error) {
+	row := q.db.QueryRow(ctx, manageAddPrincipalTokenQuota,
+		arg.Amount,
+		arg.UpdatedBy,
+		arg.UpdatedAt,
+		arg.PrincipalID,
+	)
+	var monthly_token_limit *int64
+	err := row.Scan(&monthly_token_limit)
+	return monthly_token_limit, err
+}
+
+const manageApplication = `-- name: ManageApplication :one
+SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at, monthly_token_limit FROM principal WHERE id=$1 AND is_deleted=false AND principal_type='APPLICATION'
+`
+
+func (q *Queries) ManageApplication(ctx context.Context, id int64) (Principal, error) {
+	row := q.db.QueryRow(ctx, manageApplication, id)
+	var i Principal
+	err := row.Scan(
+		&i.ID,
+		&i.IsDeleted,
+		&i.Status,
+		&i.PrincipalType,
+		&i.Name,
+		&i.Remark,
+		&i.CreatedBy,
+		&i.UpdatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.MonthlyTokenLimit,
+	)
+	return i, err
+}
+
+const manageApplicationOperations = `-- name: ManageApplicationOperations :many
+SELECT id,operator_name,operation_type,target_type,target_id,target_name,request_id,result,error_code,before_data,after_data,created_at
+FROM operation_log
+WHERE (id<$1 OR $1=0)
+  AND ((target_type='APPLICATION' AND target_id=$2)
+    OR (target_type='ACCESS_KEY' AND after_data->>'principalId'=$2::text)
+    OR (target_type='GROUP' AND after_data->>'applicationId'=$2::text))
+ORDER BY id DESC LIMIT $3
+`
+
+type ManageApplicationOperationsParams struct {
+	AfterID       int64
+	ApplicationID *int64
+	PageLimit     int32
+}
+
+type ManageApplicationOperationsRow struct {
+	ID            int64
+	OperatorName  string
+	OperationType string
+	TargetType    string
+	TargetID      *int64
+	TargetName    *string
+	RequestID     *string
+	Result        string
+	ErrorCode     *string
+	BeforeData    []byte
+	AfterData     []byte
+	CreatedAt     pgtype.Timestamptz
+}
+
+func (q *Queries) ManageApplicationOperations(ctx context.Context, arg ManageApplicationOperationsParams) ([]ManageApplicationOperationsRow, error) {
+	rows, err := q.db.Query(ctx, manageApplicationOperations, arg.AfterID, arg.ApplicationID, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ManageApplicationOperationsRow{}
+	for rows.Next() {
+		var i ManageApplicationOperationsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OperatorName,
+			&i.OperationType,
+			&i.TargetType,
+			&i.TargetID,
+			&i.TargetName,
+			&i.RequestID,
+			&i.Result,
+			&i.ErrorCode,
+			&i.BeforeData,
+			&i.AfterData,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const manageApplicationStatus = `-- name: ManageApplicationStatus :exec
+UPDATE principal SET status=$2,updated_by=$3,updated_at=$4 WHERE id=$1 AND is_deleted=false AND principal_type='APPLICATION'
+`
+
+type ManageApplicationStatusParams struct {
+	ID        int64
+	Status    string
+	UpdatedBy string
+	UpdatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) ManageApplicationStatus(ctx context.Context, arg ManageApplicationStatusParams) error {
+	_, err := q.db.Exec(ctx, manageApplicationStatus,
+		arg.ID,
+		arg.Status,
+		arg.UpdatedBy,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const manageApplicationSuggestions = `-- name: ManageApplicationSuggestions :many
+SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at, monthly_token_limit FROM principal
+WHERE is_deleted=false AND principal_type='APPLICATION'
+  AND strpos(lower(name), lower($1::text)) > 0
+  AND (id<$2 OR $2=0)
+ORDER BY id DESC LIMIT $3
+`
+
+type ManageApplicationSuggestionsParams struct {
+	ApplicationName string
+	AfterID         int64
+	PageLimit       int32
+}
+
+func (q *Queries) ManageApplicationSuggestions(ctx context.Context, arg ManageApplicationSuggestionsParams) ([]Principal, error) {
+	rows, err := q.db.Query(ctx, manageApplicationSuggestions, arg.ApplicationName, arg.AfterID, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Principal{}
+	for rows.Next() {
+		var i Principal
+		if err := rows.Scan(
+			&i.ID,
+			&i.IsDeleted,
+			&i.Status,
+			&i.PrincipalType,
+			&i.Name,
+			&i.Remark,
+			&i.CreatedBy,
+			&i.UpdatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.MonthlyTokenLimit,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const manageApplications = `-- name: ManageApplications :many
+SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at, monthly_token_limit FROM principal WHERE is_deleted=false AND principal_type='APPLICATION' AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2
+`
+
+type ManageApplicationsParams struct {
+	ID    int64
+	Limit int32
+}
+
+func (q *Queries) ManageApplications(ctx context.Context, arg ManageApplicationsParams) ([]Principal, error) {
+	rows, err := q.db.Query(ctx, manageApplications, arg.ID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Principal{}
+	for rows.Next() {
+		var i Principal
+		if err := rows.Scan(
+			&i.ID,
+			&i.IsDeleted,
+			&i.Status,
+			&i.PrincipalType,
+			&i.Name,
+			&i.Remark,
+			&i.CreatedBy,
+			&i.UpdatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.MonthlyTokenLimit,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const manageBlockResourceRuntime = `-- name: ManageBlockResourceRuntime :execrows
@@ -214,6 +509,64 @@ func (q *Queries) ManageBlockResourceRuntime(ctx context.Context, arg ManageBloc
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const manageClearGroupTokenQuota = `-- name: ManageClearGroupTokenQuota :exec
+UPDATE principal_group
+SET monthly_token_limit=NULL,updated_by=$1,updated_at=$2
+WHERE id=$3 AND NOT is_deleted
+`
+
+type ManageClearGroupTokenQuotaParams struct {
+	UpdatedBy string
+	UpdatedAt pgtype.Timestamptz
+	GroupID   int64
+}
+
+func (q *Queries) ManageClearGroupTokenQuota(ctx context.Context, arg ManageClearGroupTokenQuotaParams) error {
+	_, err := q.db.Exec(ctx, manageClearGroupTokenQuota, arg.UpdatedBy, arg.UpdatedAt, arg.GroupID)
+	return err
+}
+
+const manageClearPrincipalTokenQuota = `-- name: ManageClearPrincipalTokenQuota :exec
+UPDATE principal
+SET monthly_token_limit=NULL,updated_by=$1,updated_at=$2
+WHERE id=$3 AND NOT is_deleted AND principal_type IN ('MEMBER','APPLICATION')
+`
+
+type ManageClearPrincipalTokenQuotaParams struct {
+	UpdatedBy   string
+	UpdatedAt   pgtype.Timestamptz
+	PrincipalID int64
+}
+
+func (q *Queries) ManageClearPrincipalTokenQuota(ctx context.Context, arg ManageClearPrincipalTokenQuotaParams) error {
+	_, err := q.db.Exec(ctx, manageClearPrincipalTokenQuota, arg.UpdatedBy, arg.UpdatedAt, arg.PrincipalID)
+	return err
+}
+
+const manageCreateApplication = `-- name: ManageCreateApplication :exec
+INSERT INTO principal(id,principal_type,name,remark,status,created_by,updated_by,created_at,updated_at)
+VALUES($1,'APPLICATION',$2,$3,'DISABLED',$4,$4,$5,$5)
+`
+
+type ManageCreateApplicationParams struct {
+	ID        int64
+	Name      string
+	Remark    *string
+	CreatedBy string
+	CreatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) ManageCreateApplication(ctx context.Context, arg ManageCreateApplicationParams) error {
+	_, err := q.db.Exec(ctx, manageCreateApplication,
+		arg.ID,
+		arg.Name,
+		arg.Remark,
+		arg.CreatedBy,
+		arg.CreatedAt,
+	)
+	return err
 }
 
 const manageCreateGroup = `-- name: ManageCreateGroup :exec
@@ -476,6 +829,22 @@ func (q *Queries) ManageCreateResourceQuota(ctx context.Context, arg ManageCreat
 		arg.ReachedType,
 		arg.ObservedAt,
 	)
+	return err
+}
+
+const manageDeleteApplication = `-- name: ManageDeleteApplication :exec
+UPDATE principal SET is_deleted=true,status='DISABLED',updated_by=$2,updated_at=$3
+WHERE id=$1 AND is_deleted=false AND principal_type='APPLICATION'
+`
+
+type ManageDeleteApplicationParams struct {
+	ID        int64
+	UpdatedBy string
+	UpdatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) ManageDeleteApplication(ctx context.Context, arg ManageDeleteApplicationParams) error {
+	_, err := q.db.Exec(ctx, manageDeleteApplication, arg.ID, arg.UpdatedBy, arg.UpdatedAt)
 	return err
 }
 
@@ -752,7 +1121,7 @@ func (q *Queries) ManageGrantModel(ctx context.Context, arg ManageGrantModelPara
 }
 
 const manageGroup = `-- name: ManageGroup :one
-SELECT id, is_deleted, status, group_code, group_name, remark, created_by, updated_by, created_at, updated_at FROM principal_group WHERE id=$1 AND is_deleted=false
+SELECT id, is_deleted, status, group_code, group_name, remark, created_by, updated_by, created_at, updated_at, monthly_token_limit FROM principal_group WHERE id=$1 AND is_deleted=false
 `
 
 func (q *Queries) ManageGroup(ctx context.Context, id int64) (PrincipalGroup, error) {
@@ -769,12 +1138,56 @@ func (q *Queries) ManageGroup(ctx context.Context, id int64) (PrincipalGroup, er
 		&i.UpdatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MonthlyTokenLimit,
 	)
 	return i, err
 }
 
+const manageGroupApplications = `-- name: ManageGroupApplications :many
+SELECT p.id, p.is_deleted, p.status, p.principal_type, p.name, p.remark, p.created_by, p.updated_by, p.created_at, p.updated_at, p.monthly_token_limit FROM principal p JOIN principal_group_membership g ON g.principal_id=p.id
+WHERE g.group_id=$1 AND g.is_deleted=false AND p.is_deleted=false AND p.principal_type='APPLICATION' AND (p.id<$2 OR $2=0) ORDER BY p.id DESC LIMIT $3
+`
+
+type ManageGroupApplicationsParams struct {
+	GroupID int64
+	ID      int64
+	Limit   int32
+}
+
+func (q *Queries) ManageGroupApplications(ctx context.Context, arg ManageGroupApplicationsParams) ([]Principal, error) {
+	rows, err := q.db.Query(ctx, manageGroupApplications, arg.GroupID, arg.ID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Principal{}
+	for rows.Next() {
+		var i Principal
+		if err := rows.Scan(
+			&i.ID,
+			&i.IsDeleted,
+			&i.Status,
+			&i.PrincipalType,
+			&i.Name,
+			&i.Remark,
+			&i.CreatedBy,
+			&i.UpdatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.MonthlyTokenLimit,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const manageGroupMembers = `-- name: ManageGroupMembers :many
-SELECT p.id, p.is_deleted, p.status, p.principal_type, p.name, p.remark, p.created_by, p.updated_by, p.created_at, p.updated_at FROM principal p JOIN principal_group_membership g ON g.principal_id=p.id
+SELECT p.id, p.is_deleted, p.status, p.principal_type, p.name, p.remark, p.created_by, p.updated_by, p.created_at, p.updated_at, p.monthly_token_limit FROM principal p JOIN principal_group_membership g ON g.principal_id=p.id
 WHERE g.group_id=$1 AND g.is_deleted=false AND p.is_deleted=false AND p.principal_type='MEMBER' AND (p.id<$2 OR $2=0) ORDER BY p.id DESC LIMIT $3
 `
 
@@ -804,6 +1217,7 @@ func (q *Queries) ManageGroupMembers(ctx context.Context, arg ManageGroupMembers
 			&i.UpdatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.MonthlyTokenLimit,
 		); err != nil {
 			return nil, err
 		}
@@ -904,7 +1318,7 @@ func (q *Queries) ManageGroupStatus(ctx context.Context, arg ManageGroupStatusPa
 }
 
 const manageGroups = `-- name: ManageGroups :many
-SELECT id, is_deleted, status, group_code, group_name, remark, created_by, updated_by, created_at, updated_at FROM principal_group
+SELECT id, is_deleted, status, group_code, group_name, remark, created_by, updated_by, created_at, updated_at, monthly_token_limit FROM principal_group
 WHERE is_deleted=false
   AND ($1::text = '' OR status = $1::text)
   AND (id<$2 OR $2=0)
@@ -938,6 +1352,7 @@ func (q *Queries) ManageGroups(ctx context.Context, arg ManageGroupsParams) ([]P
 			&i.UpdatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.MonthlyTokenLimit,
 		); err != nil {
 			return nil, err
 		}
@@ -949,15 +1364,38 @@ func (q *Queries) ManageGroups(ctx context.Context, arg ManageGroupsParams) ([]P
 	return items, nil
 }
 
+const manageHasUsableApplicationKey = `-- name: ManageHasUsableApplicationKey :one
+SELECT EXISTS(SELECT 1 FROM principal_access_key
+WHERE principal_id=$1 AND is_deleted=false AND status='ACTIVE' AND revoked_at IS NULL
+  AND (expires_at IS NULL OR expires_at>$2::timestamptz))
+`
+
+type ManageHasUsableApplicationKeyParams struct {
+	PrincipalID int64
+	Now         pgtype.Timestamptz
+}
+
+func (q *Queries) ManageHasUsableApplicationKey(ctx context.Context, arg ManageHasUsableApplicationKeyParams) (bool, error) {
+	row := q.db.QueryRow(ctx, manageHasUsableApplicationKey, arg.PrincipalID, arg.Now)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const manageKeys = `-- name: ManageKeys :many
 SELECT id,name,masked_key,status,expires_at,revoked_at,created_at FROM principal_access_key
-WHERE principal_id=$1 AND is_deleted=false AND (id<$2 OR $2=0) ORDER BY id DESC LIMIT $3
+WHERE principal_id=$1 AND is_deleted=false
+  AND ($4::boolean OR
+       (status='ACTIVE' AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>$5::timestamptz)))
+  AND (id<$2 OR $2=0) ORDER BY id DESC LIMIT $3
 `
 
 type ManageKeysParams struct {
-	PrincipalID int64
-	ID          int64
-	Limit       int32
+	PrincipalID    int64
+	ID             int64
+	Limit          int32
+	IncludeExpired bool
+	At             pgtype.Timestamptz
 }
 
 type ManageKeysRow struct {
@@ -971,7 +1409,13 @@ type ManageKeysRow struct {
 }
 
 func (q *Queries) ManageKeys(ctx context.Context, arg ManageKeysParams) ([]ManageKeysRow, error) {
-	rows, err := q.db.Query(ctx, manageKeys, arg.PrincipalID, arg.ID, arg.Limit)
+	rows, err := q.db.Query(ctx, manageKeys,
+		arg.PrincipalID,
+		arg.ID,
+		arg.Limit,
+		arg.IncludeExpired,
+		arg.At,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -999,7 +1443,7 @@ func (q *Queries) ManageKeys(ctx context.Context, arg ManageKeysParams) ([]Manag
 }
 
 const manageMember = `-- name: ManageMember :one
-SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at FROM principal WHERE id=$1 AND is_deleted=false AND principal_type='MEMBER'
+SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at, monthly_token_limit FROM principal WHERE id=$1 AND is_deleted=false AND principal_type='MEMBER'
 `
 
 func (q *Queries) ManageMember(ctx context.Context, id int64) (Principal, error) {
@@ -1016,12 +1460,13 @@ func (q *Queries) ManageMember(ctx context.Context, id int64) (Principal, error)
 		&i.UpdatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MonthlyTokenLimit,
 	)
 	return i, err
 }
 
 const manageMemberGroups = `-- name: ManageMemberGroups :many
-SELECT g.id, g.is_deleted, g.status, g.group_code, g.group_name, g.remark, g.created_by, g.updated_by, g.created_at, g.updated_at FROM principal_group g JOIN principal_group_membership pg ON pg.group_id=g.id
+SELECT g.id, g.is_deleted, g.status, g.group_code, g.group_name, g.remark, g.created_by, g.updated_by, g.created_at, g.updated_at, g.monthly_token_limit FROM principal_group g JOIN principal_group_membership pg ON pg.group_id=g.id
 WHERE pg.principal_id=$1 AND pg.is_deleted=false AND g.is_deleted=false AND (g.id<$2 OR $2=0) ORDER BY g.id DESC LIMIT $3
 `
 
@@ -1051,6 +1496,7 @@ func (q *Queries) ManageMemberGroups(ctx context.Context, arg ManageMemberGroups
 			&i.UpdatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.MonthlyTokenLimit,
 		); err != nil {
 			return nil, err
 		}
@@ -1084,7 +1530,7 @@ func (q *Queries) ManageMemberStatus(ctx context.Context, arg ManageMemberStatus
 }
 
 const manageMemberSuggestions = `-- name: ManageMemberSuggestions :many
-SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at FROM principal
+SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at, monthly_token_limit FROM principal
 WHERE is_deleted=false
   AND principal_type='MEMBER'
   AND strpos(lower(name), lower($1::text)) > 0
@@ -1119,6 +1565,7 @@ func (q *Queries) ManageMemberSuggestions(ctx context.Context, arg ManageMemberS
 			&i.UpdatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.MonthlyTokenLimit,
 		); err != nil {
 			return nil, err
 		}
@@ -1131,7 +1578,7 @@ func (q *Queries) ManageMemberSuggestions(ctx context.Context, arg ManageMemberS
 }
 
 const manageMembers = `-- name: ManageMembers :many
-SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at FROM principal WHERE is_deleted=false AND principal_type='MEMBER' AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2
+SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at, monthly_token_limit FROM principal WHERE is_deleted=false AND principal_type='MEMBER' AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2
 `
 
 type ManageMembersParams struct {
@@ -1159,6 +1606,7 @@ func (q *Queries) ManageMembers(ctx context.Context, arg ManageMembersParams) ([
 			&i.UpdatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.MonthlyTokenLimit,
 		); err != nil {
 			return nil, err
 		}
@@ -1426,6 +1874,39 @@ func (q *Queries) ManageProvider(ctx context.Context, id int64) (Provider, error
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const manageProviderActivationResourceIDs = `-- name: ManageProviderActivationResourceIDs :many
+SELECT id FROM provider_credential
+WHERE provider_id=$1 AND is_deleted=false
+  AND (effective_at IS NULL OR effective_at<=$2::timestamptz)
+  AND (expires_at IS NULL OR expires_at>$2::timestamptz)
+ORDER BY id DESC
+`
+
+type ManageProviderActivationResourceIDsParams struct {
+	ProviderID int64
+	At         pgtype.Timestamptz
+}
+
+func (q *Queries) ManageProviderActivationResourceIDs(ctx context.Context, arg ManageProviderActivationResourceIDsParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, manageProviderActivationResourceIDs, arg.ProviderID, arg.At)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const manageProviderCredentialConfigured = `-- name: ManageProviderCredentialConfigured :one
@@ -1767,12 +2248,24 @@ func (q *Queries) ManageResourceQuotas(ctx context.Context, providerCredentialID
 }
 
 const manageResources = `-- name: ManageResources :many
-SELECT id,provider_id,resource_name,auth_type,auth_adapter,subscription_type,plan_code,
-       external_account_ref,priority,effective_at,expires_at,quota_status,quota_checked_at,
-       quota_resets_at,credential_refreshed_at,credential_expires_at,
-       runtime_status,blocked_reason,blocked_at,last_error_at,last_http_status,
-       last_error_code,version,created_at,updated_at FROM provider_credential
-WHERE is_deleted=false AND (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2
+SELECT r.id,r.provider_id,r.resource_name,r.auth_type,r.auth_adapter,r.subscription_type,r.plan_code,
+       r.external_account_ref,r.priority,r.effective_at,r.expires_at,r.quota_status,r.quota_checked_at,
+       r.quota_resets_at,r.credential_refreshed_at,r.credential_expires_at,
+       r.runtime_status,r.blocked_reason,r.blocked_at,r.last_error_at,r.last_http_status,
+       r.last_error_code,r.version,r.created_at,r.updated_at,
+       COALESCE(price.currency,'') AS subscription_price_currency,
+       price.period_amount AS subscription_period_amount,
+       COALESCE(price.billing_period,'') AS subscription_billing_period,
+       price.effective_at AS subscription_price_effective_at
+FROM provider_credential r
+LEFT JOIN LATERAL (
+    SELECT currency,period_amount,billing_period,effective_at
+    FROM provider_credential_subscription_price
+    WHERE provider_credential_id=r.id AND effective_at<=CURRENT_TIMESTAMP
+    ORDER BY effective_at DESC,id DESC
+    LIMIT 1
+) price ON r.auth_type='SUBSCRIPTION'
+WHERE r.is_deleted=false AND (r.id<$1 OR $1=0) ORDER BY r.id DESC LIMIT $2
 `
 
 type ManageResourcesParams struct {
@@ -1781,31 +2274,35 @@ type ManageResourcesParams struct {
 }
 
 type ManageResourcesRow struct {
-	ID                    int64
-	ProviderID            int64
-	ResourceName          string
-	AuthType              string
-	AuthAdapter           string
-	SubscriptionType      *string
-	PlanCode              *string
-	ExternalAccountRef    *string
-	Priority              int32
-	EffectiveAt           pgtype.Timestamptz
-	ExpiresAt             pgtype.Timestamptz
-	QuotaStatus           string
-	QuotaCheckedAt        pgtype.Timestamptz
-	QuotaResetsAt         pgtype.Timestamptz
-	CredentialRefreshedAt pgtype.Timestamptz
-	CredentialExpiresAt   pgtype.Timestamptz
-	RuntimeStatus         string
-	BlockedReason         *string
-	BlockedAt             pgtype.Timestamptz
-	LastErrorAt           pgtype.Timestamptz
-	LastHttpStatus        *int32
-	LastErrorCode         *string
-	Version               int64
-	CreatedAt             pgtype.Timestamptz
-	UpdatedAt             pgtype.Timestamptz
+	ID                           int64
+	ProviderID                   int64
+	ResourceName                 string
+	AuthType                     string
+	AuthAdapter                  string
+	SubscriptionType             *string
+	PlanCode                     *string
+	ExternalAccountRef           *string
+	Priority                     int32
+	EffectiveAt                  pgtype.Timestamptz
+	ExpiresAt                    pgtype.Timestamptz
+	QuotaStatus                  string
+	QuotaCheckedAt               pgtype.Timestamptz
+	QuotaResetsAt                pgtype.Timestamptz
+	CredentialRefreshedAt        pgtype.Timestamptz
+	CredentialExpiresAt          pgtype.Timestamptz
+	RuntimeStatus                string
+	BlockedReason                *string
+	BlockedAt                    pgtype.Timestamptz
+	LastErrorAt                  pgtype.Timestamptz
+	LastHttpStatus               *int32
+	LastErrorCode                *string
+	Version                      int64
+	CreatedAt                    pgtype.Timestamptz
+	UpdatedAt                    pgtype.Timestamptz
+	SubscriptionPriceCurrency    string
+	SubscriptionPeriodAmount     pgtype.Numeric
+	SubscriptionBillingPeriod    string
+	SubscriptionPriceEffectiveAt pgtype.Timestamptz
 }
 
 func (q *Queries) ManageResources(ctx context.Context, arg ManageResourcesParams) ([]ManageResourcesRow, error) {
@@ -1843,6 +2340,10 @@ func (q *Queries) ManageResources(ctx context.Context, arg ManageResourcesParams
 			&i.Version,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SubscriptionPriceCurrency,
+			&i.SubscriptionPeriodAmount,
+			&i.SubscriptionBillingPeriod,
+			&i.SubscriptionPriceEffectiveAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1885,18 +2386,19 @@ func (q *Queries) ManageRestoreResourceRuntime(ctx context.Context, arg ManageRe
 }
 
 const manageRevokeMemberKeys = `-- name: ManageRevokeMemberKeys :exec
-UPDATE principal_access_key SET status='REVOKED',revoked_at=$3,updated_by=$2,updated_at=$3
-WHERE principal_id=$1 AND is_deleted=false AND status<>'REVOKED'
+UPDATE principal_access_key SET status='REVOKED',expires_at=$1,revoked_at=$1,
+updated_by=$2,updated_at=$1
+WHERE principal_id=$3 AND is_deleted=false AND status<>'REVOKED'
 `
 
 type ManageRevokeMemberKeysParams struct {
-	PrincipalID int64
-	UpdatedBy   string
 	RevokedAt   pgtype.Timestamptz
+	UpdatedBy   string
+	PrincipalID int64
 }
 
 func (q *Queries) ManageRevokeMemberKeys(ctx context.Context, arg ManageRevokeMemberKeysParams) error {
-	_, err := q.db.Exec(ctx, manageRevokeMemberKeys, arg.PrincipalID, arg.UpdatedBy, arg.RevokedAt)
+	_, err := q.db.Exec(ctx, manageRevokeMemberKeys, arg.RevokedAt, arg.UpdatedBy, arg.PrincipalID)
 	return err
 }
 
@@ -1915,6 +2417,30 @@ func (q *Queries) ManageRevokeModel(ctx context.Context, arg ManageRevokeModelPa
 	_, err := q.db.Exec(ctx, manageRevokeModel,
 		arg.GroupID,
 		arg.ModelID,
+		arg.UpdatedBy,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const manageUpdateApplication = `-- name: ManageUpdateApplication :exec
+UPDATE principal SET name=$2,remark=$3,updated_by=$4,updated_at=$5
+WHERE id=$1 AND is_deleted=false AND principal_type='APPLICATION'
+`
+
+type ManageUpdateApplicationParams struct {
+	ID        int64
+	Name      string
+	Remark    *string
+	UpdatedBy string
+	UpdatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) ManageUpdateApplication(ctx context.Context, arg ManageUpdateApplicationParams) error {
+	_, err := q.db.Exec(ctx, manageUpdateApplication,
+		arg.ID,
+		arg.Name,
+		arg.Remark,
 		arg.UpdatedBy,
 		arg.UpdatedAt,
 	)

@@ -69,7 +69,7 @@ func TestStage4Integration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	management := mgmt.New(NewManagementStore(pool, ids), ids, cipher, nil)
+	management := mgmt.New(NewManagementStore(pool, ids), ids, cipher, successfulConnectionTester())
 	sonnet := createActiveTestModel(t, ctx, management, actor, "claude-sonnet", "Claude Sonnet", []string{"TEXT", "IMAGE"})
 	opus := createActiveTestModel(t, ctx, management, actor, "claude-opus", "Claude Opus", []string{"TEXT", "IMAGE"})
 	provider := createTestProvider(t, ctx, pool, management, actor, "Anthropic 测试服务商",

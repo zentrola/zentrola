@@ -82,6 +82,26 @@ func TestDecodeRequest(t *testing.T) {
 	}
 }
 
+func TestActivateProviderRequestValidation(t *testing.T) {
+	assertMissingParameter[ActivateProviderRequest](t, http.MethodPost, "/api/v1/providers/8/activate", `{}`, "resourceId")
+	for _, test := range []struct {
+		body string
+		want bool
+	}{
+		{body: `{"resourceId":"20","protocol":"OPENAI","providerModelMappingId":"11"}`, want: true},
+		{body: `{"resourceId":"0","protocol":"OPENAI","providerModelMappingId":"11"}`},
+		{body: `{"resourceId":"20","protocol":"INVALID","providerModelMappingId":"11"}`},
+		{body: `{"resourceId":"20","protocol":"OPENAI","providerModelMappingId":"-1"}`},
+	} {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/providers/8/activate", strings.NewReader(test.body))
+		_, ok := decodeRequest[ActivateProviderRequest](recorder, request)
+		if ok != test.want {
+			t.Fatalf("body=%s accepted=%v; want %v", test.body, ok, test.want)
+		}
+	}
+}
+
 func TestDecodeRequestUsesCredentialSpecificBodyLimit(t *testing.T) {
 	credential := strings.Repeat("x", 64<<10)
 	body, err := json.Marshal(map[string]any{
@@ -129,6 +149,36 @@ func TestConsumeResetCreditRequestValidation(t *testing.T) {
 	)
 }
 
+func TestAddTokenQuotaRequestKeepsInt64Precision(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		amount string
+		valid  bool
+	}{
+		{name: "one", amount: "1", valid: true},
+		{name: "max int64", amount: "9223372036854775807", valid: true},
+		{name: "zero", amount: "0"},
+		{name: "negative", amount: "-1"},
+		{name: "overflow", amount: "9223372036854775808"},
+		{name: "decimal", amount: "1.5"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := AddTokenQuotaRequest{Amount: test.amount, Reason: "项目扩容"}
+			if request.Valid() != test.valid {
+				t.Fatalf("amount %q validity = %v, want %v", test.amount, request.Valid(), test.valid)
+			}
+		})
+	}
+	request := AddTokenQuotaRequest{Amount: " 10000000000000001 ", Reason: " 项目扩容 "}
+	request.Normalize()
+	if !request.Valid() || request.TokenAmount() != 10000000000000001 || request.Reason != "项目扩容" {
+		t.Fatalf("normalized request = %+v amount=%d", request, request.TokenAmount())
+	}
+	if request := (AddTokenQuotaRequest{Amount: "1000000"}); !request.Valid() {
+		t.Fatal("optional empty reason was rejected")
+	}
+}
+
 func TestTimeInputsRequireUTC(t *testing.T) {
 	utc := time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)
 	offset := time.Date(2099, 1, 1, 8, 0, 0, 0, time.FixedZone("CST", 8*60*60))
@@ -169,6 +219,51 @@ func TestParseUTCQueryTime(t *testing.T) {
 		if _, err := parseUTCQueryTime(value); err == nil {
 			t.Fatalf("non-Z query time was accepted: %s", value)
 		}
+	}
+}
+
+func TestCredentialPriceRequestsValidateCurrencyPrecisionAndUTC(t *testing.T) {
+	modelRecorder := httptest.NewRecorder()
+	modelRequest := httptest.NewRequest(http.MethodPut, "/api/v1/resources/1/prices/models/2", strings.NewReader(
+		`{"currency":"USD","inputPrice":"0","outputPrice":"12.34567890","cachedInputPrice":"0.5","effectiveAt":"2026-10-01T00:00:00Z"}`,
+	))
+	model, ok := decodeRequest[SaveModelPriceRequest](modelRecorder, modelRequest)
+	if !ok {
+		t.Fatalf("valid model price request was rejected: status=%d body=%s", modelRecorder.Code, modelRecorder.Body.String())
+	}
+	if !model.Valid() {
+		t.Fatal("valid model price was rejected")
+	}
+	model.Currency = "EUR"
+	if model.Valid() {
+		t.Fatal("unsupported currency was accepted")
+	}
+	model.Currency = "CNY"
+	model.InputPrice = "1.123456789"
+	if model.Valid() {
+		t.Fatal("excess precision was accepted")
+	}
+	model.InputPrice = "1"
+	model.EffectiveAt = time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	if model.Valid() {
+		t.Fatal("non-midnight effective date was accepted")
+	}
+
+	effectiveAt := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	subscriptionRecorder := httptest.NewRecorder()
+	subscriptionRequest := httptest.NewRequest(http.MethodPut, "/api/v1/resources/1/prices/subscription", strings.NewReader(
+		`{"currency":"CNY","periodAmount":"100","billingPeriod":"MONTH","effectiveAt":"2026-10-01T00:00:00Z"}`,
+	))
+	subscription, ok := decodeRequest[SaveSubscriptionPriceRequest](subscriptionRecorder, subscriptionRequest)
+	if !ok {
+		t.Fatalf("valid subscription price request was rejected: status=%d body=%s", subscriptionRecorder.Code, subscriptionRecorder.Body.String())
+	}
+	if !subscription.Valid() {
+		t.Fatal("valid subscription price was rejected")
+	}
+	subscription.EffectiveAt = effectiveAt.Add(9 * time.Hour)
+	if subscription.Valid() {
+		t.Fatal("non-midnight subscription effective date was accepted")
 	}
 }
 
@@ -257,6 +352,15 @@ func TestProviderCredentialRequiredReturnsConflict(t *testing.T) {
 	securityError(recorder, request, mgmt.ErrProviderCredentialRequired)
 
 	if recorder.Code != http.StatusConflict || !strings.Contains(recorder.Body.String(), `"code":"PROVIDER_CREDENTIAL_REQUIRED"`) {
+		t.Fatalf("unexpected response: status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestProviderConnectionTestFailedReturnsConflict(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/providers/8/status", nil)
+	securityError(recorder, request, mgmt.ErrProviderConnectionTestFailed)
+	if recorder.Code != http.StatusConflict || !strings.Contains(recorder.Body.String(), `"code":"PROVIDER_CONNECTION_TEST_FAILED"`) {
 		t.Fatalf("unexpected response: status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }

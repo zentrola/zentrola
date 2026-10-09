@@ -81,7 +81,7 @@ func (s *SecurityHandlers) mountUsage(r chi.Router) {
 	// @Description 按用户、客户端逻辑模型或服务商聚合指定时间范围内的请求、Token、成功率和平均耗时，并按维度主指标倒序分页。
 	// @Produce json
 	// @Security AdminBearer
-	// @Param dimension query string true "统计维度" Enums(member,model,provider)
+	// @Param dimension query string true "统计维度" Enums(member,application,model,provider)
 	// @Param after query int false "上一页 nextCursor，表示排行偏移量" minimum(0) default(0)
 	// @Param limit query int false "每页数量" minimum(1) maximum(100) default(50)
 	// @Param from query string true "起始时间，UTC RFC3339，必须以 Z 结尾"
@@ -148,6 +148,8 @@ func (s *SecurityHandlers) mountUsage(r chi.Router) {
 	// @Param from query string false "起始时间，UTC RFC3339，必须以 Z 结尾；默认 to 前 24 小时"
 	// @Param to query string false "结束时间，UTC RFC3339，必须以 Z 结尾；默认当前时间"
 	// @Param memberId query string false "成员 ID"
+	// @Param applicationId query string false "应用 ID"
+	// @Param principalType query string false "主体类型" Enums(MEMBER,APPLICATION)
 	// @Param modelId query string false "模型 ID"
 	// @Param providerId query string false "服务商 ID"
 	// @Param resourceId query string false "资源 ID"
@@ -161,6 +163,11 @@ func (s *SecurityHandlers) mountUsage(r chi.Router) {
 	r.Get("/usage", func(w http.ResponseWriter, req *http.Request) {
 		f := app.Filter{To: time.Now().UTC(), Limit: 50}
 		values := req.URL.Query()
+		if (values.Has("memberId") && values.Has("applicationId")) ||
+			(values.Has("principalType") && (values.Has("memberId") || values.Has("applicationId"))) {
+			securityError(w, req, appsec.ErrInvalidArgument)
+			return
+		}
 		for key, list := range values {
 			if len(list) != 1 {
 				securityError(w, req, appsec.ErrInvalidArgument)
@@ -179,7 +186,9 @@ func (s *SecurityHandlers) mountUsage(r chi.Router) {
 				} else {
 					f.To = t
 				}
-			case "memberId", "modelId", "providerId", "resourceId", "after", "limit":
+			case "principalType":
+				f.PrincipalType = v
+			case "memberId", "applicationId", "modelId", "providerId", "resourceId", "after", "limit":
 				n, err := strconv.ParseInt(v, 10, 64)
 				if err != nil || n < 0 || (key != "after" && n == 0) || (key == "limit" && n > 100) {
 					securityError(w, req, appsec.ErrInvalidArgument)
@@ -188,6 +197,10 @@ func (s *SecurityHandlers) mountUsage(r chi.Router) {
 				switch key {
 				case "memberId":
 					f.PrincipalID = &n
+					f.PrincipalType = "MEMBER"
+				case "applicationId":
+					f.PrincipalID = &n
+					f.PrincipalType = "APPLICATION"
 				case "modelId":
 					f.ModelID = &n
 				case "providerId":

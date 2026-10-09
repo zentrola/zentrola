@@ -19,12 +19,14 @@ type Service struct {
 	ProviderService
 	QueryService
 	ResourceService
+	PriceService
 }
 
 type serviceOptions struct {
 	discoverer    ModelDiscoverer
 	subscriptions []SubscriptionAdapter
 	now           func() time.Time
+	priceStore    PriceStore
 }
 
 type Option func(*serviceOptions)
@@ -39,6 +41,10 @@ func WithSubscriptionAdapter(adapter SubscriptionAdapter) Option {
 			options.subscriptions = append(options.subscriptions, adapter)
 		}
 	}
+}
+
+func WithPriceStore(store PriceStore) Option {
+	return func(options *serviceOptions) { options.priceStore = store }
 }
 
 // WithClock 注入业务时间，测试可使用固定时钟；所有结果统一规范化为 UTC 微秒精度。
@@ -69,18 +75,20 @@ func New(store Store, ids shared.IDGenerator, cipher Cipher, tester ConnectionTe
 	}
 	now := func() time.Time { return businessTime(configuration.now) }
 	subscriptions := append([]SubscriptionAdapter(nil), configuration.subscriptions...)
+	resourceService := ResourceService{
+		store: resourceStoreAdapter{Store: store}, ids: ids, cipher: cipher, tester: tester, now: now,
+		subscriptions: subscriptions,
+	}
 	return &Service{
 		MemberService: MemberService{store: memberStoreAdapter{Store: store}, ids: ids, now: now},
 		GroupService:  GroupService{store: groupStoreAdapter{Store: store}, ids: ids, now: now},
 		ModelService:  ModelService{store: modelStoreAdapter{Store: store}, ids: ids, now: now},
 		ProviderService: ProviderService{
 			store: providerStoreAdapter{Store: store}, ids: ids, cipher: cipher, now: now,
-			discoverer: configuration.discoverer, subscriptions: subscriptions,
+			connectionProbe: &resourceService, discoverer: configuration.discoverer, subscriptions: subscriptions,
 		},
-		ResourceService: ResourceService{
-			store: resourceStoreAdapter{Store: store}, ids: ids, cipher: cipher, tester: tester, now: now,
-			subscriptions: subscriptions,
-		},
+		ResourceService: resourceService,
+		PriceService:    PriceService{store: configuration.priceStore, ids: ids, now: now},
 		QueryService: QueryService{
 			store: store, discoverer: configuration.discoverer, subscriptions: subscriptions,
 		},
@@ -119,6 +127,24 @@ func validText(s string, max int) bool {
 	return utf8.ValidString(s) && s == strings.TrimSpace(s) && s != "" && len(s) <= max && !strings.ContainsRune(s, 0)
 }
 func validRemark(s string) bool { return s == "" || validText(s, 2000) }
+func validTokenQuotaAddition(current *int64, amount int64) bool {
+	return amount > 0 && (current == nil || amount <= int64(^uint64(0)>>1)-*current)
+}
+func validTokenQuotaReason(reason string) bool { return reason == "" || validText(reason, 500) }
+func tokenQuotaBeforeValue(limit, amount int64) any {
+	before := limit - amount
+	if before == 0 {
+		return nil
+	}
+	return idString(before)
+}
+func tokenQuotaAfterValue(limit, amount int64, reason string) map[string]any {
+	after := map[string]any{"monthlyTokenLimit": idString(limit), "amount": idString(amount)}
+	if reason != "" {
+		after["reason"] = reason
+	}
+	return after
+}
 func remark(s string) *string {
 	if s == "" {
 		return nil

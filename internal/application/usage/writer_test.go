@@ -124,13 +124,14 @@ func TestTimerFlushAndSnapshot(t *testing.T) {
 		return nil
 	}), 10, 10)
 	n := int64(12)
-	e := domain.Event{RequestID: "copy", Attempt: &domain.Attempt{InputTokens: &n}}
+	e := domain.Event{RequestID: "copy", QuotaGroupIDs: []int64{20}, Attempt: &domain.Attempt{InputTokens: &n}}
 	_ = w.Submit(e)
 	n = 99
 	e.Attempt.ResourceID = 666
+	e.QuotaGroupIDs[0] = 21
 	select {
 	case got := <-received:
-		if *got[0].Attempt.InputTokens != 12 || got[0].Attempt.ResourceID != 0 {
+		if *got[0].Attempt.InputTokens != 12 || got[0].Attempt.ResourceID != 0 || got[0].QuotaGroupIDs[0] != 20 {
 			t.Fatal("queued event changed")
 		}
 	case <-time.After(time.Second):

@@ -360,16 +360,18 @@ func (s memberCreateStore) Write(_ context.Context, _ admin.Identity, fn func(Wr
 
 type memberStatusWriter struct {
 	Writer
-	member    Member
-	keys      []Key
-	statusSet bool
+	member         Member
+	keys           []Key
+	includeExpired bool
+	statusSet      bool
 }
 
 func (w *memberStatusWriter) Member(context.Context, int64) (Member, error) {
 	return w.member, nil
 }
 
-func (w *memberStatusWriter) Keys(context.Context, int64, Page) ([]Key, error) {
+func (w *memberStatusWriter) Keys(_ context.Context, _ int64, _ Page, includeExpired bool) ([]Key, error) {
+	w.includeExpired = includeExpired
 	return w.keys, nil
 }
 
@@ -480,6 +482,9 @@ func TestSetMemberStatusRequiresAccessKeyBeforeActivation(t *testing.T) {
 	}
 	if writer.statusSet {
 		t.Fatal("member status changed without an access key")
+	}
+	if writer.includeExpired {
+		t.Fatal("member activation must only inspect valid access keys")
 	}
 }
 

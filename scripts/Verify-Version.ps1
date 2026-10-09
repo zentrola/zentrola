@@ -52,9 +52,10 @@ $composeVersions = [regex]::Matches($compose, '(?m)^\s*image:\s*longjianghu/zent
 if ($composeVersions.Count -eq 0) {
     throw 'compose.yaml does not declare a longjianghu/zentrola image'
 }
+# Compose 固定跟随 latest；VERSION、前端包和 Dockerfile 才使用发布版本号。
 foreach ($match in $composeVersions) {
-    if ($match.Groups[1].Value -ne $version) {
-        throw "compose.yaml image version is '$($match.Groups[1].Value)', expected '$version'"
+    if ($match.Groups[1].Value -ne 'latest') {
+        throw "compose.yaml image tag is '$($match.Groups[1].Value)', expected 'latest'"
     }
 }
 

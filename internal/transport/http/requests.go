@@ -3,6 +3,8 @@ package http
 import (
 	"fmt"
 	"reflect"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -285,6 +287,46 @@ type UpdateCredentialRequest struct {
 	Credential string `json:"credential" binding:"required" example:"your-provider-api-key"`
 }
 
+var credentialPriceDecimal = regexp.MustCompile(`^(0|[1-9][0-9]{0,11})(\.[0-9]{1,8})?$`)
+
+type SaveModelPriceRequest struct {
+	Currency         string `json:"currency" binding:"required" enums:"CNY,USD"`
+	InputPrice       string `json:"inputPrice" binding:"required"`
+	OutputPrice      string `json:"outputPrice" binding:"required"`
+	CachedInputPrice string `json:"cachedInputPrice" binding:"required"`
+	// EffectiveAt 是以 Z 结尾的 UTC 日期起点。
+	EffectiveAt time.Time `json:"effectiveAt" binding:"required" example:"2026-10-01T00:00:00Z"`
+}
+
+func (*SaveModelPriceRequest) Normalize() {}
+func (r SaveModelPriceRequest) Valid() bool {
+	return (r.Currency == "CNY" || r.Currency == "USD") &&
+		credentialPriceDecimal.MatchString(r.InputPrice) &&
+		credentialPriceDecimal.MatchString(r.OutputPrice) &&
+		credentialPriceDecimal.MatchString(r.CachedInputPrice) && validUTCDateStart(r.EffectiveAt)
+}
+
+func validUTCDateStart(value time.Time) bool {
+	return !value.IsZero() && value.Location() == time.UTC &&
+		value.Hour() == 0 && value.Minute() == 0 && value.Second() == 0 && value.Nanosecond() == 0
+}
+
+type SaveSubscriptionPriceRequest struct {
+	Currency      string `json:"currency" binding:"required" enums:"CNY,USD"`
+	PeriodAmount  string `json:"periodAmount" binding:"required"`
+	BillingPeriod string `json:"billingPeriod" binding:"required" enums:"MONTH,YEAR"`
+	// EffectiveAt 是以 Z 结尾的 UTC 日期起点。
+	EffectiveAt time.Time `json:"effectiveAt" binding:"required" example:"2026-10-01T00:00:00Z"`
+}
+
+func (*SaveSubscriptionPriceRequest) Normalize() {}
+func (r SaveSubscriptionPriceRequest) Valid() bool {
+	return (r.Currency == "CNY" || r.Currency == "USD") &&
+		credentialPriceDecimal.MatchString(r.PeriodAmount) &&
+		(r.BillingPeriod == "MONTH" || r.BillingPeriod == "YEAR") &&
+		validUTCDateStart(r.EffectiveAt)
+}
+
 func (r *UpdateCredentialRequest) Normalize() { r.Credential = strings.TrimSpace(r.Credential) }
 func (r UpdateCredentialRequest) Valid() bool {
 	return len(r.Credential) > 0 && len(r.Credential) <= 64<<10 && utf8.ValidString(r.Credential) && !strings.ContainsRune(r.Credential, 0)
@@ -310,3 +352,49 @@ type UpdateStatusRequest struct {
 
 func (r *UpdateStatusRequest) Normalize() { r.Status = strings.TrimSpace(r.Status) }
 func (r UpdateStatusRequest) Valid() bool { return r.Status == "ACTIVE" || r.Status == "DISABLED" }
+
+type ActivateProviderRequest struct {
+	ResourceID             string `json:"resourceId" binding:"required" example:"123"`
+	Protocol               string `json:"protocol,omitempty" enums:"ANTHROPIC,OPENAI" example:"OPENAI"`
+	ProviderModelMappingID string `json:"providerModelMappingId,omitempty" example:"456"`
+}
+
+func (r *ActivateProviderRequest) Normalize() {
+	r.ResourceID = strings.TrimSpace(r.ResourceID)
+	r.Protocol = strings.TrimSpace(r.Protocol)
+	r.ProviderModelMappingID = strings.TrimSpace(r.ProviderModelMappingID)
+}
+
+func (r ActivateProviderRequest) Valid() bool {
+	if _, err := positiveID(r.ResourceID); err != nil {
+		return false
+	}
+	if r.Protocol != "" && r.Protocol != "ANTHROPIC" && r.Protocol != "OPENAI" {
+		return false
+	}
+	if r.ProviderModelMappingID != "" {
+		_, err := positiveID(r.ProviderModelMappingID)
+		return err == nil
+	}
+	return true
+}
+
+type AddTokenQuotaRequest struct {
+	Amount string `json:"amount" binding:"required" example:"1000000"`
+	Reason string `json:"reason" example:"项目扩容"`
+}
+
+func (r *AddTokenQuotaRequest) Normalize() {
+	r.Amount = strings.TrimSpace(r.Amount)
+	r.Reason = strings.TrimSpace(r.Reason)
+}
+
+func (r AddTokenQuotaRequest) Valid() bool {
+	amount, err := strconv.ParseInt(r.Amount, 10, 64)
+	return err == nil && amount > 0 && validRequestText(r.Reason, 500, false)
+}
+
+func (r AddTokenQuotaRequest) TokenAmount() int64 {
+	amount, _ := strconv.ParseInt(r.Amount, 10, 64)
+	return amount
+}

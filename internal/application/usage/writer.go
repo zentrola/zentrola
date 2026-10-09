@@ -15,6 +15,9 @@ import (
 type Store interface {
 	WriteBatch(context.Context, []domain.Event) error
 }
+type PersistObserver interface {
+	Record(context.Context, []domain.Event)
+}
 type Options struct {
 	QueueSize, BatchSize        int
 	FlushInterval, WriteTimeout time.Duration
@@ -42,13 +45,17 @@ type Writer struct {
 	closed                                           bool
 	queued, persisted, fallback, failed, writeErrors atomic.Uint64
 	pending                                          atomic.Int64
+	observer                                         PersistObserver
 }
 
-func NewWriter(store Store, logger *slog.Logger, opts Options) (*Writer, error) {
+func NewWriter(store Store, logger *slog.Logger, opts Options, observers ...PersistObserver) (*Writer, error) {
 	if opts.QueueSize < 1 || opts.BatchSize < 1 || opts.FlushInterval <= 0 || opts.WriteTimeout <= 0 {
 		return nil, errors.New("invalid usage writer options")
 	}
 	w := &Writer{store: store, logger: logger, opts: opts, queue: make(chan domain.Event, opts.QueueSize), done: make(chan struct{})}
+	if len(observers) > 0 {
+		w.observer = observers[0]
+	}
 	w.allDone = make(chan struct{})
 	w.ctx, w.cancel = context.WithCancel(context.Background())
 	go w.run() // 固定一个 Worker；无每请求后台 goroutine。
@@ -75,6 +82,7 @@ func (w *Writer) Submit(event domain.Event) error {
 		return source
 	}
 	event.Attempts = append([]domain.Attempt(nil), event.Attempts...)
+	event.QuotaGroupIDs = append([]int64(nil), event.QuotaGroupIDs...)
 	for index := range event.Attempts {
 		attempt := cloneAttempt(event.Attempts[index])
 		if attempt.AttemptNo <= 0 {
@@ -124,6 +132,9 @@ func (w *Writer) write(events []domain.Event) error {
 		w.writeErrors.Add(1)
 		w.logger.Error("usage database write failed", "error_code", "USAGE_WRITE_FAILED", "event_count", len(events))
 		return errors.New("usage persistence failed")
+	}
+	if w.observer != nil {
+		w.observer.Record(ctx, events)
 	}
 	return nil
 }

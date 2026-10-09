@@ -12,11 +12,11 @@ import (
 )
 
 func memberView(r dbgen.Principal) mgmt.Member {
-	return mgmt.Member{ID: r.ID, Name: r.Name, Remark: r.Remark, Status: r.Status, CreatedAt: r.CreatedAt.Time.UTC()}
+	return mgmt.Member{ID: r.ID, Name: r.Name, MonthlyTokenLimit: r.MonthlyTokenLimit, Remark: r.Remark, Status: r.Status, CreatedAt: r.CreatedAt.Time.UTC()}
 }
 
 func groupView(r dbgen.PrincipalGroup) mgmt.Group {
-	return mgmt.Group{ID: r.ID, Code: r.GroupCode, Name: r.GroupName, Remark: r.Remark, Status: r.Status, CreatedAt: r.CreatedAt.Time.UTC()}
+	return mgmt.Group{ID: r.ID, Code: r.GroupCode, Name: r.GroupName, MonthlyTokenLimit: r.MonthlyTokenLimit, Remark: r.Remark, Status: r.Status, CreatedAt: r.CreatedAt.Time.UTC()}
 }
 
 func modelView(id int64, code, name, status string, inputJSON, outputJSON []byte, remark string, publisherProviderID *int64, publisherProviderName *string, createdAt, updatedAt time.Time) mgmt.Model {
@@ -79,7 +79,7 @@ func endpointView(r dbgen.ProviderEndpoint) mgmt.ProviderEndpoint {
 }
 
 func resourceView(r dbgen.ManageResourcesRow) mgmt.Resource {
-	return mgmt.Resource{
+	resource := mgmt.Resource{
 		ID: r.ID, ProviderID: r.ProviderID, Name: r.ResourceName,
 		AuthType: r.AuthType, AuthAdapter: r.AuthAdapter, SubscriptionType: r.SubscriptionType,
 		PlanCode: r.PlanCode, ExternalAccountRef: r.ExternalAccountRef, Priority: r.Priority,
@@ -92,6 +92,15 @@ func resourceView(r dbgen.ManageResourcesRow) mgmt.Resource {
 		CredentialConfigured: true, Version: r.Version,
 		CreatedAt: r.CreatedAt.Time.UTC(), UpdatedAt: r.UpdatedAt.Time.UTC(),
 	}
+	if r.SubscriptionPriceCurrency != "" && r.SubscriptionPeriodAmount.Valid &&
+		r.SubscriptionBillingPeriod != "" && r.SubscriptionPriceEffectiveAt.Valid {
+		resource.SubscriptionPrice = &mgmt.SubscriptionPriceSummary{
+			Currency: r.SubscriptionPriceCurrency, PeriodAmount: priceNumber(r.SubscriptionPeriodAmount),
+			BillingPeriod: r.SubscriptionBillingPeriod,
+			EffectiveAt:   r.SubscriptionPriceEffectiveAt.Time.UTC(),
+		}
+	}
+	return resource
 }
 
 func keyView(r dbgen.ManageKeysRow) mgmt.Key {

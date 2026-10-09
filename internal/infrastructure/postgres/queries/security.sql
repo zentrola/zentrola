@@ -26,9 +26,9 @@ UPDATE admin_user SET password_hash=$2,failed_login_count=0,locked_until=NULL,
 credential_version=credential_version+1,updated_by=$4,updated_at=$3
 WHERE id=$1 AND is_deleted=false AND status='ACTIVE';
 
--- name: GetMemberForKey :one
+-- name: GetPrincipalForKey :one
 SELECT * FROM principal
-WHERE id=$1 AND principal_type='MEMBER' AND is_deleted=false FOR UPDATE;
+WHERE id=sqlc.arg(principal_id) AND principal_type=sqlc.arg(principal_type) AND is_deleted=false FOR UPDATE;
 
 -- name: CreateAccessKey :exec
 INSERT INTO principal_access_key (id,principal_id,key_hash,masked_key,name,status,expires_at,created_by,updated_by,created_at,updated_at)
@@ -38,15 +38,16 @@ VALUES ($1,$2,$3,$4,$5,'ACTIVE',$6,$7,$7,$8,$8);
 SELECT * FROM principal_access_key WHERE id=$1 AND is_deleted=false FOR UPDATE;
 
 -- name: RevokeAccessKey :exec
-UPDATE principal_access_key SET status='REVOKED',revoked_at=$2,updated_by=$3,updated_at=$2
-WHERE id=$1 AND is_deleted=false;
+UPDATE principal_access_key SET status='REVOKED',expires_at=sqlc.arg(revoked_at),revoked_at=sqlc.arg(revoked_at),
+updated_by=sqlc.arg(updated_by),updated_at=sqlc.arg(revoked_at)
+WHERE id=sqlc.arg(id) AND is_deleted=false;
 
 -- name: AuthenticateAccessKey :one
-SELECT k.id,k.principal_id,k.expires_at FROM principal_access_key k
+SELECT k.id,k.principal_id,p.principal_type,k.expires_at FROM principal_access_key k
 JOIN principal p ON p.id=k.principal_id
 WHERE k.key_hash=$1 AND k.is_deleted=false AND k.status='ACTIVE' AND k.revoked_at IS NULL
 AND (k.expires_at IS NULL OR k.expires_at > sqlc.arg(now)::timestamptz)
-AND p.is_deleted=false AND p.status='ACTIVE' AND p.principal_type='MEMBER';
+AND p.is_deleted=false AND p.status='ACTIVE' AND p.principal_type IN ('MEMBER','APPLICATION');
 
 -- name: AppendSecurityOperation :exec
 INSERT INTO operation_log (id,operator_type,operator_id,operator_name,module,operation_type,target_type,target_id,target_name,

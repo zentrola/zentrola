@@ -17,6 +17,7 @@ import (
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	"github.com/zentrola/zentrola/internal/domain/admin"
 	"github.com/zentrola/zentrola/internal/domain/operation"
+	"github.com/zentrola/zentrola/internal/domain/principal"
 	"github.com/zentrola/zentrola/internal/domain/shared"
 	"github.com/zentrola/zentrola/internal/infrastructure/idgen"
 	"github.com/zentrola/zentrola/internal/infrastructure/postgres/dbgen"
@@ -169,10 +170,17 @@ func (s *SecurityStore) Create(ctx context.Context, actor admin.Identity, key ap
 		}
 		return s.securityError(ctx, "validate_access_key_actor", err)
 	}
-	if _, err := q.GetMemberForKey(ctx, key.PrincipalID); errors.Is(err, pgx.ErrNoRows) {
+	kind := key.PrincipalType
+	if kind == "" {
+		kind = principal.Member
+	}
+	if !kind.CanUseGateway() {
+		return appsec.ErrInvalidArgument
+	}
+	if _, err := q.GetPrincipalForKey(ctx, dbgen.GetPrincipalForKeyParams{PrincipalID: key.PrincipalID, PrincipalType: string(kind)}); errors.Is(err, pgx.ErrNoRows) {
 		return appsec.ErrNotFound
 	} else if err != nil {
-		return s.securityError(ctx, "get_member_for_key", err)
+		return s.securityError(ctx, "get_principal_for_key", err)
 	}
 	if err := q.CreateAccessKey(ctx, dbgen.CreateAccessKeyParams{ID: key.ID, PrincipalID: key.PrincipalID, KeyHash: key.Hash, MaskedKey: key.MaskedKey, Name: key.Name, ExpiresAt: nullableTime(key.ExpiresAt), CreatedBy: actorRef(actor.ID), CreatedAt: pgTime(key.CreatedAt)}); err != nil {
 		return s.securityError(ctx, "create_access_key", err)
@@ -217,7 +225,8 @@ func (s *SecurityStore) Revoke(ctx context.Context, actor admin.Identity, keyID 
 		return s.securityError(ctx, "revoke_access_key", err)
 	}
 	before, _ := json.Marshal(map[string]string{"status": row.Status})
-	if err := s.appendLog(ctx, q, actor, "ACCESS_KEY", operation.AccessKeyRevoke, "ACCESS_KEY", keyID, row.Name, "SUCCESS", "", meta, before, []byte(`{"status":"REVOKED"}`), ""); err != nil {
+	after, _ := json.Marshal(map[string]string{"status": "REVOKED", "principalId": strconv.FormatInt(row.PrincipalID, 10)})
+	if err := s.appendLog(ctx, q, actor, "ACCESS_KEY", operation.AccessKeyRevoke, "ACCESS_KEY", keyID, row.Name, "SUCCESS", "", meta, before, after, ""); err != nil {
 		return s.securityError(ctx, "audit_revoke_access_key", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -233,7 +242,7 @@ func (s *SecurityStore) Authenticate(ctx context.Context, hash []byte, now time.
 	if err != nil {
 		return appsec.PrincipalIdentity{}, s.securityError(ctx, "authenticate_access_key", err)
 	}
-	return appsec.PrincipalIdentity{ID: row.PrincipalID, AccessKeyID: row.ID, ExpiresAt: timePointer(row.ExpiresAt)}, nil
+	return appsec.PrincipalIdentity{ID: row.PrincipalID, AccessKeyID: row.ID, Type: principal.Type(row.PrincipalType), ExpiresAt: timePointer(row.ExpiresAt)}, nil
 }
 
 // ValidateCredentials 确认 MASTER_KEY 可以解密全部现有凭据，失败时不修改数据。

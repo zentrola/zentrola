@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"github.com/zentrola/zentrola/internal/domain/admin"
+	"github.com/zentrola/zentrola/internal/domain/principal"
 	"time"
 )
 
@@ -28,6 +29,7 @@ func (e *AccountLockedError) Unwrap() error { return ErrUnauthenticated }
 type RequestMeta struct{ RequestID, Method, Path, IP, UserAgent string }
 type PrincipalIdentity struct {
 	ID, AccessKeyID int64
+	Type            principal.Type
 	ExpiresAt       *time.Time
 }
 
@@ -52,6 +54,7 @@ type AdminStore interface {
 
 type KeyRecord struct {
 	ID, PrincipalID int64
+	PrincipalType   principal.Type
 	Hash            []byte
 	MaskedKey, Name string
 	ExpiresAt       *time.Time

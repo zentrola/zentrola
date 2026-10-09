@@ -14,20 +14,23 @@ import (
 const countUsage = `-- name: CountUsage :one
 SELECT COUNT(*)::bigint
 FROM usage_record u
+JOIN principal p ON p.id=u.principal_id
 WHERE u.started_at>=$1::timestamptz AND u.started_at<$2::timestamptz
 AND ($3::bigint IS NULL OR u.principal_id=$3)
-AND ($4::bigint IS NULL OR u.model_id=$4)
-AND ($5::bigint IS NULL OR u.provider_id=$5)
-AND ($6::bigint IS NULL OR u.provider_credential_id=$6)
+AND ($4::text='' OR p.principal_type=$4::text)
+AND ($5::bigint IS NULL OR u.model_id=$5)
+AND ($6::bigint IS NULL OR u.provider_id=$6)
+AND ($7::bigint IS NULL OR u.provider_credential_id=$7)
 `
 
 type CountUsageParams struct {
-	FromTime    pgtype.Timestamptz
-	ToTime      pgtype.Timestamptz
-	PrincipalID *int64
-	ModelID     *int64
-	ProviderID  *int64
-	ResourceID  *int64
+	FromTime      pgtype.Timestamptz
+	ToTime        pgtype.Timestamptz
+	PrincipalID   *int64
+	PrincipalType string
+	ModelID       *int64
+	ProviderID    *int64
+	ResourceID    *int64
 }
 
 func (q *Queries) CountUsage(ctx context.Context, arg CountUsageParams) (int64, error) {
@@ -35,6 +38,7 @@ func (q *Queries) CountUsage(ctx context.Context, arg CountUsageParams) (int64, 
 		arg.FromTime,
 		arg.ToTime,
 		arg.PrincipalID,
+		arg.PrincipalType,
 		arg.ModelID,
 		arg.ProviderID,
 		arg.ResourceID,
@@ -69,9 +73,9 @@ func (q *Queries) GetPrincipalTokenUsage(ctx context.Context, arg GetPrincipalTo
 }
 
 const insertUsageAttempts = `-- name: InsertUsageAttempts :exec
-INSERT INTO usage_record(id,request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,client_protocol,input_tokens,output_tokens,cached_input_tokens,started_at,completed_at,latency_ms,status,error_type,created_at)
-SELECT nextval('zentrola_global_id_seq'),request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,'MODEL_GATEWAY',client_protocol,input_tokens,output_tokens,cached_input_tokens,started_at,completed_at,latency_ms,status,error_type,completed_at
-FROM jsonb_to_recordset($1::jsonb) AS x(request_id text,attempt_no integer,client_protocol text,principal_id bigint,provider_id bigint,provider_model_id bigint,provider_credential_id bigint,model_id bigint,input_tokens bigint,output_tokens bigint,cached_input_tokens bigint,started_at timestamptz,completed_at timestamptz,latency_ms bigint,status text,error_type text)
+INSERT INTO usage_record(id,request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,usage_scene,client_protocol,quota_group_ids,input_tokens,output_tokens,cached_input_tokens,started_at,completed_at,latency_ms,status,error_type,created_at)
+SELECT nextval('zentrola_global_id_seq'),request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,'MODEL_GATEWAY',client_protocol,COALESCE(quota_group_ids, '{}'::bigint[]),input_tokens,output_tokens,cached_input_tokens,started_at,completed_at,latency_ms,status,error_type,completed_at
+FROM jsonb_to_recordset($1::jsonb) AS x(request_id text,attempt_no integer,client_protocol text,principal_id bigint,provider_id bigint,provider_model_id bigint,provider_credential_id bigint,model_id bigint,quota_group_ids bigint[],input_tokens bigint,output_tokens bigint,cached_input_tokens bigint,started_at timestamptz,completed_at timestamptz,latency_ms bigint,status text,error_type text)
 ON CONFLICT(request_id,attempt_no) DO NOTHING
 `
 
@@ -81,28 +85,30 @@ func (q *Queries) InsertUsageAttempts(ctx context.Context, payload []byte) error
 }
 
 const queryUsage = `-- name: QueryUsage :many
-SELECT u.id,u.request_id,u.client_protocol,u.principal_id,p.name AS principal_name,u.model_id,u.started_at,u.completed_at,u.latency_ms,u.status,u.error_type,
+SELECT u.id,u.request_id,u.client_protocol,u.principal_id,p.name AS principal_name,p.principal_type,u.model_id,u.started_at,u.completed_at,u.latency_ms,u.status,u.error_type,
 attempt_no,provider_id,provider_model_id,provider_credential_id AS resource_id,input_tokens,output_tokens,cached_input_tokens
 FROM usage_record u
 JOIN principal p ON p.id=u.principal_id
 WHERE (u.id<$1::bigint OR $1::bigint=0)
 AND u.started_at>=$2::timestamptz AND u.started_at<$3::timestamptz
 AND ($4::bigint IS NULL OR u.principal_id=$4)
-AND ($5::bigint IS NULL OR u.model_id=$5)
-AND ($6::bigint IS NULL OR u.provider_id=$6)
-AND ($7::bigint IS NULL OR u.provider_credential_id=$7)
-ORDER BY u.id DESC LIMIT $8::int
+AND ($5::text='' OR p.principal_type=$5::text)
+AND ($6::bigint IS NULL OR u.model_id=$6)
+AND ($7::bigint IS NULL OR u.provider_id=$7)
+AND ($8::bigint IS NULL OR u.provider_credential_id=$8)
+ORDER BY u.id DESC LIMIT $9::int
 `
 
 type QueryUsageParams struct {
-	AfterID     int64
-	FromTime    pgtype.Timestamptz
-	ToTime      pgtype.Timestamptz
-	PrincipalID *int64
-	ModelID     *int64
-	ProviderID  *int64
-	ResourceID  *int64
-	PageLimit   int32
+	AfterID       int64
+	FromTime      pgtype.Timestamptz
+	ToTime        pgtype.Timestamptz
+	PrincipalID   *int64
+	PrincipalType string
+	ModelID       *int64
+	ProviderID    *int64
+	ResourceID    *int64
+	PageLimit     int32
 }
 
 type QueryUsageRow struct {
@@ -111,6 +117,7 @@ type QueryUsageRow struct {
 	ClientProtocol    string
 	PrincipalID       int64
 	PrincipalName     string
+	PrincipalType     string
 	ModelID           int64
 	StartedAt         pgtype.Timestamptz
 	CompletedAt       pgtype.Timestamptz
@@ -132,6 +139,7 @@ func (q *Queries) QueryUsage(ctx context.Context, arg QueryUsageParams) ([]Query
 		arg.FromTime,
 		arg.ToTime,
 		arg.PrincipalID,
+		arg.PrincipalType,
 		arg.ModelID,
 		arg.ProviderID,
 		arg.ResourceID,
@@ -150,6 +158,7 @@ func (q *Queries) QueryUsage(ctx context.Context, arg QueryUsageParams) ([]Query
 			&i.ClientProtocol,
 			&i.PrincipalID,
 			&i.PrincipalName,
+			&i.PrincipalType,
 			&i.ModelID,
 			&i.StartedAt,
 			&i.CompletedAt,
@@ -283,16 +292,18 @@ FROM usage_record u
 JOIN principal p ON p.id=u.principal_id
 WHERE u.started_at>=$1::timestamptz
   AND u.started_at<$2::timestamptz
+  AND p.principal_type=$3::text
 GROUP BY u.principal_id, p.name
 ORDER BY tokens DESC, metric_count DESC, u.principal_id DESC
-LIMIT $4::int OFFSET $3::bigint
+LIMIT $5::int OFFSET $4::bigint
 `
 
 type UsageMemberStatisticsParams struct {
-	FromTime   pgtype.Timestamptz
-	ToTime     pgtype.Timestamptz
-	PageOffset int64
-	PageLimit  int32
+	FromTime      pgtype.Timestamptz
+	ToTime        pgtype.Timestamptz
+	PrincipalType string
+	PageOffset    int64
+	PageLimit     int32
 }
 
 type UsageMemberStatisticsRow struct {
@@ -314,6 +325,7 @@ func (q *Queries) UsageMemberStatistics(ctx context.Context, arg UsageMemberStat
 	rows, err := q.db.Query(ctx, usageMemberStatistics,
 		arg.FromTime,
 		arg.ToTime,
+		arg.PrincipalType,
 		arg.PageOffset,
 		arg.PageLimit,
 	)

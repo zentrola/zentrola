@@ -63,7 +63,7 @@ func (q *Queries) GetAdminByUsername(ctx context.Context, username string) (Admi
 }
 
 const getPrincipal = `-- name: GetPrincipal :one
-SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at FROM principal WHERE id = $1 AND is_deleted = false
+SELECT id, is_deleted, status, principal_type, name, remark, created_by, updated_by, created_at, updated_at, monthly_token_limit FROM principal WHERE id = $1 AND is_deleted = false
 `
 
 func (q *Queries) GetPrincipal(ctx context.Context, id int64) (Principal, error) {
@@ -80,6 +80,7 @@ func (q *Queries) GetPrincipal(ctx context.Context, id int64) (Principal, error)
 		&i.UpdatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MonthlyTokenLimit,
 	)
 	return i, err
 }
@@ -190,7 +191,7 @@ SELECT EXISTS (
   JOIN principal_group_model_permission permission ON permission.group_id = g.id
   JOIN model m ON m.id = permission.model_id
   WHERE p.id = $1 AND m.id = $2
-    AND p.principal_type = 'MEMBER' AND p.status = 'ACTIVE' AND p.is_deleted = false
+    AND p.principal_type IN ('MEMBER','APPLICATION') AND p.status = 'ACTIVE' AND p.is_deleted = false
     AND pg.is_deleted = false AND g.status = 'ACTIVE' AND g.is_deleted = false
     AND permission.is_deleted = false AND m.status = 'ACTIVE' AND m.is_deleted = false
 )
@@ -210,7 +211,7 @@ func (q *Queries) HasGroupModelPermission(ctx context.Context, arg HasGroupModel
 }
 
 const listGroupsForPrincipal = `-- name: ListGroupsForPrincipal :many
-SELECT g.id, g.is_deleted, g.status, g.group_code, g.group_name, g.remark, g.created_by, g.updated_by, g.created_at, g.updated_at FROM principal_group g
+SELECT g.id, g.is_deleted, g.status, g.group_code, g.group_name, g.remark, g.created_by, g.updated_by, g.created_at, g.updated_at, g.monthly_token_limit FROM principal_group g
 JOIN principal_group_membership pg ON pg.group_id = g.id
 WHERE pg.principal_id = $1
   AND pg.is_deleted = false AND g.is_deleted = false AND g.status = 'ACTIVE'
@@ -237,6 +238,7 @@ func (q *Queries) ListGroupsForPrincipal(ctx context.Context, principalID int64)
 			&i.UpdatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.MonthlyTokenLimit,
 		); err != nil {
 			return nil, err
 		}

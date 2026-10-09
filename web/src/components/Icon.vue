@@ -4,6 +4,7 @@ const paths: Record<string, string> = {
   home: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z',
   members:
     'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M16 3a4 4 0 0 1 0 8M22 21v-2a4 4 0 0 0-3-3.87M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0',
+  applications: 'M4 5h16v14H4zM8 9h8m-8 4h8m-8 4h5',
   groups: 'M3 7h7l2 2h9v11H3zM3 7V4h6l2 3',
   models: 'm12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5',
   providers: 'M4 7h16v12H4zM8 7V4h8v3M8 12h8m-8 4h5',
@@ -16,6 +17,7 @@ const paths: Record<string, string> = {
   edit: 'M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4L16.5 3.5Z',
   resources: 'M8 3v5m8-5v5M5 8h14v3a7 7 0 0 1-14 0V8Zm7 10v4',
   usage: 'M4 3v18h17M8 16v-5m5 5V7m5 9V3',
+  billing: 'M6 3h12v18l-3-2-3 2-3-2-3 2V3Zm3 5h6m-6 4h6m-6 4h3',
   operations: 'M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2',
   plus: 'M12 5v14M5 12h14',
   upload: 'M12 16V4m0 0-5 5m5-5 5 5M4 16v4h16v-4',

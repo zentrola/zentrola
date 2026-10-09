@@ -180,7 +180,17 @@ watch(identity, (value) => {
     void loadSetup()
   }
 })
-const navigation = ['home', 'members', 'groups', 'models', 'providers', 'usage', 'operations']
+const navigation = [
+  'home',
+  'members',
+  'applications',
+  'groups',
+  'models',
+  'providers',
+  'usage',
+  'billing',
+  'operations',
+]
 watch(
   () => route.path,
   () => {
@@ -395,7 +405,6 @@ async function signOut() {
       <nav id="primary-navigation" :aria-label="t('console')">
         <template v-for="item in navigation" :key="item"
           ><p v-if="item === 'home' || item === 'members' || item === 'usage'" class="nav-section">
-            {{ t(item === 'home' ? 'overview' : item === 'members' ? 'governance' : 'records') }}
             <a
               v-if="item === 'home'"
               class="community-source-link"
@@ -405,8 +414,10 @@ async function signOut() {
               :aria-label="t('communityRepository')"
               :title="t('communityRepository')"
             >
+              {{ t('communityRepositoryLabel') }}
               <Icon name="external" :size="12" />
             </a>
+            <template v-else>{{ t(item === 'members' ? 'governance' : 'records') }}</template>
           </p>
           <RouterLink
             :to="`/${item}`"

@@ -13,6 +13,8 @@ import ListFooter from '../components/ListFooter.vue'
 import ListSearch from '../components/ListSearch.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import TableScroll from '../components/TableScroll.vue'
+import TechnicalValue from '../components/TechnicalValue.vue'
+import RowActionMenu from '../components/RowActionMenu.vue'
 const {
   items,
   cursor,
@@ -199,9 +201,20 @@ function deleteModel() {
       }}<button class="text-button" @click="retryAll">{{ t('common.retry') }}</button>
     </p>
     <TableScroll has-actions>
-      <table>
+      <table class="models-table">
+        <colgroup>
+          <col class="record-id-column" />
+          <col class="model-name-column" />
+          <col class="model-publisher-column" />
+          <col class="model-status-column" />
+          <col class="model-input-column" />
+          <col class="model-output-column" />
+          <col class="model-remark-column" />
+          <col class="model-action-column" />
+        </colgroup>
         <thead>
           <tr>
+            <th>{{ t('common.id') }}</th>
             <th>{{ t('models.name') }}</th>
             <th>{{ t('models.publisher') }}</th>
             <th>{{ t('common.enableStatus') }}</th>
@@ -213,6 +226,7 @@ function deleteModel() {
         </thead>
         <tbody>
           <tr v-for="model in visible" :key="model.id">
+            <td class="record-id-cell"><TechnicalValue :value="model.id" :copyable="false" /></td>
             <td>
               <div class="person">
                 <span class="avatar">{{ model.name.slice(0, 1) }}</span>
@@ -251,12 +265,17 @@ function deleteModel() {
             </td>
             <td>
               <div class="row-actions">
-                <button class="text-button danger" :disabled="busy" @click="openDelete(model)">
-                  {{ t('models.delete') }}
-                </button>
                 <button class="text-button" :disabled="busy" @click="openEdit(model)">
                   {{ t('models.editAction') }}
                 </button>
+                <RowActionMenu
+                  :label="t('common.moreActionsFor', { name: model.name })"
+                  :title="t('common.moreActions')"
+                >
+                  <button class="text-button danger" :disabled="busy" @click="openDelete(model)">
+                    {{ t('models.delete') }}
+                  </button>
+                </RowActionMenu>
               </div>
             </td>
           </tr>
@@ -298,7 +317,7 @@ function deleteModel() {
     @close="editing = false"
   >
     <p v-if="!editTarget" class="model-form-hint">{{ t('models.createHint') }}</p>
-    <form class="model-form" @submit.prevent="save">
+    <form id="model-form" class="model-form" @submit.prevent="save">
       <div class="model-form-row">
         <label class="model-form-label required-label" for="model-code-input">{{
           t('models.code')
@@ -393,14 +412,15 @@ function deleteModel() {
           />
         </div>
       </div>
-      <footer class="form-footer">
-        <button type="button" class="button" :disabled="busy" @click="editing = false">
-          {{ t('common.cancel') }}</button
-        ><button class="button primary" :disabled="busy">
-          {{ t(busy ? 'common.working' : 'common.save') }}
-        </button>
-      </footer>
     </form>
+    <template #footer>
+      <button type="button" class="button" :disabled="busy" @click="editing = false">
+        {{ t('common.cancel') }}
+      </button>
+      <button type="submit" form="model-form" class="button primary" :disabled="busy">
+        {{ t(busy ? 'common.working' : 'common.save') }}
+      </button>
+    </template>
   </Modal>
   <ConfirmDialog
     v-if="deleteTarget"
@@ -415,6 +435,29 @@ function deleteModel() {
   />
 </template>
 <style scoped>
+.models-table {
+  min-width: 1180px;
+  table-layout: fixed;
+}
+.model-name-column {
+  width: 22%;
+}
+.model-publisher-column {
+  width: 160px;
+}
+.model-status-column {
+  width: 100px;
+}
+.model-input-column,
+.model-output-column {
+  width: 120px;
+}
+.model-remark-column {
+  width: calc(78% - 820px);
+}
+.model-action-column {
+  width: 176px;
+}
 .model-publisher-filter {
   display: flex;
   flex: none;
@@ -441,9 +484,6 @@ function deleteModel() {
 }
 .model-form label {
   margin-bottom: 0;
-}
-.model-form .form-footer {
-  margin-top: 0;
 }
 .model-form-hint {
   margin: 0 0 20px;

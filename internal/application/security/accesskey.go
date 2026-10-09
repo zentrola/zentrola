@@ -5,14 +5,18 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
-	"github.com/zentrola/zentrola/internal/domain/admin"
-	"github.com/zentrola/zentrola/internal/domain/shared"
+	"io"
 	"strings"
 	"time"
+
+	"github.com/zentrola/zentrola/internal/domain/admin"
+	"github.com/zentrola/zentrola/internal/domain/principal"
+	"github.com/zentrola/zentrola/internal/domain/shared"
 )
 
 const (
 	keyMarker       = "vk-"
+	appKeyMarker    = "ak-"
 	legacyKeyMarker = "zt_vk_"
 	keyPrefixChars  = 8
 	keySuffixChars  = 4
@@ -20,8 +24,9 @@ const (
 )
 
 type Keys struct {
-	store KeyStore
-	ids   shared.IDGenerator
+	store   KeyStore
+	ids     shared.IDGenerator
+	entropy io.Reader
 }
 type CreatedKey struct {
 	ID        int64      `json:"id,string"`
@@ -31,9 +36,19 @@ type CreatedKey struct {
 	ExpiresAt *time.Time `json:"expiresAt"`
 }
 
-func NewKeys(store KeyStore, ids shared.IDGenerator) *Keys { return &Keys{store: store, ids: ids} }
+func NewKeys(store KeyStore, ids shared.IDGenerator) *Keys {
+	return &Keys{store: store, ids: ids, entropy: rand.Reader}
+}
 
 func (s *Keys) Create(ctx context.Context, actor admin.Identity, principalID int64, name string, expires *time.Time, meta RequestMeta) (CreatedKey, error) {
+	return s.create(ctx, actor, principalID, principal.Member, name, expires, meta)
+}
+
+func (s *Keys) CreateApplication(ctx context.Context, actor admin.Identity, principalID int64, name string, expires *time.Time, meta RequestMeta) (CreatedKey, error) {
+	return s.create(ctx, actor, principalID, principal.Application, name, expires, meta)
+}
+
+func (s *Keys) create(ctx context.Context, actor admin.Identity, principalID int64, kind principal.Type, name string, expires *time.Time, meta RequestMeta) (CreatedKey, error) {
 	now := time.Now().UTC()
 	if principalID <= 0 || strings.TrimSpace(name) == "" || strings.ContainsRune(name, 0) || len(name) > 128 || (expires != nil && !expires.After(now)) {
 		return CreatedKey{}, ErrInvalidArgument
@@ -43,15 +58,21 @@ func (s *Keys) Create(ctx context.Context, actor admin.Identity, principalID int
 		expires = &value
 	}
 	var entropy [32]byte
-	_, _ = rand.Read(entropy[:])
-	full := keyMarker + base64.RawURLEncoding.EncodeToString(entropy[:])
+	if _, err := io.ReadFull(s.entropy, entropy[:]); err != nil {
+		return CreatedKey{}, ErrUnavailable
+	}
+	marker := keyMarker
+	if kind == principal.Application {
+		marker = appKeyMarker
+	}
+	full := marker + base64.RawURLEncoding.EncodeToString(entropy[:])
 	digest := sha256.Sum256([]byte(full))
 	id, err := s.ids.NextID(ctx)
 	if err != nil {
 		return CreatedKey{}, ErrUnavailable
 	}
-	maskedKey := full[:len(keyMarker)+keyPrefixChars] + keyMask + full[len(full)-keySuffixChars:]
-	row := KeyRecord{ID: id, PrincipalID: principalID, Hash: digest[:], MaskedKey: maskedKey, Name: name, ExpiresAt: expires, CreatedAt: now}
+	maskedKey := full[:len(marker)+keyPrefixChars] + keyMask + full[len(full)-keySuffixChars:]
+	row := KeyRecord{ID: id, PrincipalID: principalID, PrincipalType: kind, Hash: digest[:], MaskedKey: maskedKey, Name: name, ExpiresAt: expires, CreatedAt: now}
 	if err := s.store.Create(ctx, actor, row, meta); err != nil {
 		return CreatedKey{}, err
 	}
@@ -69,6 +90,8 @@ func (s *Keys) Authenticate(ctx context.Context, full string) (PrincipalIdentity
 	// 已签发的旧密钥继续按原文摘要认证，不修改现有凭证。
 	if strings.HasPrefix(full, legacyKeyMarker) {
 		marker = legacyKeyMarker
+	} else if strings.HasPrefix(full, appKeyMarker) {
+		marker = appKeyMarker
 	}
 	if !strings.HasPrefix(full, marker) || len(full) != len(marker)+43 {
 		return PrincipalIdentity{}, ErrUnauthenticated

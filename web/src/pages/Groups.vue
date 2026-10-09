@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { api, all } from '../api'
+import { computed, onMounted, ref, watch } from 'vue'
+import { api, all, errorText } from '../api'
 import { useCollection, useAction, useListSearch, date, validText } from '../composables'
 import { t } from '../i18n'
-import { showErrorToast } from '../toast'
-import type { Group, Model } from '../types'
+import { showErrorToast, showSuccessToast } from '../toast'
+import type { Group, Model, TokenQuotaStatus } from '../types'
 import Icon from '../components/Icon.vue'
 import StatusSwitch from '../components/StatusSwitch.vue'
 import Modal from '../components/Modal.vue'
@@ -14,6 +14,10 @@ import ListSearch from '../components/ListSearch.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import GroupModelSelector from '../components/GroupModelSelector.vue'
 import TableScroll from '../components/TableScroll.vue'
+import TechnicalValue from '../components/TechnicalValue.vue'
+import TokenQuotaUsage from '../components/TokenQuotaUsage.vue'
+import AddTokenQuotaModal from '../components/AddTokenQuotaModal.vue'
+import RowActionMenu from '../components/RowActionMenu.vue'
 const {
   items,
   cursor,
@@ -43,7 +47,11 @@ const selected = ref<Group | null>(null),
   modelCandidates = ref<Model[]>([]),
   relationReady = ref(false),
   statusTarget = ref<Group | null>(null),
-  deleteTarget = ref<Group | null>(null)
+  deleteTarget = ref<Group | null>(null),
+  quotaTarget = ref<Group | null>(null),
+  quotaRemovalTarget = ref<Group | null>(null)
+const quotaStatuses = ref<Record<string, TokenQuotaStatus>>({})
+let quotaRevision = 0
 const { keyword, query, visible, search, reset, searching, searchingAll } = useListSearch(
   items,
   (g) => `${g.name} ${g.id} ${g.remark || ''}`,
@@ -58,6 +66,39 @@ const editSelectableModelIDs = computed(() =>
   modelCandidates.value.filter(canEditModelSelection).map((model) => model.id),
 )
 onMounted(() => load())
+watch(visible, (rows) => void loadQuotaStatuses(rows), { immediate: true })
+
+async function loadQuotaStatuses(rows: Group[]) {
+  const revision = ++quotaRevision
+  const ids = rows.filter((group) => group.monthlyTokenLimit).map((group) => group.id)
+  if (!ids.length) {
+    quotaStatuses.value = {}
+    return
+  }
+  try {
+    const params = new URLSearchParams({ scopeType: 'GROUP', scopeIds: ids.join(',') })
+    const statuses = await api<TokenQuotaStatus[]>(`/token-quotas?${params}`)
+    if (revision !== quotaRevision) return
+    quotaStatuses.value = Object.fromEntries(statuses.map((status) => [status.scopeId, status]))
+  } catch (error) {
+    if (revision === quotaRevision) showErrorToast(errorText(error))
+  }
+}
+
+async function quotaSaved() {
+  quotaTarget.value = null
+  await refresh()
+}
+function removeTokenQuota() {
+  if (!quotaRemovalTarget.value) return
+  const groupID = quotaRemovalTarget.value.id
+  void run(async () => {
+    await api(`/groups/${groupID}/token-quota`, 'DELETE')
+    quotaRemovalTarget.value = null
+    await refresh()
+    showSuccessToast(t('tokenQuota.removed'))
+  })
+}
 function canEditModelSelection(model: Model) {
   return (
     grantedModelIDs.value.has(model.id) ||
@@ -199,11 +240,22 @@ function deleteGroup() {
       {{ error }}<button class="text-button" @click="retry">{{ t('common.retry') }}</button>
     </p>
     <TableScroll has-actions>
-      <table>
+      <table class="groups-table">
+        <colgroup>
+          <col class="record-id-column" />
+          <col class="group-name-column" />
+          <col class="group-status-column" />
+          <col class="group-quota-column" />
+          <col class="group-created-column" />
+          <col class="group-remark-column" />
+          <col class="group-action-column" />
+        </colgroup>
         <thead>
           <tr>
+            <th>{{ t('common.id') }}</th>
             <th>{{ t('common.name') }}</th>
             <th>{{ t('common.enableStatus') }}</th>
+            <th>{{ t('tokenQuota.column') }}</th>
             <th>{{ t('common.created') }}</th>
             <th>{{ t('common.remark') }}</th>
             <th class="align-right">{{ t('common.actions') }}</th>
@@ -211,6 +263,7 @@ function deleteGroup() {
         </thead>
         <tbody>
           <tr v-for="group in visible" :key="group.id">
+            <td class="record-id-cell"><TechnicalValue :value="group.id" :copyable="false" /></td>
             <td>
               <div class="person">
                 <span class="avatar">{{ group.name.slice(0, 1) }}</span>
@@ -226,18 +279,45 @@ function deleteGroup() {
                 @change="changeStatus(group)"
               />
             </td>
+            <td>
+              <TokenQuotaUsage :limit="group.monthlyTokenLimit" :status="quotaStatuses[group.id]" />
+            </td>
             <td>{{ date(group.createdAt) }}</td>
             <td class="remark-cell" :title="group.remark || ''">
               {{ group.remark || t('common.none') }}
             </td>
             <td>
               <div class="row-actions">
-                <button class="text-button" @click="manage(group)">
+                <button class="text-button" :disabled="busy || loading" @click="manage(group)">
                   {{ t('groups.models') }}
                 </button>
-                <button class="text-button danger" @click="openDelete(group)">
-                  {{ t('groups.delete') }}
-                </button>
+                <RowActionMenu
+                  :label="t('common.moreActionsFor', { name: group.name })"
+                  :title="t('common.moreActions')"
+                >
+                  <button
+                    class="text-button"
+                    :disabled="busy || loading"
+                    @click="quotaTarget = group"
+                  >
+                    {{ t('tokenQuota.addAction') }}
+                  </button>
+                  <button
+                    v-if="group.monthlyTokenLimit"
+                    class="text-button"
+                    :disabled="busy || loading"
+                    @click="quotaRemovalTarget = group"
+                  >
+                    {{ t('tokenQuota.removeAction') }}
+                  </button>
+                  <button
+                    class="text-button danger"
+                    :disabled="busy || loading"
+                    @click="openDelete(group)"
+                  >
+                    {{ t('groups.delete') }}
+                  </button>
+                </RowActionMenu>
               </div>
             </td>
           </tr>
@@ -266,8 +346,15 @@ function deleteGroup() {
       @page-size="setPageSize"
     />
   </section>
+  <AddTokenQuotaModal
+    v-if="quotaTarget"
+    :name="quotaTarget.name"
+    :path="`/groups/${quotaTarget.id}`"
+    @close="quotaTarget = null"
+    @saved="quotaSaved"
+  />
   <Modal v-if="creating" :title="t('groups.create')" :busy="busy" wide @close="creating = false"
-    ><form class="group-form" @submit.prevent="create">
+    ><form id="group-create-form" class="group-form" @submit.prevent="create">
       <div class="group-form-fields">
         <div class="group-form-row">
           <label class="group-form-label required-label" for="create-group-name-input">{{
@@ -326,14 +413,20 @@ function deleteGroup() {
           {{ t('common.retry') }}
         </button>
       </p>
-      <footer class="form-footer">
-        <button type="button" class="button" :disabled="busy" @click="creating = false">
-          {{ t('common.cancel') }}</button
-        ><button class="button primary" :disabled="busy || !createModelsReady">
-          {{ t(busy ? 'common.working' : 'common.create') }}
-        </button>
-      </footer>
-    </form></Modal
+    </form>
+    <template #footer>
+      <button type="button" class="button" :disabled="busy" @click="creating = false">
+        {{ t('common.cancel') }}
+      </button>
+      <button
+        type="submit"
+        form="group-create-form"
+        class="button primary"
+        :disabled="busy || !createModelsReady"
+      >
+        {{ t(busy ? 'common.working' : 'common.create') }}
+      </button>
+    </template></Modal
   >
   <Modal
     v-if="selected"
@@ -342,7 +435,7 @@ function deleteGroup() {
     wide
     @close="selected = null"
   >
-    <form class="group-form" @submit.prevent="saveEdit">
+    <form id="group-edit-form" class="group-form" @submit.prevent="saveEdit">
       <div class="group-form-fields">
         <div class="group-form-row">
           <label class="group-form-label required-label" for="edit-group-name-input">{{
@@ -397,15 +490,32 @@ function deleteGroup() {
           {{ t('common.retry') }}
         </button>
       </p>
-      <footer class="form-footer">
-        <button type="button" class="button" :disabled="busy" @click="selected = null">
-          {{ t('common.cancel') }}</button
-        ><button class="button primary" :disabled="busy || !relationReady">
-          {{ t(busy ? 'common.working' : 'common.save') }}
-        </button>
-      </footer>
     </form>
+    <template #footer>
+      <button type="button" class="button" :disabled="busy" @click="selected = null">
+        {{ t('common.cancel') }}
+      </button>
+      <button
+        type="submit"
+        form="group-edit-form"
+        class="button primary"
+        :disabled="busy || !relationReady"
+      >
+        {{ t(busy ? 'common.working' : 'common.save') }}
+      </button>
+    </template>
   </Modal>
+  <ConfirmDialog
+    v-if="quotaRemovalTarget"
+    :title="t('tokenQuota.removeTitle')"
+    :message="t('tokenQuota.removeQuestion', { name: quotaRemovalTarget.name })"
+    :hint="t('tokenQuota.removeHint')"
+    :confirm-label="t('tokenQuota.removeAction')"
+    :busy="busy"
+    tone="warning"
+    @close="quotaRemovalTarget = null"
+    @confirm="removeTokenQuota"
+  />
   <ConfirmDialog
     v-if="deleteTarget"
     :title="t('groups.deleteTitle')"
@@ -419,6 +529,28 @@ function deleteGroup() {
   />
 </template>
 <style scoped>
+.groups-table {
+  min-width: 1042px;
+  table-layout: fixed;
+}
+.group-name-column {
+  width: 20%;
+}
+.group-quota-column {
+  width: 190px;
+}
+.group-status-column {
+  width: 120px;
+}
+.group-created-column {
+  width: 160px;
+}
+.group-remark-column {
+  width: calc(80% - 712px);
+}
+.group-action-column {
+  width: 132px;
+}
 .group-form-fields {
   display: grid;
   gap: 16px;

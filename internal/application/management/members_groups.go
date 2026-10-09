@@ -21,11 +21,13 @@ type MemberSession interface {
 	Member(context.Context, int64) (Member, error)
 	Group(context.Context, int64) (Group, error)
 	MemberGroups(context.Context, int64, Page) ([]Group, error)
-	Keys(context.Context, int64, Page) ([]Key, error)
+	Keys(context.Context, int64, Page, bool) ([]Key, error)
 	CreateMember(context.Context, Member) error
 	UpdateMember(context.Context, Member) error
 	SetMemberStatus(context.Context, int64, string) error
 	DeleteMember(context.Context, int64) error
+	AddPrincipalTokenQuota(context.Context, int64, int64) (int64, error)
+	ClearPrincipalTokenQuota(context.Context, int64) error
 	SetGroupMember(context.Context, int64, int64, bool) (bool, error)
 	Audit(context.Context, Audit, appsec.RequestMeta) error
 }
@@ -62,6 +64,8 @@ type GroupSession interface {
 	UpdateGroup(context.Context, Group) error
 	SetGroupStatus(context.Context, int64, string) error
 	DeleteGroup(context.Context, int64) error
+	AddGroupTokenQuota(context.Context, int64, int64) (int64, error)
+	ClearGroupTokenQuota(context.Context, int64) error
 	SetGroupMember(context.Context, int64, int64, bool) (bool, error)
 	SetGroupModel(context.Context, int64, int64, bool) (bool, error)
 	Audit(context.Context, Audit, appsec.RequestMeta) error
@@ -218,7 +222,7 @@ func (s *MemberService) SetMemberStatus(ctx context.Context, actor admin.Identit
 			return nil
 		}
 		if status == "ACTIVE" {
-			keys, err := w.Keys(ctx, id, Page{Limit: 1})
+			keys, err := w.Keys(ctx, id, Page{Limit: 1}, false)
 			if err != nil {
 				return err
 			}
@@ -247,8 +251,110 @@ func (s *MemberService) DeleteMember(ctx context.Context, actor admin.Identity, 
 		return w.Audit(ctx, Audit{Event: operation.MemberDelete, Target: "PRINCIPAL", ID: id, Name: m.Name, Before: m, After: map[string]bool{"deleted": true}}, meta)
 	})
 }
+
+func (s *MemberService) AddMemberTokenQuota(ctx context.Context, actor admin.Identity, id, amount int64, reason string, meta appsec.RequestMeta) (Member, error) {
+	if id <= 0 || amount <= 0 || !validTokenQuotaReason(reason) {
+		return Member{}, appsec.ErrInvalidArgument
+	}
+	var updated Member
+	err := s.store.WriteMember(ctx, actor, func(w MemberSession) error {
+		current, err := w.Member(ctx, id)
+		if err != nil {
+			return err
+		}
+		if !validTokenQuotaAddition(current.MonthlyTokenLimit, amount) {
+			return appsec.ErrInvalidArgument
+		}
+		limit, err := w.AddPrincipalTokenQuota(ctx, id, amount)
+		if err != nil {
+			return err
+		}
+		updated = current
+		updated.MonthlyTokenLimit = &limit
+		return w.Audit(ctx, Audit{Event: operation.PrincipalTokenQuotaAdd, Target: "PRINCIPAL", ID: id, Name: current.Name,
+			Before: map[string]any{"monthlyTokenLimit": tokenQuotaBeforeValue(limit, amount)},
+			After:  tokenQuotaAfterValue(limit, amount, reason)}, meta)
+	})
+	return updated, err
+}
+
+func (s *MemberService) RemoveMemberTokenQuota(ctx context.Context, actor admin.Identity, id int64, meta appsec.RequestMeta) (Member, error) {
+	if id <= 0 {
+		return Member{}, appsec.ErrInvalidArgument
+	}
+	var updated Member
+	err := s.store.WriteMember(ctx, actor, func(w MemberSession) error {
+		current, err := w.Member(ctx, id)
+		if err != nil {
+			return err
+		}
+		if current.MonthlyTokenLimit == nil {
+			return ErrConflict
+		}
+		if err := w.ClearPrincipalTokenQuota(ctx, id); err != nil {
+			return err
+		}
+		updated = current
+		updated.MonthlyTokenLimit = nil
+		return w.Audit(ctx, Audit{Event: operation.PrincipalTokenQuotaRemove, Target: "PRINCIPAL", ID: id, Name: current.Name,
+			Before: map[string]any{"monthlyTokenLimit": idString(*current.MonthlyTokenLimit)},
+			After:  map[string]any{"monthlyTokenLimit": nil}}, meta)
+	})
+	return updated, err
+}
 func (s *GroupService) CreateGroup(ctx context.Context, actor admin.Identity, code, name, note string, meta appsec.RequestMeta) (Group, error) {
 	return s.createGroup(ctx, actor, code, name, note, nil, meta)
+}
+
+func (s *GroupService) AddGroupTokenQuota(ctx context.Context, actor admin.Identity, id, amount int64, reason string, meta appsec.RequestMeta) (Group, error) {
+	if id <= 0 || amount <= 0 || !validTokenQuotaReason(reason) {
+		return Group{}, appsec.ErrInvalidArgument
+	}
+	var updated Group
+	err := s.store.WriteGroup(ctx, actor, func(w GroupSession) error {
+		current, err := w.Group(ctx, id)
+		if err != nil {
+			return err
+		}
+		if !validTokenQuotaAddition(current.MonthlyTokenLimit, amount) {
+			return appsec.ErrInvalidArgument
+		}
+		limit, err := w.AddGroupTokenQuota(ctx, id, amount)
+		if err != nil {
+			return err
+		}
+		updated = current
+		updated.MonthlyTokenLimit = &limit
+		return w.Audit(ctx, Audit{Event: operation.GroupTokenQuotaAdd, Target: "GROUP", ID: id, Name: current.Name,
+			Before: map[string]any{"monthlyTokenLimit": tokenQuotaBeforeValue(limit, amount)},
+			After:  tokenQuotaAfterValue(limit, amount, reason)}, meta)
+	})
+	return updated, err
+}
+
+func (s *GroupService) RemoveGroupTokenQuota(ctx context.Context, actor admin.Identity, id int64, meta appsec.RequestMeta) (Group, error) {
+	if id <= 0 {
+		return Group{}, appsec.ErrInvalidArgument
+	}
+	var updated Group
+	err := s.store.WriteGroup(ctx, actor, func(w GroupSession) error {
+		current, err := w.Group(ctx, id)
+		if err != nil {
+			return err
+		}
+		if current.MonthlyTokenLimit == nil {
+			return ErrConflict
+		}
+		if err := w.ClearGroupTokenQuota(ctx, id); err != nil {
+			return err
+		}
+		updated = current
+		updated.MonthlyTokenLimit = nil
+		return w.Audit(ctx, Audit{Event: operation.GroupTokenQuotaRemove, Target: "GROUP", ID: id, Name: current.Name,
+			Before: map[string]any{"monthlyTokenLimit": idString(*current.MonthlyTokenLimit)},
+			After:  map[string]any{"monthlyTokenLimit": nil}}, meta)
+	})
+	return updated, err
 }
 func (s *GroupService) CreateGroupWithModels(ctx context.Context, actor admin.Identity, code, name, note string, modelIDs []int64, meta appsec.RequestMeta) (Group, error) {
 	return s.createGroup(ctx, actor, code, name, note, modelIDs, meta)

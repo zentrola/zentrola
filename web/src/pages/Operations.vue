@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { useCollection, useListSearch, date } from '../composables'
 import { i18n, t } from '../i18n'
 import type { Operation } from '../types'
@@ -11,8 +12,13 @@ import ListFooter from '../components/ListFooter.vue'
 import ListSearch from '../components/ListSearch.vue'
 import OperationDiff from '../components/OperationDiff.vue'
 import TableScroll from '../components/TableScroll.vue'
+const route = useRoute()
+const operationPath = () =>
+  typeof route.query.applicationId === 'string' && /^\d+$/.test(route.query.applicationId)
+    ? `/applications/${route.query.applicationId}/operations`
+    : '/operation-logs'
 const { items, cursor, page, pageSize, total, loading, error, load, previous, retry, setPageSize } =
-  useCollection<Operation>(() => '/operation-logs')
+  useCollection<Operation>(operationPath)
 const selected = ref<Operation | null>(null)
 function operationLabel(value: string) {
   const key = `operations.types.${value}`
@@ -33,13 +39,21 @@ const { keyword, query, visible, search, reset, searching, searchingAll } = useL
   items,
   (row) =>
     `${row.operatorName} ${row.type} ${operationLabel(row.type)} ${row.targetType} ${targetLabel(row.targetType)} ${row.targetName || ''} ${row.targetId} ${row.requestId || ''} ${row.result} ${t(`state.${row.result}`)}`,
-  () => '/operation-logs',
+  operationPath,
   loading,
 )
 onMounted(() => load())
+watch(
+  () => route.query.applicationId,
+  () => void load(),
+)
 </script>
 <template>
   <PageHeader name="operations" />
+  <p v-if="route.query.applicationId" class="context-note">
+    {{ t('operations.applicationFilter') }}
+    <RouterLink to="/operations" class="text-button">{{ t('operations.showAll') }}</RouterLink>
+  </p>
   <section class="panel">
     <ListSearch
       v-model="keyword"

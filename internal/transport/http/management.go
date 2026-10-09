@@ -13,6 +13,9 @@ func (s *SecurityHandlers) mountManagement(r chi.Router) {
 	s.mountManagementCatalogRoutes(r)
 	s.mountManagementQueryRoutes(r)
 	s.mountManagementCommandRoutes(r)
+	if s.Applications != nil {
+		s.mountApplicationRoutes(r)
+	}
 }
 
 func (s *SecurityHandlers) mountManagementCatalogRoutes(r chi.Router) {
@@ -369,6 +372,7 @@ func (s *SecurityHandlers) mountManagementQueryRoutes(r chi.Router) {
 	// @Param id path string true "业务 ID（正整数字符串）"
 	// @Param after query string false "上一页 nextCursor，默认从头查询"
 	// @Param limit query int false "每页数量" minimum(1) maximum(100) default(50)
+	// @Param expiry query string false "all 或 unexpired（仅有效且未撤销），默认 all" Enums(all,unexpired)
 	// @Success 200 {object} response{data=PageResponse[mgmt.Key]}
 	// @Header all {string} X-Request-ID "请求追踪 ID"
 	// @Failure 400 {object} response
@@ -381,8 +385,12 @@ func (s *SecurityHandlers) mountManagementQueryRoutes(r chi.Router) {
 		if err != nil {
 			return mgmt.PageData[mgmt.Key]{}, err
 		}
-		return m.Keys(req.Context(), adminFrom(req), id, p)
-	}, func(v mgmt.Key) int64 { return v.ID }))
+		expiry, err := optionalQueryValue(req, "expiry")
+		if err != nil {
+			return mgmt.PageData[mgmt.Key]{}, err
+		}
+		return m.Keys(req.Context(), adminFrom(req), id, p, expiry)
+	}, func(v mgmt.Key) int64 { return v.ID }, "expiry"))
 	// @Summary 用户所属分组列表
 	// @Tags 成员管理
 	// @Description 按分组 ID 倒序分页；用于查看和编辑用户的分组关系。
@@ -488,6 +496,197 @@ func (s *SecurityHandlers) mountManagementQueryRoutes(r chi.Router) {
 	// @Failure 404 {object} response
 	// @Router /api/v1/resources/{id} [get]
 	r.Get("/resources/{id}", detailEndpoint(m.Resource))
+	// @Summary 凭证价格配置与历史版本
+	// @Tags 模型与资源
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "凭证 ID（正整数字符串）"
+	// @Success 200 {object} response{data=mgmt.CredentialPrices}
+	// @Router /api/v1/resources/{id}/prices [get]
+	r.Get("/resources/{id}/prices", func(w http.ResponseWriter, req *http.Request) {
+		id, err := routeID(req, "id")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		data, err := m.CredentialPrices(req.Context(), adminFrom(req), id)
+		adminResult(w, req, http.StatusOK, data, err)
+	})
+	// @Summary 录入或修改按量凭证模型单价
+	// @Tags 模型与资源
+	// @Accept json
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "凭证 ID（正整数字符串）"
+	// @Param modelId path string true "供应方模型映射 ID（正整数字符串）"
+	// @Param body body SaveModelPriceRequest true "每百万 Token 的单价"
+	// @Success 200 {object} response{data=mgmt.ModelPrice}
+	// @Router /api/v1/resources/{id}/prices/models/{modelId} [put]
+	r.Put("/resources/{id}/prices/models/{modelId}", func(w http.ResponseWriter, req *http.Request) {
+		id, err := routeID(req, "id")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		modelID, err := routeID(req, "modelId")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		input, ok := decodeRequest[SaveModelPriceRequest](w, req)
+		if !ok {
+			return
+		}
+		data, err := m.SaveModelPrice(req.Context(), adminFrom(req), id, mgmt.ModelPriceInput{
+			ProviderModelID: modelID, Currency: input.Currency, InputPrice: input.InputPrice,
+			OutputPrice: input.OutputPrice, CachedInputPrice: input.CachedInputPrice,
+			EffectiveAt: input.EffectiveAt,
+		}, requestMeta(req))
+		adminResult(w, req, http.StatusOK, data, err)
+	})
+	// @Summary 修改模型价格版本
+	// @Tags 模型与资源
+	// @Accept json
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "凭证 ID"
+	// @Param modelId path string true "供应方模型映射 ID"
+	// @Param priceId path string true "价格版本 ID"
+	// @Param body body SaveModelPriceRequest true "价格版本"
+	// @Success 200 {object} response{data=mgmt.ModelPrice}
+	// @Router /api/v1/resources/{id}/prices/models/{modelId}/{priceId} [put]
+	r.Put("/resources/{id}/prices/models/{modelId}/{priceId}", func(w http.ResponseWriter, req *http.Request) {
+		id, err := routeID(req, "id")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		modelID, err := routeID(req, "modelId")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		priceID, err := routeID(req, "priceId")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		input, ok := decodeRequest[SaveModelPriceRequest](w, req)
+		if !ok {
+			return
+		}
+		data, err := m.UpdateModelPrice(req.Context(), adminFrom(req), id, priceID, mgmt.ModelPriceInput{
+			ProviderModelID: modelID, Currency: input.Currency, InputPrice: input.InputPrice,
+			OutputPrice: input.OutputPrice, CachedInputPrice: input.CachedInputPrice, EffectiveAt: input.EffectiveAt,
+		}, requestMeta(req))
+		adminResult(w, req, http.StatusOK, data, err)
+	})
+	// @Summary 删除模型价格版本
+	// @Tags 模型与资源
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "凭证 ID"
+	// @Param modelId path string true "供应方模型映射 ID"
+	// @Param priceId path string true "价格版本 ID"
+	// @Success 200 {object} response
+	// @Router /api/v1/resources/{id}/prices/models/{modelId}/{priceId} [delete]
+	r.Delete("/resources/{id}/prices/models/{modelId}/{priceId}", func(w http.ResponseWriter, req *http.Request) {
+		id, err := routeID(req, "id")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		modelID, err := routeID(req, "modelId")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		priceID, err := routeID(req, "priceId")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		err = m.DeleteModelPrice(req.Context(), adminFrom(req), id, modelID, priceID, requestMeta(req))
+		adminResult(w, req, http.StatusOK, map[string]bool{"deleted": true}, err)
+	})
+	// @Summary 录入或修改订阅凭证周期费用
+	// @Tags 模型与资源
+	// @Accept json
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "凭证 ID（正整数字符串）"
+	// @Param body body SaveSubscriptionPriceRequest true "订阅周期费用"
+	// @Success 200 {object} response{data=mgmt.SubscriptionPrice}
+	// @Router /api/v1/resources/{id}/prices/subscription [put]
+	r.Put("/resources/{id}/prices/subscription", func(w http.ResponseWriter, req *http.Request) {
+		id, err := routeID(req, "id")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		input, ok := decodeRequest[SaveSubscriptionPriceRequest](w, req)
+		if !ok {
+			return
+		}
+		data, err := m.SaveSubscriptionPrice(req.Context(), adminFrom(req), id, mgmt.SubscriptionPriceInput{
+			Currency: input.Currency, PeriodAmount: input.PeriodAmount,
+			BillingPeriod: input.BillingPeriod, EffectiveAt: input.EffectiveAt,
+		}, requestMeta(req))
+		adminResult(w, req, http.StatusOK, data, err)
+	})
+	// @Summary 修改订阅费用版本
+	// @Tags 模型与资源
+	// @Accept json
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "凭证 ID"
+	// @Param priceId path string true "价格版本 ID"
+	// @Param body body SaveSubscriptionPriceRequest true "订阅费用版本"
+	// @Success 200 {object} response{data=mgmt.SubscriptionPrice}
+	// @Router /api/v1/resources/{id}/prices/subscription/{priceId} [put]
+	r.Put("/resources/{id}/prices/subscription/{priceId}", func(w http.ResponseWriter, req *http.Request) {
+		id, err := routeID(req, "id")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		priceID, err := routeID(req, "priceId")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		input, ok := decodeRequest[SaveSubscriptionPriceRequest](w, req)
+		if !ok {
+			return
+		}
+		data, err := m.UpdateSubscriptionPrice(req.Context(), adminFrom(req), id, priceID, mgmt.SubscriptionPriceInput{
+			Currency: input.Currency, PeriodAmount: input.PeriodAmount,
+			BillingPeriod: input.BillingPeriod, EffectiveAt: input.EffectiveAt,
+		}, requestMeta(req))
+		adminResult(w, req, http.StatusOK, data, err)
+	})
+	// @Summary 删除订阅费用版本
+	// @Tags 模型与资源
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "凭证 ID"
+	// @Param priceId path string true "价格版本 ID"
+	// @Success 200 {object} response
+	// @Router /api/v1/resources/{id}/prices/subscription/{priceId} [delete]
+	r.Delete("/resources/{id}/prices/subscription/{priceId}", func(w http.ResponseWriter, req *http.Request) {
+		id, err := routeID(req, "id")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		priceID, err := routeID(req, "priceId")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		err = m.DeleteSubscriptionPrice(req.Context(), adminFrom(req), id, priceID, requestMeta(req))
+		adminResult(w, req, http.StatusOK, map[string]bool{"deleted": true}, err)
+	})
 	// @Summary 资源订阅额度
 	// @Tags 模型与资源
 	// @Produce json
@@ -636,6 +835,46 @@ func (s *SecurityHandlers) mountManagementCommandRoutes(r chi.Router) {
 		data, err := m.UpdateMemberWithGroups(req.Context(), adminFrom(req), id, input.Name, input.Remark, groupIDs, requestMeta(req))
 		adminResult(w, req, 200, data, err)
 	})
+	// @Summary 增加用户月度 Token 配额
+	// @Tags 成员管理
+	// @Accept json
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "用户 ID"
+	// @Param body body AddTokenQuotaRequest true "增加额度和可选原因"
+	// @Success 200 {object} response{data=mgmt.Member}
+	// @Failure 400,401,404,503 {object} response
+	// @Router /api/v1/members/{id}/token-quota/add [post]
+	r.Post("/members/{id}/token-quota/add", func(w http.ResponseWriter, req *http.Request) {
+		input, ok := decodeRequest[AddTokenQuotaRequest](w, req)
+		if !ok {
+			return
+		}
+		id, err := routeID(req, "id")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		data, err := m.AddMemberTokenQuota(req.Context(), adminFrom(req), id, input.TokenAmount(), input.Reason, requestMeta(req))
+		adminResult(w, req, http.StatusOK, data, err)
+	})
+	// @Summary 取消用户月度 Token 配额限制
+	// @Tags 成员管理
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "用户 ID"
+	// @Success 200 {object} response{data=mgmt.Member}
+	// @Failure 400,401,404,409,503 {object} response
+	// @Router /api/v1/members/{id}/token-quota [delete]
+	r.Delete("/members/{id}/token-quota", func(w http.ResponseWriter, req *http.Request) {
+		id, err := routeID(req, "id")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		data, err := m.RemoveMemberTokenQuota(req.Context(), adminFrom(req), id, requestMeta(req))
+		adminResult(w, req, http.StatusOK, data, err)
+	})
 	// @Summary 创建分组
 	// @Tags 分组与授权
 	// @Produce json
@@ -696,6 +935,46 @@ func (s *SecurityHandlers) mountManagementCommandRoutes(r chi.Router) {
 		}
 		data, err := m.UpdateGroupWithModels(req.Context(), adminFrom(req), id, input.Name, input.Remark, modelIDs, requestMeta(req))
 		adminResult(w, req, 200, data, err)
+	})
+	// @Summary 增加分组月度 Token 配额
+	// @Tags 分组与授权
+	// @Accept json
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "分组 ID"
+	// @Param body body AddTokenQuotaRequest true "增加额度和可选原因"
+	// @Success 200 {object} response{data=mgmt.Group}
+	// @Failure 400,401,404,503 {object} response
+	// @Router /api/v1/groups/{id}/token-quota/add [post]
+	r.Post("/groups/{id}/token-quota/add", func(w http.ResponseWriter, req *http.Request) {
+		input, ok := decodeRequest[AddTokenQuotaRequest](w, req)
+		if !ok {
+			return
+		}
+		id, err := routeID(req, "id")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		data, err := m.AddGroupTokenQuota(req.Context(), adminFrom(req), id, input.TokenAmount(), input.Reason, requestMeta(req))
+		adminResult(w, req, http.StatusOK, data, err)
+	})
+	// @Summary 取消分组月度 Token 配额限制
+	// @Tags 分组与授权
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "分组 ID"
+	// @Success 200 {object} response{data=mgmt.Group}
+	// @Failure 400,401,404,409,503 {object} response
+	// @Router /api/v1/groups/{id}/token-quota [delete]
+	r.Delete("/groups/{id}/token-quota", func(w http.ResponseWriter, req *http.Request) {
+		id, err := routeID(req, "id")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		data, err := m.RemoveGroupTokenQuota(req.Context(), adminFrom(req), id, requestMeta(req))
+		adminResult(w, req, http.StatusOK, data, err)
 	})
 	// @Summary 创建资源
 	// @Tags 模型与资源
@@ -952,6 +1231,42 @@ func (s *SecurityHandlers) mountManagementCommandRoutes(r chi.Router) {
 	// @Failure 503 {object} response
 	// @Router /api/v1/providers/{id}/status [patch]
 	r.Patch("/providers/{id}/status", statusEndpoint(m.SetProviderStatus))
+	// @Summary 测试选定连接并启用服务商
+	// @Tags 模型与资源
+	// @Description 使用指定凭据、协议和模型映射执行一次连接测试；只有测试通过且配置在测试期间未变化时才启用服务商。HTTP 200 后仍需检查 data.ok 和 data.code。
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "服务商 ID"
+	// @Accept json
+	// @Param body body ActivateProviderRequest true "连接测试选择"
+	// @Success 200 {object} response{data=mgmt.ConnectionResult}
+	// @Failure 400 {object} response
+	// @Failure 401 {object} response
+	// @Failure 404 {object} response
+	// @Failure 409 {object} response
+	// @Failure 422 {object} response
+	// @Failure 503 {object} response
+	// @Router /api/v1/providers/{id}/activate [post]
+	r.Post("/providers/{id}/activate", func(w http.ResponseWriter, req *http.Request) {
+		input, ok := decodeRequest[ActivateProviderRequest](w, req)
+		if !ok {
+			return
+		}
+		id, err := routeID(req, "id")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		resourceID, _ := positiveID(input.ResourceID)
+		mappingID := int64(0)
+		if input.ProviderModelMappingID != "" {
+			mappingID, _ = positiveID(input.ProviderModelMappingID)
+		}
+		data, err := m.ActivateProvider(req.Context(), adminFrom(req), id, mgmt.ProviderActivationSelection{
+			ResourceID: resourceID, Protocol: input.Protocol, ProviderModelMappingID: mappingID,
+		}, requestMeta(req))
+		adminResult(w, req, http.StatusOK, data, err)
+	})
 
 	// @Summary 添加分组成员
 	// @Tags 分组与授权
