@@ -1667,6 +1667,9 @@ test('应用管理签发仅展示一次的 App Key', async ({ page }) => {
   await expect(
     modal(page).getByRole('row').filter({ hasText: '已撤销' }).locator('td').nth(2),
   ).toHaveText('2026年9月20日')
+  await expect(
+    modal(page).getByRole('row').filter({ hasText: '已撤销' }).locator('td').nth(3),
+  ).toHaveText('-')
   await modal(page).getByRole('button', { name: '关闭' }).click()
   await memberNavigation.click()
   await expect(page).toHaveURL(/#\/members$/)
@@ -2502,6 +2505,9 @@ test('成员列表按需查看 Key 并处理删除和失败恢复', async ({ pag
       .filter({ hasText: '临时测试' })
       .getByRole('button', { name: '撤销' }),
   ).toHaveCount(0)
+  await expect(
+    modal(page).getByRole('row').filter({ hasText: '临时测试' }).locator('td').nth(3),
+  ).toHaveText('-')
   const historyDialog = page.getByRole('dialog', { name: '林知远的 Key 记录', exact: true })
   const historyRevoke = historyDialog
     .getByRole('row')
@@ -2523,7 +2529,7 @@ test('成员列表按需查看 Key 并处理删除和失败恢复', async ({ pag
   await expect(page.locator('.toast-success')).toContainText('Key 已撤销')
   await expect(historyDialog.locator('.notice')).toHaveCount(0)
   await expect(historyRevoke).toHaveCount(0)
-  await expect(maskedKey).toContainText('已撤销')
+  await expect(maskedKey.locator('td').nth(3)).toHaveText('-')
   expect(state.keys[0].status).toBe('REVOKED')
   expect(state.keys[1].status).toBe('ACTIVE')
   await mkdir('../.cache/web-visual', { recursive: true })

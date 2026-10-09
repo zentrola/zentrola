@@ -514,7 +514,6 @@ export const i18n = createI18n({
         unexpiredKeys: '有效 Key',
         allKeys: '全部',
         noUnexpiredKeys: '没有有效的访问密钥。',
-        revokedStatus: '已撤销',
         noKeys: '还没有访问密钥。',
       },
       applications: {
@@ -565,7 +564,6 @@ export const i18n = createI18n({
         unexpiredKeys: '有效 Key',
         allKeys: '全部',
         noUnexpiredKeys: '没有有效的 App Key。',
-        revokedStatus: '已撤销',
         noKeys: '还没有 App Key。',
       },
       groups: {

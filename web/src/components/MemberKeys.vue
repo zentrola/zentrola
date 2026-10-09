@@ -137,9 +137,7 @@ function revoke() {
               >
                 {{ local('revoke') }}
               </button>
-              <span v-else-if="key.status === 'REVOKED' || key.revokedAt" class="muted">
-                {{ local('revokedStatus') }}
-              </span>
+              <span v-else class="muted">-</span>
             </td>
           </tr>
         </tbody>

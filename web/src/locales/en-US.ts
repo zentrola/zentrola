@@ -493,7 +493,6 @@ export default {
     unexpiredKeys: 'Valid keys',
     allKeys: 'All',
     noUnexpiredKeys: 'No valid access keys.',
-    revokedStatus: 'Revoked',
     noKeys: 'No access keys yet.',
   },
   applications: {
@@ -545,7 +544,6 @@ export default {
     unexpiredKeys: 'Valid keys',
     allKeys: 'All',
     noUnexpiredKeys: 'No valid App Keys.',
-    revokedStatus: 'Revoked',
     noKeys: 'No App Keys yet.',
   },
   groups: {
