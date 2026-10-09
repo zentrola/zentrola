@@ -4,18 +4,8 @@ import { all, api, download, errorText } from '../api'
 import { count, date, dateOnly, useCollection } from '../composables'
 import { t } from '../i18n'
 import { showErrorToast } from '../toast'
-import type {
-  BillingCurrency,
-  Group,
-  Model,
-  Provider,
-  Resource,
-  UsageCost,
-  UsageCostDetail,
-  UsageCostSummary,
-} from '../types'
+import type { BillingCurrency, Model, UsageCost, UsageCostDetail, UsageCostSummary } from '../types'
 import DateRangePicker from './DateRangePicker.vue'
-import Icon from './Icon.vue'
 import ListFooter from './ListFooter.vue'
 import Modal from './Modal.vue'
 import Status from './Status.vue'
@@ -26,27 +16,15 @@ const from = ref('')
 const to = ref('')
 const principalType = ref('')
 const principalId = ref('')
-const groupId = ref('')
 const modelId = ref('')
-const providerId = ref('')
-const resourceId = ref('')
-const clientProtocol = ref('')
-const status = ref('')
 const ratingStatus = ref('')
 const billingType = ref('')
-const currency = ref('')
-const sort = ref('startedAt')
-const order = ref('desc')
-const advancedFiltersOpen = ref(false)
 const query = ref('')
 const summary = ref<UsageCostSummary | null>(null)
 const summaryLoading = ref(false)
 const summaryError = ref('')
 const exporting = ref(false)
-const groups = ref<Group[]>([])
 const models = ref<Model[]>([])
-const providers = ref<Provider[]>([])
-const resources = ref<Resource[]>([])
 const lookupError = ref('')
 const selected = ref<UsageCostDetail | null>(null)
 const detailOpen = ref(false)
@@ -58,26 +36,8 @@ let detailRevision = 0
 const { items, cursor, page, pageSize, total, loading, error, load, previous, retry, setPageSize } =
   useCollection<UsageCost>(() => `/billing/usage-costs?${query.value}`)
 
-const filteredResources = computed(() =>
-  providerId.value
-    ? resources.value.filter((resource) => resource.providerId === providerId.value)
-    : resources.value,
-)
 const totalTokens = computed(
   () => (summary.value?.inputTokens || 0) + (summary.value?.outputTokens || 0),
-)
-const advancedFilterCount = computed(
-  () =>
-    [
-      principalType.value,
-      principalId.value.trim(),
-      resourceId.value,
-      clientProtocol.value,
-      status.value,
-      currency.value,
-      sort.value === 'startedAt' ? '' : sort.value,
-      order.value === 'desc' ? '' : order.value,
-    ].filter(Boolean).length,
 )
 
 function dateValue(value: Date) {
@@ -109,15 +69,9 @@ function params() {
   for (const [key, value] of [
     ['principalType', principalType.value],
     ['principalId', principalId.value.trim()],
-    ['groupId', groupId.value],
     ['modelId', modelId.value],
-    ['providerId', providerId.value],
-    ['resourceId', resourceId.value],
-    ['clientProtocol', clientProtocol.value],
-    ['status', status.value],
     ['ratingStatus', ratingStatus.value],
     ['billingType', billingType.value],
-    ['currency', currency.value],
   ])
     if (value) result.set(key, value)
   return result
@@ -125,8 +79,8 @@ function params() {
 async function search() {
   const result = params()
   if (!result) return
-  result.set('sort', sort.value)
-  result.set('order', order.value)
+  result.set('sort', 'startedAt')
+  result.set('order', 'desc')
   query.value = result.toString()
   const revision = ++summaryRevision
   summaryLoading.value = true
@@ -149,34 +103,16 @@ async function search() {
 function reset() {
   principalType.value = ''
   principalId.value = ''
-  groupId.value = ''
   modelId.value = ''
-  providerId.value = ''
-  resourceId.value = ''
-  clientProtocol.value = ''
-  status.value = ''
   ratingStatus.value = ''
   billingType.value = ''
-  currency.value = ''
-  sort.value = 'startedAt'
-  order.value = 'desc'
-  advancedFiltersOpen.value = false
   resetDates()
   void search()
-}
-function changeProvider() {
-  if (!filteredResources.value.some((resource) => resource.id === resourceId.value))
-    resourceId.value = ''
 }
 async function loadLookups() {
   lookupError.value = ''
   try {
-    ;[groups.value, models.value, providers.value, resources.value] = await Promise.all([
-      all<Group>('/groups'),
-      all<Model>('/models'),
-      all<Provider>('/providers'),
-      all<Resource>('/resources'),
-    ])
+    models.value = await all<Model>('/models')
   } catch (reason) {
     lookupError.value = errorText(reason)
   }
@@ -221,8 +157,8 @@ function closeDetail() {
 async function exportCSV() {
   const result = params()
   if (!result || exporting.value) return
-  result.set('sort', sort.value)
-  result.set('order', order.value)
+  result.set('sort', 'startedAt')
+  result.set('order', 'desc')
   exporting.value = true
   try {
     const blob = await download(`/billing/usage-costs/export?${result}`)
@@ -250,30 +186,28 @@ onMounted(() => {
   <section class="panel billing-filter-panel usage-cost-panel">
     <form class="usage-filters usage-cost-filters" @submit.prevent="search">
       <DateRangePicker v-model:from="from" v-model:to="to" />
-      <label>
-        <span class="filter-label">{{ t('billing.group') }}</span>
-        <select v-model="groupId">
-          <option value="">{{ t('common.all') }}</option>
-          <option v-for="group in groups" :key="group.id" :value="group.id">
-            {{ group.name }}
-          </option>
-        </select>
-      </label>
+      <fieldset class="usage-cost-principal-filter">
+        <legend class="filter-label">{{ t('billing.principal') }}</legend>
+        <div class="usage-cost-principal-controls">
+          <select v-model="principalType" :aria-label="t('billing.principalType')">
+            <option value="">{{ t('common.all') }}</option>
+            <option value="MEMBER">{{ t('billing.principalTypes.MEMBER') }}</option>
+            <option value="APPLICATION">{{ t('billing.principalTypes.APPLICATION') }}</option>
+          </select>
+          <input
+            v-model="principalId"
+            inputmode="numeric"
+            :aria-label="t('billing.principalId')"
+            :placeholder="t('billing.optionalId')"
+          />
+        </div>
+      </fieldset>
       <label>
         <span class="filter-label">{{ t('billing.model') }}</span>
         <select v-model="modelId">
           <option value="">{{ t('common.all') }}</option>
           <option v-for="model in models" :key="model.id" :value="model.id">
             {{ model.name }}
-          </option>
-        </select>
-      </label>
-      <label>
-        <span class="filter-label">{{ t('billing.provider') }}</span>
-        <select v-model="providerId" @change="changeProvider">
-          <option value="">{{ t('common.all') }}</option>
-          <option v-for="provider in providers" :key="provider.id" :value="provider.id">
-            {{ provider.name }}
           </option>
         </select>
       </label>
@@ -305,103 +239,6 @@ onMounted(() => {
           <option value="SUBSCRIPTION">{{ t('billing.subscription') }}</option>
         </select>
       </label>
-      <div class="usage-cost-filter-disclosure">
-        <button
-          type="button"
-          class="text-button usage-cost-more-toggle"
-          :aria-expanded="advancedFiltersOpen"
-          aria-controls="usage-cost-advanced-filters"
-          @click="advancedFiltersOpen = !advancedFiltersOpen"
-        >
-          <Icon name="arrow" :size="14" />
-          {{ t(advancedFiltersOpen ? 'billing.collapseFilters' : 'billing.moreFilters') }}
-          <span
-            v-if="advancedFilterCount"
-            class="usage-cost-filter-count"
-            :aria-label="t('billing.activeAdvancedFilters', { count: advancedFilterCount })"
-          >
-            {{ advancedFilterCount }}
-          </span>
-        </button>
-      </div>
-      <div
-        v-show="advancedFiltersOpen"
-        id="usage-cost-advanced-filters"
-        class="usage-cost-advanced-filters"
-      >
-        <label>
-          <span class="filter-label">{{ t('billing.principalType') }}</span>
-          <select v-model="principalType">
-            <option value="">{{ t('common.all') }}</option>
-            <option value="MEMBER">{{ t('billing.principalTypes.MEMBER') }}</option>
-            <option value="APPLICATION">{{ t('billing.principalTypes.APPLICATION') }}</option>
-          </select>
-        </label>
-        <label
-          ><span class="filter-label">{{ t('billing.principalId') }}</span
-          ><input v-model="principalId" inputmode="numeric" :placeholder="t('billing.optionalId')"
-        /></label>
-        <label>
-          <span class="filter-label">{{ t('billing.resource') }}</span>
-          <select v-model="resourceId">
-            <option value="">{{ t('common.all') }}</option>
-            <option v-for="resource in filteredResources" :key="resource.id" :value="resource.id">
-              {{ resource.name }}
-            </option>
-          </select>
-        </label>
-        <label>
-          <span class="filter-label">{{ t('billing.protocol') }}</span>
-          <select v-model="clientProtocol">
-            <option value="">{{ t('common.all') }}</option>
-            <option
-              v-for="value in [
-                'OPENAI_CHAT',
-                'OPENAI_RESPONSES',
-                'OPENAI_IMAGES',
-                'ANTHROPIC_MESSAGES',
-              ]"
-              :key="value"
-              :value="value"
-            >
-              {{ protocolLabel(value) }}
-            </option>
-          </select>
-        </label>
-        <label>
-          <span class="filter-label">{{ t('common.status') }}</span>
-          <select v-model="status">
-            <option value="">{{ t('common.all') }}</option>
-            <option value="SUCCESS">{{ t('state.SUCCESS') }}</option>
-            <option value="FAILED">{{ t('state.FAILED') }}</option>
-            <option value="CANCELLED">{{ t('state.CANCELLED') }}</option>
-          </select>
-        </label>
-        <label>
-          <span class="filter-label">{{ t('billing.currency') }}</span>
-          <select v-model="currency">
-            <option value="">{{ t('common.all') }}</option>
-            <option value="CNY">CNY</option>
-            <option value="USD">USD</option>
-          </select>
-        </label>
-        <label>
-          <span class="filter-label">{{ t('billing.sort') }}</span>
-          <select v-model="sort">
-            <option value="startedAt">{{ t('billing.callTime') }}</option>
-            <option value="totalCost">{{ t('billing.amount') }}</option>
-            <option value="tokens">{{ t('billing.tokens') }}</option>
-            <option value="latency">{{ t('billing.latency') }}</option>
-          </select>
-        </label>
-        <label>
-          <span class="filter-label">{{ t('billing.order') }}</span>
-          <select v-model="order">
-            <option value="desc">{{ t('billing.descending') }}</option>
-            <option value="asc">{{ t('billing.ascending') }}</option>
-          </select>
-        </label>
-      </div>
       <div class="usage-cost-actions">
         <button class="button primary" :disabled="loading || summaryLoading">
           {{ t('billing.search') }}

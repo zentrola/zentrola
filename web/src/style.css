@@ -1413,63 +1413,36 @@ tbody tr:hover {
   font-size: 12px;
   font-weight: 600;
 }
+.usage-cost-principal-filter {
+  flex: 2 1 330px;
+  min-width: 0;
+  max-width: 440px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.usage-cost-principal-filter legend {
+  width: 100%;
+  margin-bottom: 6px;
+  padding: 0;
+}
+.usage-cost-principal-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: 8px;
+}
 .usage-cost-filters input,
 .usage-cost-filters select {
   width: 100%;
   min-width: 0;
-}
-.usage-cost-filter-disclosure {
-  display: flex;
-  flex: 1 1 100%;
-  align-items: center;
-  padding-top: 8px;
-  border-top: 1px solid var(--line);
-}
-.usage-cost-more-toggle {
-  padding-left: 0;
-}
-.usage-cost-more-toggle svg {
-  transform: rotate(90deg);
-  transition: transform 0.15s ease;
-}
-.usage-cost-more-toggle[aria-expanded='true'] svg {
-  transform: rotate(-90deg);
-}
-@media (prefers-reduced-motion: reduce) {
-  .usage-cost-more-toggle svg {
-    transition: none;
-  }
-}
-.usage-cost-filter-count {
-  display: inline-grid;
-  min-width: 19px;
-  height: 19px;
-  place-items: center;
-  padding: 0 5px;
-  border-radius: 10px;
-  color: var(--color-primary);
-  background: var(--color-primary-soft);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-}
-.usage-cost-advanced-filters {
-  display: flex;
-  flex: 1 1 100%;
-  flex-wrap: wrap;
-  align-items: end;
-  gap: 14px;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-control);
-  background: #f8fafc;
 }
 .usage-cost-actions {
   display: flex;
   flex: 1 1 100%;
   flex-wrap: wrap;
   gap: 9px;
-  padding-top: 2px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
 }
 .billing-detail-metrics {
   display: grid;
@@ -1824,6 +1797,10 @@ tbody tr:hover {
   }
   .usage-cost-filters label {
     flex-basis: calc(50% - 8px);
+    max-width: none;
+  }
+  .usage-cost-principal-filter {
+    flex-basis: 100%;
     max-width: none;
   }
   .usage-cost-actions .button {

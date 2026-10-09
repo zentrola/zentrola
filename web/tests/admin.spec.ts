@@ -6003,12 +6003,19 @@ test('成本管理聚焦成本概览和计费明细', async ({ page }) => {
   await expect(usageTable.getByText('订阅账期分摊', { exact: true })).toBeVisible()
 
   const costPanel = page.locator('.usage-cost-panel')
-  await expect(costPanel.getByLabel('用户分组')).toBeVisible()
+  const principalFilter = costPanel.getByRole('group', { name: '归属主体' })
+  await expect(principalFilter.getByLabel('主体类型')).toBeVisible()
+  await expect(principalFilter.getByLabel('主体 ID')).toBeVisible()
   await expect(costPanel.getByLabel('模型')).toBeVisible()
-  await expect(costPanel.getByLabel('服务商')).toBeVisible()
   await expect(costPanel.getByLabel('核算状态')).toBeVisible()
   await expect(costPanel.getByLabel('计费方式')).toBeVisible()
-  await expect(costPanel.getByLabel('主体类型')).toBeHidden()
+  await expect(costPanel.getByLabel('用户分组')).toHaveCount(0)
+  await expect(costPanel.getByLabel('服务商')).toHaveCount(0)
+  await expect(costPanel.getByRole('button', { name: /更多筛选/ })).toHaveCount(0)
+  const principalTypeBounds = await principalFilter.getByLabel('主体类型').boundingBox()
+  const principalIdBounds = await principalFilter.getByLabel('主体 ID').boundingBox()
+  expect(principalIdBounds!.x).toBeGreaterThan(principalTypeBounds!.x)
+  expect(Math.abs(principalIdBounds!.y - principalTypeBounds!.y)).toBeLessThan(2)
   const costDateRange = costPanel.getByRole('button', { name: '选择起止日期', exact: true })
   await expect(costDateRange).toBeVisible()
   await costDateRange.click()
@@ -6021,21 +6028,24 @@ test('成本管理聚焦成本概览和计费明细', async ({ page }) => {
       request.url().includes('/billing/usage-costs?') &&
       new URL(request.url()).searchParams.get('modelId') === '71',
   )
-  await costPanel.getByRole('button', { name: /更多筛选/ }).click()
-  await expect(costPanel.getByLabel('主体类型')).toBeVisible()
-  await costPanel.getByLabel('主体类型').selectOption('MEMBER')
-  await costPanel.getByLabel('主体 ID').fill(longID)
+  await principalFilter.getByLabel('主体类型').selectOption('MEMBER')
+  await principalFilter.getByLabel('主体 ID').fill(longID)
   await costPanel.getByLabel('模型').selectOption('71')
-  await costPanel.getByLabel('服务商').selectOption('81')
-  await costPanel.getByLabel('客户端协议').selectOption('OPENAI_RESPONSES')
   await costPanel.getByLabel('核算状态').selectOption('RATED')
   await costPanel.getByLabel('计费方式').selectOption('API_KEY')
-  await costPanel.getByLabel('币种').selectOption('USD')
-  const collapseFilters = costPanel.getByRole('button', { name: /收起筛选/ })
-  await expect(collapseFilters.locator('.usage-cost-filter-count')).toHaveText('4')
-  await collapseFilters.click()
-  await expect(costPanel.getByLabel('主体类型')).toBeHidden()
-  await expect(costPanel.getByRole('button', { name: /更多筛选/ })).toContainText('4')
+  await mkdir('../.cache/web-visual', { recursive: true })
+  await costPanel.screenshot({ path: '../.cache/web-visual/usage-cost-filters.png' })
+  const costDesktopViewport = page.viewportSize()!
+  await page.setViewportSize({ width: 390, height: 844 })
+  await costPanel.screenshot({ path: '../.cache/web-visual/usage-cost-filters-mobile.png' })
+  await expect
+    .poll(() => costPanel.evaluate((panel) => panel.scrollWidth <= panel.clientWidth + 1))
+    .toBe(true)
+  const mobileTypeBounds = await principalFilter.getByLabel('主体类型').boundingBox()
+  const mobileIdBounds = await principalFilter.getByLabel('主体 ID').boundingBox()
+  expect(mobileIdBounds!.x).toBeGreaterThan(mobileTypeBounds!.x)
+  expect(Math.abs(mobileIdBounds!.y - mobileTypeBounds!.y)).toBeLessThan(2)
+  await page.setViewportSize(costDesktopViewport)
   await costPanel.getByRole('button', { name: '查询', exact: true }).click()
   const searched = new URL((await costRequest).url()).searchParams
   expect(Object.fromEntries(searched)).toMatchObject({
@@ -6044,15 +6054,22 @@ test('成本管理聚焦成本概览和计费明细', async ({ page }) => {
     principalType: 'MEMBER',
     principalId: longID,
     modelId: '71',
-    providerId: '81',
-    clientProtocol: 'OPENAI_RESPONSES',
     ratingStatus: 'RATED',
     billingType: 'API_KEY',
-    currency: 'USD',
   })
+  for (const removed of [
+    'groupId',
+    'providerId',
+    'resourceId',
+    'clientProtocol',
+    'status',
+    'currency',
+  ])
+    expect(searched.has(removed)).toBe(false)
 
   await page.getByRole('button', { name: '查看详情' }).first().click()
   const usageDetail = page.getByRole('dialog', { name: '详情', exact: true })
+  await expect(usageDetail.locator('.billing-detail-grid > div')).toHaveCount(12)
   const detailColumns = await usageDetail
     .locator('.billing-detail-grid > div')
     .evaluateAll((fields) => fields.map((field) => field.getBoundingClientRect().left))
@@ -6083,8 +6100,28 @@ test('成本管理聚焦成本概览和计费明细', async ({ page }) => {
   await page.setViewportSize(desktopViewport)
   await subscriptionDetail.getByRole('button', { name: '关闭' }).click()
 
+  const exportRequest = page.waitForRequest((request) =>
+    request.url().includes('/billing/usage-costs/export?'),
+  )
   const downloadPromise = page.waitForEvent('download')
   await costPanel.getByRole('button', { name: '导出 CSV', exact: true }).click()
   const exportDownload = await downloadPromise
   expect(exportDownload.suggestedFilename()).toContain('zentrola-usage-costs-')
+  const exported = new URL((await exportRequest).url()).searchParams
+  expect(Object.fromEntries(exported)).toMatchObject({
+    principalType: 'MEMBER',
+    principalId: longID,
+    modelId: '71',
+    ratingStatus: 'RATED',
+    billingType: 'API_KEY',
+  })
+  for (const removed of [
+    'groupId',
+    'providerId',
+    'resourceId',
+    'clientProtocol',
+    'status',
+    'currency',
+  ])
+    expect(exported.has(removed)).toBe(false)
 })
