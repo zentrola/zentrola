@@ -83,6 +83,7 @@ function revoke() {
   <Modal
     :title="local('keyListTitle', { name: member.name })"
     :busy="busy"
+    body-class="member-keys-body"
     medium
     @close="$emit('close')"
   >
@@ -155,6 +156,10 @@ function revoke() {
 </template>
 
 <style scoped>
+:global(.modal-body.member-keys-body),
+:global(.member-keys-body .table-scroll) {
+  scrollbar-gutter: auto;
+}
 .key-list {
   min-width: 520px;
 }
