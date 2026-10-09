@@ -4,6 +4,42 @@ All notable changes to Zentrola are documented here. Dates use UTC. The project 
 
 Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循语义化版本。
 
+## [Unreleased]
+
+### Added / 新增
+
+- Added a provider activation flow that lets administrators choose a credential and, where applicable, a protocol and model mapping, then enables the provider only after a successful connection test.
+- Added `expiry=all|unexpired` filtering to user and application key APIs and list controls; the Admin Web shows valid keys by default.
+- 新增服务商启用前的连接选择与验证流程，可指定凭证及适用的协议、模型映射，测试成功后才启用服务商。
+- 用户和应用密钥接口及列表新增 `expiry=all|unexpired` 筛选；管理端默认展示有效密钥。
+
+### Changed / 变更
+
+- Simplified billing-detail filters to date range, caller, model, and billing type; added user and application name suggestions and moved search actions beside the filters.
+- Distinguished personal-subscription allocation from per-token billing in billing details, removed redundant summary cards, and simplified the detail title and layout.
+- Localized principal types, protocols, call statuses, billing types, and rating results in cost CSV exports according to the Admin Web language. Requests without a supported `Accept-Language` retain raw enum codes.
+- Hid the dashboard's current-model-provider section when empty, while keeping an error and retry action visible if loading fails.
+- Kept actions visible at the bottom of common dialogs.
+- Removed the Dockerfile's dependency on a remote syntax image.
+- 计费明细筛选精简为日期范围、调用方、模型和计费方式；用户与应用支持名称联想选择，查询操作移至筛选项旁。
+- 计费明细区分个人订阅分摊与按 Token 调用计费，移除重复的汇总卡片，并精简详情标题和布局。
+- 成本 CSV 根据管理端语言格式化主体类型、协议、调用状态、计费方式和计费处理结果；未指定受支持语言时保留原始枚举值。
+- 仪表盘无当前模型服务商时隐藏区块；加载失败时仍显示错误和重试入口。
+- 常用弹窗的操作按钮固定在底部。
+- 移除 Dockerfile 对远程语法镜像的依赖。
+
+### Fixed / 修复
+
+- Aligned key-dialog content widths and action columns, displayed `-` for unavailable key actions, refreshed valid-key lists when a key expires, and omitted empty codes from usage rankings.
+- Made key revocation set the expiry to the revocation time and aligned historical revoked-key expiry values through database migrations.
+- 修正密钥弹窗内容宽度和操作列对齐，无可用操作时显示 `-`；密钥在弹窗打开期间过期时刷新有效列表；用量排行不再显示空编码占位符。
+- 撤销密钥时将到期时间设为撤销时间，并通过数据库迁移修正历史撤销记录。
+
+### Database / 数据库
+
+- Added migrations `00052` and `00053` to align revoked-key expiry with its revocation time, including historical records with a pre-existing expiry.
+- 新增 `00052` 和 `00053` 迁移，使撤销密钥的到期时间与撤销时间一致，包括原本设置过到期时间的历史记录。
+
 ## [1.1.0] - 2026-10-08
 
 ### Added / 新增
