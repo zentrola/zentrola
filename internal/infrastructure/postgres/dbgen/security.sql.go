@@ -377,18 +377,19 @@ func (q *Queries) ResetAdminPassword(ctx context.Context, arg ResetAdminPassword
 }
 
 const revokeAccessKey = `-- name: RevokeAccessKey :exec
-UPDATE principal_access_key SET status='REVOKED',revoked_at=$2,updated_by=$3,updated_at=$2
-WHERE id=$1 AND is_deleted=false
+UPDATE principal_access_key SET status='REVOKED',expires_at=$1,revoked_at=$1,
+updated_by=$2,updated_at=$1
+WHERE id=$3 AND is_deleted=false
 `
 
 type RevokeAccessKeyParams struct {
-	ID        int64
 	RevokedAt pgtype.Timestamptz
 	UpdatedBy string
+	ID        int64
 }
 
 func (q *Queries) RevokeAccessKey(ctx context.Context, arg RevokeAccessKeyParams) error {
-	_, err := q.db.Exec(ctx, revokeAccessKey, arg.ID, arg.RevokedAt, arg.UpdatedBy)
+	_, err := q.db.Exec(ctx, revokeAccessKey, arg.RevokedAt, arg.UpdatedBy, arg.ID)
 	return err
 }
 

@@ -2386,18 +2386,19 @@ func (q *Queries) ManageRestoreResourceRuntime(ctx context.Context, arg ManageRe
 }
 
 const manageRevokeMemberKeys = `-- name: ManageRevokeMemberKeys :exec
-UPDATE principal_access_key SET status='REVOKED',revoked_at=$3,updated_by=$2,updated_at=$3
-WHERE principal_id=$1 AND is_deleted=false AND status<>'REVOKED'
+UPDATE principal_access_key SET status='REVOKED',expires_at=$1,revoked_at=$1,
+updated_by=$2,updated_at=$1
+WHERE principal_id=$3 AND is_deleted=false AND status<>'REVOKED'
 `
 
 type ManageRevokeMemberKeysParams struct {
-	PrincipalID int64
-	UpdatedBy   string
 	RevokedAt   pgtype.Timestamptz
+	UpdatedBy   string
+	PrincipalID int64
 }
 
 func (q *Queries) ManageRevokeMemberKeys(ctx context.Context, arg ManageRevokeMemberKeysParams) error {
-	_, err := q.db.Exec(ctx, manageRevokeMemberKeys, arg.PrincipalID, arg.UpdatedBy, arg.RevokedAt)
+	_, err := q.db.Exec(ctx, manageRevokeMemberKeys, arg.RevokedAt, arg.UpdatedBy, arg.PrincipalID)
 	return err
 }
 

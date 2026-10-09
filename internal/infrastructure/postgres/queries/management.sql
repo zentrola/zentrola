@@ -59,8 +59,9 @@ WHERE id=$1 AND is_deleted=false AND principal_type='MEMBER';
 UPDATE principal_group_membership SET is_deleted=true,updated_by=$2,updated_at=$3
 WHERE principal_id=$1 AND is_deleted=false;
 -- name: ManageRevokeMemberKeys :exec
-UPDATE principal_access_key SET status='REVOKED',revoked_at=$3,updated_by=$2,updated_at=$3
-WHERE principal_id=$1 AND is_deleted=false AND status<>'REVOKED';
+UPDATE principal_access_key SET status='REVOKED',expires_at=sqlc.arg(revoked_at),revoked_at=sqlc.arg(revoked_at),
+updated_by=sqlc.arg(updated_by),updated_at=sqlc.arg(revoked_at)
+WHERE principal_id=sqlc.arg(principal_id) AND is_deleted=false AND status<>'REVOKED';
 
 -- name: ManageGroups :many
 SELECT * FROM principal_group

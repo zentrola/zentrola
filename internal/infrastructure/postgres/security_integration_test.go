@@ -235,11 +235,19 @@ func TestStage2Integration(t *testing.T) {
 		if rec := request("POST", "/api/v1/access-keys/"+strconv.FormatInt(issued.ID, 10)+"/revoke", initial.Token, "", nil); rec.Code != 200 {
 			t.Fatal("revoke failed")
 		}
+		var expiresAt, revokedAt time.Time
+		if err := pool.QueryRow(ctx, "SELECT expires_at, revoked_at FROM principal_access_key WHERE id=$1", issued.ID).Scan(&expiresAt, &revokedAt); err != nil || !expiresAt.Equal(revokedAt) {
+			t.Fatalf("revoked key expiry must equal revocation time: expiresAt=%s revokedAt=%s err=%v", expiresAt, revokedAt, err)
+		}
 		if _, err := keys.Authenticate(ctx, issued.Key); !errors.Is(err, appsec.ErrUnauthenticated) {
 			t.Fatal("revoked key remained valid")
 		}
 		if err := keys.Revoke(ctx, actor, issued.ID, appsec.RequestMeta{}); err != nil {
 			t.Fatal("revoke is not idempotent")
+		}
+		var expiresAfterRetry, revokedAfterRetry time.Time
+		if err := pool.QueryRow(ctx, "SELECT expires_at, revoked_at FROM principal_access_key WHERE id=$1", issued.ID).Scan(&expiresAfterRetry, &revokedAfterRetry); err != nil || !expiresAfterRetry.Equal(expiresAt) || !revokedAfterRetry.Equal(revokedAt) {
+			t.Fatalf("repeated revoke changed expiry or revocation time: %s %s err=%v", expiresAfterRetry, revokedAfterRetry, err)
 		}
 		foreign := actor
 		foreign.ID = 0

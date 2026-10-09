@@ -38,8 +38,9 @@ VALUES ($1,$2,$3,$4,$5,'ACTIVE',$6,$7,$7,$8,$8);
 SELECT * FROM principal_access_key WHERE id=$1 AND is_deleted=false FOR UPDATE;
 
 -- name: RevokeAccessKey :exec
-UPDATE principal_access_key SET status='REVOKED',revoked_at=$2,updated_by=$3,updated_at=$2
-WHERE id=$1 AND is_deleted=false;
+UPDATE principal_access_key SET status='REVOKED',expires_at=sqlc.arg(revoked_at),revoked_at=sqlc.arg(revoked_at),
+updated_by=sqlc.arg(updated_by),updated_at=sqlc.arg(revoked_at)
+WHERE id=sqlc.arg(id) AND is_deleted=false;
 
 -- name: AuthenticateAccessKey :one
 SELECT k.id,k.principal_id,p.principal_type,k.expires_at FROM principal_access_key k

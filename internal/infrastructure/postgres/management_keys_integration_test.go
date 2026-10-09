@@ -78,6 +78,16 @@ func TestManageKeysExpiryFilterIntegration(t *testing.T) {
 			if err != nil || len(allItems) != 5 || allItems[2].ID != test.keyBase+3 || allItems[3].ID != test.keyBase+2 {
 				t.Fatalf("all keys must include expired records in ID order: %+v, error = %v", allItems, err)
 			}
+			if err := session.q.ManageRevokeMemberKeys(ctx, dbgen.ManageRevokeMemberKeysParams{
+				PrincipalID: test.principalID, UpdatedBy: "system", RevokedAt: pgTime(at),
+			}); err != nil {
+				t.Fatal(err)
+			}
+			var synchronized int
+			if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM principal_access_key
+				WHERE principal_id=$1 AND revoked_at=$2 AND expires_at=$2 AND status='REVOKED'`, test.principalID, at).Scan(&synchronized); err != nil || synchronized != 4 {
+				t.Fatalf("batch revoke must set expiry and revocation to same time: count=%d err=%v", synchronized, err)
+			}
 		})
 	}
 }
