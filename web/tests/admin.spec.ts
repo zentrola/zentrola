@@ -1666,7 +1666,7 @@ test('应用管理签发仅展示一次的 App Key', async ({ page }) => {
   ])
   await expect(
     modal(page).getByRole('row').filter({ hasText: '已撤销' }).locator('td').nth(2),
-  ).toHaveText('-')
+  ).toHaveText('2026年9月20日')
   await modal(page).getByRole('button', { name: '关闭' }).click()
   await memberNavigation.click()
   await expect(page).toHaveURL(/#\/members$/)
@@ -2488,14 +2488,14 @@ test('成员列表按需查看 Key 并处理删除和失败恢复', async ({ pag
   ])
   const maskedKey = modal(page).getByRole('row').filter({ hasText: '工作站' })
   await expect(maskedKey.getByRole('button', { name: '复制', exact: true })).toHaveCount(0)
-  await expect(maskedKey.locator('td').nth(2)).toHaveText('-')
+  await expect(maskedKey.locator('td').nth(2)).toHaveText('长期有效')
   await expect(modal(page)).toContainText('2020年1月1日')
   await expect(
     modal(page).getByRole('row').filter({ hasText: '临时测试' }).locator('td').nth(2),
   ).toHaveText('2020年1月1日')
   await expect(
     modal(page).getByRole('row').filter({ hasText: '已撤销的 Key' }).locator('td').nth(2),
-  ).toHaveText('-')
+  ).toHaveText('2026年9月20日')
   await expect(
     modal(page)
       .getByRole('row')

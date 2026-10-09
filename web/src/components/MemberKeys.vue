@@ -55,7 +55,8 @@ function canRevoke(key: AccessKey) {
   )
 }
 function expiryDate(key: AccessKey) {
-  return key.expiresAt ? dateOnly(key.expiresAt) : '-'
+  const expiredAt = key.revokedAt ?? key.expiresAt
+  return expiredAt ? dateOnly(expiredAt) : local('noExpiry')
 }
 function changeExpiry(event: Event) {
   const value = (event.target as HTMLSelectElement).value
