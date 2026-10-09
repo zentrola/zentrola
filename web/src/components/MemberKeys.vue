@@ -118,7 +118,7 @@ function revoke() {
             <th>{{ local('keyDisplayName') }}</th>
             <th>{{ local('assignedKeys') }}</th>
             <th>{{ local('expiryDate') }}</th>
-            <th class="align-right">{{ t('common.actions') }}</th>
+            <th class="key-action-cell">{{ t('common.actions') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -128,7 +128,7 @@ function revoke() {
               <TechnicalValue :value="key.maskedKey" :copyable="false" />
             </td>
             <td>{{ expiryDate(key) }}</td>
-            <td class="align-right">
+            <td class="key-action-cell">
               <button
                 v-if="canRevoke(key)"
                 class="text-button danger"
@@ -184,6 +184,9 @@ function revoke() {
   white-space: normal;
   overflow-wrap: anywhere;
   max-width: 240px;
+}
+.key-action-cell {
+  text-align: center;
 }
 .masked-key-note {
   margin-bottom: 16px;

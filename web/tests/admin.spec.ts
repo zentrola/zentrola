@@ -2484,6 +2484,19 @@ test('成员列表按需查看 Key 并处理删除和失败恢复', async ({ pag
     '过期日期',
     '操作',
   ])
+  await expect(modal(page).getByRole('columnheader', { name: '操作' })).toHaveCSS(
+    'text-align',
+    'center',
+  )
+  const actionCenters = await modal(page)
+    .locator('tbody tr td:last-child > *')
+    .evaluateAll((elements) =>
+      elements.map((element) => {
+        const bounds = element.getBoundingClientRect()
+        return bounds.left + bounds.width / 2
+      }),
+    )
+  expect(Math.max(...actionCenters) - Math.min(...actionCenters)).toBeLessThan(2)
   await expect(modal(page).locator('code')).toHaveText([
     'vk-revoked********1234',
     'zt_vk_temp********temp',
