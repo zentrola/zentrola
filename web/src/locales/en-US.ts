@@ -309,7 +309,6 @@ export default {
     activeModels: 'Current model providers',
     activeModelsCount: '{count} models',
     activeModelsList: 'Current model provider list, scroll for more',
-    noActiveModels: 'No current model providers',
     modelIdentity: 'Model / code',
     currentProvider: 'Current provider',
     modelRankingUsage: '{requests} requests / {tokens} tokens',

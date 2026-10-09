@@ -332,7 +332,6 @@ export const i18n = createI18n({
         activeModels: '当前模型服务商',
         activeModelsCount: '{count} 个模型',
         activeModelsList: '当前模型服务商列表，可滚动查看',
-        noActiveModels: '暂无当前模型服务商',
         modelIdentity: '模型名称 / 编码',
         currentProvider: '当前服务商',
         modelRankingUsage: '{requests} 次 / {tokens} Token',

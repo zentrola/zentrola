@@ -1881,6 +1881,19 @@ test('首页展示本月指标、应用接入、配置脚本和分项排行榜',
   await page.screenshot({ path: '../.cache/web-visual/home-setup-mobile.png', fullPage: true })
 })
 
+test('没有当前模型服务商时隐藏整个区块', async ({ page }) => {
+  const state = await fixture(page)
+  state.activeModelRows.splice(0)
+  const activeModelsResponse = page.waitForResponse((response) =>
+    new URL(response.url()).pathname.endsWith('/gateway/active-models'),
+  )
+  await signIn(page, 'home')
+  await activeModelsResponse
+
+  await expect(page.getByRole('region', { name: '当前模型服务商' })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: '用户 Token 消耗排行' })).toBeVisible()
+})
+
 test('当前模型服务商在大量记录时限制卡片高度并内部滚动', async ({ page }) => {
   const state = await fixture(page)
   state.activeModelRows.splice(
