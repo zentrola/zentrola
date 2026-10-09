@@ -1442,11 +1442,9 @@ tbody tr:hover {
 }
 .usage-cost-actions {
   display: flex;
-  flex: 1 1 100%;
+  flex: 0 1 auto;
   flex-wrap: wrap;
   gap: 9px;
-  padding-top: 14px;
-  border-top: 1px solid var(--line);
 }
 .billing-alert {
   margin-bottom: 16px;

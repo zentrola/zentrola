@@ -147,7 +147,9 @@ func TestUsageCostCSVUsesBOMUTCAndFormulaProtection(t *testing.T) {
 		ID: 1, RequestID: "=cmd", AttemptNo: 1, PrincipalID: 2, PrincipalName: "+member",
 		ModelID: 3, ModelName: "-model", ProviderID: 4, ProviderName: "@provider",
 		ResourceID: 5, ResourceName: "safe", StartedAt: started,
-	}})
+		PrincipalType: "MEMBER", ClientProtocol: "OPENAI_CHAT", Status: "SUCCESS",
+		BillingType: "API_KEY", RatingStatus: "RATED",
+	}}, "zh-CN")
 	body := recorder.Body.Bytes()
 	if len(body) < 3 || string(body[:3]) != "\xef\xbb\xbf" {
 		t.Fatal("CSV must start with an UTF-8 BOM")
@@ -167,8 +169,62 @@ func TestUsageCostCSVUsesBOMUTCAndFormulaProtection(t *testing.T) {
 	if rows[1][3] != "2026-09-06T07:30:00.123Z" {
 		t.Fatalf("started_at = %q", rows[1][3])
 	}
+	for index, want := range map[int]string{
+		4: "用户", 13: "OpenAI Chat", 14: "成功", 18: "按 Token 调用计费", 19: "已核算",
+	} {
+		if rows[1][index] != want {
+			t.Fatalf("column %d = %q, want %q", index, rows[1][index], want)
+		}
+	}
+	if recorder.Header().Get("Content-Language") != "zh-CN" {
+		t.Fatalf("Content-Language = %q", recorder.Header().Get("Content-Language"))
+	}
 	contentDisposition, err := url.QueryUnescape(recorder.Header().Get("Content-Disposition"))
 	if err != nil || !strings.Contains(contentDisposition, "20260901-20261001") {
 		t.Fatalf("Content-Disposition = %q", recorder.Header().Get("Content-Disposition"))
+	}
+}
+
+func TestUsageCostCSVUsesEnglishLabels(t *testing.T) {
+	from := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	recorder := httptest.NewRecorder()
+	writeUsageCostCSV(recorder, app.UsageCostFilter{From: from, To: from.AddDate(0, 1, 0)}, []app.UsageCostRow{{
+		PrincipalType: "APPLICATION", ClientProtocol: "ANTHROPIC_MESSAGES", Status: "FAILED",
+		BillingType: "SUBSCRIPTION", RatingStatus: "SUBSCRIPTION_SHARED",
+	}}, "en-US")
+	rows, err := csv.NewReader(strings.NewReader(string(recorder.Body.Bytes()[3:]))).ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index, want := range map[int]string{
+		4: "Application", 13: "Anthropic Messages", 14: "Failed",
+		18: "Personal subscription allocation", 19: "Subscription period allocation",
+	} {
+		if rows[1][index] != want {
+			t.Fatalf("column %d = %q, want %q", index, rows[1][index], want)
+		}
+	}
+	if recorder.Header().Get("Content-Language") != "en-US" {
+		t.Fatalf("Content-Language = %q", recorder.Header().Get("Content-Language"))
+	}
+}
+
+func TestUsageCostCSVWithoutLanguageKeepsEnumCodes(t *testing.T) {
+	from := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	recorder := httptest.NewRecorder()
+	writeUsageCostCSV(recorder, app.UsageCostFilter{From: from, To: from.AddDate(0, 1, 0)}, []app.UsageCostRow{{
+		PrincipalType: "MEMBER", Status: "SUCCESS", BillingType: "API_KEY", RatingStatus: "RATED",
+	}}, "")
+	rows, err := csv.NewReader(strings.NewReader(string(recorder.Body.Bytes()[3:]))).ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index, want := range map[int]string{4: "MEMBER", 14: "SUCCESS", 18: "API_KEY", 19: "RATED"} {
+		if rows[1][index] != want {
+			t.Fatalf("column %d = %q, want %q", index, rows[1][index], want)
+		}
+	}
+	if recorder.Header().Get("Content-Language") != "" {
+		t.Fatalf("Content-Language = %q", recorder.Header().Get("Content-Language"))
 	}
 }

@@ -106,6 +106,7 @@ func (s *SecurityHandlers) mountBillingCosts(r chi.Router) {
 	// @Tags 成本管理
 	// @Produce text/csv
 	// @Security AdminBearer
+	// @Param Accept-Language header string false "CSV 枚举文案语言；省略时保留原始枚举码" Enums(zh-CN,en-US)
 	// @Success 200 {file} binary
 	// @Failure 400,401,422,503 {object} response
 	// @Router /api/v1/billing/usage-costs/export [get]
@@ -120,7 +121,7 @@ func (s *SecurityHandlers) mountBillingCosts(r chi.Router) {
 			securityError(w, req, err)
 			return
 		}
-		writeUsageCostCSV(w, filter, rows)
+		writeUsageCostCSV(w, filter, rows, req.Header.Get("Accept-Language"))
 	})
 
 	// @Summary 单次用量成本详情
@@ -258,7 +259,19 @@ func usageCostFilter(req *http.Request, mode string) (app.UsageCostFilter, int32
 	return filter, requestedLimit, nil
 }
 
-func writeUsageCostCSV(w http.ResponseWriter, filter app.UsageCostFilter, rows []app.UsageCostRow) {
+func writeUsageCostCSV(w http.ResponseWriter, filter app.UsageCostFilter, rows []app.UsageCostRow, language string) {
+	language = strings.ToLower(strings.TrimSpace(language))
+	switch {
+	case strings.HasPrefix(language, "en"):
+		language = "en-US"
+	case strings.HasPrefix(language, "zh"):
+		language = "zh-CN"
+	default:
+		language = ""
+	}
+	if language != "" {
+		w.Header().Set("Content-Language", language)
+	}
 	filename := "zentrola-usage-costs-" + filter.From.UTC().Format("20060102") + "-" + filter.To.UTC().Format("20060102") + ".csv"
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
@@ -274,15 +287,56 @@ func writeUsageCostCSV(w http.ResponseWriter, filter app.UsageCostFilter, rows [
 	for _, row := range rows {
 		_ = writer.Write([]string{
 			strconv.FormatInt(row.ID, 10), safeCSVText(row.RequestID), strconv.FormatInt(row.AttemptNo, 10),
-			row.StartedAt.UTC().Format(time.RFC3339Nano), row.PrincipalType, strconv.FormatInt(row.PrincipalID, 10),
+			row.StartedAt.UTC().Format(time.RFC3339Nano), usageCostCSVLabel("principal_type", row.PrincipalType, language), strconv.FormatInt(row.PrincipalID, 10),
 			safeCSVText(row.PrincipalName), strconv.FormatInt(row.ModelID, 10), safeCSVText(row.ModelName),
 			strconv.FormatInt(row.ProviderID, 10), safeCSVText(row.ProviderName), strconv.FormatInt(row.ResourceID, 10),
-			safeCSVText(row.ResourceName), row.ClientProtocol, row.Status, optionalInt64(row.InputTokens),
-			optionalInt64(row.CachedInputTokens), optionalInt64(row.OutputTokens), row.BillingType, row.RatingStatus,
+			safeCSVText(row.ResourceName), usageCostCSVLabel("client_protocol", row.ClientProtocol, language), usageCostCSVLabel("status", row.Status, language), optionalInt64(row.InputTokens),
+			optionalInt64(row.CachedInputTokens), optionalInt64(row.OutputTokens), usageCostCSVLabel("billing_type", row.BillingType, language), usageCostCSVLabel("rating_status", row.RatingStatus, language),
 			optionalInt32(row.RatingRevision), optionalString(row.Currency), optionalString(row.TotalCost),
 		})
 	}
 	writer.Flush()
+}
+
+var usageCostCSVLabels = map[string]map[string][2]string{
+	"principal_type": {
+		"MEMBER": {"用户", "User"}, "APPLICATION": {"应用", "Application"},
+	},
+	"client_protocol": {
+		"OPENAI_CHAT":        {"OpenAI Chat", "OpenAI Chat"},
+		"OPENAI_RESPONSES":   {"OpenAI Responses", "OpenAI Responses"},
+		"OPENAI_IMAGES":      {"OpenAI Images", "OpenAI Images"},
+		"ANTHROPIC_MESSAGES": {"Anthropic Messages", "Anthropic Messages"},
+	},
+	"status": {
+		"SUCCESS": {"成功", "Success"}, "FAILED": {"失败", "Failed"}, "CANCELLED": {"已取消", "Cancelled"},
+	},
+	"billing_type": {
+		"API_KEY":      {"按 Token 调用计费", "Per-token API key billing"},
+		"SUBSCRIPTION": {"个人订阅分摊", "Personal subscription allocation"},
+	},
+	"rating_status": {
+		"RATED":               {"已核算", "Rated"},
+		"SUBSCRIPTION_SHARED": {"订阅账期分摊", "Subscription period allocation"},
+		"INCOMPLETE_TOKENS":   {"Token 数据不完整", "Incomplete token data"},
+		"MISSING_PRICE":       {"缺少有效价格", "No effective price"},
+		"PENDING_RATING":      {"等待核算", "Waiting for rating"},
+		"NOT_BILLABLE":        {"不计费", "Not billable"},
+	},
+}
+
+func usageCostCSVLabel(column, value, language string) string {
+	if language == "" {
+		return safeCSVText(value)
+	}
+	labels, ok := usageCostCSVLabels[column][value]
+	if !ok {
+		return safeCSVText(value)
+	}
+	if language == "en-US" {
+		return labels[1]
+	}
+	return labels[0]
 }
 
 func safeCSVText(value string) string {

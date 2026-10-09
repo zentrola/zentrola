@@ -2388,6 +2388,18 @@
                     "成本管理"
                 ],
                 "summary": "导出单次用量成本",
+                "parameters": [
+                    {
+                        "enum": [
+                            "zh-CN",
+                            "en-US"
+                        ],
+                        "type": "string",
+                        "description": "CSV 枚举文案语言；省略时保留原始枚举码",
+                        "name": "Accept-Language",
+                        "in": "header"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",

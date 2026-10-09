@@ -212,7 +212,10 @@ export async function download(path: string): Promise<Blob> {
       cache: 'no-store',
       credentials: 'omit',
       redirect: 'error',
-      headers: token.value ? { Authorization: `Bearer ${token.value}` } : {},
+      headers: {
+        ...(token.value ? { Authorization: `Bearer ${token.value}` } : {}),
+        'Accept-Language': i18n.global.locale.value,
+      },
     })
     if (epoch !== generation) throw new ApiError('UNAUTHENTICATED')
     if (!response.ok) {

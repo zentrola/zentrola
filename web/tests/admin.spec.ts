@@ -6067,6 +6067,11 @@ test('成本管理聚焦成本概览和计费明细', async ({ page }) => {
   expect(state.memberSuggestionQueries.at(-1)?.get('name')).toBe('林知')
   await costPanel.getByLabel('模型').selectOption('71')
   await costPanel.getByLabel('计费方式').selectOption('API_KEY')
+  const billingTypeBounds = await costPanel.getByLabel('计费方式').boundingBox()
+  const searchButtonBounds = await costPanel
+    .getByRole('button', { name: '查询', exact: true })
+    .boundingBox()
+  expect(Math.abs(searchButtonBounds!.y - billingTypeBounds!.y)).toBeLessThan(4)
   await mkdir('../.cache/web-visual', { recursive: true })
   await costPanel.screenshot({ path: '../.cache/web-visual/usage-cost-filters.png' })
   const costDesktopViewport = page.viewportSize()!
@@ -6142,6 +6147,9 @@ test('成本管理聚焦成本概览和计费明细', async ({ page }) => {
   const exportDownload = await downloadPromise
   expect(exportDownload.suggestedFilename()).toContain('zentrola-usage-costs-')
   const exported = new URL((await exportRequest).url()).searchParams
+  expect((await exportRequest).headers()['accept-language']).toBe(
+    await page.locator('html').getAttribute('lang'),
+  )
   expect(Object.fromEntries(exported)).toMatchObject({
     principalType: 'MEMBER',
     principalId: longID,
