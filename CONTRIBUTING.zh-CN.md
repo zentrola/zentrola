@@ -14,7 +14,7 @@
 
 ## 开发环境要求
 
-- Go 1.26
+- Go 1.26.9 或更高版本
 - PostgreSQL 17
 - Redis，用于缓存和故障切换状态测试
 - Node.js 22.18 或更高版本，推荐 Node.js 24 LTS

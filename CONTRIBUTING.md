@@ -14,7 +14,7 @@ Thank you for helping improve Zentrola. Keep each change focused, preserve the s
 
 ## Development requirements
 
-- Go 1.26
+- Go 1.26.9 or later
 - PostgreSQL 17
 - Redis for cache and failover-state testing
 - Node.js 22.18 or newer; Node.js 24 LTS is recommended
