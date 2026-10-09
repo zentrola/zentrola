@@ -423,17 +423,15 @@ onMounted(() => {
               {{ amount(selected.subscription.periodAmount, selected.subscription.currency) }}
             </dd>
           </div>
-          <div>
+          <div v-if="selected.subscription.periodStart && selected.subscription.periodEnd">
             <dt>{{ t('billing.period') }}</dt>
             <dd>
               {{
-                selected.subscription.periodStart && selected.subscription.periodEnd
-                  ? `${dateOnly(selected.subscription.periodStart)} – ${dateOnly(selected.subscription.periodEnd)}`
-                  : '-'
+                `${dateOnly(selected.subscription.periodStart)} – ${dateOnly(selected.subscription.periodEnd)}`
               }}
             </dd>
           </div>
-          <div>
+          <div v-if="selected.subscription.principalAmount !== null">
             <dt>{{ t('billing.allocatedCost') }}</dt>
             <dd>
               {{ amount(selected.subscription.principalAmount, selected.subscription.currency) }}

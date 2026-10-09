@@ -153,7 +153,7 @@ export default {
     successRate: 'Success rate',
     unrated: 'Unrated',
     subscriptionShared: 'subscription calls',
-    accruedCost: 'Accrued metered cost',
+    accruedCost: 'Rated API key usage cost',
     costBreakdown: 'Cost breakdown',
     overviewDescription:
       'Separate personal subscriptions and API keys by currency using finalized settlement amounts.',

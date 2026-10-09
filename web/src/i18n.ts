@@ -184,7 +184,7 @@ export const i18n = createI18n({
         successRate: '成功率',
         unrated: '待核算',
         subscriptionShared: '订阅分摊调用',
-        accruedCost: '实时累计按量成本',
+        accruedCost: 'API Key 已核算按量成本',
         costBreakdown: '成本构成',
         overviewDescription: '按币种区分个人订阅与 API Key，金额采用最终结算口径。',
         currentOverviewDescription:
