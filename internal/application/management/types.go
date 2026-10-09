@@ -352,8 +352,8 @@ type MemberReader interface {
 	Member(context.Context, int64) (Member, error)
 	MemberGroups(context.Context, int64, Page) ([]Group, error)
 	CountMemberGroups(context.Context, int64) (int64, error)
-	Keys(context.Context, int64, Page) ([]Key, error)
-	CountKeys(context.Context, int64) (int64, error)
+	Keys(context.Context, int64, Page, bool) ([]Key, error)
+	CountKeys(context.Context, int64, bool) (int64, error)
 }
 
 type GroupReader interface {

@@ -96,10 +96,18 @@ func (q *Queries) CountManageGroups(ctx context.Context, status string) (int64, 
 const countManageKeys = `-- name: CountManageKeys :one
 SELECT COUNT(*)::bigint FROM principal_access_key
 WHERE principal_id=$1 AND is_deleted=false
+  AND ($2::boolean OR
+       (status='ACTIVE' AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>$3::timestamptz)))
 `
 
-func (q *Queries) CountManageKeys(ctx context.Context, principalID int64) (int64, error) {
-	row := q.db.QueryRow(ctx, countManageKeys, principalID)
+type CountManageKeysParams struct {
+	PrincipalID    int64
+	IncludeExpired bool
+	At             pgtype.Timestamptz
+}
+
+func (q *Queries) CountManageKeys(ctx context.Context, arg CountManageKeysParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countManageKeys, arg.PrincipalID, arg.IncludeExpired, arg.At)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -1376,13 +1384,18 @@ func (q *Queries) ManageHasUsableApplicationKey(ctx context.Context, arg ManageH
 
 const manageKeys = `-- name: ManageKeys :many
 SELECT id,name,masked_key,status,expires_at,revoked_at,created_at FROM principal_access_key
-WHERE principal_id=$1 AND is_deleted=false AND (id<$2 OR $2=0) ORDER BY id DESC LIMIT $3
+WHERE principal_id=$1 AND is_deleted=false
+  AND ($4::boolean OR
+       (status='ACTIVE' AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>$5::timestamptz)))
+  AND (id<$2 OR $2=0) ORDER BY id DESC LIMIT $3
 `
 
 type ManageKeysParams struct {
-	PrincipalID int64
-	ID          int64
-	Limit       int32
+	PrincipalID    int64
+	ID             int64
+	Limit          int32
+	IncludeExpired bool
+	At             pgtype.Timestamptz
 }
 
 type ManageKeysRow struct {
@@ -1396,7 +1409,13 @@ type ManageKeysRow struct {
 }
 
 func (q *Queries) ManageKeys(ctx context.Context, arg ManageKeysParams) ([]ManageKeysRow, error) {
-	rows, err := q.db.Query(ctx, manageKeys, arg.PrincipalID, arg.ID, arg.Limit)
+	rows, err := q.db.Query(ctx, manageKeys,
+		arg.PrincipalID,
+		arg.ID,
+		arg.Limit,
+		arg.IncludeExpired,
+		arg.At,
+	)
 	if err != nil {
 		return nil, err
 	}

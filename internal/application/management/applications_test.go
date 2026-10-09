@@ -153,3 +153,26 @@ func TestRemoveApplicationTokenQuotaClearsLimitAndAudits(t *testing.T) {
 		t.Fatalf("unexpected audit: %+v", session.audits)
 	}
 }
+
+func TestKeyExpiryFilterRejectsUnknownValue(t *testing.T) {
+	ctx, actor, page := context.Background(), admin.Identity{ID: 1}, Page{Limit: 20}
+	for _, test := range []struct {
+		name string
+		read func() error
+	}{
+		{"member", func() error {
+			_, err := (&QueryService{}).Keys(ctx, actor, 7, page, "expired")
+			return err
+		}},
+		{"application", func() error {
+			_, err := (&ApplicationService{}).Keys(ctx, actor, 7, page, "expired")
+			return err
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := test.read(); !errors.Is(err, appsec.ErrInvalidArgument) {
+				t.Fatalf("unknown expiry filter error = %v, want invalid argument", err)
+			}
+		})
+	}
+}

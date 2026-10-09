@@ -1,0 +1,83 @@
+package postgres
+
+import (
+	"bytes"
+	"context"
+	"testing"
+	"time"
+
+	mgmt "github.com/zentrola/zentrola/internal/application/management"
+	"github.com/zentrola/zentrola/internal/infrastructure/postgres/dbgen"
+)
+
+func TestManageKeysExpiryFilterIntegration(t *testing.T) {
+	ctx, pool, _ := integrationDatabase(t)
+	at := time.Date(2030, time.January, 1, 0, 0, 0, 0, time.UTC)
+	createdAt := at.Add(-2 * time.Hour)
+	session := &managementSession{q: dbgen.New(pool), readAt: at}
+
+	for _, test := range []struct {
+		name          string
+		principalType string
+		principalID   int64
+		keyBase       int64
+		list          func(context.Context, int64, mgmt.Page, bool) ([]mgmt.Key, error)
+		count         func(context.Context, int64, bool) (int64, error)
+	}{
+		{"member", "MEMBER", 10, 100, session.Keys, session.CountKeys},
+		{"application", "APPLICATION", 20, 200, session.ApplicationKeys, session.CountApplicationKeys},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := pool.Exec(ctx, `INSERT INTO principal
+				(id,principal_type,name,status,created_by,updated_by,created_at,updated_at)
+				VALUES ($1,$2,$3,'ACTIVE','system','system',$4,$4)`, test.principalID, test.principalType, test.name, createdAt); err != nil {
+				t.Fatal(err)
+			}
+
+			for _, key := range []struct {
+				id        int64
+				status    string
+				expiresAt any
+				revokedAt any
+			}{
+				{test.keyBase + 1, "ACTIVE", at.Add(-time.Second), nil},
+				{test.keyBase + 2, "REVOKED", nil, at.Add(-time.Minute)},
+				{test.keyBase + 3, "ACTIVE", at, nil},
+				{test.keyBase + 4, "ACTIVE", at.Add(time.Hour), nil},
+				{test.keyBase + 5, "ACTIVE", nil, nil},
+			} {
+				if _, err := pool.Exec(ctx, `INSERT INTO principal_access_key
+					(id,principal_id,key_hash,masked_key,name,status,expires_at,revoked_at,created_by,updated_by,created_at,updated_at)
+					VALUES ($1,$2,$3,'test****','Test Key',$4,$5,$6,'system','system',$7,$7)`,
+					key.id, test.principalID, bytes.Repeat([]byte{byte(key.id)}, 32), key.status, key.expiresAt, key.revokedAt, createdAt); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			total, err := test.count(ctx, test.principalID, false)
+			if err != nil || total != 2 {
+				t.Fatalf("unexpired key total = %d, error = %v; want 2", total, err)
+			}
+			for _, page := range []struct {
+				after int64
+				want  int64
+			}{
+				{0, test.keyBase + 5},
+				{test.keyBase + 5, test.keyBase + 4},
+			} {
+				items, err := test.list(ctx, test.principalID, mgmt.Page{After: page.after, Limit: 1}, false)
+				if err != nil || len(items) != 1 || items[0].ID != page.want {
+					t.Fatalf("after %d: items = %+v, error = %v; want key %d", page.after, items, err, page.want)
+				}
+			}
+			allTotal, err := test.count(ctx, test.principalID, true)
+			if err != nil || allTotal != 5 {
+				t.Fatalf("all key total = %d, error = %v; want 5", allTotal, err)
+			}
+			allItems, err := test.list(ctx, test.principalID, mgmt.Page{Limit: 5}, true)
+			if err != nil || len(allItems) != 5 || allItems[2].ID != test.keyBase+3 || allItems[3].ID != test.keyBase+2 {
+				t.Fatalf("all keys must include expired records in ID order: %+v, error = %v", allItems, err)
+			}
+		})
+	}
+}

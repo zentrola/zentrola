@@ -59,12 +59,12 @@ func (s *managementSession) ApplicationGroups(ctx context.Context, id int64, pag
 	return s.MemberGroups(ctx, id, page)
 }
 
-func (s *managementSession) ApplicationKeys(ctx context.Context, id int64, page mgmt.Page) ([]mgmt.Key, error) {
-	return s.Keys(ctx, id, page)
+func (s *managementSession) ApplicationKeys(ctx context.Context, id int64, page mgmt.Page, includeExpired bool) ([]mgmt.Key, error) {
+	return s.Keys(ctx, id, page, includeExpired)
 }
 
-func (s *managementSession) CountApplicationKeys(ctx context.Context, id int64) (int64, error) {
-	return s.CountKeys(ctx, id)
+func (s *managementSession) CountApplicationKeys(ctx context.Context, id int64, includeExpired bool) (int64, error) {
+	return s.CountKeys(ctx, id, includeExpired)
 }
 
 func (s *managementSession) HasUsableApplicationKey(ctx context.Context, id int64, now time.Time) (bool, error) {

@@ -326,7 +326,10 @@ WHERE id=$1 AND is_deleted=false AND version=sqlc.arg(expected_version);
 
 -- name: ManageKeys :many
 SELECT id,name,masked_key,status,expires_at,revoked_at,created_at FROM principal_access_key
-WHERE principal_id=$1 AND is_deleted=false AND (id<$2 OR $2=0) ORDER BY id DESC LIMIT $3;
+WHERE principal_id=$1 AND is_deleted=false
+  AND (sqlc.arg(include_expired)::boolean OR
+       (status='ACTIVE' AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>sqlc.arg(at)::timestamptz)))
+  AND (id<$2 OR $2=0) ORDER BY id DESC LIMIT $3;
 -- name: ManageHasUsableApplicationKey :one
 SELECT EXISTS(SELECT 1 FROM principal_access_key
 WHERE principal_id=sqlc.arg(principal_id) AND is_deleted=false AND status='ACTIVE' AND revoked_at IS NULL
@@ -381,7 +384,9 @@ WHERE is_deleted=false;
 
 -- name: CountManageKeys :one
 SELECT COUNT(*)::bigint FROM principal_access_key
-WHERE principal_id=$1 AND is_deleted=false;
+WHERE principal_id=$1 AND is_deleted=false
+  AND (sqlc.arg(include_expired)::boolean OR
+       (status='ACTIVE' AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>sqlc.arg(at)::timestamptz)));
 
 -- name: CountManageOperations :one
 SELECT COUNT(*)::bigint FROM operation_log;

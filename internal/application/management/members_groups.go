@@ -21,7 +21,7 @@ type MemberSession interface {
 	Member(context.Context, int64) (Member, error)
 	Group(context.Context, int64) (Group, error)
 	MemberGroups(context.Context, int64, Page) ([]Group, error)
-	Keys(context.Context, int64, Page) ([]Key, error)
+	Keys(context.Context, int64, Page, bool) ([]Key, error)
 	CreateMember(context.Context, Member) error
 	UpdateMember(context.Context, Member) error
 	SetMemberStatus(context.Context, int64, string) error
@@ -222,7 +222,7 @@ func (s *MemberService) SetMemberStatus(ctx context.Context, actor admin.Identit
 			return nil
 		}
 		if status == "ACTIVE" {
-			keys, err := w.Keys(ctx, id, Page{Limit: 1})
+			keys, err := w.Keys(ctx, id, Page{Limit: 1}, false)
 			if err != nil {
 				return err
 			}

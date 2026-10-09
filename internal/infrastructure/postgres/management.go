@@ -32,9 +32,10 @@ func NewManagementStore(pool *pgxpool.Pool, ids shared.IDGenerator, loggers ...*
 }
 
 type managementSession struct {
-	q     *dbgen.Queries
-	actor admin.Identity
-	store *ManagementStore
+	q      *dbgen.Queries
+	actor  admin.Identity
+	store  *ManagementStore
+	readAt time.Time
 }
 
 func (s *ManagementStore) Read(ctx context.Context, a admin.Identity, fn func(mgmt.Reader) error) error {
@@ -65,7 +66,7 @@ func (s *ManagementStore) run(ctx context.Context, a admin.Identity, write bool,
 	if err != nil {
 		return s.managementError(ctx, "validate_actor", err)
 	}
-	if err = fn(&managementSession{q: q, actor: a, store: s}); err != nil {
+	if err = fn(&managementSession{q: q, actor: a, store: s, readAt: time.Now().UTC()}); err != nil {
 		return s.managementError(ctx, "execute_callback", err)
 	}
 	return s.managementError(ctx, "commit_transaction", tx.Commit(ctx))
@@ -301,8 +302,10 @@ func (s *managementSession) GroupModels(ctx context.Context, id int64, p mgmt.Pa
 	}
 	return result, nil
 }
-func (s *managementSession) Keys(ctx context.Context, id int64, p mgmt.Page) ([]mgmt.Key, error) {
-	rows, err := s.q.ManageKeys(ctx, dbgen.ManageKeysParams{PrincipalID: id, ID: p.After, Limit: managementPageLimit(p)})
+func (s *managementSession) Keys(ctx context.Context, id int64, p mgmt.Page, includeExpired bool) ([]mgmt.Key, error) {
+	rows, err := s.q.ManageKeys(ctx, dbgen.ManageKeysParams{
+		PrincipalID: id, ID: p.After, Limit: managementPageLimit(p), At: pgTime(s.readAt), IncludeExpired: includeExpired,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -342,8 +345,8 @@ func (s *managementSession) CountMemberGroups(ctx context.Context, id int64) (in
 func (s *managementSession) CountGroupModels(ctx context.Context, id int64) (int64, error) {
 	return s.q.CountManageGroupModels(ctx, id)
 }
-func (s *managementSession) CountKeys(ctx context.Context, id int64) (int64, error) {
-	return s.q.CountManageKeys(ctx, id)
+func (s *managementSession) CountKeys(ctx context.Context, id int64, includeExpired bool) (int64, error) {
+	return s.q.CountManageKeys(ctx, dbgen.CountManageKeysParams{PrincipalID: id, At: pgTime(s.readAt), IncludeExpired: includeExpired})
 }
 func (s *managementSession) Member(ctx context.Context, id int64) (mgmt.Member, error) {
 	row, err := s.q.ManageMember(ctx, id)

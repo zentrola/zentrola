@@ -489,6 +489,11 @@ export default {
     noGroups: 'No groups exist yet. Create one from the Groups page.',
     keyCreated: 'Key issued',
     revoked: 'Key revoked',
+    keyExpiryFilter: 'Show',
+    unexpiredKeys: 'Valid keys',
+    allKeys: 'All',
+    noUnexpiredKeys: 'No valid access keys.',
+    revokedStatus: 'Revoked',
     noKeys: 'No access keys yet.',
   },
   applications: {
@@ -536,6 +541,11 @@ export default {
     noGroups: 'No groups exist yet. Create one from the Groups page.',
     keyCreated: 'App Key issued',
     revoked: 'App Key revoked',
+    keyExpiryFilter: 'Show',
+    unexpiredKeys: 'Valid keys',
+    allKeys: 'All',
+    noUnexpiredKeys: 'No valid App Keys.',
+    revokedStatus: 'Revoked',
     noKeys: 'No App Keys yet.',
   },
   groups: {

@@ -63,6 +63,7 @@ func (s *SecurityHandlers) mountApplicationRoutes(r chi.Router) {
 	// @Produce json
 	// @Security AdminBearer
 	// @Param id path string true "应用 ID"
+	// @Param expiry query string false "all 或 unexpired（仅有效且未撤销），默认 all" Enums(all,unexpired)
 	// @Success 200 {object} response{data=PageResponse[mgmt.Key]}
 	// @Failure 400,401,404,503 {object} response
 	// @Router /api/v1/applications/{id}/keys [get]
@@ -71,8 +72,12 @@ func (s *SecurityHandlers) mountApplicationRoutes(r chi.Router) {
 		if err != nil {
 			return mgmt.PageData[mgmt.Key]{}, err
 		}
-		return a.Keys(req.Context(), adminFrom(req), id, page)
-	}, func(value mgmt.Key) int64 { return value.ID }))
+		expiry, err := optionalQueryValue(req, "expiry")
+		if err != nil {
+			return mgmt.PageData[mgmt.Key]{}, err
+		}
+		return a.Keys(req.Context(), adminFrom(req), id, page, expiry)
+	}, func(value mgmt.Key) int64 { return value.ID }, "expiry"))
 	// @Summary 应用操作记录
 	// @Tags 应用管理
 	// @Produce json

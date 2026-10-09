@@ -372,6 +372,7 @@ func (s *SecurityHandlers) mountManagementQueryRoutes(r chi.Router) {
 	// @Param id path string true "业务 ID（正整数字符串）"
 	// @Param after query string false "上一页 nextCursor，默认从头查询"
 	// @Param limit query int false "每页数量" minimum(1) maximum(100) default(50)
+	// @Param expiry query string false "all 或 unexpired（仅有效且未撤销），默认 all" Enums(all,unexpired)
 	// @Success 200 {object} response{data=PageResponse[mgmt.Key]}
 	// @Header all {string} X-Request-ID "请求追踪 ID"
 	// @Failure 400 {object} response
@@ -384,8 +385,12 @@ func (s *SecurityHandlers) mountManagementQueryRoutes(r chi.Router) {
 		if err != nil {
 			return mgmt.PageData[mgmt.Key]{}, err
 		}
-		return m.Keys(req.Context(), adminFrom(req), id, p)
-	}, func(v mgmt.Key) int64 { return v.ID }))
+		expiry, err := optionalQueryValue(req, "expiry")
+		if err != nil {
+			return mgmt.PageData[mgmt.Key]{}, err
+		}
+		return m.Keys(req.Context(), adminFrom(req), id, p, expiry)
+	}, func(v mgmt.Key) int64 { return v.ID }, "expiry"))
 	// @Summary 用户所属分组列表
 	// @Tags 成员管理
 	// @Description 按分组 ID 倒序分页；用于查看和编辑用户的分组关系。

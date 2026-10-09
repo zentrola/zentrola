@@ -510,6 +510,11 @@ export const i18n = createI18n({
         noGroups: '暂无分组，请先在分组页面创建。',
         keyCreated: '密钥已分配',
         revoked: 'Key 已撤销',
+        keyExpiryFilter: '查看范围',
+        unexpiredKeys: '有效 Key',
+        allKeys: '全部',
+        noUnexpiredKeys: '没有有效的访问密钥。',
+        revokedStatus: '已撤销',
         noKeys: '还没有访问密钥。',
       },
       applications: {
@@ -556,6 +561,11 @@ export const i18n = createI18n({
         noGroups: '暂无分组，请先在分组页面创建。',
         keyCreated: 'App Key 已签发',
         revoked: 'App Key 已撤销',
+        keyExpiryFilter: '查看范围',
+        unexpiredKeys: '有效 Key',
+        allKeys: '全部',
+        noUnexpiredKeys: '没有有效的 App Key。',
+        revokedStatus: '已撤销',
         noKeys: '还没有 App Key。',
       },
       groups: {

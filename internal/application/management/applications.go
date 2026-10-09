@@ -17,8 +17,8 @@ type ApplicationReader interface {
 	CountApplicationSuggestions(context.Context, string) (int64, error)
 	Application(context.Context, int64) (Application, error)
 	ApplicationGroups(context.Context, int64, Page) ([]Group, error)
-	ApplicationKeys(context.Context, int64, Page) ([]Key, error)
-	CountApplicationKeys(context.Context, int64) (int64, error)
+	ApplicationKeys(context.Context, int64, Page, bool) ([]Key, error)
+	CountApplicationKeys(context.Context, int64, bool) (int64, error)
 	HasUsableApplicationKey(context.Context, int64, time.Time) (bool, error)
 	ApplicationOperations(context.Context, int64, Page) ([]Operation, error)
 	CountApplicationOperations(context.Context, int64) (int64, error)
@@ -120,21 +120,25 @@ func (s *ApplicationService) ApplicationGroups(ctx context.Context, actor admin.
 	return result, err
 }
 
-func (s *ApplicationService) Keys(ctx context.Context, actor admin.Identity, id int64, page Page) (PageData[Key], error) {
+func (s *ApplicationService) Keys(ctx context.Context, actor admin.Identity, id int64, page Page, expiry string) (PageData[Key], error) {
 	if id <= 0 || !validPage(page) {
 		return PageData[Key]{}, appsec.ErrInvalidArgument
 	}
+	includeExpired, err := keyExpiryIncludesExpired(expiry)
+	if err != nil {
+		return PageData[Key]{}, err
+	}
 	var result PageData[Key]
-	err := s.store.ReadApplication(ctx, actor, func(r ApplicationReader) error {
+	err = s.store.ReadApplication(ctx, actor, func(r ApplicationReader) error {
 		if _, err := r.Application(ctx, id); err != nil {
 			return err
 		}
 		var err error
-		result.Items, err = r.ApplicationKeys(ctx, id, page)
+		result.Items, err = r.ApplicationKeys(ctx, id, page, includeExpired)
 		if err != nil {
 			return err
 		}
-		result.Total, err = r.CountApplicationKeys(ctx, id)
+		result.Total, err = r.CountApplicationKeys(ctx, id, includeExpired)
 		return err
 	})
 	return result, err

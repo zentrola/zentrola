@@ -1277,7 +1277,14 @@ async function fixture(page: Page) {
       if (method === 'GET') {
         const limit = Number(url.searchParams.get('limit') || '50')
         const after = url.searchParams.get('after')
-        const matching = keys.filter((key) => key.memberID === segments[1])
+        const matching = keys.filter(
+          (key) =>
+            key.memberID === segments[1] &&
+            (url.searchParams.get('expiry') !== 'unexpired' ||
+              (key.status === 'ACTIVE' &&
+                !key.revokedAt &&
+                (!key.expiresAt || Date.parse(key.expiresAt) > Date.now()))),
+        )
         const items = matching
           .filter((key) => !after || BigInt(key.id) < BigInt(after))
           .sort((a, b) => (BigInt(a.id) > BigInt(b.id) ? -1 : 1))
@@ -1520,7 +1527,8 @@ test('应用管理签发仅展示一次的 App Key', async ({ page }) => {
   const applications: any[] = []
   await page.route('**/api/v1/applications**', async (route) => {
     const request = route.request()
-    const path = new URL(request.url()).pathname.replace('/api/v1', '')
+    const url = new URL(request.url())
+    const path = url.pathname.replace('/api/v1', '')
     const reply = (data: unknown, status = 200) =>
       route.fulfill({
         status,
@@ -1552,6 +1560,39 @@ test('应用管理签发仅展示一次的 App Key', async ({ page }) => {
         },
         201,
       )
+    if (path === '/applications/71/keys' && request.method() === 'GET') {
+      const keys = [
+        {
+          id: '82',
+          name: '已过期',
+          maskedKey: 'ak-expired******',
+          status: 'ACTIVE',
+          expiresAt: '2020-01-01T00:00:00Z',
+          revokedAt: null,
+          createdAt: stamp,
+        },
+        {
+          id: '81',
+          name: '生产调用',
+          maskedKey: 'ak-active******',
+          status: 'ACTIVE',
+          expiresAt: null,
+          revokedAt: null,
+          createdAt: stamp,
+        },
+        {
+          id: '80',
+          name: '已撤销',
+          maskedKey: 'ak-revoked******',
+          status: 'REVOKED',
+          expiresAt: null,
+          revokedAt: '2026-09-20T09:12:26Z',
+          createdAt: stamp,
+        },
+      ]
+      const items = url.searchParams.get('expiry') === 'unexpired' ? keys.slice(1, 2) : keys
+      return reply({ items, total: items.length, nextCursor: null })
+    }
     return reply(null, 404)
   })
 
@@ -1613,6 +1654,20 @@ test('应用管理签发仅展示一次的 App Key', async ({ page }) => {
   )
   await modal(page).getByRole('button', { name: '我已保存，关闭' }).click()
   await expect(page.getByText('ak-once-only-secret')).toHaveCount(0)
+  await row.getByRole('button', { name: '查看 App Key 记录' }).click()
+  const expiryFilter = modal(page).getByRole('combobox', { name: '查看范围' })
+  await expect(expiryFilter).toHaveValue('unexpired')
+  await expect(modal(page).locator('tbody tr td:first-child')).toHaveText(['生产调用'])
+  await expiryFilter.selectOption('all')
+  await expect(modal(page).locator('tbody tr td:first-child')).toHaveText([
+    '已过期',
+    '生产调用',
+    '已撤销',
+  ])
+  await expect(
+    modal(page).getByRole('row').filter({ hasText: '已撤销' }).locator('td').nth(2),
+  ).toHaveText('-')
+  await modal(page).getByRole('button', { name: '关闭' }).click()
   await memberNavigation.click()
   await expect(page).toHaveURL(/#\/members$/)
   await expect(page.getByRole('heading', { name: '用户管理', exact: true })).toBeVisible()
@@ -2368,6 +2423,16 @@ test('成员列表按需查看 Key 并处理删除和失败恢复', async ({ pag
       revokedAt: null,
       createdAt: '2019-02-01T00:00:00Z',
     },
+    {
+      id: '803',
+      memberID: longID,
+      name: '已撤销的 Key',
+      maskedKey: 'vk-revoked********1234',
+      status: 'REVOKED',
+      expiresAt: null,
+      revokedAt: '2026-09-20T09:12:26Z',
+      createdAt: '2019-03-01T00:00:00Z',
+    },
   )
   await signIn(page)
   const row = page.getByRole('row').filter({ hasText: '林知远' })
@@ -2401,24 +2466,36 @@ test('成员列表按需查看 Key 并处理删除和失败恢复', async ({ pag
   await viewKeys.click()
   await expect(modal(page)).toHaveAccessibleName('林知远的 Key 记录')
   await expect(modal(page)).toContainText('完整 Key 仅在分配成功时展示一次')
+  const expiryFilter = modal(page).getByRole('combobox', { name: '查看范围' })
+  await expect(expiryFilter).toHaveValue('unexpired')
+  await expect(modal(page).locator('tbody tr td:first-child')).toHaveText(['工作站'])
+  await expiryFilter.selectOption('all')
+  await expect(modal(page).locator('tbody tr td:first-child')).toHaveText([
+    '已撤销的 Key',
+    '临时测试',
+    '工作站',
+  ])
   await expect(modal(page).getByRole('columnheader')).toHaveText([
     '显示名称',
     '访问密钥',
     '过期日期',
     '操作',
   ])
-  await expect(modal(page).locator('tbody tr td:first-child')).toHaveText(['临时测试', '工作站'])
   await expect(modal(page).locator('code')).toHaveText([
+    'vk-revoked********1234',
     'zt_vk_temp********temp',
     'vk-work1234********1234',
   ])
   const maskedKey = modal(page).getByRole('row').filter({ hasText: '工作站' })
   await expect(maskedKey.getByRole('button', { name: '复制', exact: true })).toHaveCount(0)
-  await expect(modal(page)).toContainText('长期有效')
+  await expect(maskedKey.locator('td').nth(2)).toHaveText('-')
   await expect(modal(page)).toContainText('2020年1月1日')
-  await expect(modal(page).locator('tbody tr').first().locator('td').nth(2)).toHaveText(
-    '2020年1月1日',
-  )
+  await expect(
+    modal(page).getByRole('row').filter({ hasText: '临时测试' }).locator('td').nth(2),
+  ).toHaveText('2020年1月1日')
+  await expect(
+    modal(page).getByRole('row').filter({ hasText: '已撤销的 Key' }).locator('td').nth(2),
+  ).toHaveText('-')
   await expect(
     modal(page)
       .getByRole('row')
@@ -2446,7 +2523,7 @@ test('成员列表按需查看 Key 并处理删除和失败恢复', async ({ pag
   await expect(page.locator('.toast-success')).toContainText('Key 已撤销')
   await expect(historyDialog.locator('.notice')).toHaveCount(0)
   await expect(historyRevoke).toHaveCount(0)
-  await expect(maskedKey).not.toContainText('长期有效')
+  await expect(maskedKey).toContainText('已撤销')
   expect(state.keys[0].status).toBe('REVOKED')
   expect(state.keys[1].status).toBe('ACTIVE')
   await mkdir('../.cache/web-visual', { recursive: true })
@@ -2489,7 +2566,7 @@ test('成员列表按需查看 Key 并处理删除和失败恢复', async ({ pag
   await expect(row.getByRole('cell').first().locator('code')).toHaveText(longID)
   await expect(row).not.toContainText('zt_vk_temp')
   await expect(row).not.toContainText('2020年1月1日')
-  expect(state.keys).toHaveLength(3)
+  expect(state.keys).toHaveLength(4)
   await expect(row).not.toContainText('2099年12月31日')
   expect(
     await page.evaluate((value) => {
