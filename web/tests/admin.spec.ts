@@ -6052,7 +6052,11 @@ test('成本管理聚焦成本概览和计费明细', async ({ page }) => {
   })
 
   await page.getByRole('button', { name: '查看详情' }).first().click()
-  const usageDetail = page.getByRole('dialog', { name: '单次用量成本详情' })
+  const usageDetail = page.getByRole('dialog', { name: '详情', exact: true })
+  const detailColumns = await usageDetail
+    .locator('.billing-detail-grid > div')
+    .evaluateAll((fields) => fields.map((field) => field.getBoundingClientRect().left))
+  expect(Math.max(...detailColumns) - Math.min(...detailColumns)).toBeGreaterThan(350)
   await expect(usageDetail.locator('tbody tr').nth(0).locator('td').first()).toHaveText('1')
   await expect(usageDetail.locator('tbody tr').nth(1).locator('td').first()).toHaveText('2')
   await expect(usageDetail.getByText('$0.0036', { exact: true })).toBeVisible()
@@ -6061,10 +6065,22 @@ test('成本管理聚焦成本概览和计费明细', async ({ page }) => {
   await usageDetail.getByRole('button', { name: '关闭' }).click()
 
   await page.getByRole('button', { name: '查看详情' }).nth(1).click()
-  const subscriptionDetail = page.getByRole('dialog', { name: '单次用量成本详情' })
+  const subscriptionDetail = page.getByRole('dialog', { name: '详情', exact: true })
   await expect(subscriptionDetail).toContainText('个人订阅按账期分摊')
   await expect(subscriptionDetail).toContainText('¥1,000')
   await expect(subscriptionDetail).toContainText('¥700')
+  await mkdir('../.cache/web-visual', { recursive: true })
+  await page.screenshot({ path: '../.cache/web-visual/usage-cost-detail.png', fullPage: true })
+  const desktopViewport = page.viewportSize()!
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(
+    await subscriptionDetail.evaluate((dialog) => dialog.scrollWidth <= dialog.clientWidth + 1),
+  ).toBe(true)
+  await page.screenshot({
+    path: '../.cache/web-visual/usage-cost-detail-mobile.png',
+    fullPage: true,
+  })
+  await page.setViewportSize(desktopViewport)
   await subscriptionDetail.getByRole('button', { name: '关闭' }).click()
 
   const downloadPromise = page.waitForEvent('download')

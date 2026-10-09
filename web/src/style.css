@@ -1785,10 +1785,40 @@ tbody tr:hover {
   color: var(--color-text-secondary);
   font-size: 13px;
 }
-.billing-detail-grid {
-  margin-bottom: 22px;
+.detail-grid.billing-detail-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px 28px;
+  margin-bottom: 28px;
+}
+.billing-detail-grid > div,
+.subscription-cost-note .detail-grid > div {
+  min-width: 0;
+}
+.billing-detail-grid .billing-request-id {
+  grid-column: span 2;
+}
+.subscription-cost-note .detail-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px 28px;
+}
+.billing-detail-grid dt,
+.subscription-cost-note dt {
+  margin-bottom: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.billing-detail-grid dd,
+.subscription-cost-note dd {
+  font-size: 14px;
+  line-height: 1.5;
 }
 @media (max-width: 760px) {
+  .detail-grid.billing-detail-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .billing-detail-grid .billing-request-id {
+    grid-column: 1 / -1;
+  }
   .billing-detail-metrics {
     grid-template-columns: 1fr;
   }
@@ -1832,6 +1862,12 @@ tbody tr:hover {
   }
   .usage-ranking-heading .dimension-tabs button {
     flex: 1;
+  }
+}
+@media (max-width: 520px) {
+  .detail-grid.billing-detail-grid,
+  .subscription-cost-note .detail-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 @media (max-width: 480px) {

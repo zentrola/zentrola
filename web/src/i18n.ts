@@ -214,7 +214,7 @@ export const i18n = createI18n({
         exportCsv: '导出 CSV',
         exporting: '正在导出…',
         emptyUsageCosts: '当前筛选条件下暂无用量成本记录。',
-        usageCostDetails: '单次用量成本详情',
+        usageCostDetails: '详情',
         subscriptionAllocation: '订阅账期分摊',
         subscriptionNoUsageCost: '个人订阅按账期分摊，不生成虚假的单次调用成本。',
         priceVersion: '价格版本 ID',

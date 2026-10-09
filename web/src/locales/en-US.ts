@@ -188,7 +188,7 @@ export default {
     exportCsv: 'Export CSV',
     exporting: 'Exporting…',
     emptyUsageCosts: 'No usage cost records match these filters.',
-    usageCostDetails: 'Usage cost details',
+    usageCostDetails: 'Details',
     subscriptionAllocation: 'Subscription-period allocation',
     subscriptionNoUsageCost:
       'Personal subscriptions are allocated by billing period; no artificial per-call cost is generated.',

@@ -527,7 +527,7 @@ onMounted(() => {
           <dt>Usage ID</dt>
           <dd>{{ selected.id }}</dd>
         </div>
-        <div>
+        <div class="billing-request-id">
           <dt>Request ID</dt>
           <dd><TechnicalValue :value="selected.requestId" /></dd>
         </div>
