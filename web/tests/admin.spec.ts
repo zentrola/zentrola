@@ -6004,12 +6004,10 @@ test('成本管理聚焦成本概览和计费明细', async ({ page }) => {
   await expect(usageRanking.getByText('最高用量', { exact: true })).toBeVisible()
 
   await page.getByRole('tab', { name: '计费明细', exact: true }).click()
-  await expect(
-    page.locator('.billing-detail-metrics').getByText('$0.008', { exact: true }),
-  ).toBeVisible()
+  await expect(page.locator('.billing-detail-metrics')).toHaveCount(0)
   const usageTable = page.locator('.usage-cost-table')
-  await expect(usageTable.getByText('已核算', { exact: true })).toBeVisible()
-  await expect(usageTable.getByText('订阅账期分摊', { exact: true })).toBeVisible()
+  await expect(usageTable.getByText('按 Token 调用计费', { exact: true })).toBeVisible()
+  await expect(usageTable.getByText('个人订阅分摊', { exact: true })).toBeVisible()
 
   const costPanel = page.locator('.usage-cost-panel')
   const principalFilter = costPanel.getByRole('group', { name: '调用方' })
@@ -6018,7 +6016,7 @@ test('成本管理聚焦成本概览和计费明细', async ({ page }) => {
   await expect(callerType).toBeVisible()
   await expect(callerName).toBeDisabled()
   await expect(costPanel.getByLabel('模型')).toBeVisible()
-  await expect(costPanel.getByLabel('核算状态')).toBeVisible()
+  await expect(costPanel.getByLabel('核算状态')).toHaveCount(0)
   await expect(costPanel.getByLabel('计费方式')).toBeVisible()
   await expect(costPanel.getByLabel('用户分组')).toHaveCount(0)
   await expect(costPanel.getByLabel('服务商')).toHaveCount(0)
@@ -6027,7 +6025,7 @@ test('成本管理聚焦成本概览和计费明细', async ({ page }) => {
   const principalNameBounds = await callerName.boundingBox()
   expect(principalNameBounds!.x).toBeGreaterThan(principalTypeBounds!.x)
   expect(Math.abs(principalNameBounds!.y - principalTypeBounds!.y)).toBeLessThan(2)
-  for (const label of ['模型', '核算状态', '计费方式']) {
+  for (const label of ['模型', '计费方式']) {
     const field = costPanel.locator('label').filter({ hasText: label })
     const labelBounds = await field.locator('.filter-label').boundingBox()
     const controlBounds = await field.locator('select').boundingBox()
@@ -6068,7 +6066,6 @@ test('成本管理聚焦成本概览和计费明细', async ({ page }) => {
   await expect(callerName).toHaveValue('林知远')
   expect(state.memberSuggestionQueries.at(-1)?.get('name')).toBe('林知')
   await costPanel.getByLabel('模型').selectOption('71')
-  await costPanel.getByLabel('核算状态').selectOption('RATED')
   await costPanel.getByLabel('计费方式').selectOption('API_KEY')
   await mkdir('../.cache/web-visual', { recursive: true })
   await costPanel.screenshot({ path: '../.cache/web-visual/usage-cost-filters.png' })
@@ -6091,7 +6088,6 @@ test('成本管理聚焦成本概览和计费明细', async ({ page }) => {
     principalType: 'MEMBER',
     principalId: longID,
     modelId: '71',
-    ratingStatus: 'RATED',
     billingType: 'API_KEY',
   })
   for (const removed of [
@@ -6100,13 +6096,14 @@ test('成本管理聚焦成本概览和计费明细', async ({ page }) => {
     'resourceId',
     'clientProtocol',
     'status',
+    'ratingStatus',
     'currency',
   ])
     expect(searched.has(removed)).toBe(false)
 
   await page.getByRole('button', { name: '查看详情' }).first().click()
   const usageDetail = page.getByRole('dialog', { name: '详情', exact: true })
-  await expect(usageDetail.locator('.billing-detail-grid > div')).toHaveCount(12)
+  await expect(usageDetail.locator('.billing-detail-grid > div')).toHaveCount(11)
   const detailColumns = await usageDetail
     .locator('.billing-detail-grid > div')
     .evaluateAll((fields) => fields.map((field) => field.getBoundingClientRect().left))
@@ -6149,7 +6146,6 @@ test('成本管理聚焦成本概览和计费明细', async ({ page }) => {
     principalType: 'MEMBER',
     principalId: longID,
     modelId: '71',
-    ratingStatus: 'RATED',
     billingType: 'API_KEY',
   })
   for (const removed of [
@@ -6158,6 +6154,7 @@ test('成本管理聚焦成本概览和计费明细', async ({ page }) => {
     'resourceId',
     'clientProtocol',
     'status',
+    'ratingStatus',
     'currency',
   ])
     expect(exported.has(removed)).toBe(false)

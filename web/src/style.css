@@ -1448,38 +1448,6 @@ tbody tr:hover {
   padding-top: 14px;
   border-top: 1px solid var(--line);
 }
-.billing-detail-metrics {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 16px;
-}
-.billing-detail-metrics article {
-  display: grid;
-  align-content: center;
-  min-height: 105px;
-  padding: 17px 18px;
-}
-.billing-detail-metrics span,
-.billing-detail-metrics small {
-  color: var(--color-text-secondary);
-  font-size: 12px;
-}
-.billing-detail-metrics strong {
-  margin: 5px 0 3px;
-  color: var(--color-text);
-  font-size: 21px;
-  font-variant-numeric: tabular-nums;
-}
-.billing-rating-notice {
-  margin: 0 0 16px;
-  padding: 11px 14px;
-  border: 1px solid #fed7aa;
-  border-radius: 7px;
-  color: #9a3412;
-  background: #fff7ed;
-  font-size: 13px;
-}
 .billing-alert {
   margin-bottom: 16px;
 }
@@ -1730,14 +1698,6 @@ tbody tr:hover {
   color: #1d4ed8;
   background: #eff6ff;
 }
-.issue-badge.rated {
-  color: #047857;
-  background: #ecfdf5;
-}
-.issue-badge.subscription_shared {
-  color: #6d28d9;
-  background: #f5f3ff;
-}
 .issue-badge.not_billable {
   color: #475569;
   background: #f1f5f9;
@@ -1795,9 +1755,6 @@ tbody tr:hover {
   }
   .billing-detail-grid .billing-request-id {
     grid-column: 1 / -1;
-  }
-  .billing-detail-metrics {
-    grid-template-columns: 1fr;
   }
   .usage-cost-filters label {
     flex-basis: calc(50% - 8px);

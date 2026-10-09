@@ -1,18 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { all, api, download, errorText } from '../api'
 import { count, date, dateOnly, useCollection } from '../composables'
 import { t } from '../i18n'
 import { showErrorToast } from '../toast'
-import type {
-  BillingCurrency,
-  Member,
-  Model,
-  Page,
-  UsageCost,
-  UsageCostDetail,
-  UsageCostSummary,
-} from '../types'
+import type { BillingCurrency, Member, Model, Page, UsageCost, UsageCostDetail } from '../types'
 import DateRangePicker from './DateRangePicker.vue'
 import ListFooter from './ListFooter.vue'
 import Modal from './Modal.vue'
@@ -31,12 +23,8 @@ const callerSuggestionsLoading = ref(false)
 const callerSearchError = ref('')
 const callerSuggestions = ref<Member[]>([])
 const modelId = ref('')
-const ratingStatus = ref('')
 const billingType = ref('')
 const query = ref('')
-const summary = ref<UsageCostSummary | null>(null)
-const summaryLoading = ref(false)
-const summaryError = ref('')
 const exporting = ref(false)
 const models = ref<Model[]>([])
 const lookupError = ref('')
@@ -44,17 +32,12 @@ const selected = ref<UsageCostDetail | null>(null)
 const detailOpen = ref(false)
 const detailLoading = ref(false)
 const detailError = ref('')
-let summaryRevision = 0
 let detailRevision = 0
 let callerSearchRevision = 0
 let callerSearchTimer: ReturnType<typeof setTimeout> | undefined
 
 const { items, cursor, page, pageSize, total, loading, error, load, previous, retry, setPageSize } =
   useCollection<UsageCost>(() => `/billing/usage-costs?${query.value}`)
-
-const totalTokens = computed(
-  () => (summary.value?.inputTokens || 0) + (summary.value?.outputTokens || 0),
-)
 
 function dateValue(value: Date) {
   return value.toISOString().slice(0, 10)
@@ -92,7 +75,6 @@ function params() {
     ['principalType', principalType.value],
     ['principalId', principalId.value.trim()],
     ['modelId', modelId.value],
-    ['ratingStatus', ratingStatus.value],
     ['billingType', billingType.value],
   ])
     if (value) result.set(key, value)
@@ -104,23 +86,7 @@ async function search() {
   result.set('sort', 'startedAt')
   result.set('order', 'desc')
   query.value = result.toString()
-  const revision = ++summaryRevision
-  summaryLoading.value = true
-  summaryError.value = ''
-  const summaryParams = new URLSearchParams(result)
-  summaryParams.delete('sort')
-  summaryParams.delete('order')
-  const summaryPromise = api<UsageCostSummary>(`/billing/usage-costs/summary?${summaryParams}`)
-    .then((value) => {
-      if (revision === summaryRevision) summary.value = value
-    })
-    .catch((reason) => {
-      if (revision === summaryRevision) summaryError.value = errorText(reason)
-    })
-    .finally(() => {
-      if (revision === summaryRevision) summaryLoading.value = false
-    })
-  await Promise.all([load(), summaryPromise])
+  await load()
 }
 function reset() {
   principalType.value = ''
@@ -128,7 +94,6 @@ function reset() {
   callerName.value = ''
   clearCallerSuggestions()
   modelId.value = ''
-  ratingStatus.value = ''
   billingType.value = ''
   resetDates()
   void search()
@@ -211,11 +176,14 @@ function amount(value: string | null, valueCurrency: BillingCurrency | null) {
   const integer = match[1].replace(/\B(?=(\d{3})+(?!\d))/g, ',')
   return `${valueCurrency === 'CNY' ? '¥' : '$'}${integer}${fraction ? `.${fraction}` : ''}`
 }
-function costTotal(valueCurrency: BillingCurrency) {
-  return summary.value?.totals.find((value) => value.currency === valueCurrency)?.amount || '0'
-}
 function ratingLabel(value: string) {
   return t(`billing.ratingStatuses.${value}`)
+}
+function billingModeLabel(value: string) {
+  return t(value === 'SUBSCRIPTION' ? 'billing.subscriptionBilling' : 'billing.tokenBilling')
+}
+function hasBillingIssue(value: string) {
+  return value !== 'RATED' && value !== 'SUBSCRIPTION_SHARED'
 }
 function protocolLabel(value: string) {
   return t(`billing.protocols.${value}`)
@@ -369,35 +337,15 @@ onBeforeUnmount(() => {
         </select>
       </label>
       <label>
-        <span class="filter-label">{{ t('billing.ratingStatus') }}</span>
-        <select v-model="ratingStatus">
-          <option value="">{{ t('common.all') }}</option>
-          <option
-            v-for="value in [
-              'RATED',
-              'SUBSCRIPTION_SHARED',
-              'INCOMPLETE_TOKENS',
-              'MISSING_PRICE',
-              'PENDING_RATING',
-              'NOT_BILLABLE',
-            ]"
-            :key="value"
-            :value="value"
-          >
-            {{ ratingLabel(value) }}
-          </option>
-        </select>
-      </label>
-      <label>
         <span class="filter-label">{{ t('billing.billingType') }}</span>
         <select v-model="billingType">
           <option value="">{{ t('common.all') }}</option>
-          <option value="API_KEY">{{ t('billing.apiKey') }}</option>
-          <option value="SUBSCRIPTION">{{ t('billing.subscription') }}</option>
+          <option value="API_KEY">{{ t('billing.tokenBilling') }}</option>
+          <option value="SUBSCRIPTION">{{ t('billing.subscriptionBilling') }}</option>
         </select>
       </label>
       <div class="usage-cost-actions">
-        <button class="button primary" :disabled="loading || summaryLoading">
+        <button class="button primary" :disabled="loading">
           {{ t('billing.search') }}
         </button>
         <button type="button" class="button secondary" :disabled="loading" @click="reset">
@@ -410,27 +358,6 @@ onBeforeUnmount(() => {
     </form>
     <p v-if="lookupError" class="alert error">{{ lookupError }}</p>
   </section>
-
-  <div v-if="summaryError" class="alert error billing-alert" role="alert">{{ summaryError }}</div>
-  <section v-else class="billing-detail-metrics" aria-live="polite">
-    <article class="panel">
-      <span>{{ t('billing.tokens') }}</span
-      ><strong>{{ count(totalTokens) }}</strong
-      ><small>{{ count(summary?.cachedInputTokens ?? 0) }} {{ t('billing.cachedTokens') }}</small>
-    </article>
-    <article
-      v-for="valueCurrency in ['CNY', 'USD'] as BillingCurrency[]"
-      :key="valueCurrency"
-      class="panel"
-    >
-      <span>{{ valueCurrency }}</span
-      ><strong>{{ amount(costTotal(valueCurrency), valueCurrency) }}</strong
-      ><small>{{ t('billing.accruedCost') }}</small>
-    </article>
-  </section>
-  <p v-if="summary?.unrated" class="billing-rating-notice" role="status">
-    {{ t('billing.pendingRatingNotice', { count: count(summary.unrated) }) }}
-  </p>
 
   <section class="panel billing-table-panel">
     <div v-if="error" class="alert error" role="alert">
@@ -447,7 +374,7 @@ onBeforeUnmount(() => {
             <th>{{ t('billing.model') }}</th>
             <th>{{ t('billing.resource') }}</th>
             <th>{{ t('billing.protocol') }}</th>
-            <th>{{ t('billing.ratingStatus') }}</th>
+            <th>{{ t('billing.billingType') }}</th>
             <th class="numeric">{{ t('billing.tokens') }}</th>
             <th class="numeric">{{ t('billing.amount') }}</th>
             <th>{{ t('common.actions') }}</th>
@@ -475,9 +402,12 @@ onBeforeUnmount(() => {
             </td>
             <td>{{ protocolLabel(item.clientProtocol) }}</td>
             <td>
-              <span class="issue-badge" :class="item.ratingStatus.toLowerCase()">{{
-                ratingLabel(item.ratingStatus)
-              }}</span>
+              {{ billingModeLabel(item.billingType) }}
+              <small v-if="hasBillingIssue(item.ratingStatus)" class="subline">
+                <span class="issue-badge" :class="item.ratingStatus.toLowerCase()">{{
+                  ratingLabel(item.ratingStatus)
+                }}</span>
+              </small>
             </td>
             <td class="numeric">{{ count((item.inputTokens ?? 0) + (item.outputTokens ?? 0)) }}</td>
             <td class="numeric amount-cell">{{ amount(item.totalCost, item.currency) }}</td>
@@ -545,7 +475,7 @@ onBeforeUnmount(() => {
           <dt>{{ t('common.status') }}</dt>
           <dd><Status :value="selected.status" /></dd>
         </div>
-        <div>
+        <div v-if="hasBillingIssue(selected.ratingStatus)">
           <dt>{{ t('billing.ratingStatus') }}</dt>
           <dd>{{ ratingLabel(selected.ratingStatus) }}</dd>
         </div>
