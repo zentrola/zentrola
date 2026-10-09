@@ -909,6 +909,16 @@
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "enum": [
+                            "all",
+                            "unexpired"
+                        ],
+                        "type": "string",
+                        "description": "all 或 unexpired（仅有效且未撤销），默认 all",
+                        "name": "expiry",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -4710,6 +4720,16 @@
                         "default": 50,
                         "description": "每页数量",
                         "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "all",
+                            "unexpired"
+                        ],
+                        "type": "string",
+                        "description": "all 或 unexpired（仅有效且未撤销），默认 all",
+                        "name": "expiry",
                         "in": "query"
                     }
                 ],

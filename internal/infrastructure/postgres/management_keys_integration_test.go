@@ -91,3 +91,59 @@ func TestManageKeysExpiryFilterIntegration(t *testing.T) {
 		})
 	}
 }
+
+func TestRevokedKeyExpiryMigrationIntegration(t *testing.T) {
+	ctx, pool, _ := integrationDatabase(t)
+	if _, err := pool.Exec(ctx, `DELETE FROM goose_db_version WHERE version_id=53 AND is_applied`); err != nil {
+		t.Fatal(err)
+	}
+	revokedAt := time.Date(2026, time.October, 9, 8, 0, 0, 0, time.UTC)
+	if _, err := pool.Exec(ctx, `INSERT INTO principal
+		(id,principal_type,name,status,created_by,updated_by,created_at,updated_at)
+		VALUES (30,'MEMBER','migration test','ACTIVE','system','system',$1,$1)`, revokedAt); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []struct {
+		id        int64
+		status    string
+		expiresAt any
+		revokedAt any
+	}{
+		{301, "REVOKED", revokedAt.Add(time.Hour), revokedAt},
+		{302, "REVOKED", nil, revokedAt},
+		{303, "ACTIVE", revokedAt.Add(time.Hour), nil},
+	} {
+		if _, err := pool.Exec(ctx, `INSERT INTO principal_access_key
+			(id,principal_id,key_hash,masked_key,name,status,expires_at,revoked_at,created_by,updated_by,created_at,updated_at)
+			VALUES ($1,30,$2,'test****','Test Key',$3,$4,$5,'system','system',$6,$6)`,
+			key.id, bytes.Repeat([]byte{byte(key.id)}, 32), key.status, key.expiresAt, key.revokedAt, revokedAt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := pool.Query(ctx, `SELECT id,expires_at FROM principal_access_key WHERE principal_id=30 ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for _, want := range []struct {
+		id int64
+		at time.Time
+	}{
+		{301, revokedAt}, {302, revokedAt}, {303, revokedAt.Add(time.Hour)},
+	} {
+		if !rows.Next() {
+			t.Fatalf("missing key %d", want.id)
+		}
+		var id int64
+		var expiresAt time.Time
+		if err := rows.Scan(&id, &expiresAt); err != nil || id != want.id || !expiresAt.Equal(want.at) {
+			t.Fatalf("key %d expiry = %s, error = %v; want %s", id, expiresAt, err, want.at)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+}

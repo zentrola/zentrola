@@ -1961,6 +1961,32 @@ test('没有当前模型服务商时隐藏整个区块', async ({ page }) => {
   await expect(page.getByRole('heading', { name: '用户 Token 消耗排行' })).toBeVisible()
 })
 
+test('当前模型服务商加载失败时提示并允许重试', async ({ page }) => {
+  await fixture(page)
+  let attempts = 0
+  await page.route('**/api/v1/gateway/active-models', async (route) => {
+    attempts++
+    await route.fulfill({
+      status: attempts === 1 ? 503 : 200,
+      json: {
+        code: attempts === 1 ? 'UNAVAILABLE' : 'OK',
+        data:
+          attempts === 1
+            ? null
+            : [{ modelCode: 'test-model', modelName: '测试模型', providerName: '测试服务商' }],
+      },
+    })
+  })
+  await signIn(page, 'home')
+  const alert = page.getByRole('alert').filter({ hasText: '当前模型服务商' })
+  await expect(alert).toBeVisible()
+  await expect(page.getByRole('region', { name: '当前模型服务商' })).toHaveCount(0)
+  await alert.getByRole('button', { name: '重试' }).click()
+  await expect(page.getByRole('region', { name: '当前模型服务商' })).toContainText('测试模型')
+  await expect(alert).toHaveCount(0)
+  expect(attempts).toBe(2)
+})
+
 test('当前模型服务商在大量记录时限制卡片高度并内部滚动', async ({ page }) => {
   const state = await fixture(page)
   state.activeModelRows.splice(
@@ -2628,6 +2654,43 @@ test('成员列表按需查看 Key 并处理删除和失败恢复', async ({ pag
   await expect(page.locator('.toast-success')).toContainText('用户已删除')
   await expect(page.locator('.notice')).toHaveCount(0)
   expect(state.members).toHaveLength(2)
+})
+
+test('密钥在弹窗打开期间到期后刷新有效期内列表', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-10-09T08:00:00Z') })
+  await fixture(page)
+  let requests = 0
+  await page.route(`**/api/v1/members/${longID}/keys*`, async (route) => {
+    requests++
+    const items =
+      requests === 1
+        ? [
+            {
+              id: '801',
+              name: '即将过期',
+              maskedKey: 'vk-expiring********1234',
+              status: 'ACTIVE',
+              expiresAt: '2026-10-09T08:00:01Z',
+              revokedAt: null,
+              createdAt: stamp,
+            },
+          ]
+        : []
+    await route.fulfill({
+      json: { code: 'OK', data: { items, total: items.length, nextCursor: null } },
+    })
+  })
+  await signIn(page)
+  await page
+    .getByRole('row')
+    .filter({ hasText: '林知远' })
+    .getByRole('button', { name: '查看 Key 记录' })
+    .click()
+  await expect(modal(page).getByText('即将过期')).toBeVisible()
+  await page.clock.fastForward(2000)
+  await expect(modal(page).getByText('即将过期')).toHaveCount(0)
+  await expect(modal(page)).toContainText('没有有效的访问密钥。')
+  expect(requests).toBe(2)
 })
 
 test('成员列表不预查密钥且分配密钥后可激活', async ({ page }) => {

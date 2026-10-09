@@ -243,8 +243,8 @@ func TestFreshDatabaseAppliesPostBaselineMigrationsOnFirstRun(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version WHERE is_applied`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version < 52 {
-		t.Fatalf("fresh database stopped at migration %d; want at least 52", version)
+	if version < 53 {
+		t.Fatalf("fresh database stopped at migration %d; want at least 53", version)
 	}
 	var exists bool
 	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=$1 AND table_name='provider_credential' AND column_name='version')`, schema).Scan(&exists); err != nil {

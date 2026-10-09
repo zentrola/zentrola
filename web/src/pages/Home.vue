@@ -20,6 +20,7 @@ const healthResources = ref<Resource[]>([])
 const activeModels = ref<ActiveModel[]>([])
 const loading = ref(false)
 const error = ref('')
+const activeModelsError = ref('')
 const providerHealthLoading = ref(false)
 const providerHealthError = ref('')
 const copied = ref('')
@@ -186,11 +187,15 @@ async function loadDashboard(current: number) {
 }
 
 async function loadActiveModels(current: number) {
+  if (current === revision) activeModelsError.value = ''
   try {
     const result = await api<ActiveModel[]>('/gateway/active-models')
     if (current === revision) activeModels.value = Array.isArray(result) ? result : []
-  } catch {
-    if (current === revision) activeModels.value = []
+  } catch (reason) {
+    if (current === revision) {
+      activeModels.value = []
+      activeModelsError.value = errorText(reason)
+    }
   }
 }
 
@@ -416,6 +421,12 @@ onMounted(load)
     </section>
   </div>
 
+  <div v-if="activeModelsError" class="alert error active-models-error" role="alert">
+    {{ t('home.activeModels') }}: {{ activeModelsError }}
+    <button type="button" class="text-button" @click="loadActiveModels(revision)">
+      {{ t('common.retry') }}
+    </button>
+  </div>
   <section
     v-if="activeModels.length"
     class="active-models-panel"
@@ -780,6 +791,9 @@ onMounted(load)
   border-radius: 12px;
   background: var(--color-surface);
   box-shadow: var(--shadow-card);
+}
+.active-models-error {
+  margin-bottom: 18px;
 }
 
 .active-models-head {

@@ -40,7 +40,21 @@ function scheduleExpiryUpdate() {
     timer = undefined
     return
   }
-  timer = setTimeout(scheduleExpiryUpdate, Math.min(nextExpiry - now.value + 1, 2147483647))
+  const delay = nextExpiry - now.value + 1
+  timer = setTimeout(
+    delay > 2147483647 ? scheduleExpiryUpdate : refreshExpiredKeys,
+    Math.min(delay, 2147483647),
+  )
+}
+function refreshExpiredKeys() {
+  now.value = Date.now()
+  if (expiry.value !== 'unexpired') {
+    scheduleExpiryUpdate()
+  } else if (loading.value) {
+    timer = setTimeout(refreshExpiredKeys, 250)
+  } else {
+    void load()
+  }
 }
 onMounted(() => {
   void load()
