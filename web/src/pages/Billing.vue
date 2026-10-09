@@ -401,8 +401,8 @@ onBeforeUnmount(() => {
             </div>
             <div class="cost-rank-identity">
               <strong>{{ row.name }}</strong>
-              <small class="cost-rank-meta">
-                <span>{{ row.code || '-' }}</span>
+              <small v-if="row.code || index === 0" class="cost-rank-meta">
+                <span v-if="row.code">{{ row.code }}</span>
                 <span v-if="index === 0" class="cost-rank-highlight">
                   {{ t('billing.highestUsage') }}
                 </span>
