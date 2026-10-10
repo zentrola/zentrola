@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#102840" />
+    <meta
+      name="description"
+      content="Zentrola 是面向研发团队的开源 AI Coding 能力治理平台。统一管理模型接入、访问权限、密钥、Token 配额、用量与成本，同时保留团队现有的 Codex、Claude Code 等客户端。"
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Zentrola｜让 AI Coding 接入可控、用量可见" />
+    <meta
+      property="og:description"
+      content="在开发者使用的 AI Coding 客户端和模型服务商之间，统一管理访问、路由、配额与成本。"
+    />
+    <meta
+      property="og:image"
+      content="https://zentrola.github.io/zentrola/assets/admin-console.png"
+    />
+    <link rel="canonical" href="https://zentrola.github.io/zentrola/" />
+    <link rel="alternate" hreflang="en" href="https://zentrola.github.io/zentrola/en/" />
+    <link rel="alternate" hreflang="zh-CN" href="https://zentrola.github.io/zentrola/" />
+    <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
+    <link rel="stylesheet" href="assets/style.css" />
+    <title>Zentrola｜AI Coding 能力治理平台</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳转到正文</a>
+    <header class="site-header">
+      <div class="shell header-inner">
+        <a class="brand" href="./" aria-label="Zentrola 首页">
+          <span class="brand-mark" aria-hidden="true">Z</span>
+          <span>Zentrola</span>
+        </a>
+        <nav class="header-nav" aria-label="主导航">
+          <a href="#how-it-works">工作方式</a>
+          <a href="#capabilities">核心能力</a>
+          <a href="https://github.com/zentrola/zentrola/blob/main/docs/getting-started.zh-CN.md"
+            >文档</a
+          >
+          <a class="language-link" href="en/" lang="en" hreflang="en">English</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="hero">
+        <div class="shell hero-grid">
+          <div class="hero-copy">
+            <p class="hero-kicker">开源 · 面向研发团队</p>
+            <h1>让 AI Coding 接入可控，用量可见。</h1>
+            <p class="hero-lead">
+              Zentrola 位于 Codex、Claude Code 等客户端和模型服务商之间。
+              开发者继续使用熟悉的工具，团队集中管理模型、权限、凭据、配额与成本。
+            </p>
+            <div class="hero-actions">
+              <a
+                class="button button-primary"
+                href="https://github.com/zentrola/zentrola/blob/main/docs/getting-started.zh-CN.md"
+                >开始部署 <span aria-hidden="true">↗</span></a
+              >
+              <a class="button button-quiet" href="https://github.com/zentrola/zentrola"
+                >查看 GitHub 仓库 <span aria-hidden="true">↗</span></a
+              >
+            </div>
+          </div>
+          <div class="flow-panel" id="how-it-works" aria-label="Zentrola 工作方式">
+            <div class="flow-source">
+              <span class="flow-caption">团队原有工具</span>
+              <strong>Codex <span>/</span> Claude Code <span>/</span> 应用</strong>
+              <small>使用 Virtual Key 或 App Key</small>
+            </div>
+            <div class="flow-rail" aria-hidden="true"><span></span></div>
+            <div class="flow-center">
+              <div class="flow-center-title">
+                <span class="mini-mark">Z</span><strong>Zentrola</strong>
+              </div>
+              <div class="flow-stages">
+                <span>身份与授权</span><span>Token 配额</span><span>逻辑模型</span
+                ><span>路由与记录</span>
+              </div>
+            </div>
+            <div class="flow-rail" aria-hidden="true"><span></span></div>
+            <div class="flow-source flow-destination">
+              <span class="flow-caption">企业的模型资源</span>
+              <strong>OpenAI <span>/</span> Anthropic <span>/</span> 兼容服务商</strong>
+              <small>上游凭据留在服务端</small>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section problem-section" aria-labelledby="problem-heading">
+        <div class="shell">
+          <div class="section-heading">
+            <h2 id="problem-heading">团队接入模型，难点不在“能调用”。</h2>
+            <p>当多个成员、应用和模型服务商一起使用时，授权、凭据和费用需要有统一的归属。</p>
+          </div>
+          <div class="problem-grid">
+            <article class="problem-item">
+              <h3>凭据四处分发</h3>
+              <p>真实的服务商 API Key 被复制到个人电脑和应用配置中，轮换和撤销都变得困难。</p>
+              <p class="solution">Zentrola 为成员和应用签发独立密钥；上游凭据集中保存。</p>
+            </article>
+            <article class="problem-item">
+              <h3>模型访问没有边界</h3>
+              <p>团队需要知道谁能使用哪些模型，以及不同客户端是否遵循同一套规则。</p>
+              <p class="solution">用 Group 授权逻辑模型，并在 Gateway 调用时执行权限与配额。</p>
+            </article>
+            <article class="problem-item">
+              <h3>用量和成本难归属</h3>
+              <p>账单只显示服务商总额时，很难定位成员、应用和模型的实际消耗。</p>
+              <p class="solution">按成员、应用、模型和资源记录用量，查看成本明细与月度配额。</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section
+        class="section capability-section"
+        id="capabilities"
+        aria-labelledby="capabilities-heading"
+      >
+        <div class="shell capability-layout">
+          <div class="section-heading capability-intro">
+            <h2 id="capabilities-heading">一层控制面，连接现有工具与模型。</h2>
+            <p>
+              无需要求团队换掉熟悉的 AI Coding 客户端。Zentrola 统一处理后台管理和模型调用入口。
+            </p>
+          </div>
+          <div class="capability-list">
+            <div class="capability-row">
+              <strong>接入</strong>
+              <p>兼容 OpenAI 和 Anthropic 常用 API，支持协议转换与服务商故障切换。</p>
+            </div>
+            <div class="capability-row">
+              <strong>治理</strong>
+              <p>管理服务商、凭据、逻辑模型、成员与应用访问，以及独立的月度 Token 配额。</p>
+            </div>
+            <div class="capability-row">
+              <strong>核算</strong>
+              <p>查看用量、调用记录和成本归属，支持计费明细筛选与 CSV 导出。</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section console-section" aria-labelledby="console-heading">
+        <div class="shell console-layout">
+          <div class="console-copy">
+            <h2 id="console-heading">把管理工作留在一个地方。</h2>
+            <p>
+              管理员通过独立的 Web
+              控制台配置资源和访问规则；开发者通过自己的客户端调用已授权的模型。
+            </p>
+            <a
+              class="text-link"
+              href="https://github.com/zentrola/zentrola/blob/main/docs/client-configuration.zh-CN.md"
+              >查看客户端配置指南 <span aria-hidden="true">↗</span></a
+            >
+          </div>
+          <figure class="console-figure">
+            <img
+              src="assets/admin-console.png"
+              alt="Zentrola 管理控制台的登录界面"
+              width="1600"
+              height="904"
+              loading="lazy"
+            />
+            <figcaption>管理控制台界面</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="closing-section" aria-labelledby="closing-heading">
+        <div class="shell closing-inner">
+          <div>
+            <h2 id="closing-heading">从一条受控的模型调用链开始。</h2>
+            <p>安装 Zentrola，配置服务商和逻辑模型，为成员或应用签发密钥。</p>
+          </div>
+          <div class="closing-actions">
+            <a
+              class="button button-light"
+              href="https://github.com/zentrola/zentrola/blob/main/docs/getting-started.zh-CN.md"
+              >阅读入门指南 <span aria-hidden="true">↗</span></a
+            >
+            <a class="button button-outline" href="https://github.com/zentrola/zentrola/releases"
+              >下载发布包 <span aria-hidden="true">↗</span></a
+            >
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="shell footer-inner">
+        <div>
+          <strong>Zentrola</strong>
+          <p>面向研发团队的开源 AI Coding 能力治理平台。</p>
+        </div>
+        <div class="footer-links">
+          <a href="https://github.com/zentrola/zentrola">GitHub</a>
+          <a href="https://github.com/zentrola/zentrola/blob/main/docs/README.zh-CN.md">文档</a>
+          <a href="https://github.com/zentrola/zentrola/blob/main/LICENSE">Apache-2.0</a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

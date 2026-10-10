@@ -2,6 +2,8 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
+[项目网站](https://zentrola.github.io/zentrola/) · [入门指南](docs/getting-started.zh-CN.md)
+
 [![CI](https://github.com/zentrola/zentrola/actions/workflows/ci.yml/badge.svg)](https://github.com/zentrola/zentrola/actions/workflows/ci.yml)
 [![Security](https://github.com/zentrola/zentrola/actions/workflows/security.yml/badge.svg)](https://github.com/zentrola/zentrola/actions/workflows/security.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
