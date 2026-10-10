@@ -35,6 +35,14 @@ curl -i http://127.0.0.1:9527/health/ready
 - Readiness 通过不代表 Provider Credential 或上游模型可用。
 - Redis 有意不纳入 readiness；缓存和路由冷却状态不可用时 Gateway 会 fail-open。
 
+## Nginx 多实例反向代理示例
+
+参见 [`nginx-multi-instance.conf`](nginx-multi-instance.conf)。示例将两个 Backend 和两个 Admin Web 实例放在同一公网域名后面，按 `/v1/`、`/anthropic/` 和 `/api/` 路径分流。替换示例域名、证书路径和内网实例地址后，运行 `nginx -t` 检查配置，再重新加载 Nginx。
+
+示例的 `client_max_body_size 64m` 要求每个 Backend 都设置 `GATEWAY_MAX_BODY_BYTES=67108864`。若使用其他上限，两个配置应一起调整。模型接口关闭了 Nginx 响应缓冲，并把读取超时设为 16 分钟，以适配默认最长 15 分钟的 Gateway 请求和 SSE 流。
+
+各 Backend 实例须连接同一 PostgreSQL、Redis，并使用相同的 `MASTER_KEY` 和 `ADMIN_JWT_SECRET`；Admin Web 的 `WEB_API_BASE_URL` 和 `WEB_GATEWAY_BASE_URL` 都应指向示例中的公网 HTTPS 域名。无需会话粘滞，单条 SSE 连接会保持在接收它的实例上。Nginx 开源版的上述配置只提供被动故障摘除；部署系统仍应在内网访问每个实例的 `/health/ready`，决定是否接入流量。滚动更新时先停止向旧实例分配新请求，再等待已有流式请求结束。
+
 ## 数据库迁移与升级
 
 `MIGRATIONS_AUTO_APPLY=true` 会在 Backend 启动时执行前向迁移。生产环境如果需要受控变更，可以关闭自动迁移，并在启动新版本前执行 `zentrola migrate`。

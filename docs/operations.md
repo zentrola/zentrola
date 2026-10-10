@@ -35,6 +35,14 @@ curl -i http://127.0.0.1:9527/health/ready
 - Readiness does not prove that a provider credential or upstream model is available.
 - Redis is intentionally not part of readiness; gateway caches and cooldown state fail open.
 
+## Multi-instance Nginx reverse proxy example
+
+See [`nginx-multi-instance.conf`](nginx-multi-instance.conf). It routes two Backend and two Admin Web instances behind one public hostname, splitting `/v1/`, `/anthropic/`, and `/api/` from the Web routes. Replace the example hostname, certificate paths, and private instance addresses, then run `nginx -t` before reloading Nginx.
+
+The example uses `client_max_body_size 64m`; set `GATEWAY_MAX_BODY_BYTES=67108864` on every Backend instance. Change both limits together if you choose another size. Response buffering is disabled for model routes, and the 16-minute read timeout accommodates the default 15-minute Gateway request timeout and SSE streams.
+
+All Backend instances must share PostgreSQL, Redis, `MASTER_KEY`, and `ADMIN_JWT_SECRET`. Set both `WEB_API_BASE_URL` and `WEB_GATEWAY_BASE_URL` for each Admin Web instance to the public HTTPS hostname in the example. Sticky sessions are unnecessary; each SSE connection remains on the instance that accepted it. This Nginx Open Source configuration only performs passive failure detection; use each instance's `/health/ready` on the private network in the deployment system before routing traffic to it. During rolling updates, stop assigning new requests to the old instance and let active streams finish.
+
 ## Database migrations and upgrades
 
 `MIGRATIONS_AUTO_APPLY=true` applies forward migrations when the Backend starts. For controlled production changes, disable automatic migration and run `zentrola migrate` before starting the new version.
