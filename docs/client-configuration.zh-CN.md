@@ -67,7 +67,7 @@ Remove-Variable secureKey, zentrolaKey
 
 ## 会话与账号分流
 
-Zentrola 先按服务商模型映射及协议优先级选路；在同一映射下，个人订阅优先于 API Key。有多个同类账号时，Codex 的 `session-id` 和 Claude Code 的 `x-claude-code-session-id` 用于分配新会话，并将后续请求固定到同一账号。Claude Code 子代理的 `x-claude-code-agent-id` 会得到独立绑定。绑定在连续 30 天没有请求后过期。
+管理员可在服务商的模型映射中设置路由优先级，范围为 1–10000，默认 100，数值越小越先尝试。同一服务商可以针对不同逻辑模型设置不同优先级。Zentrola 先按映射优先级及协议优先级选路；在同一映射下，个人订阅优先于 API Key。有多个同类账号时，Codex 的 `session-id` 和 Claude Code 的 `x-claude-code-session-id` 用于分配新会话，并将后续请求固定到同一账号。Claude Code 子代理的 `x-claude-code-agent-id` 会得到独立绑定。绑定在连续 30 天没有请求后过期。
 
 当前账号不可用时，网关会在可以安全重试的情况下切换账号并更新绑定。如果请求带有 `previous_response_id`，网关必须找到原绑定，不会将该 ID 发给另一个账号；找不到时返回 `SESSION_ROUTE_UNAVAILABLE`。不带上述会话头的客户端仍按原有优先级和故障转移规则选路。
 

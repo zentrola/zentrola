@@ -221,6 +221,7 @@ const subscriptionPasteTab = ref<HTMLButtonElement | null>(null)
 type MappingDraft = {
   modelId: string
   upstreamModelCode: string
+  priority: string
 }
 type ProxyHeaderDraft = {
   key: string
@@ -508,6 +509,7 @@ function openEdit(provider: Provider | null = null) {
         .map((mapping) => ({
           modelId: mapping.modelId,
           upstreamModelCode: mapping.upstreamModelCode,
+          priority: String(mapping.priority ?? 100),
         }))
         .filter((mapping) => modelIDs.has(mapping.modelId))
         .filter(
@@ -534,6 +536,7 @@ function toggleMapping(model: Model) {
     form.mappings.push({
       modelId: model.id,
       upstreamModelCode: '',
+      priority: '100',
     })
   } else {
     form.mappings.splice(index, 1)
@@ -544,7 +547,7 @@ function selectAllMappings() {
   const visibleModels = filteredMappingRows.value.map((row) => row.model)
   for (const model of visibleModels) {
     if (!form.mappings.some((mapping) => mapping.modelId === model.id)) {
-      form.mappings.push({ modelId: model.id, upstreamModelCode: '' })
+      form.mappings.push({ modelId: model.id, upstreamModelCode: '', priority: '100' })
     }
   }
 }
@@ -556,6 +559,15 @@ function invertMappingSelection() {
 function updateUpstreamModelCode(modelId: string, event: Event) {
   const mapping = form.mappings.find((candidate) => candidate.modelId === modelId)
   if (mapping) mapping.upstreamModelCode = (event.target as HTMLInputElement).value
+}
+
+function updateMappingPriority(modelId: string, event: Event) {
+  const mapping = form.mappings.find((candidate) => candidate.modelId === modelId)
+  if (mapping) mapping.priority = (event.target as HTMLInputElement).value
+}
+
+function validMappingPriority(value: string) {
+  return /^[1-9]\d*$/.test(value) && Number(value) <= 10000
 }
 
 function endpointURL(provider: Provider, protocolType: ProviderProtocol) {
@@ -1374,6 +1386,7 @@ function save() {
     mappings: form.mappings.map((mapping) => ({
       modelId: mapping.modelId,
       upstreamModelCode: mapping.upstreamModelCode.trim(),
+      priority: Number(mapping.priority),
     })),
   }
   if (!validText(input.name, 128)) validation = t('common.byteLimit')
@@ -1409,6 +1422,8 @@ function save() {
     )
   )
     validation = t('providers.mappingInvalid')
+  else if (form.mappings.some((mapping) => !validMappingPriority(mapping.priority)))
+    validation = t('providers.mappingPriorityInvalid')
   else if (new Set(form.mappings.map((mapping) => mapping.modelId)).size !== form.mappings.length)
     validation = t('providers.mappingDuplicate')
   if (validation) {
@@ -1422,7 +1437,8 @@ function save() {
         (mapping) =>
           !availableMappingModels.value.some((model) => model.id === mapping.modelId) ||
           (mapping.upstreamModelCode.trim() !== '' &&
-            !validText(mapping.upstreamModelCode.trim(), 128)),
+            !validText(mapping.upstreamModelCode.trim(), 128)) ||
+          !validMappingPriority(mapping.priority),
       )
     )
       activeConfigTab.value = 'models'
@@ -2116,6 +2132,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
               <header class="mapping-pane-head mapping-selected-head">
                 <strong>{{ t('providers.logicalModel') }}</strong>
                 <strong>{{ t('providers.upstreamModelCode') }}</strong>
+                <strong>{{ t('providers.mappingPriority') }}</strong>
                 <span aria-hidden="true"></span>
               </header>
               <div v-if="selectedMappingRows.length" class="mapping-selected-list">
@@ -2140,6 +2157,16 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
                       "
                       :aria-label="t('providers.mappingCodeFor', { name: row.model.name })"
                       @input="updateUpstreamModelCode(row.model.id, $event)"
+                    />
+                  </label>
+                  <label class="mapping-control mapping-priority-control">
+                    <input
+                      :value="row.mapping?.priority ?? '100'"
+                      type="text"
+                      inputmode="numeric"
+                      :disabled="busy"
+                      :aria-label="t('providers.mappingPriorityFor', { name: row.model.name })"
+                      @input="updateMappingPriority(row.model.id, $event)"
                     />
                   </label>
                   <button
@@ -4246,7 +4273,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
 }
 .mapping-selected-head {
   display: grid;
-  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr) 32px;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr) 76px 32px;
   gap: 10px;
   padding-right: 22px;
 }
@@ -4385,7 +4412,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
 .mapping-selected-row {
   display: grid;
   min-height: 52px;
-  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr) 32px;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr) 76px 32px;
   align-items: center;
   gap: 10px;
   padding: 8px 10px 8px 12px;

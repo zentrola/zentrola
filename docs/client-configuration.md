@@ -67,7 +67,7 @@ Configure the client to use a logical-model code granted to the member. Zentrola
 
 ## Session and account distribution
 
-Zentrola first applies provider-model mapping and protocol priority. Within the same mapping, personal subscriptions precede API keys. When multiple accounts of the same type are available, Codex's `session-id` and Claude Code's `x-claude-code-session-id` distribute new sessions and keep later requests on the selected account. Claude Code subagents receive separate bindings through `x-claude-code-agent-id`. A binding expires after 30 days without requests.
+Administrators can set route priority on each provider-model mapping from 1 to 10000. The default is 100, and lower values are tried first. A provider can have different priorities for different logical models. Zentrola first applies mapping and protocol priority. Within the same mapping, personal subscriptions precede API keys. When multiple accounts of the same type are available, Codex's `session-id` and Claude Code's `x-claude-code-session-id` distribute new sessions and keep later requests on the selected account. Claude Code subagents receive separate bindings through `x-claude-code-agent-id`. A binding expires after 30 days without requests.
 
 When an account becomes unavailable, the gateway switches and updates the binding only when retrying is safe. A request containing `previous_response_id` requires its original binding; Zentrola will not send that ID to another account and returns `SESSION_ROUTE_UNAVAILABLE` if the binding is missing. Clients without either session header retain the existing priority and failover behavior.
 

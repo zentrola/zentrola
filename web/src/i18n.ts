@@ -778,7 +778,7 @@ export const i18n = createI18n({
         removeProxyHeader: '删除第 {index} 个代理 Header',
         mappingTitle: '模型映射',
         mappingHint:
-          '可暂不勾选模型；启用服务商前必须至少配置一个映射。服务商模型编码留空时，调用使用系统模型编码。',
+          '可暂不勾选模型；启用服务商前必须至少配置一个映射。服务商模型编码留空时，调用使用系统模型编码。路由优先级默认为 100，数值越小越先尝试。',
         mappingSearch: '搜索模型映射',
         mappingSearchPlaceholder: '搜索系统模型名称、编码或服务商模型编码',
         clearMappingSearch: '清空模型映射搜索',
@@ -794,6 +794,9 @@ export const i18n = createI18n({
         logicalModel: '模型名称',
         protocol: '协议',
         upstreamModelCode: '服务商编码',
+        mappingPriority: '路由优先级',
+        mappingPriorityFor: '{name} 的路由优先级',
+        mappingPriorityInvalid: '路由优先级必须是 1 到 10000 的整数。',
         upstreamModelPlaceholder: '默认为 {code}',
         mappingModelFor: '第 {index} 条映射的系统模型',
         mappingProtocolFor: '第 {index} 条映射的协议',

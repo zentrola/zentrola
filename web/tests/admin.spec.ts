@@ -3594,8 +3594,37 @@ test('官方服务商编辑时不展示或提交停用模型映射', async ({ pa
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expect(dialog).toHaveCount(0)
   expect(state.providerInputs.at(-1)?.mappings).toEqual([
-    { modelId: '71', upstreamModelCode: 'deepseek-v4-flash' },
+    { modelId: '71', upstreamModelCode: 'deepseek-v4-flash', priority: 100 },
   ])
+})
+
+test('服务商映射优先级可编辑且保存其他设置时不会重置', async ({ page }) => {
+  const state = await fixture(page)
+  state.providerMappings.get('81')![0].priority = 25
+  await signIn(page)
+  await page.getByRole('link', { name: '服务商', exact: true }).click()
+  const edit = page.getByRole('row').filter({ hasText: 'DeepSeek' }).getByRole('button', {
+    name: '编辑',
+  })
+  await edit.click()
+  const dialog = modal(page)
+  const priority = dialog.getByLabel('DeepSeek V4 Flash 的路由优先级')
+  await expect(priority).toHaveValue('25')
+  await dialog.getByRole('button', { name: '保存', exact: true }).click()
+  expect(state.providerInputs.at(-1)?.mappings[0].priority).toBe(25)
+
+  await edit.click()
+  await expect(priority).toHaveValue('25')
+  const savedCount = state.providerInputs.length
+  await priority.fill('0')
+  await dialog.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(page.locator('.toast')).toContainText('路由优先级必须是 1 到 10000 的整数')
+  expect(state.providerInputs).toHaveLength(savedCount)
+  await priority.fill('5')
+  await dialog.getByRole('button', { name: '保存', exact: true }).click()
+  expect(state.providerInputs.at(-1)?.mappings[0].priority).toBe(5)
+  await edit.click()
+  await expect(priority).toHaveValue('5')
 })
 
 test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => {
@@ -4047,6 +4076,7 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
     {
       modelId: '71',
       upstreamModelCode: 'aliyun-deepseek-v4-flash',
+      priority: 100,
     },
   ])
   expect(created.proxyUrl).not.toContain('proxy-password')

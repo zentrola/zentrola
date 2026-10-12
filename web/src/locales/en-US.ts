@@ -771,7 +771,7 @@ export default {
     removeProxyHeader: 'Remove proxy header {index}',
     mappingTitle: 'Model mappings',
     mappingHint:
-      'Model mappings are optional while editing, but at least one is required before enabling the provider. A blank provider model code uses the system model code at runtime.',
+      'Model mappings are optional while editing, but at least one is required before enabling the provider. A blank provider model code uses the system model code at runtime. Route priority defaults to 100; lower values are tried first.',
     mappingSearch: 'Search model mappings',
     mappingSearchPlaceholder: 'Search by system model name, code, or provider model code',
     clearMappingSearch: 'Clear model mapping search',
@@ -787,6 +787,9 @@ export default {
     logicalModel: 'Model name',
     protocol: 'Protocol',
     upstreamModelCode: 'Provider code',
+    mappingPriority: 'Route priority',
+    mappingPriorityFor: 'Route priority for {name}',
+    mappingPriorityInvalid: 'Route priority must be an integer from 1 to 10000.',
     upstreamModelPlaceholder: 'Defaults to {code}',
     mappingModelFor: 'System model for mapping {index}',
     mappingProtocolFor: 'Protocol for mapping {index}',
