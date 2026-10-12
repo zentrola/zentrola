@@ -65,6 +65,12 @@ Remove-Variable secureKey, zentrolaKey
 
 Configure the client to use a logical-model code granted to the member. Zentrola forwards supported Messages, streaming, and tool-use traffic. `count_tokens` requires an Anthropic-compatible upstream route; Zentrola does not estimate it through an OpenAI-only upstream.
 
+## Session and account distribution
+
+Zentrola first applies provider-model mapping and protocol priority. Within the same mapping, personal subscriptions precede API keys. When multiple accounts of the same type are available, Codex's `session-id` and Claude Code's `x-claude-code-session-id` distribute new sessions and keep later requests on the selected account. Claude Code subagents receive separate bindings through `x-claude-code-agent-id`. A binding expires after 30 days without requests.
+
+When an account becomes unavailable, the gateway switches and updates the binding only when retrying is safe. A request containing `previous_response_id` requires its original binding; Zentrola will not send that ID to another account and returns `SESSION_ROUTE_UNAVAILABLE` if the binding is missing. Clients without either session header retain the existing priority and failover behavior.
+
 ## Direct verification
 
 List authorized models:

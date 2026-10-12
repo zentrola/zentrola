@@ -11,6 +11,7 @@ import (
 type Parsed struct {
 	Model                string
 	Stream               bool
+	PreviousResponseID   string
 	modelStart, modelEnd int
 	toolsStart, toolsEnd int
 }
@@ -64,6 +65,12 @@ func parse(body []byte, nullableStream bool) (Parsed, error) {
 				return result, ErrInvalid
 			}
 			result.Stream = bytes.Equal(raw, []byte("true"))
+		case "previous_response_id":
+			if !bytes.Equal(raw, []byte("null")) {
+				if err := json.Unmarshal(raw, &result.PreviousResponseID); err != nil {
+					return result, ErrInvalid
+				}
+			}
 		case "tools":
 			result.toolsEnd = int(d.InputOffset())
 			result.toolsStart = result.toolsEnd - len(raw)

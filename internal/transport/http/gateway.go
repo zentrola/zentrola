@@ -308,11 +308,12 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		defer stopClientCancellation()
 	}
 	addAccessLogFields(r.Context(), "protocol", protocol)
+	clientSessionID, clientAgentID := gatewayClientSession(r, protocol)
 	g.logger.InfoContext(r.Context(), "gateway forwarding started",
 		"protocol", protocol, "path", path,
 		"principal_id", identity.ID, "access_key_id", identity.AccessKeyID)
 	upstreamStarted := time.Now()
-	upstream, err := g.service.Forward(ctx, identity, gw.Request{Path: path, Version: version, Beta: beta, BetaQuery: query, Development: g.cfg.Development, Body: body, RequestID: requestIDFromContext(r.Context()), ProtocolHeaders: nativeHeaders, Trace: trace, Protocol: protocol})
+	upstream, err := g.service.Forward(ctx, identity, gw.Request{Path: path, Version: version, Beta: beta, BetaQuery: query, Development: g.cfg.Development, Body: body, RequestID: requestIDFromContext(r.Context()), ProtocolHeaders: nativeHeaders, Trace: trace, Protocol: protocol, ClientSessionID: clientSessionID, ClientAgentID: clientAgentID})
 	if retainOpenAICompletion && err == nil && upstream != nil {
 		upstreamOpened.Store(true)
 	}
@@ -465,6 +466,32 @@ func safeUpstreamRequestID(headers map[string][]string) string {
 		}
 	}
 	return value
+}
+
+func gatewayClientSession(r *http.Request, protocol string) (string, string) {
+	if protocol == gw.AnthropicProtocol {
+		id := singleSessionHeader(r.Header.Values("X-Claude-Code-Session-Id"))
+		if id == "" {
+			return "", ""
+		}
+		return id, singleSessionHeader(r.Header.Values("X-Claude-Code-Agent-Id"))
+	}
+	if protocol == gw.OpenAIResponsesProtocol {
+		return singleSessionHeader(r.Header.Values("Session-Id")), ""
+	}
+	return "", ""
+}
+
+func singleSessionHeader(values []string) string {
+	if len(values) != 1 || len(values[0]) == 0 || len(values[0]) > 128 || strings.TrimSpace(values[0]) != values[0] {
+		return ""
+	}
+	for _, char := range values[0] {
+		if char < 33 || char > 126 {
+			return ""
+		}
+	}
+	return values[0]
 }
 
 func protocolHeaders(r *http.Request) (string, string, error) {

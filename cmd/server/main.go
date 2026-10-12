@@ -323,6 +323,7 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 	gatewayService := gateway.New(
 		gatewaycache.NewGatewayStore(postgres.NewGatewayStore(pool, logger), gatewayCache, logger), credentials, compatibleUpstream,
 		gateway.WithRouteState(routeState),
+		gateway.WithSessionRouteBinding(routeState),
 		gateway.WithTokenQuotaAdmission(quotaService),
 		gateway.WithActiveRouteRecorder(gatewayCache),
 		gateway.WithSubscriptionRefreshCoordinator(routeState),

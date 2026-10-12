@@ -50,9 +50,23 @@ func (s *Service) nextRoute(ctx context.Context, routes []Route, start int) int 
 	return -1
 }
 
+func (s *Service) nextRetryRoute(ctx context.Context, routes []Route, start int, parsed Parsed) int {
+	if parsed.PreviousResponseID != "" {
+		return -1
+	}
+	return s.nextRoute(ctx, routes, start)
+}
+
 func (s *Service) forwardCandidates(ctx context.Context, identity appsec.PrincipalIdentity, request Request, parsed Parsed, routes []Route) (*Response, error) {
 	originalBody := request.Body
+	routes, sessionKey, boundResourceID, err := s.sessionRoutesForRequest(ctx, identity, request, parsed, routes)
+	if err != nil {
+		return nil, err
+	}
 	index := s.nextRoute(ctx, routes, 0)
+	if parsed.PreviousResponseID != "" && index > 0 {
+		return nil, ErrSessionRoute
+	}
 	if index < 0 {
 		// ResolveCandidates 已经确认存在配置完整的候选路由；此处全部被
 		// RouteState 拒绝只表示短期冷却，不能误报为缺少 Provider 配置。
@@ -61,7 +75,7 @@ func (s *Service) forwardCandidates(ctx context.Context, identity appsec.Princip
 	for index >= 0 {
 		route := routes[index]
 		if !validModel(route.UpstreamModel) {
-			next := s.nextRoute(ctx, routes, index+1)
+			next := s.nextRetryRoute(ctx, routes, index+1, parsed)
 			if next < 0 {
 				return nil, ErrRoute
 			}
@@ -71,7 +85,7 @@ func (s *Service) forwardCandidates(ctx context.Context, identity appsec.Princip
 		credential, err := s.cipher.Decrypt(route.Credential, catalog.CredentialOwner{ProviderID: route.ProviderID, ResourceID: route.ResourceID})
 		if err != nil {
 			s.block(ctx, identity, route, ResourceBlock{Reason: "CREDENTIAL_UNRECOVERABLE", ErrorCode: "CREDENTIAL_UNRECOVERABLE"})
-			next := s.nextRoute(ctx, routes, index+1)
+			next := s.nextRetryRoute(ctx, routes, index+1, parsed)
 			if next < 0 {
 				return nil, ErrCredential
 			}
@@ -82,7 +96,7 @@ func (s *Service) forwardCandidates(ctx context.Context, identity appsec.Princip
 		if err != nil {
 			clear(credential)
 			s.cooldown(ctx, route, defaultRouteCooldown)
-			next := s.nextRoute(ctx, routes, index+1)
+			next := s.nextRetryRoute(ctx, routes, index+1, parsed)
 			if next < 0 {
 				return nil, err
 			}
@@ -101,7 +115,7 @@ func (s *Service) forwardCandidates(ctx context.Context, identity appsec.Princip
 				} else {
 					s.cooldown(ctx, route, defaultRouteCooldown)
 				}
-				next := s.nextRoute(ctx, routes, index+1)
+				next := s.nextRetryRoute(ctx, routes, index+1, parsed)
 				if next < 0 {
 					return nil, err
 				}
@@ -126,7 +140,7 @@ func (s *Service) forwardCandidates(ctx context.Context, identity appsec.Princip
 				if !errors.Is(openErr, ErrRoute) && !errors.Is(openErr, ErrCredential) && !errors.Is(openErr, ErrProxyServer) {
 					s.cooldown(ctx, route, defaultRouteCooldown)
 				}
-				next := s.nextRoute(ctx, routes, index+1)
+				next := s.nextRetryRoute(ctx, routes, index+1, parsed)
 				if next >= 0 {
 					index = next
 					continue
@@ -145,7 +159,7 @@ func (s *Service) forwardCandidates(ctx context.Context, identity appsec.Princip
 			_ = s.state.Healthy(ctx, route)
 		}
 		if decision.retry {
-			next := s.nextRoute(ctx, routes, index+1)
+			next := s.nextRetryRoute(ctx, routes, index+1, parsed)
 			if next >= 0 {
 				s.failAttempt(request.Trace, attempt, responseErrorType(response))
 				response.Body.Close()
@@ -155,6 +169,9 @@ func (s *Service) forwardCandidates(ctx context.Context, identity appsec.Princip
 		}
 		selectedRoute := route
 		response.route = &selectedRoute
+		if sessionKey != "" && boundResourceID != route.ResourceID && response.Status < 400 {
+			_ = s.sessionRoutes.Move(ctx, sessionKey, boundResourceID, route.ResourceID)
+		}
 		s.recordActiveRoute(ctx, selectedRoute)
 		return response, nil
 	}

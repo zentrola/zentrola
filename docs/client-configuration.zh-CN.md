@@ -65,6 +65,12 @@ Remove-Variable secureKey, zentrolaKey
 
 将客户端模型设置为已向成员授权的逻辑模型编码。Zentrola 会转发受支持的 Messages、Streaming 和工具调用。`count_tokens` 必须路由到 Anthropic 兼容上游；Zentrola 不会通过只有 OpenAI 接口的上游生成估算值。
 
+## 会话与账号分流
+
+Zentrola 先按服务商模型映射及协议优先级选路；在同一映射下，个人订阅优先于 API Key。有多个同类账号时，Codex 的 `session-id` 和 Claude Code 的 `x-claude-code-session-id` 用于分配新会话，并将后续请求固定到同一账号。Claude Code 子代理的 `x-claude-code-agent-id` 会得到独立绑定。绑定在连续 30 天没有请求后过期。
+
+当前账号不可用时，网关会在可以安全重试的情况下切换账号并更新绑定。如果请求带有 `previous_response_id`，网关必须找到原绑定，不会将该 ID 发给另一个账号；找不到时返回 `SESSION_ROUTE_UNAVAILABLE`。不带上述会话头的客户端仍按原有优先级和故障转移规则选路。
+
 ## 直接验证
 
 查看已授权模型：

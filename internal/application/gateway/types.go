@@ -43,6 +43,7 @@ var (
 	ErrPermission     = &Failure{"MODEL_PERMISSION_DENIED", "permission_error", "The API key is not authorized to use the requested model.", 403}
 	ErrRoute          = &Failure{"MODEL_ROUTE_UNAVAILABLE", "api_error", "No active provider route is available for the requested model. Enable a provider and configure its endpoint and model mapping.", 503}
 	ErrRouteCooldown  = &Failure{"MODEL_ROUTE_COOLDOWN", "api_error", "All configured provider routes for the requested model are temporarily cooling down after upstream failures. Retry later.", 503}
+	ErrSessionRoute   = &Failure{"SESSION_ROUTE_UNAVAILABLE", "api_error", "The original provider account for this conversation cannot be verified or is unavailable. Retry later or start a new conversation.", 503}
 	ErrResource       = &Failure{"RESOURCE_UNAVAILABLE", "api_error", "No active provider API key is available. Configure or enable the provider API key.", 503}
 	ErrCredential     = &Failure{"CREDENTIAL_UNRECOVERABLE", "api_error", "The provider API key cannot be decrypted. Reconfigure the provider API key.", 503}
 	ErrSubscription   = &Failure{"SUBSCRIPTION_REFRESH_FAILED", "api_error", "The provider subscription could not be refreshed. Retry later or reconfigure the subscription.", 503}
@@ -180,6 +181,11 @@ type RouteState interface {
 	Cooldown(context.Context, Route, time.Duration) error
 	Healthy(context.Context, Route) error
 }
+type SessionRouteBinding interface {
+	Get(context.Context, string) (int64, error)
+	Assign(context.Context, string, int64) (int64, error)
+	Move(context.Context, string, int64, int64) error
+}
 type TokenQuotaAdmission interface {
 	Check(context.Context, []domainquota.Scope, time.Time) (domainquota.Decision, error)
 }
@@ -220,6 +226,7 @@ type Request struct {
 	Trace                          *usage.Event
 	Path, Version, Beta, RequestID string
 	Protocol                       string
+	ClientSessionID, ClientAgentID string
 	BetaQuery, Development         bool
 	Body                           []byte
 	ProtocolHeaders                map[string][]string
@@ -240,6 +247,7 @@ type Service struct {
 	cipher             Cipher
 	upstream           Upstream
 	state              RouteState
+	sessionRoutes      SessionRouteBinding
 	activeRoutes       ActiveRouteRecorder
 	refresh            []SubscriptionRefresher
 	refreshCoordinator SubscriptionRefreshCoordinator
@@ -250,6 +258,9 @@ type Service struct {
 type Option func(*Service)
 
 func WithRouteState(state RouteState) Option { return func(service *Service) { service.state = state } }
+func WithSessionRouteBinding(binding SessionRouteBinding) Option {
+	return func(service *Service) { service.sessionRoutes = binding }
+}
 func WithActiveRouteRecorder(recorder ActiveRouteRecorder) Option {
 	return func(service *Service) { service.activeRoutes = recorder }
 }
