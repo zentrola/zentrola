@@ -33,7 +33,7 @@ curl -i http://127.0.0.1:9527/health/ready
 - `/health/live` 表示 Backend 能够响应 HTTP 请求。
 - `/health/ready` 检查 PostgreSQL、Master Key 和管理员初始化状态。
 - Readiness 通过不代表 Provider Credential 或上游模型可用。
-- Redis 有意不纳入 readiness；缓存和路由冷却状态不可用时 Gateway 会 fail-open。会话固定路由使用同一个 Redis；Redis 不可用时，带 `previous_response_id` 的会话续传会返回 503，以免发送到错误账号。
+- Redis 有意不纳入 readiness；缓存和路由冷却状态不可用时 Gateway 会 fail-open。会话固定路由使用同一个 Redis；Redis 不可用时，带 `previous_response_id` 的会话续传会返回 503，以免发送到错误账号。切换账号的请求若无法更新已有绑定，也会返回 503。
 
 ## Nginx 多实例反向代理示例
 
@@ -108,7 +108,7 @@ Zentrola 会随 Backend 启动两个成本处理任务。两个任务都会在�
 
 普通部署建议保留默认值。增大核算页大小可以更快消化积压，但会增加单轮数据库压力；缩短执行间隔可以提高成本数据的新鲜度，但会增加查询频率。如果 Usage 持久化或上游用量上报可能延迟，应适当增加结算等待时间。
 
-多实例部署通过 Redis 锁保证每类任务同一时间只有一个 Backend 实例执行。这两个锁采用 fail-closed 策略：Redis 不可用时，成本核算和结算暂停，并在后续扫描时重试；普通 Gateway 请求和已经持久化的 Usage 记录不受影响，但带 `previous_response_id` 的会话续传会暂时失败，成本页面数据也可能滞后。如果处理没有推进，可在 Backend 日志中检查 `BILLING_SETTLEMENT_LOCK_FAILED`、`SUBSCRIPTION_BILLING_FAILED`、`API_KEY_BILLING_FAILED`、`API_KEY_RATING_LOCK_FAILED` 或 `API_KEY_RATING_FAILED`。
+多实例部署通过 Redis 锁保证每类任务同一时间只有一个 Backend 实例执行。这两个锁采用 fail-closed 策略：Redis 不可用时，成本核算和结算暂停，并在后续扫描时重试；大部分 Gateway 请求和已经持久化的 Usage 记录仍可用，但带 `previous_response_id` 的会话续传，以及无法更新已有会话绑定的请求会暂时失败，成本页面数据也可能滞后。如果处理没有推进，可在 Backend 日志中检查 `BILLING_SETTLEMENT_LOCK_FAILED`、`SUBSCRIPTION_BILLING_FAILED`、`API_KEY_BILLING_FAILED`、`API_KEY_RATING_LOCK_FAILED` 或 `API_KEY_RATING_FAILED`。
 
 月度 Token 配额不使用环境变量。管理员在 Admin Web 中按用户、应用或 Group 增加额度或取消额度限制。用量累计与 Usage 记录在同一 PostgreSQL 事务中提交；Group 归属按调用发生时的成员关系和模型授权保存。
 

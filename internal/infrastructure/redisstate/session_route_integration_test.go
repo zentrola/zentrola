@@ -84,14 +84,14 @@ func TestSessionRouteRedisIntegration(t *testing.T) {
 	if bound == 11 {
 		other = 12
 	}
-	if err := first.Move(ctx, key, other, 99); err != nil {
-		t.Fatal(err)
+	if moved, err := first.Move(ctx, key, other, 99); err != nil || moved {
+		t.Fatalf("stale Move: moved=%t err=%v", moved, err)
 	}
 	if got, _ := second.Get(ctx, key); got != bound {
 		t.Fatalf("stale route changed binding to %d", got)
 	}
-	if err := first.Move(ctx, key, bound, other); err != nil {
-		t.Fatal(err)
+	if moved, err := first.Move(ctx, key, bound, other); err != nil || !moved {
+		t.Fatalf("conditional Move: moved=%t err=%v", moved, err)
 	}
 	if got, err := second.Get(ctx, key); err != nil || got != other {
 		t.Fatalf("conditional Move=%d, err=%v, want=%d", got, err, other)

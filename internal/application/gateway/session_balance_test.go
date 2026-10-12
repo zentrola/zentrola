@@ -2,7 +2,10 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"strings"
 	"sync"
 	"testing"
 
@@ -11,8 +14,20 @@ import (
 )
 
 type memorySessionRoutes struct {
-	mu     sync.Mutex
-	routes map[string]int64
+	mu           sync.Mutex
+	routes       map[string]int64
+	moveErr      error
+	moveConflict bool
+}
+
+type closeTrackingBody struct {
+	io.ReadCloser
+	closed bool
+}
+
+func (body *closeTrackingBody) Close() error {
+	body.closed = true
+	return body.ReadCloser.Close()
 }
 
 func (s *memorySessionRoutes) Get(_ context.Context, key string) (int64, error) {
@@ -31,13 +46,20 @@ func (s *memorySessionRoutes) Assign(_ context.Context, key string, preferred in
 	return preferred, nil
 }
 
-func (s *memorySessionRoutes) Move(_ context.Context, key string, from, to int64) error {
+func (s *memorySessionRoutes) Move(_ context.Context, key string, from, to int64) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.moveErr != nil {
+		return false, s.moveErr
+	}
+	if s.moveConflict {
+		return false, nil
+	}
 	if s.routes[key] == from {
 		s.routes[key] = to
+		return true, nil
 	}
-	return nil
+	return false, nil
 }
 
 func balanceTestRoutes() []Route {
@@ -231,6 +253,52 @@ func TestSessionBalanceMovesBindingWhenResourceIsNoLongerCandidate(t *testing.T)
 	_ = got.Body.Close()
 	if assigned, _ := bindings.Get(context.Background(), key); assigned != 12 {
 		t.Fatalf("binding=%d want=12", assigned)
+	}
+	second, err := service.Forward(context.Background(), identity, request)
+	if err != nil || second == nil || second.Status != 200 {
+		t.Fatalf("next request did not use replacement: response=%v err=%v", second, err)
+	}
+	_ = second.Body.Close()
+}
+
+func TestSessionRouteMoveMustSucceedBeforeDeliveringResponse(t *testing.T) {
+	tests := []struct {
+		name     string
+		moveErr  error
+		conflict bool
+		wantErr  error
+	}{
+		{name: "storage failure", moveErr: errors.New("redis unavailable"), wantErr: ErrUnavailable},
+		{name: "concurrent binding change", conflict: true, wantErr: ErrSessionRoute},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			identity := appsec.PrincipalIdentity{ID: 1, AccessKeyID: 3}
+			request := Request{
+				Path: "/v1/responses", Protocol: OpenAIResponsesProtocol, ClientSessionID: "moved-session",
+				Body: []byte(`{"model":"gpt-test","input":"hi"}`),
+			}
+			key := sessionRouteKey(identity, request, "gpt-test")
+			bindings := &memorySessionRoutes{
+				routes: map[string]int64{key: 11}, moveErr: test.moveErr, moveConflict: test.conflict,
+			}
+			body := &closeTrackingBody{ReadCloser: io.NopCloser(strings.NewReader("{}"))}
+			service := New(&failoverStore{routes: balanceTestRoutes()[1:2]}, failoverCipher{},
+				upstreamFunc(func(_ context.Context, _ Route, _ Request, _ []byte) (*Response, error) {
+					return &Response{Status: 200, Headers: map[string][]string{}, Body: body}, nil
+				}), WithSessionRouteBinding(bindings),
+				WithSubscriptionRefresher(subscriptionRefreshFunc(func(_ context.Context, credential []byte, _ *catalog.OutboundProxy) ([]byte, bool, error) {
+					return credential, false, nil
+				})),
+			)
+			got, err := service.Forward(context.Background(), identity, request)
+			if got != nil || err != test.wantErr || !body.closed {
+				t.Fatalf("response=%v err=%v body closed=%t; want %v", got, err, body.closed, test.wantErr)
+			}
+			if assigned, _ := bindings.Get(context.Background(), key); assigned != 11 {
+				t.Fatalf("binding changed to %d after failed Move", assigned)
+			}
+		})
 	}
 }
 

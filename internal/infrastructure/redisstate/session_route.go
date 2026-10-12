@@ -54,12 +54,12 @@ func (s *State) Assign(ctx context.Context, key string, preferredResourceID int6
 }
 
 // Move updates a binding only if it still points to the route that failed.
-func (s *State) Move(ctx context.Context, key string, fromResourceID, toResourceID int64) error {
+func (s *State) Move(ctx context.Context, key string, fromResourceID, toResourceID int64) (bool, error) {
 	if s == nil || s.client == nil || s.redisUnavailable() {
-		return errors.New("redis unavailable")
+		return false, errors.New("redis unavailable")
 	}
-	err := moveSessionRouteScript.Run(ctx, s.client,
+	moved, err := moveSessionRouteScript.Run(ctx, s.client,
 		[]string{sessionRouteRedisKey(key)}, strconv.FormatInt(fromResourceID, 10),
-		strconv.FormatInt(toResourceID, 10), strconv.FormatInt(int64(sessionRouteTTL/time.Second), 10)).Err()
-	return s.record(err)
+		strconv.FormatInt(toResourceID, 10), strconv.FormatInt(int64(sessionRouteTTL/time.Second), 10)).Int64()
+	return moved == 1, s.record(err)
 }

@@ -33,7 +33,7 @@ curl -i http://127.0.0.1:9527/health/ready
 - `/health/live` confirms that the Backend can answer HTTP requests.
 - `/health/ready` checks PostgreSQL, the master key, and administrator initialization.
 - Readiness does not prove that a provider credential or upstream model is available.
-- Redis is intentionally not part of readiness; gateway caches and cooldown state fail open. Session affinity uses the same Redis. When it is unavailable, a continuation with `previous_response_id` returns 503 rather than sending the ID to the wrong account.
+- Redis is intentionally not part of readiness; gateway caches and cooldown state fail open. Session affinity uses the same Redis. When it is unavailable, a continuation with `previous_response_id` returns 503 rather than sending the ID to the wrong account. A request that has switched accounts also returns 503 if its existing binding cannot be updated.
 
 ## Multi-instance Nginx reverse proxy example
 
@@ -108,7 +108,7 @@ The workers use the following settings. Duration values use Go duration syntax s
 
 The defaults are suitable for ordinary deployments. A larger rating page can reduce a backlog faster but increases database work per scan. A shorter interval improves freshness but causes more frequent database queries. Increasing the settlement grace is safer when usage persistence or upstream reporting can be delayed.
 
-In a multi-instance deployment, Redis locks allow only one Backend instance to run each worker at a time. These locks fail closed: if Redis is unavailable, cost rating and settlement pause and are retried by a later scan. Ordinary Gateway traffic and persisted usage records remain available, but continuations with `previous_response_id` temporarily fail and cost views may lag. Look for `BILLING_SETTLEMENT_LOCK_FAILED`, `SUBSCRIPTION_BILLING_FAILED`, `API_KEY_BILLING_FAILED`, `API_KEY_RATING_LOCK_FAILED`, or `API_KEY_RATING_FAILED` in Backend logs when processing does not advance.
+In a multi-instance deployment, Redis locks allow only one Backend instance to run each worker at a time. These locks fail closed: if Redis is unavailable, cost rating and settlement pause and are retried by a later scan. Most Gateway traffic and persisted usage records remain available, but continuations with `previous_response_id` and requests that cannot update an existing session binding temporarily fail; cost views may also lag. Look for `BILLING_SETTLEMENT_LOCK_FAILED`, `SUBSCRIPTION_BILLING_FAILED`, `API_KEY_BILLING_FAILED`, `API_KEY_RATING_LOCK_FAILED`, or `API_KEY_RATING_FAILED` in Backend logs when processing does not advance.
 
 Monthly Token quotas do not use environment variables. Administrators configure or remove quota limits per user, application, or Group in the Admin Web. Usage totals are updated in the same PostgreSQL transaction as usage records; Group attribution is recorded at call time.
 

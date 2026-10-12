@@ -71,6 +71,8 @@ Zentrola first applies provider-model mapping and protocol priority. Within the 
 
 When an account becomes unavailable, the gateway switches and updates the binding only when retrying is safe. A request containing `previous_response_id` requires its original binding; Zentrola will not send that ID to another account and returns `SESSION_ROUTE_UNAVAILABLE` if the binding is missing. Clients without either session header retain the existing priority and failover behavior.
 
+If an administrator deletes the account bound to a session, the next request selects another available account and updates the binding after a successful upstream response. If no account remains, the gateway returns a route or resource unavailable error. If the conditional update of an existing binding fails, the gateway returns 503 instead of delivering the response with stale session state.
+
 ## Direct verification
 
 List authorized models:

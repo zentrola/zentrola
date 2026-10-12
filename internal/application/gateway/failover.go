@@ -170,7 +170,18 @@ func (s *Service) forwardCandidates(ctx context.Context, identity appsec.Princip
 		selectedRoute := route
 		response.route = &selectedRoute
 		if sessionKey != "" && boundResourceID != route.ResourceID && response.Status < 400 {
-			_ = s.sessionRoutes.Move(ctx, sessionKey, boundResourceID, route.ResourceID)
+			persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+			moved, moveErr := s.sessionRoutes.Move(persistCtx, sessionKey, boundResourceID, route.ResourceID)
+			cancel()
+			if moveErr != nil || !moved {
+				failure := ErrSessionRoute
+				if moveErr != nil {
+					failure = ErrUnavailable
+				}
+				s.failAttempt(request.Trace, attempt, failure.Code)
+				response.Body.Close()
+				return nil, failure
+			}
 		}
 		s.recordActiveRoute(ctx, selectedRoute)
 		return response, nil

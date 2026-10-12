@@ -184,7 +184,7 @@ type RouteState interface {
 type SessionRouteBinding interface {
 	Get(context.Context, string) (int64, error)
 	Assign(context.Context, string, int64) (int64, error)
-	Move(context.Context, string, int64, int64) error
+	Move(context.Context, string, int64, int64) (bool, error)
 }
 type TokenQuotaAdmission interface {
 	Check(context.Context, []domainquota.Scope, time.Time) (domainquota.Decision, error)
