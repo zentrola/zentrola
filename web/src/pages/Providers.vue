@@ -875,7 +875,9 @@ async function refreshProviderQuotas(provider: Provider) {
   const subscriptions = resourcesFor(provider).filter(
     (resource) => resource.authType === 'SUBSCRIPTION',
   )
-  await Promise.all(subscriptions.map(refreshSubscriptionQuota))
+  // Codex App Server 的账号额度读取不适合在同一服务商下并发执行；串行刷新可避免
+  // 多个个人订阅同时启动探测进程时，后续账号被上游或本地进程链路拒绝。
+  for (const subscription of subscriptions) await refreshSubscriptionQuota(subscription)
   if (subscriptions.length) await loadResources()
 }
 

@@ -1182,6 +1182,7 @@ export const i18n = createI18n({
         CODEX_APP_SERVER_UNAVAILABLE:
           'Codex App Server 无法启动，请检查 Codex 可执行文件配置（{executable}）并重启后端。',
         SUBSCRIPTION_UNAVAILABLE: '个人订阅额度读取失败，请检查网络或代理配置。',
+        SUBSCRIPTION_CHECK_BUSY: '正在检测其他个人订阅，请稍后重试。',
         SUBSCRIPTION_REFRESH_FAILED: '个人订阅认证刷新失败，请稍后重试或重新导入 auth.json。',
         UPSTREAM_INVALID_RESPONSE: '上游返回了无效响应。',
         MODEL_CATALOG_UNSUPPORTED: '该服务商暂不支持同步官方模型目录。',

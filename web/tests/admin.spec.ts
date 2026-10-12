@@ -4372,6 +4372,100 @@ test('个人订阅额度刷新失败时展示 Codex 可执行文件配置项', a
   )
 })
 
+test('多个个人订阅按顺序刷新额度', async ({ page }) => {
+  const state = await fixture(page)
+  state.providers.push({
+    id: '82',
+    name: 'OpenAI',
+    code: 'openai-official',
+    type: 'OFFICIAL',
+    status: 'ACTIVE',
+    website: 'https://openai.com',
+    endpoints: [{ protocolType: 'OPENAI', baseUrl: 'https://api.openai.com/v1' }],
+    proxyEnabled: false,
+    proxyUrl: null,
+    proxyHeaders: [],
+    modelSyncSupported: false,
+    authAdapters: ['API_KEY', 'OPENAI_CODEX'],
+    createdAt: stamp,
+    updatedAt: stamp,
+  })
+  for (const [id, account] of [
+    ['89', 'fixture-account-1'],
+    ['90', 'fixture-account-2'],
+  ]) {
+    state.resources.push({
+      id,
+      providerId: '82',
+      name: `OpenAI 个人订阅 · ${account.slice(-6)}`,
+      authType: 'SUBSCRIPTION',
+      authAdapter: 'OPENAI_CODEX',
+      subscriptionType: 'PERSONAL',
+      planCode: 'plus',
+      externalAccountRef: account,
+      priority: 100,
+      effectiveAt: null,
+      expiresAt: null,
+      quotaStatus: 'UNKNOWN',
+      quotaCheckedAt: null,
+      quotaResetsAt: null,
+      runtimeStatus: 'HEALTHY',
+      blockedReason: null,
+      blockedAt: null,
+      lastErrorAt: null,
+      lastHttpStatus: null,
+      lastErrorCode: null,
+      credentialConfigured: true,
+      subscriptionPrice: null,
+      createdAt: stamp,
+      updatedAt: stamp,
+    })
+  }
+
+  let activeRequests = 0
+  let maximumActiveRequests = 0
+  let requestCount = 0
+  let notifySecondRequest = () => {}
+  const secondRequestStarted = new Promise<void>((resolve) => {
+    notifySecondRequest = resolve
+  })
+  await page.route('**/api/v1/resources/*/test-connection', async (route) => {
+    requestCount += 1
+    activeRequests += 1
+    maximumActiveRequests = Math.max(maximumActiveRequests, activeRequests)
+    if (requestCount === 1) {
+      await Promise.race([
+        secondRequestStarted,
+        new Promise<void>((resolve) => setTimeout(resolve, 100)),
+      ])
+    } else {
+      notifySecondRequest()
+    }
+    activeRequests -= 1
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        code: 'OK',
+        data: { ok: true, code: 'OK', httpStatus: 200, latencyMs: 1 },
+        requestId: `req_subscription_${requestCount}`,
+      }),
+    })
+  })
+
+  await signIn(page)
+  await page.getByRole('link', { name: '服务商', exact: true }).click()
+  await page
+    .getByRole('row')
+    .filter({ hasText: 'OpenAI' })
+    .getByRole('button', { name: '管理 OpenAI 的认证凭据', exact: true })
+    .click()
+
+  await expect.poll(() => requestCount).toBe(2)
+  await expect.poll(() => activeRequests).toBe(0)
+  expect(maximumActiveRequests).toBe(1)
+})
+
 test('服务商支持个人订阅优先并保留 API Key 兜底', async ({ page }) => {
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
   const state = await fixture(page)

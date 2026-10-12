@@ -31,6 +31,7 @@ const (
 var (
 	errInvalidCredential    = errors.New("invalid Codex ChatGPT credential")
 	errAppServerUnavailable = errors.New("codex app-server is unavailable")
+	errSessionBusy          = errors.New("codex app-server session is busy")
 )
 
 type connectionFailure struct {
@@ -46,6 +47,7 @@ type Adapter struct {
 	executable   string
 	refreshAhead time.Duration
 	runSession   accountSessionRunner
+	sessionSlot  chan struct{}
 }
 
 type accountRPC interface {
@@ -68,7 +70,7 @@ func New(executable string, options ...Option) *Adapter {
 	if strings.TrimSpace(executable) == "" {
 		executable = "codex"
 	}
-	adapter := &Adapter{executable: executable, refreshAhead: defaultRefreshAhead}
+	adapter := &Adapter{executable: executable, refreshAhead: defaultRefreshAhead, sessionSlot: make(chan struct{}, 1)}
 	adapter.runSession = adapter.runAccountSession
 	for _, option := range options {
 		option(adapter)
@@ -255,21 +257,12 @@ func claimUnix(claims map[string]any, key string) (time.Time, bool) {
 
 func (a *Adapter) Probe(ctx context.Context, raw []byte, proxy *catalog.OutboundProxy) (mgmt.SubscriptionProbe, error) {
 	var limits rateLimitsResponse
-	credential, inspection, err := a.runSession(ctx, raw, proxy, func(client accountRPC) error {
+	credential, inspection, err := a.tryRunIsolatedSession(ctx, raw, proxy, func(client accountRPC) error {
 		return client.call(ctx, 2, "account/rateLimits/read", nil, &limits)
 	})
 	if err != nil {
-		code := "SUBSCRIPTION_UNAVAILABLE"
-		switch {
-		case errors.Is(err, errInvalidCredential):
-			code = "CREDENTIAL_INVALID"
-		case errors.Is(err, errAppServerUnavailable):
-			code = "CODEX_APP_SERVER_UNAVAILABLE"
-		case errors.Is(err, context.DeadlineExceeded):
-			code = "UPSTREAM_TIMEOUT"
-		}
 		return mgmt.SubscriptionProbe{}, &connectionFailure{
-			code: code, cause: fmt.Errorf("cannot read Codex ChatGPT rate limits: %w", err),
+			code: subscriptionErrorCode(err), cause: fmt.Errorf("cannot read Codex ChatGPT rate limits: %w", err),
 		}
 	}
 	if plan := limits.planType(); plan != "" {
@@ -284,9 +277,24 @@ func (a *Adapter) Probe(ctx context.Context, raw []byte, proxy *catalog.Outbound
 	}, nil
 }
 
+func subscriptionErrorCode(err error) string {
+	switch {
+	case errors.Is(err, errSessionBusy):
+		return "SUBSCRIPTION_CHECK_BUSY"
+	case errors.Is(err, errInvalidCredential):
+		return "CREDENTIAL_INVALID"
+	case errors.Is(err, errAppServerUnavailable):
+		return "CODEX_APP_SERVER_UNAVAILABLE"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "UPSTREAM_TIMEOUT"
+	default:
+		return "SUBSCRIPTION_UNAVAILABLE"
+	}
+}
+
 func (a *Adapter) refreshCredential(ctx context.Context, raw []byte, proxy *catalog.OutboundProxy) ([]byte, mgmt.SubscriptionInspection, error) {
 	var account accountResponse
-	updated, inspection, err := a.runSession(ctx, raw, proxy, func(client accountRPC) error {
+	updated, inspection, err := a.runIsolatedSession(ctx, raw, proxy, func(client accountRPC) error {
 		return client.call(ctx, 2, "account/read", map[string]bool{"refreshToken": true}, &account)
 	})
 	if err != nil {
@@ -351,6 +359,34 @@ func (a *Adapter) runAccountSession(ctx context.Context, raw []byte, proxy *cata
 	return updated, inspection, nil
 }
 
+// 同一个适配器实例同时服务后台刷新和管理员检测；限制 Codex App Server 会话并发，
+// 避免多个订阅在同一后端进程内同时读取账号额度或刷新认证。
+func (a *Adapter) runIsolatedSession(ctx context.Context, raw []byte, proxy *catalog.OutboundProxy, action func(accountRPC) error) ([]byte, mgmt.SubscriptionInspection, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, mgmt.SubscriptionInspection{}, err
+	}
+	select {
+	case a.sessionSlot <- struct{}{}:
+		defer func() { <-a.sessionSlot }()
+	case <-ctx.Done():
+		return nil, mgmt.SubscriptionInspection{}, ctx.Err()
+	}
+	return a.runSession(ctx, raw, proxy, action)
+}
+
+func (a *Adapter) tryRunIsolatedSession(ctx context.Context, raw []byte, proxy *catalog.OutboundProxy, action func(accountRPC) error) ([]byte, mgmt.SubscriptionInspection, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, mgmt.SubscriptionInspection{}, err
+	}
+	select {
+	case a.sessionSlot <- struct{}{}:
+		defer func() { <-a.sessionSlot }()
+	default:
+		return nil, mgmt.SubscriptionInspection{}, errSessionBusy
+	}
+	return a.runSession(ctx, raw, proxy, action)
+}
+
 func (a *Adapter) ConsumeResetCredit(ctx context.Context, raw []byte, proxy *catalog.OutboundProxy, idempotencyKey, creditID string) (mgmt.ResetCreditConsume, error) {
 	if strings.TrimSpace(idempotencyKey) == "" || strings.TrimSpace(creditID) != creditID {
 		return mgmt.ResetCreditConsume{}, errors.New("invalid rate-limit reset request")
@@ -363,7 +399,7 @@ func (a *Adapter) ConsumeResetCredit(ctx context.Context, raw []byte, proxy *cat
 		Outcome string `json:"outcome"`
 	}
 	var limits rateLimitsResponse
-	credential, inspection, err := a.runSession(ctx, raw, proxy, func(client accountRPC) error {
+	credential, inspection, err := a.runIsolatedSession(ctx, raw, proxy, func(client accountRPC) error {
 		if err := client.call(ctx, 2, "account/rateLimitResetCredit/consume", params, &consumed); err != nil {
 			return err
 		}

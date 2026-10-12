@@ -285,7 +285,7 @@ func subscriptionConnectionCode(err error) string {
 	var connectionError SubscriptionConnectionError
 	if errors.As(err, &connectionError) {
 		switch connectionError.ConnectionCode() {
-		case "CREDENTIAL_INVALID", "CODEX_APP_SERVER_UNAVAILABLE", "UPSTREAM_AUTH_FAILED",
+		case "CREDENTIAL_INVALID", "CODEX_APP_SERVER_UNAVAILABLE", "SUBSCRIPTION_CHECK_BUSY", "UPSTREAM_AUTH_FAILED",
 			"UPSTREAM_BILLING_BLOCKED", "UPSTREAM_RATE_LIMITED", "UPSTREAM_TIMEOUT", "PROXY_AUTH_REJECTED", "PROXY_SERVER_UNAVAILABLE",
 			"UPSTREAM_UNAVAILABLE", "UPSTREAM_INVALID_RESPONSE":
 			return connectionError.ConnectionCode()
