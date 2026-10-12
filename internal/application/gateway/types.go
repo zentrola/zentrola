@@ -239,6 +239,22 @@ type Response struct {
 	ErrorType       string
 	route           *Route
 }
+
+type RouteSelection struct {
+	ProviderID, ProviderModelID, ResourceID int64
+	AuthType                                string
+}
+
+func (r *Response) RouteSelection() (RouteSelection, bool) {
+	if r == nil || r.route == nil {
+		return RouteSelection{}, false
+	}
+	return RouteSelection{
+		ProviderID: r.route.ProviderID, ProviderModelID: r.route.ProviderModelID,
+		ResourceID: r.route.ResourceID, AuthType: r.route.AuthType,
+	}, true
+}
+
 type Upstream interface {
 	Open(context.Context, Route, Request, []byte) (*Response, error)
 }

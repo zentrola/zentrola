@@ -358,10 +358,21 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer upstream.Body.Close()
-	g.logger.InfoContext(r.Context(), "gateway upstream response opened",
+	attributes := []any{
 		"protocol", protocol, "upstream_status", upstream.Status,
 		"principal_id", identity.ID, "access_key_id", identity.AccessKeyID,
-		"upstream_headers_ms", time.Since(upstreamStarted).Milliseconds())
+		"upstream_headers_ms", time.Since(upstreamStarted).Milliseconds(),
+	}
+	if route, ok := upstream.RouteSelection(); ok {
+		attributes = append(attributes,
+			"provider_id", route.ProviderID,
+			"provider_model_id", route.ProviderModelID,
+			"resource_id", route.ResourceID,
+			"auth_type", route.AuthType,
+			"session_routed", clientSessionID != "",
+		)
+	}
+	g.logger.InfoContext(r.Context(), "gateway upstream response opened", attributes...)
 	addAccessLogFields(r.Context(), "upstream_status", upstream.Status)
 	if upstreamRequestID := safeUpstreamRequestID(upstream.Headers); upstreamRequestID != "" {
 		addAccessLogFields(r.Context(), "upstream_request_id", upstreamRequestID)

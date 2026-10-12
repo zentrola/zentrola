@@ -149,6 +149,18 @@ func TestSessionBalanceKeepsSubscriptionAheadOfAPIKey(t *testing.T) {
 	_ = got.Body.Close()
 }
 
+func TestResponseRouteSelectionExposesSafeRoutingMetadata(t *testing.T) {
+	response := &Response{route: &Route{
+		ProviderID: 10, ProviderModelID: 20, ResourceID: 30,
+		AuthType: "SUBSCRIPTION", Credential: catalog.SealedCredential{Ciphertext: []byte("secret")},
+	}}
+	selected, ok := response.RouteSelection()
+	if !ok || selected.ProviderID != 10 || selected.ProviderModelID != 20 ||
+		selected.ResourceID != 30 || selected.AuthType != "SUBSCRIPTION" {
+		t.Fatalf("selection=%+v ok=%t", selected, ok)
+	}
+}
+
 func TestSessionBalanceFailsOverToAPIKeyAndKeepsBinding(t *testing.T) {
 	bindings := &memorySessionRoutes{routes: map[string]int64{}}
 	state := &failoverState{blocked: map[int64]bool{11: true, 12: true}}
@@ -190,6 +202,36 @@ func TestSessionBalanceFailsOverToAPIKeyAndKeepsBinding(t *testing.T) {
 		t.Fatalf("session moved after subscription recovered: route=%d want=%d err=%v", selected, selectedAPIKey, err)
 	}
 	_ = second.Body.Close()
+}
+
+func TestSessionBalanceMovesBindingWhenResourceIsNoLongerCandidate(t *testing.T) {
+	identity := appsec.PrincipalIdentity{ID: 1, AccessKeyID: 3}
+	request := Request{
+		Path: "/v1/responses", Protocol: OpenAIResponsesProtocol, ClientSessionID: "removed-resource-session",
+		Body: []byte(`{"model":"gpt-test","input":"hi"}`),
+	}
+	key := sessionRouteKey(identity, request, "gpt-test")
+	bindings := &memorySessionRoutes{routes: map[string]int64{key: 11}}
+	routes := balanceTestRoutes()[1:2]
+	service := New(&failoverStore{routes: routes}, failoverCipher{},
+		upstreamFunc(func(_ context.Context, route Route, _ Request, _ []byte) (*Response, error) {
+			if route.ResourceID != 12 {
+				t.Fatalf("route=%d want=12", route.ResourceID)
+			}
+			return response(200, `{}`), nil
+		}), WithSessionRouteBinding(bindings),
+		WithSubscriptionRefresher(subscriptionRefreshFunc(func(_ context.Context, credential []byte, _ *catalog.OutboundProxy) ([]byte, bool, error) {
+			return credential, false, nil
+		})),
+	)
+	got, err := service.Forward(context.Background(), identity, request)
+	if err != nil || got.Status != 200 {
+		t.Fatalf("response=%v err=%v", got, err)
+	}
+	_ = got.Body.Close()
+	if assigned, _ := bindings.Get(context.Background(), key); assigned != 12 {
+		t.Fatalf("binding=%d want=12", assigned)
+	}
 }
 
 func TestPreviousResponseIDDoesNotFailOverBetweenAccounts(t *testing.T) {
