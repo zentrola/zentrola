@@ -4,7 +4,7 @@ import { all, api, errorText } from '../api'
 import { useCollection, useAction, useListSearch, validText } from '../composables'
 import { t } from '../i18n'
 import { showErrorToast } from '../toast'
-import type { Model, Modality, Provider } from '../types'
+import type { Model, ModelProviderMapping, Modality, Provider } from '../types'
 import Icon from '../components/Icon.vue'
 import StatusSwitch from '../components/StatusSwitch.vue'
 import Modal from '../components/Modal.vue'
@@ -34,6 +34,12 @@ const editing = ref(false)
 const editTarget = ref<Model | null>(null)
 const deleteTarget = ref<Model | null>(null)
 const providers = ref<Provider[]>([])
+const priorityTarget = ref<Model | null>(null)
+const priorityRows = ref<(ModelProviderMapping & { draft: string })[]>([])
+const priorityLoading = ref(false)
+const prioritySaving = ref(false)
+const priorityError = ref('')
+let priorityLoadVersion = 0
 const providerLoading = ref(false)
 const providerError = ref('')
 const modalities: Modality[] = ['TEXT', 'IMAGE', 'AUDIO', 'VIDEO']
@@ -161,6 +167,59 @@ function deleteModel() {
     await load()
   })
 }
+async function openPriorities(model: Model) {
+  const version = ++priorityLoadVersion
+  priorityTarget.value = model
+  priorityRows.value = []
+  priorityError.value = ''
+  priorityLoading.value = true
+  try {
+    const mappings = await api<ModelProviderMapping[]>(`/models/${model.id}/provider-priorities`)
+    if (version !== priorityLoadVersion || priorityTarget.value?.id !== model.id) return
+    priorityRows.value = mappings.map((mapping) => ({
+      ...mapping,
+      draft: String(mapping.priority),
+    }))
+  } catch (error) {
+    if (version !== priorityLoadVersion || priorityTarget.value?.id !== model.id) return
+    priorityError.value = errorText(error)
+  } finally {
+    if (version === priorityLoadVersion) priorityLoading.value = false
+  }
+}
+function closePriorities() {
+  priorityLoadVersion++
+  priorityTarget.value = null
+}
+function savePriorities() {
+  if (!priorityTarget.value) return
+  if (priorityRows.value.some((row) => !/^(?:[1-9]|[1-9]\d|100)$/.test(row.draft))) {
+    priorityError.value = t('models.priorityInvalid')
+    return
+  }
+  prioritySaving.value = true
+  priorityError.value = ''
+  void api<ModelProviderMapping[]>(
+    `/models/${priorityTarget.value.id}/provider-priorities`,
+    'PUT',
+    {
+      mappings: priorityRows.value.map((row) => ({
+        id: row.id,
+        priority: Number(row.draft),
+        updatedAt: row.updatedAt,
+      })),
+    },
+  )
+    .then(() => {
+      closePriorities()
+    })
+    .catch((error) => {
+      priorityError.value = errorText(error)
+    })
+    .finally(() => {
+      prioritySaving.value = false
+    })
+}
 </script>
 <template>
   <PageHeader name="models" />
@@ -267,6 +326,9 @@ function deleteModel() {
               <div class="row-actions">
                 <button class="text-button" :disabled="busy" @click="openEdit(model)">
                   {{ t('models.editAction') }}
+                </button>
+                <button class="text-button" :disabled="busy" @click="openPriorities(model)">
+                  {{ t('models.providerPriorities') }}
                 </button>
                 <RowActionMenu
                   :label="t('common.moreActionsFor', { name: model.name })"
@@ -433,6 +495,65 @@ function deleteModel() {
     @close="deleteTarget = null"
     @confirm="deleteModel"
   />
+  <Modal
+    v-if="priorityTarget"
+    :title="t('models.providerPrioritiesFor', { name: priorityTarget.name })"
+    :busy="prioritySaving"
+    medium
+    @close="closePriorities"
+  >
+    <p class="model-form-hint">{{ t('models.priorityHint') }}</p>
+    <div v-if="priorityError" class="alert" role="alert">
+      {{ priorityError }}
+      <button
+        type="button"
+        class="text-button"
+        :disabled="priorityLoading || prioritySaving"
+        @click="openPriorities(priorityTarget)"
+      >
+        {{ t('models.reloadPriorities') }}
+      </button>
+    </div>
+    <p v-if="priorityLoading">{{ t('common.loading') }}</p>
+    <p v-else-if="!priorityRows.length && !priorityError">
+      {{ t('models.noProviderMappings') }}
+      <RouterLink to="/providers">{{ t('models.configureProviderMappings') }}</RouterLink>
+    </p>
+    <div v-else class="model-priority-list">
+      <label v-for="row in priorityRows" :key="row.id" class="model-priority-row">
+        <span>
+          <strong>{{ row.providerName }}</strong>
+          <small>ID: {{ row.providerId }}</small>
+          <small v-if="row.providerStatus !== 'ACTIVE'">{{ t('models.providerDisabled') }}</small>
+          <small v-else-if="!row.endpointConfigured">{{ t('models.providerNoEndpoint') }}</small>
+          <small v-else-if="!row.resourceAvailable">{{ t('models.providerNoResource') }}</small>
+          <small v-else>{{ t('models.providerAvailable') }}</small>
+        </span>
+        <input
+          v-model="row.draft"
+          type="number"
+          min="1"
+          max="100"
+          step="1"
+          :disabled="prioritySaving || row.providerStatus !== 'ACTIVE'"
+          :aria-label="t('models.priorityForProvider', { name: row.providerName })"
+        />
+      </label>
+    </div>
+    <template #footer>
+      <button type="button" class="button" :disabled="prioritySaving" @click="closePriorities">
+        {{ t('common.cancel') }}
+      </button>
+      <button
+        type="button"
+        class="button primary"
+        :disabled="priorityLoading || prioritySaving || !priorityRows.length"
+        @click="savePriorities"
+      >
+        {{ t(prioritySaving ? 'common.working' : 'common.save') }}
+      </button>
+    </template>
+  </Modal>
 </template>
 <style scoped>
 .models-table {
@@ -456,7 +577,29 @@ function deleteModel() {
   width: calc(78% - 820px);
 }
 .model-action-column {
-  width: 176px;
+  width: 260px;
+}
+.model-priority-list {
+  display: grid;
+  gap: 10px;
+}
+.model-priority-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+.model-priority-row span {
+  display: grid;
+  gap: 2px;
+}
+.model-priority-row small {
+  color: var(--muted);
+}
+.model-priority-row input {
+  width: 90px;
 }
 .model-publisher-filter {
   display: flex;

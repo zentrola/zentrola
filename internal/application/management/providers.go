@@ -464,8 +464,7 @@ func (s *ProviderService) replaceProviderMappings(ctx context.Context, w Provide
 			mapping = ProviderMapping{ID: id, ProviderID: provider.ID, ModelID: input.ModelID, CreatedAt: now}
 		}
 		mapping.UpstreamModelCode = input.UpstreamModelCode
-		mapping.Priority = input.Priority
-		if mapping.Priority == 0 {
+		if !exists {
 			mapping.Priority = defaultProviderMappingPriority
 		}
 		mapping.UpdatedAt = now

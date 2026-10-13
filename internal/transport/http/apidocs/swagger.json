@@ -5516,6 +5516,166 @@
                 }
             }
         },
+        "/api/v1/models/{id}/provider-priorities": {
+            "get": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "模型与资源"
+                ],
+                "summary": "查看模型的服务商优先级",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "模型 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/management.ModelProviderMapping"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "模型与资源"
+                ],
+                "summary": "批量更新模型的服务商优先级",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "模型 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "完整映射快照与优先级",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.ModelProviderPriorityRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/management.ModelProviderMapping"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/models/{id}/status": {
             "patch": {
                 "security": [
@@ -9782,6 +9942,32 @@
                 }
             }
         },
+        "http.ModelProviderPriorityItemRequest": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "priority": {
+                    "type": "integer"
+                },
+                "updatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "http.ModelProviderPriorityRequest": {
+            "type": "object",
+            "properties": {
+                "mappings": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/http.ModelProviderPriorityItemRequest"
+                    }
+                }
+            }
+        },
         "http.ModelRequest": {
             "type": "object",
             "required": [
@@ -10627,6 +10813,41 @@
                 "providerModelId": {
                     "type": "string",
                     "example": "0"
+                }
+            }
+        },
+        "management.ModelProviderMapping": {
+            "type": "object",
+            "properties": {
+                "endpointConfigured": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "modelId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "priority": {
+                    "type": "integer"
+                },
+                "providerId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "providerName": {
+                    "type": "string"
+                },
+                "providerStatus": {
+                    "type": "string"
+                },
+                "resourceAvailable": {
+                    "type": "boolean"
+                },
+                "updatedAt": {
+                    "type": "string"
                 }
             }
         },

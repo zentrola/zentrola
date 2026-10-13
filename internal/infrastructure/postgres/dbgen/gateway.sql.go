@@ -60,7 +60,7 @@ JOIN provider_credential r ON r.provider_id=p.id
          OR (r.quota_status='EXHAUSTED' AND r.quota_resets_at IS NOT NULL AND r.quota_resets_at<=now()))
 WHERE pm.model_id=$1 AND NOT pm.is_deleted
   AND NOT p.is_deleted AND p.status='ACTIVE'
-ORDER BY pm.priority,
+ORDER BY pm.priority,pm.provider_id,
     CASE WHEN pe.protocol_type=$2 THEN 0 ELSE 1 END,
     CASE WHEN r.auth_type='SUBSCRIPTION' THEN 0 ELSE 1 END,
     r.priority,pm.id,r.id
@@ -375,7 +375,7 @@ AND EXISTS(SELECT 1 FROM principal_group_membership pg JOIN principal_group g ON
 JOIN principal_group_model_permission gp ON gp.group_id=g.id
 WHERE pg.principal_id=$1
 AND NOT pg.is_deleted AND NOT g.is_deleted AND g.status='ACTIVE' AND NOT gp.is_deleted AND gp.model_id=m.id)
-ORDER BY m.model_code,CASE pe.protocol_type WHEN 'OPENAI' THEN 0 ELSE 1 END,pm.priority,pm.id
+ORDER BY m.model_code,pm.priority,p.id,CASE pe.protocol_type WHEN 'OPENAI' THEN 0 ELSE 1 END,pm.id
 `
 
 type OpenAIModelsRow struct {

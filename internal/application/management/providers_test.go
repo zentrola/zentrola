@@ -240,7 +240,7 @@ func TestReplaceProviderMappingsAllowsRemovingAllModels(t *testing.T) {
 
 func TestReplaceProviderMappingsLogicallyDeletesUncheckedModels(t *testing.T) {
 	writer := &mappingWriter{mappings: []ProviderMapping{
-		{ID: 10, ProviderID: 8, ModelID: 1, UpstreamModelCode: "old-one", Priority: 100},
+		{ID: 10, ProviderID: 8, ModelID: 1, UpstreamModelCode: "old-one", Priority: 25},
 		{ID: 11, ProviderID: 8, ModelID: 2, UpstreamModelCode: "old-two", Priority: 100},
 	}}
 	service := &ProviderService{}
@@ -250,7 +250,7 @@ func TestReplaceProviderMappingsLogicallyDeletesUncheckedModels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result) != 1 || result[0].ID != 10 || result[0].Priority != defaultProviderMappingPriority {
+	if len(result) != 1 || result[0].ID != 10 || result[0].Priority != 25 {
 		t.Fatalf("unexpected retained mappings: %+v", result)
 	}
 	if len(writer.updated) != 1 || writer.updated[0].UpstreamModelCode != "" {

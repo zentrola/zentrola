@@ -81,6 +81,17 @@ export interface ProviderMapping {
   createdAt: string
   updatedAt: string
 }
+export interface ModelProviderMapping {
+  id: string
+  providerId: string
+  providerName: string
+  providerStatus: string
+  modelId: string
+  priority: number
+  updatedAt: string
+  endpointConfigured: boolean
+  resourceAvailable: boolean
+}
 export interface ProviderDetail extends Provider {
   mappings: ProviderMapping[]
   models: Model[]

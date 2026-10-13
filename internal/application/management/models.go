@@ -23,6 +23,7 @@ type ModelService struct {
 
 type ModelLookup interface {
 	Model(context.Context, int64) (Model, error)
+	ModelProviderMappings(context.Context, int64) ([]ModelProviderMapping, error)
 }
 
 type ProviderLookup interface {
@@ -34,6 +35,7 @@ type ModelSession interface {
 	ProviderLookup
 	CreateModel(context.Context, Model) error
 	UpdateModel(context.Context, Model) error
+	UpdateModelMappingPriority(context.Context, int64, int32, time.Time) error
 	DeleteModel(context.Context, int64, time.Time) error
 	SetModelStatus(context.Context, int64, string) error
 	Audit(context.Context, Audit, appsec.RequestMeta) error
@@ -185,6 +187,83 @@ func (s *ModelService) Model(ctx context.Context, actor admin.Identity, id int64
 		return err
 	})
 	return model, err
+}
+
+func (s *ModelService) ModelProviderMappings(ctx context.Context, actor admin.Identity, id int64) ([]ModelProviderMapping, error) {
+	if id <= 0 {
+		return nil, appsec.ErrInvalidArgument
+	}
+	var mappings []ModelProviderMapping
+	err := s.store.ReadModel(ctx, actor, func(r ModelLookup) error {
+		if _, err := r.Model(ctx, id); err != nil {
+			return err
+		}
+		var err error
+		mappings, err = r.ModelProviderMappings(ctx, id)
+		return err
+	})
+	return mappings, err
+}
+
+func (s *ModelService) UpdateModelProviderPriorities(ctx context.Context, actor admin.Identity, id int64, inputs []ModelProviderPriorityInput, meta appsec.RequestMeta) ([]ModelProviderMapping, error) {
+	if id <= 0 {
+		return nil, appsec.ErrInvalidArgument
+	}
+	seen := make(map[int64]struct{}, len(inputs))
+	for _, input := range inputs {
+		if input.ID <= 0 || input.Priority < 1 || input.Priority > 100 || input.UpdatedAt.IsZero() {
+			return nil, appsec.ErrInvalidArgument
+		}
+		if _, duplicate := seen[input.ID]; duplicate {
+			return nil, appsec.ErrInvalidArgument
+		}
+		seen[input.ID] = struct{}{}
+	}
+	var result []ModelProviderMapping
+	err := s.store.WriteModel(ctx, actor, func(w ModelSession) error {
+		model, err := w.Model(ctx, id)
+		if err != nil {
+			return err
+		}
+		current, err := w.ModelProviderMappings(ctx, id)
+		if err != nil {
+			return err
+		}
+		if len(current) != len(inputs) {
+			return ErrConflict
+		}
+		byID := make(map[int64]ModelProviderPriorityInput, len(inputs))
+		for _, input := range inputs {
+			byID[input.ID] = input
+		}
+		for _, mapping := range current {
+			input, exists := byID[mapping.ID]
+			if !exists || !mapping.UpdatedAt.Equal(input.UpdatedAt) {
+				return ErrConflict
+			}
+		}
+		before, after := make([]map[string]any, 0), make([]map[string]any, 0)
+		now := businessTime(s.now)
+		for _, mapping := range current {
+			input := byID[mapping.ID]
+			if mapping.Priority == input.Priority {
+				continue
+			}
+			before = append(before, map[string]any{"mappingId": idString(mapping.ID), "providerId": idString(mapping.ProviderID), "priority": mapping.Priority})
+			after = append(after, map[string]any{"mappingId": idString(mapping.ID), "providerId": idString(mapping.ProviderID), "priority": input.Priority})
+			if err := w.UpdateModelMappingPriority(ctx, mapping.ID, input.Priority, now); err != nil {
+				return err
+			}
+		}
+		if len(after) > 0 {
+			if err := w.Audit(ctx, Audit{Event: operation.ModelUpdate, Target: "MODEL", ID: id, Name: model.Name, Before: map[string]any{"providerPriorities": before}, After: map[string]any{"providerPriorities": after}}, meta); err != nil {
+				return err
+			}
+		}
+		result, err = w.ModelProviderMappings(ctx, id)
+		return err
+	})
+	return result, err
 }
 
 func (s *ModelService) SetModelStatus(ctx context.Context, actor admin.Identity, id int64, status string, meta appsec.RequestMeta) error {

@@ -586,6 +586,31 @@ func (s *managementSession) CreateProviderMapping(ctx context.Context, mapping m
 func (s *managementSession) UpdateProviderMapping(ctx context.Context, mapping mgmt.ProviderMapping) error {
 	return s.q.ManageUpdateProviderMapping(ctx, dbgen.ManageUpdateProviderMappingParams{ID: mapping.ID, ProviderID: mapping.ProviderID, UpstreamModelCode: mapping.UpstreamModelCode, Priority: mapping.Priority, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(mapping.UpdatedAt)})
 }
+func (s *managementSession) ModelProviderMappings(ctx context.Context, modelID int64) ([]mgmt.ModelProviderMapping, error) {
+	rows, err := s.q.ManageModelProviderMappings(ctx, modelID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]mgmt.ModelProviderMapping, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, mgmt.ModelProviderMapping{
+			ID: row.ID, ProviderID: row.ProviderID, ProviderName: row.ProviderName,
+			ProviderStatus: row.ProviderStatus, ModelID: row.ModelID, Priority: row.Priority,
+			UpdatedAt: row.UpdatedAt.Time.UTC(), EndpointConfigured: row.EndpointConfigured,
+			ResourceAvailable: row.ResourceAvailable,
+		})
+	}
+	return result, nil
+}
+func (s *managementSession) UpdateModelMappingPriority(ctx context.Context, mappingID int64, priority int32, at time.Time) error {
+	count, err := s.q.ManageUpdateModelMappingPriority(ctx, dbgen.ManageUpdateModelMappingPriorityParams{
+		ID: mappingID, Priority: priority, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(at),
+	})
+	if err == nil && count != 1 {
+		return mgmt.ErrConflict
+	}
+	return err
+}
 func (s *managementSession) DeleteProviderMapping(ctx context.Context, providerID, mappingID int64, at time.Time) error {
 	return s.q.ManageDeleteProviderMapping(ctx, dbgen.ManageDeleteProviderMappingParams{ID: mappingID, ProviderID: providerID, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(at)})
 }

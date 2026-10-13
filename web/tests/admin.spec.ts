@@ -1006,6 +1006,7 @@ async function fixture(page: Page) {
           id,
           mappings.map((mapping: any) => ({
             ...mapping,
+            priority: 100,
             id: next(),
             providerId: id,
             createdAt: stamp,
@@ -1033,6 +1034,45 @@ async function fixture(page: Page) {
       })
       return reply(row)
     }
+    if (segments[0] === 'models' && segments[2] === 'provider-priorities') {
+      const model = models.find((item) => item.id === segments[1])
+      if (!model) return reply(null, 404, 'NOT_FOUND')
+      const rows = [...providerMappings.values()]
+        .flat()
+        .filter((mapping) => mapping.modelId === model.id)
+      if (method === 'PUT') {
+        if (conflict || body.mappings.length !== rows.length) return reply(null, 409, 'CONFLICT')
+        for (const entry of body.mappings) {
+          const row = rows.find((mapping) => mapping.id === entry.id)
+          if (
+            !row ||
+            row.updatedAt !== entry.updatedAt ||
+            entry.priority < 1 ||
+            entry.priority > 100
+          )
+            return reply(null, 409, 'CONFLICT')
+        }
+        for (const entry of body.mappings) {
+          const row = rows.find((mapping) => mapping.id === entry.id)
+          row.priority = entry.priority
+          row.updatedAt = '2026-09-06T07:31:00Z'
+        }
+      }
+      return reply(
+        rows
+          .map((mapping) => {
+            const provider = providers.find((item) => item.id === mapping.providerId)
+            return {
+              ...mapping,
+              providerName: provider?.name ?? '',
+              providerStatus: provider?.status ?? 'DISABLED',
+              endpointConfigured: Boolean(provider?.endpoints?.length),
+              resourceAvailable: resources.some((resource) => resource.providerId === provider?.id),
+            }
+          })
+          .sort((a, b) => a.priority - b.priority || Number(a.providerId) - Number(b.providerId)),
+      )
+    }
     if (segments[0] === 'providers' && segments.length === 2 && method === 'PUT') {
       if (conflict) return reply(null, 409, 'CONFLICT')
       const row = providers.find((provider) => provider.id === segments[1])
@@ -1045,7 +1085,12 @@ async function fixture(page: Page) {
         row.id,
         mappings.map((mapping: any) => ({
           ...mapping,
-          id: next(),
+          id:
+            (providerMappings.get(row.id) || []).find((old) => old.modelId === mapping.modelId)
+              ?.id ?? next(),
+          priority:
+            (providerMappings.get(row.id) || []).find((old) => old.modelId === mapping.modelId)
+              ?.priority ?? 100,
           providerId: row.id,
           createdAt: stamp,
           updatedAt: stamp,
@@ -3594,11 +3639,11 @@ test('官方服务商编辑时不展示或提交停用模型映射', async ({ pa
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
   await expect(dialog).toHaveCount(0)
   expect(state.providerInputs.at(-1)?.mappings).toEqual([
-    { modelId: '71', upstreamModelCode: 'deepseek-v4-flash', priority: 100 },
+    { modelId: '71', upstreamModelCode: 'deepseek-v4-flash' },
   ])
 })
 
-test('服务商映射优先级可编辑且保存其他设置时不会重置', async ({ page }) => {
+test('模型页面配置服务商优先级，编辑服务商不重置配置', async ({ page }) => {
   const state = await fixture(page)
   state.providerMappings.get('81')![0].priority = 25
   await signIn(page)
@@ -3608,23 +3653,60 @@ test('服务商映射优先级可编辑且保存其他设置时不会重置', as
   })
   await edit.click()
   const dialog = modal(page)
-  const priority = dialog.getByLabel('DeepSeek V4 Flash 的路由优先级')
-  await expect(priority).toHaveValue('25')
+  await expect(dialog.getByText('路由优先级')).toHaveCount(0)
   await dialog.getByRole('button', { name: '保存', exact: true }).click()
-  expect(state.providerInputs.at(-1)?.mappings[0].priority).toBe(25)
+  expect(state.providerInputs.at(-1)?.mappings[0].priority).toBeUndefined()
+  expect(state.providerMappings.get('81')![0].priority).toBe(25)
 
-  await edit.click()
+  await page.getByRole('link', { name: '模型', exact: true }).click()
+  await page
+    .getByRole('row')
+    .filter({ hasText: 'DeepSeek V4 Flash' })
+    .getByRole('button', { name: '服务商优先级' })
+    .click()
+  const priorityDialog = page.getByRole('dialog', { name: 'DeepSeek V4 Flash 的服务商优先级' })
+  const priority = priorityDialog.getByRole('spinbutton', { name: 'DeepSeek 的优先级' })
   await expect(priority).toHaveValue('25')
-  const savedCount = state.providerInputs.length
   await priority.fill('0')
-  await dialog.getByRole('button', { name: '保存', exact: true }).click()
-  await expect(page.locator('.toast')).toContainText('路由优先级必须是 1 到 10000 的整数')
-  expect(state.providerInputs).toHaveLength(savedCount)
+  await priorityDialog.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(priorityDialog.getByRole('alert')).toContainText('优先级必须是 1 到 100 的整数')
   await priority.fill('5')
-  await dialog.getByRole('button', { name: '保存', exact: true }).click()
-  expect(state.providerInputs.at(-1)?.mappings[0].priority).toBe(5)
-  await edit.click()
-  await expect(priority).toHaveValue('5')
+  state.conflict(true)
+  await priorityDialog.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(priorityDialog.getByRole('alert')).toBeVisible()
+  state.conflict(false)
+  await priorityDialog.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(priorityDialog).toHaveCount(0)
+  expect(state.providerMappings.get('81')![0].priority).toBe(5)
+})
+
+test('切换模型时忽略前一个优先级弹层的延迟响应', async ({ page }) => {
+  await fixture(page)
+  await page.route('**/api/v1/models/71/provider-priorities', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    await route.fallback()
+  })
+  await signIn(page)
+  await page.getByRole('link', { name: '模型', exact: true }).click()
+  await page
+    .getByRole('row')
+    .filter({ hasText: 'DeepSeek V4 Flash' })
+    .getByRole('button', { name: '服务商优先级' })
+    .click()
+  await page
+    .getByRole('dialog', { name: 'DeepSeek V4 Flash 的服务商优先级' })
+    .getByRole('button', { name: '关闭' })
+    .click()
+  await page
+    .getByRole('row')
+    .filter({ hasText: 'Claude Sonnet' })
+    .getByRole('button', { name: '服务商优先级' })
+    .click()
+  const dialog = page.getByRole('dialog', { name: 'Claude Sonnet 的服务商优先级' })
+  await expect(dialog.getByText('此模型暂无服务商映射。')).toBeVisible()
+  await page.waitForTimeout(500)
+  await expect(dialog.getByText('此模型暂无服务商映射。')).toBeVisible()
+  await expect(dialog.getByRole('spinbutton')).toHaveCount(0)
 })
 
 test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => {
@@ -4076,7 +4158,6 @@ test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => 
     {
       modelId: '71',
       upstreamModelCode: 'aliyun-deepseek-v4-flash',
-      priority: 100,
     },
   ])
   expect(created.proxyUrl).not.toContain('proxy-password')

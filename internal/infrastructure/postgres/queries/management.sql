@@ -234,6 +234,21 @@ SELECT * FROM provider_model
 WHERE provider_id=$1 AND is_deleted=false
 ORDER BY priority,id;
 
+-- name: ManageModelProviderMappings :many
+SELECT pm.id,pm.provider_id,p.provider_name,p.status AS provider_status,
+       pm.model_id,pm.upstream_model_code,pm.priority,pm.updated_at,
+       EXISTS(SELECT 1 FROM provider_endpoint pe WHERE pe.provider_id=p.id AND pe.protocol_type IN ('OPENAI','ANTHROPIC')) AS endpoint_configured,
+       EXISTS(SELECT 1 FROM provider_credential r WHERE r.provider_id=p.id AND NOT r.is_deleted
+           AND r.runtime_status='HEALTHY'
+           AND (r.effective_at IS NULL OR r.effective_at<=now())
+           AND (r.expires_at IS NULL OR r.expires_at>now())
+           AND (r.auth_type='API_KEY' OR r.quota_status IN ('AVAILABLE','NEAR_LIMIT')
+               OR (r.quota_status='EXHAUSTED' AND r.quota_resets_at IS NOT NULL AND r.quota_resets_at<=now()))) AS resource_available
+FROM provider_model pm
+JOIN provider p ON p.id=pm.provider_id AND NOT p.is_deleted
+WHERE pm.model_id=$1 AND NOT pm.is_deleted
+ORDER BY pm.priority,pm.provider_id;
+
 -- name: ManageCreateProviderMapping :exec
 INSERT INTO provider_model(id,provider_id,model_id,upstream_model_code,priority,created_by,updated_by,created_at,updated_at)
 VALUES($1,$2,$3,$4,$5,$6,$6,$7,$7);
@@ -242,6 +257,10 @@ VALUES($1,$2,$3,$4,$5,$6,$6,$7,$7);
 UPDATE provider_model
 SET upstream_model_code=$3,priority=$4,updated_by=$5,updated_at=$6
 WHERE id=$1 AND provider_id=$2 AND is_deleted=false;
+
+-- name: ManageUpdateModelMappingPriority :execrows
+UPDATE provider_model SET priority=$2,updated_by=$3,updated_at=$4
+WHERE id=$1 AND is_deleted=false;
 
 -- name: ManageDeleteProviderMapping :exec
 UPDATE provider_model

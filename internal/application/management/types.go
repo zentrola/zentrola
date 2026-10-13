@@ -176,6 +176,22 @@ type ProviderMapping struct {
 	CreatedAt         time.Time `json:"createdAt"`
 	UpdatedAt         time.Time `json:"updatedAt"`
 }
+type ModelProviderMapping struct {
+	ID                 int64     `json:"id,string"`
+	ProviderID         int64     `json:"providerId,string"`
+	ProviderName       string    `json:"providerName"`
+	ProviderStatus     string    `json:"providerStatus"`
+	ModelID            int64     `json:"modelId,string"`
+	Priority           int32     `json:"priority"`
+	UpdatedAt          time.Time `json:"updatedAt"`
+	EndpointConfigured bool      `json:"endpointConfigured"`
+	ResourceAvailable  bool      `json:"resourceAvailable"`
+}
+type ModelProviderPriorityInput struct {
+	ID        int64
+	Priority  int32
+	UpdatedAt time.Time
+}
 type ProviderDetail struct {
 	Provider
 	Mappings []ProviderMapping `json:"mappings"`
@@ -370,6 +386,7 @@ type ModelReader interface {
 	Models(context.Context, Page, string) ([]Model, error)
 	CountModels(context.Context, string) (int64, error)
 	Model(context.Context, int64) (Model, error)
+	ModelProviderMappings(context.Context, int64) ([]ModelProviderMapping, error)
 }
 
 type ProviderReader interface {
@@ -428,6 +445,7 @@ type ModelWriter interface {
 	SetModelStatus(context.Context, int64, string) error
 	CreateModel(context.Context, Model) error
 	UpdateModel(context.Context, Model) error
+	UpdateModelMappingPriority(context.Context, int64, int32, time.Time) error
 	DeleteModel(context.Context, int64, time.Time) error
 }
 

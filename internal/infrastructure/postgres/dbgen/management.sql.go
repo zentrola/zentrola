@@ -1680,6 +1680,66 @@ func (q *Queries) ManageModel(ctx context.Context, id int64) (ManageModelRow, er
 	return i, err
 }
 
+const manageModelProviderMappings = `-- name: ManageModelProviderMappings :many
+SELECT pm.id,pm.provider_id,p.provider_name,p.status AS provider_status,
+       pm.model_id,pm.upstream_model_code,pm.priority,pm.updated_at,
+       EXISTS(SELECT 1 FROM provider_endpoint pe WHERE pe.provider_id=p.id AND pe.protocol_type IN ('OPENAI','ANTHROPIC')) AS endpoint_configured,
+       EXISTS(SELECT 1 FROM provider_credential r WHERE r.provider_id=p.id AND NOT r.is_deleted
+           AND r.runtime_status='HEALTHY'
+           AND (r.effective_at IS NULL OR r.effective_at<=now())
+           AND (r.expires_at IS NULL OR r.expires_at>now())
+           AND (r.auth_type='API_KEY' OR r.quota_status IN ('AVAILABLE','NEAR_LIMIT')
+               OR (r.quota_status='EXHAUSTED' AND r.quota_resets_at IS NOT NULL AND r.quota_resets_at<=now()))) AS resource_available
+FROM provider_model pm
+JOIN provider p ON p.id=pm.provider_id AND NOT p.is_deleted
+WHERE pm.model_id=$1 AND NOT pm.is_deleted
+ORDER BY pm.priority,pm.provider_id
+`
+
+type ManageModelProviderMappingsRow struct {
+	ID                 int64
+	ProviderID         int64
+	ProviderName       string
+	ProviderStatus     string
+	ModelID            int64
+	UpstreamModelCode  string
+	Priority           int32
+	UpdatedAt          pgtype.Timestamptz
+	EndpointConfigured bool
+	ResourceAvailable  bool
+}
+
+func (q *Queries) ManageModelProviderMappings(ctx context.Context, modelID int64) ([]ManageModelProviderMappingsRow, error) {
+	rows, err := q.db.Query(ctx, manageModelProviderMappings, modelID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ManageModelProviderMappingsRow{}
+	for rows.Next() {
+		var i ManageModelProviderMappingsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProviderID,
+			&i.ProviderName,
+			&i.ProviderStatus,
+			&i.ModelID,
+			&i.UpstreamModelCode,
+			&i.Priority,
+			&i.UpdatedAt,
+			&i.EndpointConfigured,
+			&i.ResourceAvailable,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const manageModelStatus = `-- name: ManageModelStatus :exec
 UPDATE model SET status=$2,updated_by=$3,updated_at=$4 WHERE id=$1 AND is_deleted=false
 `
@@ -2525,6 +2585,31 @@ func (q *Queries) ManageUpdateModel(ctx context.Context, arg ManageUpdateModelPa
 		arg.UpdatedAt,
 	)
 	return err
+}
+
+const manageUpdateModelMappingPriority = `-- name: ManageUpdateModelMappingPriority :execrows
+UPDATE provider_model SET priority=$2,updated_by=$3,updated_at=$4
+WHERE id=$1 AND is_deleted=false
+`
+
+type ManageUpdateModelMappingPriorityParams struct {
+	ID        int64
+	Priority  int32
+	UpdatedBy string
+	UpdatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) ManageUpdateModelMappingPriority(ctx context.Context, arg ManageUpdateModelMappingPriorityParams) (int64, error) {
+	result, err := q.db.Exec(ctx, manageUpdateModelMappingPriority,
+		arg.ID,
+		arg.Priority,
+		arg.UpdatedBy,
+		arg.UpdatedAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const manageUpdateProvider = `-- name: ManageUpdateProvider :exec

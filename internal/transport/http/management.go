@@ -108,6 +108,46 @@ func (s *SecurityHandlers) mountManagementCatalogRoutes(r chi.Router) {
 	// @Failure 503 {object} response
 	// @Router /api/v1/models/{id} [delete]
 	r.Delete("/models/{id}", deleteEndpoint(m.DeleteModel))
+	// @Summary 查看模型的服务商优先级
+	// @Tags 模型与资源
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "模型 ID"
+	// @Success 200 {object} response{data=[]mgmt.ModelProviderMapping}
+	// @Failure 400,401,404,503 {object} response
+	// @Router /api/v1/models/{id}/provider-priorities [get]
+	r.Get("/models/{id}/provider-priorities", func(w http.ResponseWriter, req *http.Request) {
+		id, err := routeID(req, "id")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		data, err := m.ModelProviderMappings(req.Context(), adminFrom(req), id)
+		adminResult(w, req, 200, data, err)
+	})
+	// @Summary 批量更新模型的服务商优先级
+	// @Tags 模型与资源
+	// @Accept json
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "模型 ID"
+	// @Param body body ModelProviderPriorityRequest true "完整映射快照与优先级"
+	// @Success 200 {object} response{data=[]mgmt.ModelProviderMapping}
+	// @Failure 400,401,404,409,503 {object} response
+	// @Router /api/v1/models/{id}/provider-priorities [put]
+	r.Put("/models/{id}/provider-priorities", func(w http.ResponseWriter, req *http.Request) {
+		input, ok := decodeRequest[ModelProviderPriorityRequest](w, req)
+		if !ok {
+			return
+		}
+		id, err := routeID(req, "id")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		data, err := m.UpdateModelProviderPriorities(req.Context(), adminFrom(req), id, input.inputs(), requestMeta(req))
+		adminResult(w, req, 200, data, err)
+	})
 	// @Summary 创建服务商
 	// @Tags 模型与资源
 	// @Description 新服务商默认停用；至少配置一种 HTTPS 兼容协议地址，模型映射可稍后配置。启用服务商时必须至少存在一条模型映射和一个可用凭据。

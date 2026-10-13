@@ -2,6 +2,7 @@ package management
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +10,38 @@ import (
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	"github.com/zentrola/zentrola/internal/domain/admin"
 )
+
+func TestModelProviderPrioritiesValidateSnapshotAndAudit(t *testing.T) {
+	at := time.Date(2026, 10, 13, 1, 2, 3, 0, time.UTC)
+	session := &modelSessionStub{model: Model{ID: 8, Name: "模型"}, mappings: []ModelProviderMapping{
+		{ID: 11, ModelID: 8, ProviderID: 2, Priority: 100, UpdatedAt: at},
+		{ID: 12, ModelID: 8, ProviderID: 3, Priority: 100, UpdatedAt: at},
+	}}
+	service := ModelService{store: modelStoreStub{session: session}, now: func() time.Time { return at.Add(time.Minute) }}
+	actor := admin.Identity{ID: 1}
+	for _, inputs := range [][]ModelProviderPriorityInput{
+		{{ID: 11, Priority: 0, UpdatedAt: at}, {ID: 12, Priority: 100, UpdatedAt: at}},
+		{{ID: 11, Priority: 101, UpdatedAt: at}, {ID: 12, Priority: 100, UpdatedAt: at}},
+		{{ID: 11, Priority: 10, UpdatedAt: at}, {ID: 11, Priority: 20, UpdatedAt: at}},
+	} {
+		if _, err := service.UpdateModelProviderPriorities(context.Background(), actor, 8, inputs, appsec.RequestMeta{}); !errors.Is(err, appsec.ErrInvalidArgument) {
+			t.Fatalf("invalid input accepted: %v", err)
+		}
+	}
+	if _, err := service.UpdateModelProviderPriorities(context.Background(), actor, 8, []ModelProviderPriorityInput{{ID: 11, Priority: 10, UpdatedAt: at}}, appsec.RequestMeta{}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("missing mapping should conflict: %v", err)
+	}
+	if _, err := service.UpdateModelProviderPriorities(context.Background(), actor, 8, []ModelProviderPriorityInput{{ID: 11, Priority: 10, UpdatedAt: at.Add(-time.Second)}, {ID: 12, Priority: 100, UpdatedAt: at}}, appsec.RequestMeta{}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale snapshot should conflict: %v", err)
+	}
+	if len(session.priorityUpdates) != 0 || len(session.audits) != 0 {
+		t.Fatal("invalid snapshots wrote data")
+	}
+	result, err := service.UpdateModelProviderPriorities(context.Background(), actor, 8, []ModelProviderPriorityInput{{ID: 11, Priority: 10, UpdatedAt: at}, {ID: 12, Priority: 100, UpdatedAt: at}}, appsec.RequestMeta{})
+	if err != nil || len(result) != 2 || result[0].Priority != 10 || len(session.priorityUpdates) != 1 || len(session.audits) != 1 {
+		t.Fatalf("priority update failed: result=%+v err=%v", result, err)
+	}
+}
 
 func TestModelInputValidation(t *testing.T) {
 	valid := ModelInput{Code: "official-model-v1", Name: "官方模型", InputModalities: []string{"TEXT", "IMAGE"}, OutputModalities: []string{"TEXT"}}
@@ -48,15 +81,30 @@ func TestModelInputValidation(t *testing.T) {
 
 type modelSessionStub struct {
 	ModelSession
-	model    Model
-	provider Provider
-	created  *Model
-	updated  *Model
-	deleted  *time.Time
-	audits   []Audit
+	model           Model
+	provider        Provider
+	created         *Model
+	updated         *Model
+	deleted         *time.Time
+	audits          []Audit
+	mappings        []ModelProviderMapping
+	priorityUpdates []ModelProviderPriorityInput
 }
 
 func (s *modelSessionStub) Model(context.Context, int64) (Model, error) { return s.model, nil }
+func (s *modelSessionStub) ModelProviderMappings(context.Context, int64) ([]ModelProviderMapping, error) {
+	return append([]ModelProviderMapping(nil), s.mappings...), nil
+}
+func (s *modelSessionStub) UpdateModelMappingPriority(_ context.Context, id int64, priority int32, at time.Time) error {
+	s.priorityUpdates = append(s.priorityUpdates, ModelProviderPriorityInput{ID: id, Priority: priority, UpdatedAt: at})
+	for i := range s.mappings {
+		if s.mappings[i].ID == id {
+			s.mappings[i].Priority = priority
+			s.mappings[i].UpdatedAt = at
+		}
+	}
+	return nil
+}
 func (s *modelSessionStub) Provider(context.Context, int64) (Provider, error) {
 	return s.provider, nil
 }

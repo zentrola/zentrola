@@ -493,8 +493,8 @@ func requestBodyLimit(payload any) int64 {
 	const defaultLimit int64 = 16 << 10
 	const credentialLimit int64 = 512 << 10
 	switch payload.(type) {
-	case *CreateResourceRequest, *UpdateCredentialRequest:
-		// Credential 解码后最多允许 64 KiB；JSON 转义可能显著放大线上字节数。
+	case *CreateResourceRequest, *UpdateCredentialRequest, *ModelProviderPriorityRequest:
+		// 凭据和批量映射请求可能较大；凭据自身仍由各请求的 Valid 限制。
 		return credentialLimit
 	default:
 		return defaultLimit

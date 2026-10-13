@@ -1,6 +1,11 @@
 package http
 
-import mgmt "github.com/zentrola/zentrola/internal/application/management"
+import (
+	"strings"
+	"time"
+
+	mgmt "github.com/zentrola/zentrola/internal/application/management"
+)
 
 // ModelRequest 是模型管理的 HTTP 契约；application.ModelInput 不携带协议、
 // 校验框架或文档标签，避免 API 字段变化向应用层扩散。
@@ -51,7 +56,52 @@ type ProviderProxyHeaderRequest struct {
 type ProviderMappingRequest struct {
 	ModelID           int64  `json:"modelId,string" binding:"required"`
 	UpstreamModelCode string `json:"upstreamModelCode"`
+	// Priority 仅兼容旧客户端请求，服务商写入时忽略；请使用模型优先级接口。
 	Priority          int32  `json:"priority,omitempty"`
+}
+
+type ModelProviderPriorityRequest struct {
+	Mappings []ModelProviderPriorityItemRequest `json:"mappings"`
+}
+
+type ModelProviderPriorityItemRequest struct {
+	ID        int64  `json:"id,string"`
+	Priority  int32  `json:"priority"`
+	UpdatedAt string `json:"updatedAt"`
+}
+
+func (*ModelProviderPriorityRequest) Normalize() {}
+
+func (request ModelProviderPriorityRequest) Valid() bool {
+	if request.Mappings == nil {
+		return false
+	}
+	seen := make(map[int64]struct{}, len(request.Mappings))
+	for _, mapping := range request.Mappings {
+		if mapping.ID <= 0 || mapping.Priority < 1 || mapping.Priority > 100 || !strings.HasSuffix(mapping.UpdatedAt, "Z") {
+			return false
+		}
+		if _, err := time.Parse(time.RFC3339Nano, mapping.UpdatedAt); err != nil {
+			return false
+		}
+		if _, exists := seen[mapping.ID]; exists {
+			return false
+		}
+		seen[mapping.ID] = struct{}{}
+	}
+	return true
+}
+
+func (request ModelProviderPriorityRequest) inputs() []mgmt.ModelProviderPriorityInput {
+	inputs := make([]mgmt.ModelProviderPriorityInput, len(request.Mappings))
+	for index, mapping := range request.Mappings {
+		updatedAt := time.Time{}
+		if strings.HasSuffix(mapping.UpdatedAt, "Z") {
+			updatedAt, _ = time.Parse(time.RFC3339Nano, mapping.UpdatedAt)
+		}
+		inputs[index] = mgmt.ModelProviderPriorityInput{ID: mapping.ID, Priority: mapping.Priority, UpdatedAt: updatedAt}
+	}
+	return inputs
 }
 
 type ProviderRequest struct {

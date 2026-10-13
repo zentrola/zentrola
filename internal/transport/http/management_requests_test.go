@@ -18,6 +18,25 @@ func TestModelRequestRoundTrip(t *testing.T) {
 	}
 }
 
+func TestModelProviderPriorityRequestRequiresUTCSnapshot(t *testing.T) {
+	request := ModelProviderPriorityRequest{}
+	request.Mappings = []ModelProviderPriorityItemRequest{{ID: 11, Priority: 1, UpdatedAt: "2026-10-13T03:20:00Z"}}
+	if !request.Valid() || request.inputs()[0].UpdatedAt.IsZero() {
+		t.Fatal("valid UTC snapshot rejected")
+	}
+	for _, invalid := range []string{"2026-10-13T11:20:00+08:00", "2026-10-13T03:20:00", "invalid"} {
+		request.Mappings[0].UpdatedAt = invalid
+		if request.Valid() {
+			t.Fatalf("invalid timestamp accepted: %s", invalid)
+		}
+	}
+	request.Mappings[0].UpdatedAt = "2026-10-13T03:20:00Z"
+	request.Mappings[0].Priority = 101
+	if request.Valid() {
+		t.Fatal("out-of-range priority accepted")
+	}
+}
+
 func TestProviderRequestRoundTripPreservesOptionalCollections(t *testing.T) {
 	tests := []struct {
 		name  string
