@@ -2,7 +2,7 @@ import { test, expect, type BrowserContext, type Page } from '@playwright/test'
 
 const sessionKey = 'zentrola.admin.session'
 async function fixture(context: BrowserContext) {
-  const state = { meStatus: 200, meCalls: 0, loginCalls: 0, expiresAt: '' }
+  const state = { meStatus: 200, protectedStatus: 200, meCalls: 0, loginCalls: 0, expiresAt: '' }
   await context.route('**/api/v1/**', async (route) => {
     const path = new URL(route.request().url()).pathname
     const reply = (data: unknown, status = 200, code = 'OK') =>
@@ -24,6 +24,12 @@ async function fixture(context: BrowserContext) {
         )
       return reply({ id: '1', username: 'admin', displayName: '管理员' })
     }
+    if (state.protectedStatus !== 200)
+      return reply(
+        null,
+        state.protectedStatus,
+        state.protectedStatus === 401 ? 'UNAUTHENTICATED' : 'SERVICE_UNAVAILABLE',
+      )
     return reply({ items: [], nextCursor: null, total: 0 })
   })
   return state
@@ -41,54 +47,68 @@ test('刷新及关闭后重新打开恢复身份和路由，不重新登录或�
   const state = await fixture(context)
   await signIn(page)
   const saved = await stored(page)
-  expect(JSON.parse(saved!)).toEqual({ token: 'session-test-token', expiresAt: state.expiresAt })
+  expect(JSON.parse(saved!)).toEqual({
+    token: 'session-test-token',
+    expiresAt: state.expiresAt,
+    identity: { id: '1', username: 'admin', displayName: '管理员' },
+  })
   await page.getByRole('link', { name: '模型', exact: true }).click()
   await expect(page.getByRole('heading', { name: '模型', exact: true })).toBeVisible()
   await page.reload()
   await expect(page.getByRole('heading', { name: '模型', exact: true })).toBeVisible()
-  expect(state.meCalls).toBe(2)
+  expect(state.meCalls).toBe(1)
   expect(await stored(page)).toBe(saved)
   await page.close()
   const reopened = await context.newPage()
   await reopened.goto('/')
   await expect(reopened.getByRole('heading', { name: '仪表盘', exact: true })).toBeVisible()
   expect(state.loginCalls).toBe(1)
-  expect(state.meCalls).toBe(3)
+  expect(state.meCalls).toBe(1)
   await reopened.getByRole('button', { name: '账号菜单' }).click()
   await reopened.getByRole('menuitem', { name: '注销登录' }).click()
   await expect(reopened.getByRole('heading', { name: '欢迎回来' })).toBeVisible()
   expect(await stored(reopened)).toBeNull()
   await reopened.reload()
   await expect(reopened.getByRole('button', { name: '登录控制台' })).toBeVisible()
-  expect(state.meCalls).toBe(3)
+  expect(state.meCalls).toBe(1)
 })
 
-test('恢复时 401 清除凭证，之后刷新不再尝试恢复', async ({ page, context }) => {
+test('读取缓存后受保护接口返回 401 时清除凭证', async ({ page, context }) => {
   const state = await fixture(context)
   await signIn(page)
-  state.meStatus = 401
+  state.protectedStatus = 401
   await page.reload()
   await expect(page.getByRole('button', { name: '登录控制台' })).toBeVisible()
   await expect(page.getByRole('alert')).toContainText('登录已失效')
   expect(await stored(page)).toBeNull()
   await page.reload()
   await expect(page.getByRole('button', { name: '登录控制台' })).toBeVisible()
-  expect(state.meCalls).toBe(2)
+  expect(state.meCalls).toBe(1)
 })
 
-test('恢复时服务暂时不可用保留凭证，重试成功后进入控制台', async ({ page, context }) => {
+test('旧格式缓存恢复时服务暂时不可用可重试并补齐身份', async ({ page, context }) => {
   const state = await fixture(context)
   await signIn(page)
-  const saved = await stored(page)
+  const legacy = JSON.stringify({ token: 'session-test-token', expiresAt: state.expiresAt })
+  await page.evaluate(({ key, value }) => localStorage.setItem(key, value), {
+    key: sessionKey,
+    value: legacy,
+  })
   state.meStatus = 503
   await page.reload()
   await expect(page.getByRole('alert')).toContainText('服务暂时不可用')
   await expect(page.getByRole('button', { name: '登录控制台' })).toHaveCount(0)
-  expect(await stored(page)).toBe(saved)
+  expect(await stored(page)).toBe(legacy)
   state.meStatus = 200
   await page.getByRole('button', { name: '重试' }).click()
   await expect(page.getByRole('heading', { name: '仪表盘', exact: true })).toBeVisible()
   expect(state.loginCalls).toBe(1)
+  expect(state.meCalls).toBe(3)
+  expect(JSON.parse((await stored(page))!).identity).toEqual({
+    id: '1',
+    username: 'admin',
+    displayName: '管理员',
+  })
 })
 
 for (const value of [

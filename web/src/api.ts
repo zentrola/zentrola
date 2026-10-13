@@ -8,9 +8,9 @@ declare global {
   }
 }
 
-// 只保存 Token 和服务端到期时间；身份信息每次启动都通过 /me 校验。
+// 将身份信息与 Token 一起保存；受保护接口仍在服务端校验登录状态。
 export const sessionKey = 'zentrola.admin.session'
-type Session = { token: string; expiresAt: string }
+type Session = { token: string; expiresAt: string; identity?: Identity }
 const token = ref('')
 export const identity = ref<Identity | null>(null)
 export const sessionExpired = ref(false)
@@ -60,6 +60,18 @@ function validSession(value: unknown): value is Session {
   )
 }
 
+function validIdentity(value: unknown): value is Identity {
+  if (!value || typeof value !== 'object') return false
+  const user = value as Partial<Identity>
+  return (
+    typeof user.id === 'string' &&
+    user.id.length > 0 &&
+    typeof user.username === 'string' &&
+    user.username.length > 0 &&
+    typeof user.displayName === 'string'
+  )
+}
+
 function scheduleExpiry(session: Session) {
   clearTimeout(expiry)
   const remaining = Date.parse(session.expiresAt) - Date.now()
@@ -92,9 +104,21 @@ export async function restoreSession() {
   }
   if (!scheduleExpiry(session)) return
   token.value = session.token
-  try {
-    identity.value = await api<Identity>('/me')
+  if (validIdentity(session.identity)) {
+    identity.value = session.identity
     sessionExpired.value = false
+    return
+  }
+  try {
+    const current = await api<Identity>('/me')
+    if (!validIdentity(current)) throw new ApiError('UNKNOWN')
+    identity.value = current
+    sessionExpired.value = false
+    try {
+      localStorage.setItem(sessionKey, JSON.stringify({ ...session, identity: current }))
+    } catch {
+      // 旧会话仍可在当前页面使用。
+    }
   } catch (error) {
     // 401 已由 api 清理；网络错误保留凭证，交给页面显示重试。
     if (error instanceof ApiError && error.code === 'UNAUTHENTICATED') return
@@ -249,7 +273,9 @@ export async function login(username: string, password: string) {
   if (!scheduleExpiry(result)) throw new ApiError('UNAUTHENTICATED')
   token.value = result.token
   try {
-    identity.value = await api<Identity>('/me')
+    const current = await api<Identity>('/me')
+    if (!validIdentity(current)) throw new ApiError('UNKNOWN')
+    identity.value = current
   } catch (error) {
     clearSession()
     throw error
@@ -258,7 +284,11 @@ export async function login(username: string, password: string) {
   try {
     localStorage.setItem(
       sessionKey,
-      JSON.stringify({ token: result.token, expiresAt: result.expiresAt }),
+      JSON.stringify({
+        token: result.token,
+        expiresAt: result.expiresAt,
+        identity: identity.value,
+      }),
     )
   } catch {
     // 存储不可用时降级为当前页面会话，不阻断登录。
