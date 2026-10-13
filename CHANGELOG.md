@@ -4,16 +4,16 @@ All notable changes to Zentrola are documented here. Dates use UTC. The project 
 
 Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循语义化版本。
 
-## [1.2.0] - 2026-10-12
+## [1.2.0] - 2026-10-13
 
 ### Added / 新增
 
 - Added session-level account distribution for Codex `session-id` and Claude Code `x-claude-code-session-id`: new sessions are distributed among accounts of the same type, and later requests stay on the selected account. Claude Code subagents use `x-claude-code-agent-id` for separate bindings; bindings expire after 30 days without requests.
 - When a bound account becomes unavailable or is deleted, requests that can safely retry may use another available account. The binding changes only after that account responds successfully; if no account is available or the binding update fails, the request returns an error.
-- Added editable route priority for each provider-model mapping in the Admin Web; editing a provider preserves existing custom priorities.
+- Added editable route priority (1–100) for each provider-model mapping in the Admin Web; editing a provider preserves existing custom priorities. During migration, historical priorities above 100 are set to 100.
 - 新增基于 Codex `session-id` 和 Claude Code `x-claude-code-session-id` 的会话级账号分流：新会话在同类账号间分配，后续请求固定到选中的账号。Claude Code 子代理通过 `x-claude-code-agent-id` 独立绑定；绑定连续 30 天无请求后过期。
 - 已绑定账号不可用或被删除时，可安全重试的请求会尝试其他可用账号，并在新账号成功响应后更新绑定；没有可用账号或绑定更新失败时返回错误。
-- 管理端支持为每条服务商模型映射设置路由优先级，编辑服务商时保留已有的自定义值。
+- 管理端支持为每条服务商模型映射设置 1–100 的路由优先级，编辑服务商时保留已有的自定义值。迁移时历史优先级大于 100 的值统一调整为 100。
 
 ## [1.1.0] - 2026-10-08
 
@@ -109,6 +109,7 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - 支持协议转换、流式响应、工具调用和服务商故障切换的 OpenAI/Anthropic 兼容网关。
 - 中英文管理界面、独立发布包和 Docker Compose 部署方式。
 
+[1.2.0]: https://github.com/zentrola/zentrola/releases/tag/v1.2.0
 [1.1.0]: https://github.com/zentrola/zentrola/releases/tag/v1.1.0
 [1.0.1]: https://github.com/zentrola/zentrola/releases/tag/v1.0.1
 [1.0.0]: https://github.com/zentrola/zentrola/releases/tag/v1.0.0
