@@ -666,6 +666,9 @@ function savePriorities() {
   font-size: 12px;
   font-weight: 600;
 }
+.model-priority-head span:last-child {
+  text-align: center;
+}
 .model-priority-row + .model-priority-row {
   border-top: 1px solid var(--color-border);
 }
@@ -694,6 +697,7 @@ function savePriorities() {
 .model-priority-row input {
   width: 76px;
   margin: 0;
+  justify-self: center;
   text-align: center;
 }
 .model-publisher-filter {
