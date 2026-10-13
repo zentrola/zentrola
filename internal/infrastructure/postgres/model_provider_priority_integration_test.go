@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"io/fs"
-	"strings"
 	"testing"
 	"time"
 
@@ -56,7 +55,7 @@ func TestGatewayCandidatesOrderProvidersBeforeProtocol(t *testing.T) {
 	})
 }
 
-func TestModelProviderPriorityMigrationRequiresExplicitLegacyCleanup(t *testing.T) {
+func TestModelProviderPriorityMigrationClampsLegacyValues(t *testing.T) {
 	ctx, pool, _ := isolatedDatabase(t)
 	db := stdlib.OpenDBFromPool(pool)
 	defer db.Close()
@@ -80,17 +79,14 @@ func TestModelProviderPriorityMigrationRequiresExplicitLegacyCleanup(t *testing.
 			t.Fatal(err)
 		}
 	}
-	if err := Migrate(ctx, pool); err == nil || !strings.Contains(err.Error(), "priority above 100") {
-		t.Fatalf("legacy priority was not reported: %v", err)
+	if err := Migrate(ctx, pool); err != nil {
+		t.Fatalf("migration failed with legacy priority: %v", err)
 	}
 	var priority int32
-	if err := pool.QueryRow(ctx, `SELECT priority FROM provider_model WHERE id=50`).Scan(&priority); err != nil || priority != 250 {
-		t.Fatalf("failed migration changed priority: value=%d err=%v", priority, err)
+	if err := pool.QueryRow(ctx, `SELECT priority FROM provider_model WHERE id=50`).Scan(&priority); err != nil || priority != 100 {
+		t.Fatalf("legacy priority was not clamped: value=%d err=%v", priority, err)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE provider_model SET priority=100 WHERE id=50`); err != nil {
-		t.Fatal(err)
-	}
-	if err := Migrate(ctx, pool); err != nil {
-		t.Fatalf("migration did not recover after explicit cleanup: %v", err)
+	if _, err := pool.Exec(ctx, `UPDATE provider_model SET priority=101 WHERE id=50`); err == nil {
+		t.Fatal("priority above 100 was accepted after migration")
 	}
 }
