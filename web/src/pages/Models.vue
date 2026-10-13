@@ -180,6 +180,7 @@ async function openPriorities(model: Model) {
       ...mapping,
       draft: String(mapping.priority),
     }))
+    updateProviderSummary(model, mappings)
   } catch (error) {
     if (version !== priorityLoadVersion || priorityTarget.value?.id !== model.id) return
     priorityError.value = errorText(error)
@@ -191,26 +192,41 @@ function closePriorities() {
   priorityLoadVersion++
   priorityTarget.value = null
 }
+function updateProviderSummary(model: Model, mappings: ModelProviderMapping[]) {
+  const first = [...mappings].sort(
+    (a, b) =>
+      a.priority - b.priority ||
+      (BigInt(a.providerId) < BigInt(b.providerId)
+        ? -1
+        : BigInt(a.providerId) > BigInt(b.providerId)
+          ? 1
+          : 0),
+  )[0]
+  const summary = first
+    ? { count: mappings.length, providerName: first.providerName, priority: first.priority }
+    : null
+  model.providerSummary = summary
+  const listModel = items.value.find((candidate) => candidate.id === model.id)
+  if (listModel && listModel !== model) listModel.providerSummary = summary
+}
 function savePriorities() {
   if (!priorityTarget.value) return
+  const model = priorityTarget.value
   if (priorityRows.value.some((row) => !/^(?:[1-9]|[1-9]\d|100)$/.test(row.draft))) {
     priorityError.value = t('models.priorityInvalid')
     return
   }
   prioritySaving.value = true
   priorityError.value = ''
-  void api<ModelProviderMapping[]>(
-    `/models/${priorityTarget.value.id}/provider-priorities`,
-    'PUT',
-    {
-      mappings: priorityRows.value.map((row) => ({
-        id: row.id,
-        priority: Number(row.draft),
-        updatedAt: row.updatedAt,
-      })),
-    },
-  )
-    .then(() => {
+  void api<ModelProviderMapping[]>(`/models/${model.id}/provider-priorities`, 'PUT', {
+    mappings: priorityRows.value.map((row) => ({
+      id: row.id,
+      priority: Number(row.draft),
+      updatedAt: row.updatedAt,
+    })),
+  })
+    .then((mappings) => {
+      updateProviderSummary(model, mappings)
       closePriorities()
     })
     .catch((error) => {
@@ -290,8 +306,30 @@ function savePriorities() {
               <div class="person">
                 <span class="avatar">{{ model.name.slice(0, 1) }}</span>
                 <div>
-                  <strong class="model-name-regular">{{ model.name }}</strong
-                  ><small>{{ model.code }}</small>
+                  <strong class="model-name-regular">{{ model.name }}</strong>
+                  <div class="model-code-line">
+                    <small>{{ model.code }}</small>
+                    <button
+                      type="button"
+                      class="model-provider-trigger"
+                      :disabled="busy"
+                      :aria-label="t('models.providerPrioritiesFor', { name: model.name })"
+                      @click="openPriorities(model)"
+                    >
+                      <template v-if="model.providerSummary">
+                        <span class="model-provider-name">{{
+                          model.providerSummary.providerName
+                        }}</span>
+                        <span v-if="model.providerSummary.count > 1" class="model-provider-count">{{
+                          t('models.moreProviders', { count: model.providerSummary.count - 1 })
+                        }}</span>
+                        <span v-else class="model-provider-priority">{{
+                          t('models.priorityValue', { value: model.providerSummary.priority })
+                        }}</span>
+                      </template>
+                      <template v-else>{{ t('models.configureProviders') }}</template>
+                    </button>
+                  </div>
                 </div>
               </div>
             </td>
@@ -326,9 +364,6 @@ function savePriorities() {
               <div class="row-actions">
                 <button class="text-button" :disabled="busy" @click="openEdit(model)">
                   {{ t('models.editAction') }}
-                </button>
-                <button class="text-button" :disabled="busy" @click="openPriorities(model)">
-                  {{ t('models.providerPriorities') }}
                 </button>
                 <RowActionMenu
                   :label="t('common.moreActionsFor', { name: model.name })"
@@ -502,7 +537,7 @@ function savePriorities() {
     medium
     @close="closePriorities"
   >
-    <p class="model-form-hint">{{ t('models.priorityHint') }}</p>
+    <p class="model-priority-hint">{{ t('models.priorityHint') }}</p>
     <div v-if="priorityError" class="alert" role="alert">
       {{ priorityError }}
       <button
@@ -519,26 +554,43 @@ function savePriorities() {
       {{ t('models.noProviderMappings') }}
       <RouterLink to="/providers">{{ t('models.configureProviderMappings') }}</RouterLink>
     </p>
-    <div v-else class="model-priority-list">
-      <label v-for="row in priorityRows" :key="row.id" class="model-priority-row">
-        <span>
+    <div v-else-if="priorityRows.length" class="model-priority-list">
+      <div class="model-priority-head" aria-hidden="true">
+        <span>{{ t('models.provider') }}</span>
+        <span>{{ t('models.routingStatus') }}</span>
+        <span>{{ t('models.priority') }}</span>
+      </div>
+      <div v-for="row in priorityRows" :key="row.id" class="model-priority-row">
+        <div class="model-priority-provider">
           <strong>{{ row.providerName }}</strong>
           <small>ID: {{ row.providerId }}</small>
-          <small v-if="row.providerStatus !== 'ACTIVE'">{{ t('models.providerDisabled') }}</small>
-          <small v-else-if="!row.endpointConfigured">{{ t('models.providerNoEndpoint') }}</small>
-          <small v-else-if="!row.resourceAvailable">{{ t('models.providerNoResource') }}</small>
-          <small v-else>{{ t('models.providerAvailable') }}</small>
+        </div>
+        <span
+          class="model-priority-status"
+          :class="{
+            available:
+              row.providerStatus === 'ACTIVE' && row.endpointConfigured && row.resourceAvailable,
+          }"
+        >
+          {{
+            row.providerStatus !== 'ACTIVE'
+              ? t('models.providerDisabled')
+              : !row.endpointConfigured
+                ? t('models.providerNoEndpoint')
+                : !row.resourceAvailable
+                  ? t('models.providerNoResource')
+                  : t('models.providerAvailable')
+          }}
         </span>
         <input
           v-model="row.draft"
-          type="number"
-          min="1"
-          max="100"
-          step="1"
+          type="text"
+          inputmode="numeric"
+          pattern="[0-9]*"
           :disabled="prioritySaving || row.providerStatus !== 'ACTIVE'"
           :aria-label="t('models.priorityForProvider', { name: row.providerName })"
         />
-      </label>
+      </div>
     </div>
     <template #footer>
       <button type="button" class="button" :disabled="prioritySaving" @click="closePriorities">
@@ -561,7 +613,7 @@ function savePriorities() {
   table-layout: fixed;
 }
 .model-name-column {
-  width: 22%;
+  width: 26%;
 }
 .model-publisher-column {
   width: 160px;
@@ -574,32 +626,115 @@ function savePriorities() {
   width: 120px;
 }
 .model-remark-column {
-  width: calc(78% - 820px);
+  width: calc(74% - 730px);
 }
 .model-action-column {
-  width: 260px;
+  width: 170px;
+}
+.model-code-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+}
+.models-table .person > div {
+  min-width: 0;
+}
+.model-code-line small {
+  min-width: 0;
+  margin-top: 0;
+}
+.model-provider-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 2px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.model-provider-trigger:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+.model-provider-trigger:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+.model-provider-trigger:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.model-provider-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-provider-count,
+.model-provider-priority {
+  flex: none;
+  color: var(--muted);
+}
+.model-priority-hint {
+  margin: 0 0 14px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
 }
 .model-priority-list {
   display: grid;
-  gap: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.model-priority-head,
+.model-priority-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) 90px;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 14px;
+}
+.model-priority-head {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.model-priority-row + .model-priority-row {
+  border-top: 1px solid var(--color-border);
 }
 .model-priority-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--color-border);
+  min-height: 60px;
 }
-.model-priority-row span {
+.model-priority-provider {
   display: grid;
-  gap: 2px;
+  min-width: 0;
 }
-.model-priority-row small {
+.model-priority-provider strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-priority-provider small {
   color: var(--muted);
 }
+.model-priority-status {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+.model-priority-status.available {
+  color: var(--color-success);
+}
 .model-priority-row input {
-  width: 90px;
+  width: 76px;
+  margin: 0;
+  text-align: center;
 }
 .model-publisher-filter {
   display: flex;
@@ -705,6 +840,24 @@ function savePriorities() {
   font-size: 12px;
 }
 @media (max-width: 640px) {
+  .model-priority-head {
+    display: none;
+  }
+  .model-priority-row {
+    grid-template-columns: minmax(0, 1fr) 76px;
+    gap: 4px 12px;
+  }
+  .model-priority-provider {
+    grid-column: 1;
+  }
+  .model-priority-status {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .model-priority-row input {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
   .model-publisher-filter {
     width: 100%;
   }

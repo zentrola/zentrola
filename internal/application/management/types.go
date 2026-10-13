@@ -97,17 +97,24 @@ type Group struct {
 	CreatedAt         time.Time `json:"createdAt"`
 }
 type Model struct {
-	ID                    int64     `json:"id,string"`
-	Code                  string    `json:"code"`
-	Name                  string    `json:"name"`
-	Status                string    `json:"status"`
-	InputModalities       []string  `json:"inputModalities"`
-	OutputModalities      []string  `json:"outputModalities"`
-	Remark                string    `json:"remark"`
-	PublisherProviderID   *int64    `json:"publisherProviderId,string"`
-	PublisherProviderName *string   `json:"publisherProviderName"`
-	CreatedAt             time.Time `json:"createdAt"`
-	UpdatedAt             time.Time `json:"updatedAt"`
+	ID                    int64                 `json:"id,string"`
+	Code                  string                `json:"code"`
+	Name                  string                `json:"name"`
+	Status                string                `json:"status"`
+	InputModalities       []string              `json:"inputModalities"`
+	OutputModalities      []string              `json:"outputModalities"`
+	Remark                string                `json:"remark"`
+	PublisherProviderID   *int64                `json:"publisherProviderId,string"`
+	PublisherProviderName *string               `json:"publisherProviderName"`
+	ProviderSummary       *ModelProviderSummary `json:"providerSummary,omitempty"`
+	CreatedAt             time.Time             `json:"createdAt"`
+	UpdatedAt             time.Time             `json:"updatedAt"`
+}
+
+type ModelProviderSummary struct {
+	Count        int64  `json:"count"`
+	ProviderName string `json:"providerName"`
+	Priority     int32  `json:"priority"`
 }
 
 type ModelInput struct {

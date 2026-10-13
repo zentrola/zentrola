@@ -24,6 +24,10 @@ func TestGatewayCandidatesOrderProvidersBeforeProtocol(t *testing.T) {
 			VALUES (60,40,'Primary',decode(repeat('00',32),'hex'),decode(repeat('00',12),'hex'),1,'system','system',now(),now()),
 			       (61,41,'Backup',decode(repeat('00',32),'hex'),decode(repeat('00',12),'hex'),1,'system','system',now(),now())`)
 		query := dbgen.New(tx)
+		summaries, err := query.ManageModelProviderSummaries(ctx, []int64{30})
+		if err != nil || len(summaries) != 1 || summaries[0].ProviderName != "Anthropic" || summaries[0].ProviderCount != 2 || summaries[0].Priority != 100 {
+			t.Fatalf("model provider summary mismatch: rows=%+v err=%v", summaries, err)
+		}
 		mappings, err := query.ManageModelProviderMappings(ctx, 30)
 		if err != nil || len(mappings) != 2 || mappings[0].ProviderID != 40 || mappings[1].ProviderID != 41 || !mappings[0].EndpointConfigured || !mappings[0].ResourceAvailable {
 			t.Fatalf("model mappings unavailable or incorrectly sorted: rows=%+v err=%v", mappings, err)
@@ -41,6 +45,10 @@ func TestGatewayCandidatesOrderProvidersBeforeProtocol(t *testing.T) {
 		})
 		if err != nil || updated != 1 {
 			t.Fatalf("priority update failed: rows=%d err=%v", updated, err)
+		}
+		summaries, err = query.ManageModelProviderSummaries(ctx, []int64{30})
+		if err != nil || len(summaries) != 1 || summaries[0].ProviderName != "Backup" || summaries[0].ProviderCount != 2 || summaries[0].Priority != 10 {
+			t.Fatalf("updated model provider summary mismatch: rows=%+v err=%v", summaries, err)
 		}
 		mappings, err = query.ManageModelProviderMappings(ctx, 30)
 		if err != nil || len(mappings) != 2 || mappings[0].ProviderID != 41 {

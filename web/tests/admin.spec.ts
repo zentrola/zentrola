@@ -733,7 +733,33 @@ async function fixture(page: Page) {
       if (path === '/models') {
         modelQueries.push(new URLSearchParams(url.searchParams))
         const status = url.searchParams.get('status')
-        return pageReply(status ? models.filter((model) => model.status === status) : models)
+        const rows = status ? models.filter((model) => model.status === status) : models
+        return pageReply(
+          rows.map((model) => {
+            const mappings = [...providerMappings.values()]
+              .flat()
+              .filter((mapping) => mapping.modelId === model.id)
+              .map((mapping) => ({
+                ...mapping,
+                providerName: providers.find((provider) => provider.id === mapping.providerId)
+                  ?.name,
+              }))
+              .filter((mapping) => mapping.providerName)
+              .sort(
+                (a, b) => a.priority - b.priority || Number(a.providerId) - Number(b.providerId),
+              )
+            return {
+              ...model,
+              providerSummary: mappings.length
+                ? {
+                    count: mappings.length,
+                    providerName: mappings[0].providerName,
+                    priority: mappings[0].priority,
+                  }
+                : null,
+            }
+          }),
+        )
       }
       if (path === '/providers') {
         providerQueries.push(new URLSearchParams(url.searchParams))
@@ -3659,13 +3685,15 @@ test('模型页面配置服务商优先级，编辑服务商不重置配置', as
   expect(state.providerMappings.get('81')![0].priority).toBe(25)
 
   await page.getByRole('link', { name: '模型', exact: true }).click()
-  await page
+  const providerTrigger = page
     .getByRole('row')
     .filter({ hasText: 'DeepSeek V4 Flash' })
-    .getByRole('button', { name: '服务商优先级' })
-    .click()
+    .getByRole('button', { name: 'DeepSeek V4 Flash 的服务商优先级' })
+  await expect(providerTrigger).toContainText('DeepSeek')
+  await expect(providerTrigger).toContainText('优先级 25')
+  await providerTrigger.click()
   const priorityDialog = page.getByRole('dialog', { name: 'DeepSeek V4 Flash 的服务商优先级' })
-  const priority = priorityDialog.getByRole('spinbutton', { name: 'DeepSeek 的优先级' })
+  const priority = priorityDialog.getByRole('textbox', { name: 'DeepSeek 的优先级' })
   await expect(priority).toHaveValue('25')
   await priority.fill('0')
   await priorityDialog.getByRole('button', { name: '保存', exact: true }).click()
@@ -3678,6 +3706,40 @@ test('模型页面配置服务商优先级，编辑服务商不重置配置', as
   await priorityDialog.getByRole('button', { name: '保存', exact: true }).click()
   await expect(priorityDialog).toHaveCount(0)
   expect(state.providerMappings.get('81')![0].priority).toBe(5)
+  await expect(providerTrigger).toContainText('优先级 5')
+})
+
+test('模型编码旁按优先级展示服务商摘要', async ({ page }) => {
+  const state = await fixture(page)
+  state.providers.push({ ...state.providers[0], id: '82', name: '备用服务商' })
+  state.providerMappings.set('82', [
+    {
+      id: '94',
+      providerId: '82',
+      modelId: '71',
+      upstreamModelCode: 'deepseek-v4-flash',
+      priority: 10,
+      createdAt: stamp,
+      updatedAt: stamp,
+    },
+  ])
+  await signIn(page)
+  await page.getByRole('link', { name: '模型', exact: true }).click()
+  const row = page.getByRole('row').filter({ hasText: 'DeepSeek V4 Flash' })
+  const trigger = row.getByRole('button', { name: 'DeepSeek V4 Flash 的服务商优先级' })
+  await expect(trigger).toContainText('备用服务商')
+  await expect(trigger).toContainText('等 1 家')
+  await trigger.click()
+  const dialog = page.getByRole('dialog', { name: 'DeepSeek V4 Flash 的服务商优先级' })
+  await expect(dialog.locator('.model-priority-row').first()).toContainText('备用服务商')
+  await expect(dialog.getByRole('textbox', { name: '备用服务商 的优先级' })).toHaveValue('10')
+  await dialog.getByRole('button', { name: '关闭' }).click()
+  await expect(
+    page
+      .getByRole('row')
+      .filter({ hasText: 'Claude Sonnet' })
+      .getByRole('button', { name: 'Claude Sonnet 的服务商优先级' }),
+  ).toContainText('配置服务商')
 })
 
 test('切换模型时忽略前一个优先级弹层的延迟响应', async ({ page }) => {
@@ -3691,7 +3753,7 @@ test('切换模型时忽略前一个优先级弹层的延迟响应', async ({ pa
   await page
     .getByRole('row')
     .filter({ hasText: 'DeepSeek V4 Flash' })
-    .getByRole('button', { name: '服务商优先级' })
+    .getByRole('button', { name: 'DeepSeek V4 Flash 的服务商优先级' })
     .click()
   await page
     .getByRole('dialog', { name: 'DeepSeek V4 Flash 的服务商优先级' })
@@ -3700,13 +3762,13 @@ test('切换模型时忽略前一个优先级弹层的延迟响应', async ({ pa
   await page
     .getByRole('row')
     .filter({ hasText: 'Claude Sonnet' })
-    .getByRole('button', { name: '服务商优先级' })
+    .getByRole('button', { name: 'Claude Sonnet 的服务商优先级' })
     .click()
   const dialog = page.getByRole('dialog', { name: 'Claude Sonnet 的服务商优先级' })
-  await expect(dialog.getByText('此模型暂无服务商映射。')).toBeVisible()
+  await expect(dialog.getByText('当前模型暂无服务商提供服务。')).toBeVisible()
   await page.waitForTimeout(500)
-  await expect(dialog.getByText('此模型暂无服务商映射。')).toBeVisible()
-  await expect(dialog.getByRole('spinbutton')).toHaveCount(0)
+  await expect(dialog.getByText('当前模型暂无服务商提供服务。')).toBeVisible()
+  await expect(dialog.getByRole('textbox')).toHaveCount(0)
 })
 
 test('服务商新增编辑、启停和窄屏导航折叠', async ({ page }) => {

@@ -145,6 +145,15 @@ SELECT m.*,p.provider_name AS publisher_provider_name
 FROM model m
 LEFT JOIN provider p ON p.id=m.publisher_provider_id
 WHERE m.id=$1 AND m.is_deleted=false;
+
+-- name: ManageModelProviderSummaries :many
+SELECT DISTINCT ON (pm.model_id) pm.model_id,p.provider_name,pm.priority,
+       COUNT(*) OVER (PARTITION BY pm.model_id)::bigint AS provider_count
+FROM provider_model pm
+JOIN provider p ON p.id=pm.provider_id AND NOT p.is_deleted
+WHERE pm.model_id=ANY(sqlc.arg(model_ids)::bigint[]) AND NOT pm.is_deleted
+ORDER BY pm.model_id,pm.priority,pm.provider_id;
+
 -- name: ManageModelStatus :exec
 UPDATE model SET status=$2,updated_by=$3,updated_at=$4 WHERE id=$1 AND is_deleted=false;
 -- name: ManageCreateModel :exec

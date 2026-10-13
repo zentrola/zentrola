@@ -182,11 +182,31 @@ func (s *managementSession) Models(ctx context.Context, p mgmt.Page, status stri
 	if err != nil {
 		return nil, err
 	}
+	modelIDs := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		modelIDs = append(modelIDs, row.ID)
+	}
+	summaries := make(map[int64]mgmt.ModelProviderSummary, len(modelIDs))
+	if len(modelIDs) > 0 {
+		summaryRows, err := s.q.ManageModelProviderSummaries(ctx, modelIDs)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range summaryRows {
+			summaries[row.ModelID] = mgmt.ModelProviderSummary{
+				Count: row.ProviderCount, ProviderName: row.ProviderName, Priority: row.Priority,
+			}
+		}
+	}
 	result := make([]mgmt.Model, 0, len(rows))
 	for _, row := range rows {
-		result = append(result, modelView(row.ID, row.ModelCode, row.DisplayName, row.Status,
+		model := modelView(row.ID, row.ModelCode, row.DisplayName, row.Status,
 			row.InputModalities, row.OutputModalities, row.Remark, row.PublisherProviderID,
-			row.PublisherProviderName, row.CreatedAt.Time, row.UpdatedAt.Time))
+			row.PublisherProviderName, row.CreatedAt.Time, row.UpdatedAt.Time)
+		if summary, ok := summaries[row.ID]; ok {
+			model.ProviderSummary = &summary
+		}
+		result = append(result, model)
 	}
 	return result, nil
 }

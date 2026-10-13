@@ -40,8 +40,14 @@ export interface Model {
   remark: string
   publisherProviderId: string | null
   publisherProviderName: string | null
+  providerSummary?: ModelProviderSummary | null
   createdAt: string
   updatedAt: string
+}
+export interface ModelProviderSummary {
+  count: number
+  providerName: string
+  priority: number
 }
 export type Modality = 'TEXT' | 'IMAGE' | 'AUDIO' | 'VIDEO'
 export interface Provider {
