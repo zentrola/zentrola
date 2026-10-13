@@ -297,7 +297,7 @@ function savePriorities() {
                       :aria-label="t('models.providerPrioritiesFor', { name: model.name })"
                       @click="openPriorities(model)"
                     >
-                      {{ t('models.provider') }}
+                      {{ t('models.providerEntry') }}
                     </button>
                   </div>
                 </div>

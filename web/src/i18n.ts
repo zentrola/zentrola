@@ -624,6 +624,7 @@ export const i18n = createI18n({
         edit: '编辑模型',
         providerPriorities: '服务商优先级',
         providerPrioritiesFor: '{name} 的服务商优先级',
+        providerEntry: '服务提供商',
         provider: '服务商',
         routingStatus: '选路状态',
         priority: '优先级',

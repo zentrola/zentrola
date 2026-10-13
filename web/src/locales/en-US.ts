@@ -604,6 +604,7 @@ export default {
     edit: 'Edit model',
     providerPriorities: 'Provider priority',
     providerPrioritiesFor: 'Provider priority for {name}',
+    providerEntry: 'Service providers',
     provider: 'Provider',
     routingStatus: 'Routing status',
     priority: 'Priority',
