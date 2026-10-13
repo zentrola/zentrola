@@ -57,7 +57,7 @@ type ProviderMappingRequest struct {
 	ModelID           int64  `json:"modelId,string" binding:"required"`
 	UpstreamModelCode string `json:"upstreamModelCode"`
 	// Priority 仅兼容旧客户端请求，服务商写入时忽略；请使用模型优先级接口。
-	Priority          int32  `json:"priority,omitempty"`
+	Priority int32 `json:"priority,omitempty"`
 }
 
 type ModelProviderPriorityRequest struct {

@@ -3,9 +3,12 @@ package postgres
 import (
 	"bytes"
 	"context"
+	"io/fs"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/pressly/goose/v3"
 	mgmt "github.com/zentrola/zentrola/internal/application/management"
 	"github.com/zentrola/zentrola/internal/infrastructure/postgres/dbgen"
 )
@@ -93,8 +96,18 @@ func TestManageKeysExpiryFilterIntegration(t *testing.T) {
 }
 
 func TestRevokedKeyExpiryMigrationIntegration(t *testing.T) {
-	ctx, pool, _ := integrationDatabase(t)
-	if _, err := pool.Exec(ctx, `DELETE FROM goose_db_version WHERE version_id=53 AND is_applied`); err != nil {
+	ctx, pool, _ := isolatedDatabase(t)
+	db := stdlib.OpenDBFromPool(pool)
+	defer db.Close()
+	source, err := fs.Sub(migrations, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, err := goose.NewProvider(goose.DialectPostgres, db, source, goose.WithDisableGlobalRegistry(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.UpTo(ctx, 52); err != nil {
 		t.Fatal(err)
 	}
 	revokedAt := time.Date(2026, time.October, 9, 8, 0, 0, 0, time.UTC)

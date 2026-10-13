@@ -166,12 +166,14 @@ func TestStage3Integration(t *testing.T) {
 			{ModelID: model.ID, UpstreamModelCode: "vendor-model-v2"},
 		},
 	}
+	request("POST", "/api/v1/providers", httptransport.NewProviderRequest(customProviderInput), 400)
+	request("PATCH", "/api/v1/models/"+sid(mappedModel.ID)+"/status", map[string]string{"status": "ACTIVE"}, 200)
 	customProvider := stage3Data[mgmt.Provider](t, request("POST", "/api/v1/providers", httptransport.NewProviderRequest(customProviderInput), 201))
 	providers = stage3Data[struct {
 		Items []mgmt.Provider `json:"items"`
 	}](t, request("GET", "/api/v1/providers", nil, 200)).Items
-	if len(providers) != 1 || providers[0].ID != customProvider.ID || providers[0].ModelCount != 1 {
-		t.Fatalf("provider model count=%+v, want one active mapped model", providers)
+	if len(providers) != 1 || providers[0].ID != customProvider.ID || providers[0].ModelCount != 2 {
+		t.Fatalf("provider model count=%+v, want two active mapped models", providers)
 	}
 	missingCredential := request("PATCH", "/api/v1/providers/"+sid(customProvider.ID)+"/status", map[string]string{"status": "ACTIVE"}, 409)
 	if !strings.Contains(missingCredential.Body.String(), `"code":"PROVIDER_CREDENTIAL_REQUIRED"`) {
@@ -196,7 +198,9 @@ func TestStage3Integration(t *testing.T) {
 	if len(providerDetail.Mappings) != 2 || providerDetail.Mappings[0].ModelID != mappedModel.ID || providerDetail.Mappings[0].UpstreamModelCode != "vendor-model-v1" || providerDetail.Mappings[0].Priority != 100 {
 		t.Fatalf("unexpected provider mappings: %+v", providerDetail.Mappings)
 	}
-	if len(providerDetail.Models) != 1 || providerDetail.Models[0].ID != model.ID {
+	if len(providerDetail.Models) != 2 ||
+		!((providerDetail.Models[0].ID == mappedModel.ID && providerDetail.Models[1].ID == model.ID) ||
+			(providerDetail.Models[0].ID == model.ID && providerDetail.Models[1].ID == mappedModel.ID)) {
 		t.Fatalf("unexpected provider models: %+v", providerDetail.Models)
 	}
 	mappingID := providerDetail.Mappings[0].ID
@@ -206,10 +210,9 @@ func TestStage3Integration(t *testing.T) {
 	providers = stage3Data[struct {
 		Items []mgmt.Provider `json:"items"`
 	}](t, request("GET", "/api/v1/providers", nil, 200)).Items
-	if len(providers) != 1 || providers[0].ModelCount != 0 {
-		t.Fatalf("provider model count=%+v, want zero active mapped models", providers)
+	if len(providers) != 1 || providers[0].ModelCount != 1 {
+		t.Fatalf("provider model count=%+v, want one active mapped model", providers)
 	}
-	request("PATCH", "/api/v1/models/"+sid(mappedModel.ID)+"/status", map[string]string{"status": "ACTIVE"}, 200)
 	providerDetail = stage3Data[mgmt.ProviderDetail](t, request("GET", customProviderPath, nil, 200))
 	if len(providerDetail.Mappings) != 1 || providerDetail.Mappings[0].ID != mappingID || providerDetail.Mappings[0].UpstreamModelCode != "" {
 		t.Fatalf("provider mapping update not preserved: %+v", providerDetail.Mappings)
