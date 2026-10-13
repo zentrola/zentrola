@@ -1740,47 +1740,6 @@ func (q *Queries) ManageModelProviderMappings(ctx context.Context, modelID int64
 	return items, nil
 }
 
-const manageModelProviderSummaries = `-- name: ManageModelProviderSummaries :many
-SELECT DISTINCT ON (pm.model_id) pm.model_id,p.provider_name,pm.priority,
-       COUNT(*) OVER (PARTITION BY pm.model_id)::bigint AS provider_count
-FROM provider_model pm
-JOIN provider p ON p.id=pm.provider_id AND NOT p.is_deleted
-WHERE pm.model_id=ANY($1::bigint[]) AND NOT pm.is_deleted
-ORDER BY pm.model_id,pm.priority,pm.provider_id
-`
-
-type ManageModelProviderSummariesRow struct {
-	ModelID       int64
-	ProviderName  string
-	Priority      int32
-	ProviderCount int64
-}
-
-func (q *Queries) ManageModelProviderSummaries(ctx context.Context, modelIds []int64) ([]ManageModelProviderSummariesRow, error) {
-	rows, err := q.db.Query(ctx, manageModelProviderSummaries, modelIds)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ManageModelProviderSummariesRow{}
-	for rows.Next() {
-		var i ManageModelProviderSummariesRow
-		if err := rows.Scan(
-			&i.ModelID,
-			&i.ProviderName,
-			&i.Priority,
-			&i.ProviderCount,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const manageModelStatus = `-- name: ManageModelStatus :exec
 UPDATE model SET status=$2,updated_by=$3,updated_at=$4 WHERE id=$1 AND is_deleted=false
 `

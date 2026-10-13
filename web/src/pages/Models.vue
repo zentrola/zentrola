@@ -180,7 +180,6 @@ async function openPriorities(model: Model) {
       ...mapping,
       draft: String(mapping.priority),
     }))
-    updateProviderSummary(model, mappings)
   } catch (error) {
     if (version !== priorityLoadVersion || priorityTarget.value?.id !== model.id) return
     priorityError.value = errorText(error)
@@ -191,23 +190,6 @@ async function openPriorities(model: Model) {
 function closePriorities() {
   priorityLoadVersion++
   priorityTarget.value = null
-}
-function updateProviderSummary(model: Model, mappings: ModelProviderMapping[]) {
-  const first = [...mappings].sort(
-    (a, b) =>
-      a.priority - b.priority ||
-      (BigInt(a.providerId) < BigInt(b.providerId)
-        ? -1
-        : BigInt(a.providerId) > BigInt(b.providerId)
-          ? 1
-          : 0),
-  )[0]
-  const summary = first
-    ? { count: mappings.length, providerName: first.providerName, priority: first.priority }
-    : null
-  model.providerSummary = summary
-  const listModel = items.value.find((candidate) => candidate.id === model.id)
-  if (listModel && listModel !== model) listModel.providerSummary = summary
 }
 function savePriorities() {
   if (!priorityTarget.value) return
@@ -225,8 +207,7 @@ function savePriorities() {
       updatedAt: row.updatedAt,
     })),
   })
-    .then((mappings) => {
-      updateProviderSummary(model, mappings)
+    .then(() => {
       closePriorities()
     })
     .catch((error) => {
@@ -316,18 +297,7 @@ function savePriorities() {
                       :aria-label="t('models.providerPrioritiesFor', { name: model.name })"
                       @click="openPriorities(model)"
                     >
-                      <template v-if="model.providerSummary">
-                        <span class="model-provider-name">{{
-                          model.providerSummary.providerName
-                        }}</span>
-                        <span v-if="model.providerSummary.count > 1" class="model-provider-count">{{
-                          t('models.moreProviders', { count: model.providerSummary.count - 1 })
-                        }}</span>
-                        <span v-else class="model-provider-priority">{{
-                          t('models.priorityValue', { value: model.providerSummary.priority })
-                        }}</span>
-                      </template>
-                      <template v-else>{{ t('models.configureProviders') }}</template>
+                      {{ t('models.provider') }}
                     </button>
                   </div>
                 </div>
@@ -670,16 +640,6 @@ function savePriorities() {
 .model-provider-trigger:disabled {
   opacity: 0.55;
   cursor: default;
-}
-.model-provider-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.model-provider-count,
-.model-provider-priority {
-  flex: none;
-  color: var(--muted);
 }
 .model-priority-hint {
   margin: 0 0 14px;
