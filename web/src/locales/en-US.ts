@@ -606,7 +606,7 @@ export default {
     providerPrioritiesFor: 'Provider priority for {name}',
     providerEntry: 'Service providers',
     provider: 'Provider',
-    routingStatus: 'Routing status',
+    routingStatus: 'Status',
     priority: 'Priority',
     priorityHint:
       'Lower numbers are tried first. Use 1–100; new mappings default to 100. Ties use ascending provider ID.',
@@ -618,7 +618,7 @@ export default {
     providerDisabled: 'Provider disabled',
     providerNoEndpoint: 'No compatible endpoint',
     providerNoResource: 'No currently available account',
-    providerAvailable: 'Available for routing',
+    providerAvailable: 'Available',
     name: 'Model name',
     code: 'Model code',
     publisher: 'Publisher',

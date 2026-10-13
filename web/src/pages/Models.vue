@@ -191,6 +191,15 @@ function closePriorities() {
   priorityLoadVersion++
   priorityTarget.value = null
 }
+function providerRoutingAvailable(row: ModelProviderMapping) {
+  return row.providerStatus === 'ACTIVE' && row.endpointConfigured && row.resourceAvailable
+}
+function providerRoutingStatus(row: ModelProviderMapping) {
+  if (row.providerStatus !== 'ACTIVE') return t('models.providerDisabled')
+  if (!row.endpointConfigured) return t('models.providerNoEndpoint')
+  if (!row.resourceAvailable) return t('models.providerNoResource')
+  return t('models.providerAvailable')
+}
 function savePriorities() {
   if (!priorityTarget.value) return
   const model = priorityTarget.value
@@ -504,7 +513,6 @@ function savePriorities() {
     v-if="priorityTarget"
     :title="t('models.providerPrioritiesFor', { name: priorityTarget.name })"
     :busy="prioritySaving"
-    medium
     @close="closePriorities"
   >
     <p class="model-priority-hint">{{ t('models.priorityHint') }}</p>
@@ -524,44 +532,44 @@ function savePriorities() {
       {{ t('models.noProviderMappings') }}
       <RouterLink to="/providers">{{ t('models.configureProviderMappings') }}</RouterLink>
     </p>
-    <div v-else-if="priorityRows.length" class="model-priority-list">
-      <div class="model-priority-head" aria-hidden="true">
-        <span>{{ t('models.provider') }}</span>
-        <span>{{ t('models.routingStatus') }}</span>
-        <span>{{ t('models.priority') }}</span>
-      </div>
-      <div v-for="row in priorityRows" :key="row.id" class="model-priority-row">
-        <div class="model-priority-provider">
-          <strong>{{ row.providerName }}</strong>
-          <small>ID: {{ row.providerId }}</small>
-        </div>
-        <span
-          class="model-priority-status"
-          :class="{
-            available:
-              row.providerStatus === 'ACTIVE' && row.endpointConfigured && row.resourceAvailable,
-          }"
-        >
-          {{
-            row.providerStatus !== 'ACTIVE'
-              ? t('models.providerDisabled')
-              : !row.endpointConfigured
-                ? t('models.providerNoEndpoint')
-                : !row.resourceAvailable
-                  ? t('models.providerNoResource')
-                  : t('models.providerAvailable')
-          }}
-        </span>
-        <input
-          v-model="row.draft"
-          type="text"
-          inputmode="numeric"
-          pattern="[0-9]*"
-          :disabled="prioritySaving || row.providerStatus !== 'ACTIVE'"
-          :aria-label="t('models.priorityForProvider', { name: row.providerName })"
-        />
-      </div>
-    </div>
+    <table v-else-if="priorityRows.length" class="model-priority-table">
+      <colgroup>
+        <col class="model-priority-provider-column" />
+        <col class="model-priority-status-column" />
+        <col class="model-priority-value-column" />
+      </colgroup>
+      <thead>
+        <tr>
+          <th scope="col">{{ t('models.provider') }}</th>
+          <th scope="col">{{ t('models.routingStatus') }}</th>
+          <th scope="col">{{ t('models.priority') }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="row in priorityRows" :key="row.id">
+          <td class="model-priority-provider" :title="row.providerName">
+            <strong>{{ row.providerName }}</strong>
+          </td>
+          <td
+            class="model-priority-status"
+            :class="{ available: providerRoutingAvailable(row) }"
+            :title="providerRoutingStatus(row)"
+          >
+            {{ providerRoutingStatus(row) }}
+          </td>
+          <td class="model-priority-value">
+            <input
+              v-model="row.draft"
+              type="text"
+              inputmode="numeric"
+              pattern="[0-9]*"
+              :disabled="prioritySaving || row.providerStatus !== 'ACTIVE'"
+              :aria-label="t('models.priorityForProvider', { name: row.providerName })"
+            />
+          </td>
+        </tr>
+      </tbody>
+    </table>
     <template #footer>
       <button type="button" class="button" :disabled="prioritySaving" @click="closePriorities">
         {{ t('common.cancel') }}
@@ -647,57 +655,58 @@ function savePriorities() {
   font-size: 13px;
   line-height: 1.5;
 }
-.model-priority-list {
-  display: grid;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  overflow: hidden;
+.model-priority-table {
+  table-layout: fixed;
 }
-.model-priority-head,
-.model-priority-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) 90px;
-  align-items: center;
-  gap: 16px;
-  padding: 10px 14px;
+.model-priority-provider-column {
+  width: 44%;
 }
-.model-priority-head {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 600;
+.model-priority-status-column {
+  width: 32%;
 }
-.model-priority-head span:last-child {
-  text-align: center;
+.model-priority-value-column {
+  width: 24%;
 }
-.model-priority-row + .model-priority-row {
-  border-top: 1px solid var(--color-border);
+.model-priority-table th {
+  padding: 8px;
+  border-top: 0;
+  background: transparent;
 }
-.model-priority-row {
-  min-height: 60px;
+.model-priority-table td {
+  height: 56px;
+  padding: 8px;
 }
-.model-priority-provider {
-  display: grid;
-  min-width: 0;
+.model-priority-table th:first-child,
+.model-priority-table td:first-child {
+  padding-left: 0;
 }
-.model-priority-provider strong {
+.model-priority-table th:last-child,
+.model-priority-table td:last-child {
+  padding-right: 0;
+  text-align: right;
+}
+.model-priority-provider,
+.model-priority-status {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.model-priority-provider small {
-  color: var(--muted);
+.model-priority-provider strong {
+  color: var(--color-text);
+  font-size: 13px;
 }
 .model-priority-status {
   color: var(--color-text-secondary);
   font-size: 12px;
 }
 .model-priority-status.available {
-  color: var(--color-success);
+  color: #047857;
 }
-.model-priority-row input {
-  width: 76px;
-  margin: 0;
-  justify-self: center;
+.model-priority-value input {
+  width: 64px;
+  min-height: 36px;
+  padding: 6px 8px;
+  font-size: 14px;
   text-align: center;
 }
 .model-publisher-filter {
@@ -804,24 +813,6 @@ function savePriorities() {
   font-size: 12px;
 }
 @media (max-width: 640px) {
-  .model-priority-head {
-    display: none;
-  }
-  .model-priority-row {
-    grid-template-columns: minmax(0, 1fr) 76px;
-    gap: 4px 12px;
-  }
-  .model-priority-provider {
-    grid-column: 1;
-  }
-  .model-priority-status {
-    grid-column: 1;
-    grid-row: 2;
-  }
-  .model-priority-row input {
-    grid-column: 2;
-    grid-row: 1 / span 2;
-  }
   .model-publisher-filter {
     width: 100%;
   }
