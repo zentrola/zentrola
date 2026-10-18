@@ -499,3 +499,37 @@ func (q *Queries) UpdateGatewayResourceCredentialRefreshMetadata(ctx context.Con
 	}
 	return result.RowsAffected(), nil
 }
+
+const updateGatewayResourceQuota = `-- name: UpdateGatewayResourceQuota :execrows
+UPDATE provider_credential
+SET quota_status=$1,quota_checked_at=$2,
+    quota_resets_at=$3
+WHERE id=$4 AND provider_id=$5 AND NOT is_deleted
+  AND auth_type='SUBSCRIPTION' AND auth_adapter=$6
+  AND (quota_checked_at IS NULL OR quota_checked_at<=$2)
+`
+
+type UpdateGatewayResourceQuotaParams struct {
+	QuotaStatus    string
+	QuotaCheckedAt pgtype.Timestamptz
+	QuotaResetsAt  pgtype.Timestamptz
+	ResourceID     int64
+	ProviderID     int64
+	AuthAdapter    string
+}
+
+// 被动观测的额度不是配置变更：不递增 version，避免与管理端乐观锁冲突；只接受比已记录更新的观测。
+func (q *Queries) UpdateGatewayResourceQuota(ctx context.Context, arg UpdateGatewayResourceQuotaParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateGatewayResourceQuota,
+		arg.QuotaStatus,
+		arg.QuotaCheckedAt,
+		arg.QuotaResetsAt,
+		arg.ResourceID,
+		arg.ProviderID,
+		arg.AuthAdapter,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}

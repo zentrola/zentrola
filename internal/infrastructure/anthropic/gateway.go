@@ -22,6 +22,18 @@ type GatewayClient struct {
 	client        *http.Client
 	privateClient *http.Client
 	logger        *slog.Logger
+	observer      SubscriptionResponseObserver
+}
+
+// SubscriptionResponseObserver 旁路观测 Claude 订阅的原始上游响应头（如统一限额），
+// 不得阻塞或影响转发。兼容协议转换会移除这些头，因此必须在上游客户端处观测。
+type SubscriptionResponseObserver interface {
+	ObserveResponse(ctx context.Context, route gw.Route, status int, header http.Header)
+}
+
+// ObserveSubscriptionResponses 在启动阶段设置订阅响应观测器，必须在处理请求前调用。
+func (c *GatewayClient) ObserveSubscriptionResponses(observer SubscriptionResponseObserver) {
+	c.observer = observer
 }
 
 func NewGatewayClient(headerTimeout time.Duration, loggers ...*slog.Logger) *GatewayClient {
@@ -205,6 +217,9 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 		resp.Body.Close()
 		cleanup()
 		return nil, gw.ErrUpstream
+	}
+	if claudeSubscription && c.observer != nil {
+		c.observer.ObserveResponse(ctx, route, resp.StatusCode, resp.Header)
 	}
 	return &gw.Response{Status: resp.StatusCode, Headers: resp.Header, Body: &gatewayBody{ReadCloser: resp.Body, sentHeaders: sentHeaders, cleanup: cleanup}}, nil
 }

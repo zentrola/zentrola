@@ -502,6 +502,8 @@ type ConnectionResult struct {
 	TestedModelID           int64                  `json:"testedModelId,string,omitempty"`
 	TestedModelCode         string                 `json:"testedModelCode,omitempty"`
 	ResetCredits            *RateLimitResetCredits `json:"resetCredits,omitempty"`
+	// ObservedQuotas 是推理探测从响应中观测到的订阅额度，仅用于持久化，不对外返回。
+	ObservedQuotas []ResourceQuota `json:"-"`
 }
 
 type ResetCreditConsumeResult struct {

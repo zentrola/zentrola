@@ -831,7 +831,99 @@ func TestClaudeSubscriptionConnectionUsesInferenceInsteadOfUsage(t *testing.T) {
 		t.Fatalf("unexpected tested model metadata: %+v", result)
 	}
 	if writer.updated.QuotaCheckedAt != nil || len(writer.quotas) != 0 {
-		t.Fatalf("inference test must not claim quota was refreshed: %+v", writer.updated.Resource)
+		t.Fatalf("inference test without observed quota must not claim quota was refreshed: %+v", writer.updated.Resource)
+	}
+}
+
+func TestClaudeSubscriptionConnectionRecordsObservedQuotas(t *testing.T) {
+	reset := time.Date(2026, 10, 18, 8, 0, 0, 0, time.UTC)
+	used := 100.0
+	exhausted := []ResourceQuota{
+		{Code: "subscription", Status: QuotaExhausted, ResetsAt: &reset},
+		{Code: "five_hour", Status: QuotaExhausted, UsedPercent: &used, ResetsAt: &reset},
+	}
+	available := []ResourceQuota{
+		{Code: "subscription", Status: QuotaAvailable},
+		{Code: "five_hour", Status: QuotaAvailable, ResetsAt: &reset},
+	}
+	tests := []struct {
+		name           string
+		result         ConnectionResult
+		changeResource bool
+		wantCode       string
+		wantStatus     string
+		wantRestored   bool
+		wantRecorded   bool
+	}{
+		{
+			name:     "successful inference",
+			result:   ConnectionResult{OK: true, Code: "OK", HTTPStatus: 200, ObservedQuotas: available},
+			wantCode: "OK", wantStatus: QuotaAvailable, wantRestored: true, wantRecorded: true,
+		},
+		{
+			name:     "rate limited inference marks quota exhausted",
+			result:   ConnectionResult{Code: "UPSTREAM_RATE_LIMITED", HTTPStatus: 429, ObservedQuotas: exhausted},
+			wantCode: "UPSTREAM_RATE_LIMITED", wantStatus: QuotaExhausted, wantRecorded: true,
+		},
+		{
+			name:     "served inference is not marked exhausted",
+			result:   ConnectionResult{OK: true, Code: "OK", HTTPStatus: 200, ObservedQuotas: exhausted},
+			wantCode: "OK", wantStatus: QuotaNearLimit, wantRestored: true, wantRecorded: true,
+		},
+		{
+			name:           "resource changed during test",
+			result:         ConnectionResult{OK: true, Code: "OK", HTTPStatus: 200, ObservedQuotas: available},
+			changeResource: true, wantCode: "RESOURCE_CHANGED", wantStatus: QuotaUnknown,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			writer := &resourceTestWriter{
+				resource: ResourceRecord{
+					Resource: Resource{
+						ID: 48, ProviderID: 40, Name: "Claude 订阅", Version: 3,
+						AuthType: AuthTypeSubscription, AuthAdapter: AuthAdapterClaudeCode,
+						QuotaStatus: QuotaUnknown, RuntimeStatus: "BLOCKED",
+					},
+					Sealed: catalog.SealedCredential{Ciphertext: []byte("setup-token"), KeyVersion: 1},
+				},
+				provider: Provider{
+					ID: 40, Code: catalog.AnthropicOfficialCode,
+					Endpoints: []ProviderEndpoint{{ProtocolType: "ANTHROPIC", BaseURL: "https://api.anthropic.com"}},
+				},
+				model:    Model{ID: 90, Code: "claude-test", Status: "ACTIVE"},
+				mappings: []ProviderMapping{{ID: 1, ProviderID: 40, ModelID: 90, UpstreamModelCode: "claude-test"}},
+			}
+			checkedAt := time.Date(2026, 10, 18, 3, 20, 0, 0, time.FixedZone("UTC+8", 8*3600))
+			service := New(resourceTestStore{writer: writer}, nil, providerTestCipher{}, connectionTesterFunc(
+				func(context.Context, ConnectionTarget, []byte, *catalog.OutboundProxy) ConnectionResult {
+					if test.changeResource {
+						writer.resource.Version++
+					}
+					return test.result
+				},
+			), WithSubscriptionAdapter(claudeSubscriptionAdapterStub{}), WithClock(func() time.Time { return checkedAt }))
+
+			result, err := service.TestResource(context.Background(), admin.Identity{ID: 1}, 48, appsec.RequestMeta{})
+			if err != nil || result.Code != test.wantCode || writer.restored != test.wantRestored {
+				t.Fatalf("result=%+v restored=%v err=%v", result, writer.restored, err)
+			}
+			if writer.resource.QuotaStatus != test.wantStatus {
+				t.Fatalf("quota status = %s, want %s", writer.resource.QuotaStatus, test.wantStatus)
+			}
+			if !test.wantRecorded {
+				if writer.resource.QuotaCheckedAt != nil || len(writer.quotas) != 0 {
+					t.Fatalf("quota must not be recorded: %+v quotas=%+v", writer.resource.Resource, writer.quotas)
+				}
+				return
+			}
+			if writer.resource.QuotaCheckedAt == nil || !writer.resource.QuotaCheckedAt.Equal(checkedAt) ||
+				writer.resource.QuotaCheckedAt.Location() != time.UTC ||
+				writer.resource.QuotaResetsAt == nil || !writer.resource.QuotaResetsAt.Equal(reset) ||
+				len(writer.quotas) != len(test.result.ObservedQuotas) {
+				t.Fatalf("unexpected recorded quota: %+v quotas=%+v", writer.resource.Resource, writer.quotas)
+			}
+		})
 	}
 }
 

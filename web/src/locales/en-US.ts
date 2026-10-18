@@ -895,7 +895,7 @@ export default {
     },
     addCredential: 'Add credential',
     listHint:
-      'Only non-sensitive details are shown after saving. OpenAI personal subscriptions can be exported as auth.json, and their connection test refreshes quota data. Claude subscription connection tests call the selected model.',
+      'Only non-sensitive details are shown after saving. OpenAI personal subscriptions can be exported as auth.json, and their connection test refreshes quota data. Claude subscription connection tests call the selected model; quota data comes from the unified rate limits in inference responses and is also synced periodically from gateway traffic.',
     emptyCredentials: 'No credentials yet',
     emptyCredentialsHint: 'Select Add credential to add an API key or supported subscription.',
     provider: 'Provider',
@@ -987,7 +987,7 @@ export default {
     subscriptionTestHint:
       'Verifies subscription authentication through the ChatGPT quota endpoint. On success, it updates quota status, quota reset time, and check time without making a model request.',
     claudeSubscriptionTestHint:
-      'Sends one minimal real request with the long-lived OAuth token and selected model. This may incur a small upstream charge. This test does not refresh quota data.',
+      'Sends one minimal real request with the long-lived OAuth token and selected model. This may incur a small upstream charge. Quota status, quota reset time, and check time are updated from the unified rate limits in the response, including when the request is rate-limited.',
     syncModels: 'Sync models',
     syncingModels: 'Reading the model catalog…',
     syncPassed: 'Model catalog synchronized',

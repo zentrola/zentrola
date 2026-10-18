@@ -223,6 +223,10 @@ func (t *ConnectionTester) Test(ctx context.Context, target mgmt.ConnectionTarge
 	}
 	defer resp.Body.Close()
 	result.HTTPStatus = resp.StatusCode
+	if oauthBearer {
+		// 限流拒绝同样携带统一限额头，失败响应也要记录，以便额度耗尽时停止路由。
+		result.ObservedQuotas = anthropicclaude.RateLimitQuotas(resp.Header, time.Now())
+	}
 	data, readErr := io.ReadAll(io.LimitReader(resp.Body, (64<<10)+1))
 	if readErr != nil {
 		result.Code = connectionErrorCode(ctx, readErr, proxy)
@@ -242,6 +246,9 @@ func (t *ConnectionTester) Test(ctx context.Context, target mgmt.ConnectionTarge
 	}
 	result.OK = true
 	result.Code = "OK"
+	if oauthBearer && result.ObservedQuotas == nil {
+		result.ObservedQuotas = anthropicclaude.AvailableQuotas(time.Now())
+	}
 	return
 }
 

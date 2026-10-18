@@ -92,6 +92,58 @@ func TestGatewayClientUsesBearerForClaudeSubscription(t *testing.T) {
 	}
 }
 
+type subscriptionObserverStub struct {
+	routes   []gw.Route
+	statuses []int
+	headers  []http.Header
+}
+
+func (o *subscriptionObserverStub) ObserveResponse(_ context.Context, route gw.Route, status int, header http.Header) {
+	o.routes = append(o.routes, route)
+	o.statuses = append(o.statuses, status)
+	o.headers = append(o.headers, header)
+}
+
+func TestGatewayClientObservesClaudeSubscriptionResponses(t *testing.T) {
+	tests := []struct {
+		name   string
+		route  gw.Route
+		status int
+		want   bool
+	}{
+		{name: "Claude subscription success", route: gw.Route{ResourceID: 9, BaseURL: "https://api.anthropic.com", NetworkScope: "PUBLIC", AuthType: "SUBSCRIPTION", AuthAdapter: anthropicclaude.AdapterCode}, status: 200, want: true},
+		{name: "Claude subscription rate limited", route: gw.Route{ResourceID: 9, BaseURL: "https://api.anthropic.com", NetworkScope: "PUBLIC", AuthType: "SUBSCRIPTION", AuthAdapter: anthropicclaude.AdapterCode}, status: 429, want: true},
+		{name: "API key", route: gw.Route{ResourceID: 9, AuthType: "API_KEY", BaseURL: "https://api.anthropic.com", NetworkScope: "PUBLIC"}, status: 200},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client := NewGatewayClient(time.Second)
+			observer := &subscriptionObserverStub{}
+			client.ObserveSubscriptionResponses(observer)
+			client.client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+				header := http.Header{"Anthropic-Ratelimit-Unified-5h-Utilization": {"0.5"}}
+				return &http.Response{StatusCode: test.status, Header: header, Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+			})
+			credential := []byte("sk-ant-oat01-test")
+			response, err := client.Open(context.Background(), test.route, gw.Request{Path: "/v1/messages", Body: []byte(`{}`)}, credential)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = response.Body.Close()
+			if !test.want {
+				if len(observer.routes) != 0 {
+					t.Fatalf("unexpected observation: %+v", observer.routes)
+				}
+				return
+			}
+			if len(observer.routes) != 1 || observer.routes[0].ResourceID != 9 || observer.statuses[0] != test.status ||
+				observer.headers[0].Get("anthropic-ratelimit-unified-5h-utilization") != "0.5" {
+				t.Fatalf("observations = %+v statuses=%v headers=%v", observer.routes, observer.statuses, observer.headers)
+			}
+		})
+	}
+}
+
 func TestGatewayClientTimeoutAndRedirect(t *testing.T) {
 	var hits atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -87,6 +87,15 @@ WHERE id=sqlc.arg(resource_id) AND provider_id=sqlc.arg(provider_id) AND NOT is_
   AND credential_nonce=sqlc.arg(expected_credential_nonce)
   AND key_version=sqlc.arg(expected_key_version);
 
+-- name: UpdateGatewayResourceQuota :execrows
+-- 被动观测的额度不是配置变更：不递增 version，避免与管理端乐观锁冲突；只接受比已记录更新的观测。
+UPDATE provider_credential
+SET quota_status=sqlc.arg(quota_status),quota_checked_at=sqlc.arg(quota_checked_at),
+    quota_resets_at=sqlc.narg(quota_resets_at)
+WHERE id=sqlc.arg(resource_id) AND provider_id=sqlc.arg(provider_id) AND NOT is_deleted
+  AND auth_type='SUBSCRIPTION' AND auth_adapter=sqlc.arg(auth_adapter)
+  AND (quota_checked_at IS NULL OR quota_checked_at<=sqlc.arg(quota_checked_at));
+
 -- name: GatewayResourceCredential :one
 SELECT credential_ciphertext,credential_nonce,key_version
 FROM provider_credential

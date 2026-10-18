@@ -131,6 +131,83 @@ func TestClaudeSubscriptionConnectionUsesOAuthBearer(t *testing.T) {
 	}
 }
 
+func TestClaudeSubscriptionConnectionObservesUnifiedRateLimits(t *testing.T) {
+	success := `{"type":"message","content":[{"type":"text","text":"OK"}]}`
+	tests := []struct {
+		name       string
+		status     int
+		body       string
+		headers    map[string]string
+		wantOK     bool
+		wantQuotas []string
+	}{
+		{
+			name: "successful inference with unified headers", status: 200, body: success, wantOK: true,
+			headers: map[string]string{
+				"anthropic-ratelimit-unified-status":         "allowed",
+				"anthropic-ratelimit-unified-5h-utilization": "0.5",
+				"anthropic-ratelimit-unified-5h-reset":       "1792000000",
+				"anthropic-ratelimit-unified-7d-utilization": "0.56",
+				"anthropic-ratelimit-unified-7d-reset":       "1792500000",
+			},
+			wantQuotas: []string{"subscription", "five_hour", "seven_day"},
+		},
+		{
+			name: "successful inference without unified headers", status: 200, body: success, wantOK: true,
+			wantQuotas: []string{"subscription"},
+		},
+		{
+			name: "rate limited inference keeps rejected window", status: 429,
+			body: `{"type":"error","error":{"type":"rate_limit_error","message":"limited"}}`,
+			headers: map[string]string{
+				"anthropic-ratelimit-unified-status":               "rejected",
+				"anthropic-ratelimit-unified-reset":                "1792000000",
+				"anthropic-ratelimit-unified-representative-claim": "five_hour",
+			},
+			wantQuotas: []string{"subscription", "five_hour"},
+		},
+		{name: "rate limited inference without unified headers", status: 429, body: `{}`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			tester := NewConnectionTester()
+			tester.client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+				header := make(http.Header)
+				for name, value := range test.headers {
+					header.Set(name, value)
+				}
+				return &http.Response{StatusCode: test.status, Body: io.NopCloser(strings.NewReader(test.body)), Header: header}, nil
+			})
+			result := tester.Test(context.Background(), mgmt.ConnectionTarget{
+				Protocol: "ANTHROPIC", BaseURL: "https://api.anthropic.com", UpstreamModelCode: "claude-sonnet-5-5",
+				AuthType: mgmt.AuthTypeSubscription, AuthAdapter: anthropicclaude.AdapterCode,
+			}, []byte("sk-ant-oat01-test"), nil)
+			if result.OK != test.wantOK || len(result.ObservedQuotas) != len(test.wantQuotas) {
+				t.Fatalf("result = %+v quotas=%+v", result, result.ObservedQuotas)
+			}
+			for index, code := range test.wantQuotas {
+				if result.ObservedQuotas[index].Code != code {
+					t.Fatalf("quota[%d] = %+v, want %s", index, result.ObservedQuotas[index], code)
+				}
+			}
+		})
+	}
+}
+
+func TestAPIKeyConnectionIgnoresUnifiedRateLimits(t *testing.T) {
+	tester := NewConnectionTester()
+	tester.client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+		header := http.Header{"Anthropic-Ratelimit-Unified-Status": {"allowed"}}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"type":"message","content":[{"type":"text","text":"OK"}]}`)), Header: header}, nil
+	})
+	result := tester.Test(context.Background(), mgmt.ConnectionTarget{
+		Protocol: "ANTHROPIC", BaseURL: "https://api.anthropic.com", UpstreamModelCode: "claude-sonnet-5-5", NetworkScope: "PUBLIC",
+	}, []byte("sk-ant-api-test"), nil)
+	if !result.OK || result.ObservedQuotas != nil {
+		t.Fatalf("API key result = %+v quotas=%+v", result, result.ObservedQuotas)
+	}
+}
+
 func TestOpenAIConnectionUsesRealInference(t *testing.T) {
 	tester := NewConnectionTester()
 	tester.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {

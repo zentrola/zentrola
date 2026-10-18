@@ -1444,6 +1444,56 @@ async function fixture(page: Page) {
         .flat()
         .find((mapping) => mapping.id === providerModelMappingId)
       const testedModel = models.find((model) => model.id === testedMapping?.modelId)
+      if (resource?.authAdapter === 'ANTHROPIC_CLAUDE_CODE' && !failedTest) {
+        // Claude 订阅额度来自推理响应头中的统一限额，连接测试成功后写入。
+        resource.quotaStatus = 'AVAILABLE'
+        resource.quotaCheckedAt = stamp
+        resource.quotaResetsAt = stamp
+        resource.quotaDetails = [
+          {
+            code: 'subscription',
+            name: 'Subscription',
+            status: 'AVAILABLE',
+            unit: null,
+            limitValue: null,
+            usedValue: null,
+            remainingValue: null,
+            usedPercent: null,
+            windowDurationSeconds: null,
+            resetsAt: null,
+            reachedType: null,
+            observedAt: stamp,
+          },
+          {
+            code: 'five_hour',
+            name: null,
+            status: 'AVAILABLE',
+            unit: 'PERCENT',
+            limitValue: null,
+            usedValue: null,
+            remainingValue: null,
+            usedPercent: 50,
+            windowDurationSeconds: 18000,
+            resetsAt: stamp,
+            reachedType: null,
+            observedAt: stamp,
+          },
+          {
+            code: 'seven_day',
+            name: null,
+            status: 'AVAILABLE',
+            unit: 'PERCENT',
+            limitValue: null,
+            usedValue: null,
+            remainingValue: null,
+            usedPercent: 56,
+            windowDurationSeconds: 604800,
+            resetsAt: stamp,
+            reachedType: null,
+            observedAt: stamp,
+          },
+        ]
+      }
       if (resource?.authAdapter === 'OPENAI_CODEX' && !failedTest) {
         resource.quotaStatus = 'AVAILABLE'
         resource.quotaCheckedAt = stamp
@@ -4751,7 +4801,7 @@ test('服务商支持个人订阅优先并保留 API Key 兜底', async ({ page 
   await modal(page).getByRole('button', { name: '保存', exact: true }).click()
   const credentialList = modal(page)
   await expect(credentialList).toContainText(
-    'OpenAI 个人订阅可导出为 auth.json，其连接测试会刷新额度。Claude 订阅连接测试会调用所选模型。',
+    'OpenAI 个人订阅可导出为 auth.json，其连接测试会刷新额度。Claude 订阅连接测试会调用所选模型，额度来自推理响应中的统一限额，网关转发请求时也会定期同步。',
   )
   await expect(credentialList.getByRole('columnheader')).toHaveText([
     '认证凭据',
@@ -5048,8 +5098,27 @@ test('Anthropic 官方渠道直接输入 Claude 个人订阅 Token', async ({ pa
   await selectionDialog.getByRole('button', { name: '开始测试' }).click()
   expect(new URL((await testRequest).url()).searchParams.get('providerModelMappingId')).toBe('96')
   await expect(modal(page).getByRole('status')).toContainText('模型调用验证通过')
-  await expect(modal(page)).toContainText('本次测试不刷新额度')
-  expect(state.resources[0].quotaCheckedAt).toBeNull()
+  await expect(modal(page)).toContainText('会根据响应中的统一限额更新额度状态')
+  expect(state.resources[0].quotaCheckedAt).toBe(stamp)
+  await modal(page).getByRole('button', { name: '关闭', exact: true }).last().click()
+
+  // 打开凭据弹窗只读取已记录的额度，不为刷新额度再次发起模型调用。
+  const automaticTests: string[] = []
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().includes('/test-connection'))
+      automaticTests.push(request.url())
+  })
+  const quotaDetailRequest = page.waitForRequest((request) =>
+    new URL(request.url()).pathname.endsWith(`/resources/${state.resources[0].id}/quotas`),
+  )
+  await providerRow.getByRole('button', { name: '管理 Anthropic 的认证凭据' }).click()
+  await quotaDetailRequest
+  const subscriptionRow = modal(page).getByRole('row').filter({ hasText: 'Anthropic 个人订阅' })
+  await expect(subscriptionRow).toContainText('5 小时窗口 · 剩余 50%')
+  await expect(subscriptionRow).toContainText('7 天窗口 · 剩余 44%')
+  await expect(subscriptionRow).not.toContainText('five_hour')
+  await expect(subscriptionRow.locator('.credential-quota-reset')).toHaveCount(2)
+  expect(automaticTests).toEqual([])
 })
 
 test('状态 switch 直接生效且危险操作仍需确认', async ({ page }) => {

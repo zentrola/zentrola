@@ -371,6 +371,33 @@ func (s *GatewayStore) UpdateResourceCredentialRefreshMetadata(ctx context.Conte
 	return nil
 }
 
+type resourceQuotaRecorder interface {
+	RecordResourceQuotas(context.Context, gw.Route, string, *time.Time, time.Time, []management.ResourceQuota) error
+}
+
+// RecordResourceQuotas 保存被动观测的订阅额度。只有可路由性变化时才失效缓存，
+// 避免高频额度观测反复清空全部路由缓存。
+func (s *GatewayStore) RecordResourceQuotas(ctx context.Context, route gw.Route, status string, resetsAt *time.Time, checkedAt time.Time, quotas []management.ResourceQuota) error {
+	next, ok := s.next.(resourceQuotaRecorder)
+	if !ok {
+		return gw.ErrUnavailable
+	}
+	if err := next.RecordResourceQuotas(ctx, route, status, resetsAt, checkedAt, quotas); err != nil {
+		return err
+	}
+	if quotaRoutable(route.QuotaStatus) != quotaRoutable(status) {
+		s.logger.InfoContext(ctx, "gateway resource quota updated; invalidating cache",
+			"change_type", "resource_quota_updated", "resource_id", route.ResourceID,
+			"provider_id", route.ProviderID, "quota_status", status)
+		s.cache.Clear(ctx, "resource_quota_updated")
+	}
+	return nil
+}
+
+func quotaRoutable(status string) bool {
+	return status == management.QuotaAvailable || status == management.QuotaNearLimit
+}
+
 func (s *GatewayStore) LoadResourceCredential(ctx context.Context, route gw.Route) (catalog.SealedCredential, error) {
 	next, ok := s.next.(gw.CredentialLoader)
 	if !ok {

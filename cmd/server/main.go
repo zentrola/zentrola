@@ -320,8 +320,10 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 	}
 	redisProbeCancel()
 	quotaService := quotaapp.New(postgres.NewQuotaStore(pool, logger), logger)
+	gatewayStore := gatewaycache.NewGatewayStore(postgres.NewGatewayStore(pool, logger), gatewayCache, logger)
+	anthropicClient.ObserveSubscriptionResponses(anthropicclaude.NewQuotaObserver(gatewayStore, logger))
 	gatewayService := gateway.New(
-		gatewaycache.NewGatewayStore(postgres.NewGatewayStore(pool, logger), gatewayCache, logger), credentials, compatibleUpstream,
+		gatewayStore, credentials, compatibleUpstream,
 		gateway.WithRouteState(routeState),
 		gateway.WithSessionRouteBinding(routeState),
 		gateway.WithTokenQuotaAdmission(quotaService),

@@ -141,7 +141,7 @@ func (s *ResourceService) TestResourceSelection(ctx context.Context, actor admin
 				if probe.Inspection.ExpiresAt != nil {
 					resource.ExpiresAt = probe.Inspection.ExpiresAt
 				}
-				resource.QuotaStatus, resource.QuotaResetsAt = aggregateQuota(probe.Quotas)
+				resource.QuotaStatus, resource.QuotaResetsAt = AggregateQuota(probe.Quotas)
 				now := businessTime(s.now)
 				resource.QuotaCheckedAt = &now
 				result.OK, result.Code = true, "OK"
@@ -229,6 +229,19 @@ func (s *ResourceService) TestResourceSelection(ctx context.Context, actor admin
 			}
 			expectedVersion++
 			if err := w.ReplaceResourceQuotas(auditCtx, id, subscriptionProbe.Quotas); err != nil {
+				return err
+			}
+		} else if current.Version == resource.Version && len(result.ObservedQuotas) > 0 {
+			// Claude 订阅的推理探测从响应头观测额度；限流拒绝时同样记录，使网关在重置前暂停路由。
+			checkedAt := businessTime(s.now)
+			current.QuotaStatus, current.QuotaResetsAt = ObservedQuotaStatus(result.ObservedQuotas, result.OK)
+			current.QuotaCheckedAt = &checkedAt
+			current.UpdatedAt = checkedAt
+			if err := w.UpdateResource(auditCtx, current); err != nil {
+				return err
+			}
+			expectedVersion++
+			if err := w.ReplaceResourceQuotas(auditCtx, id, result.ObservedQuotas); err != nil {
 				return err
 			}
 		}
@@ -363,7 +376,7 @@ func (s *ResourceService) ConsumeResourceResetCredit(ctx context.Context, actor 
 	if consumed.Probe.Inspection.ExpiresAt != nil {
 		resource.ExpiresAt = consumed.Probe.Inspection.ExpiresAt
 	}
-	resource.QuotaStatus, resource.QuotaResetsAt = aggregateQuota(consumed.Probe.Quotas)
+	resource.QuotaStatus, resource.QuotaResetsAt = AggregateQuota(consumed.Probe.Quotas)
 	checkedAt := businessTime(s.now)
 	resource.QuotaCheckedAt = &checkedAt
 	if refreshedSealed.KeyVersion != 0 {
@@ -418,7 +431,19 @@ func connectionBlockReason(code string) string {
 	}
 }
 
-func aggregateQuota(quotas []ResourceQuota) (string, *time.Time) {
+// ObservedQuotaStatus 汇总从推理响应观测到的额度。served 表示本次推理已成功返回：
+// 订阅额度用尽后上游仍可能以额外用量继续服务，此时不能标记为耗尽而停止路由，只标记为接近上限。
+func ObservedQuotaStatus(quotas []ResourceQuota, served bool) (string, *time.Time) {
+	status, resetsAt := AggregateQuota(quotas)
+	if served && status == QuotaExhausted {
+		status = QuotaNearLimit
+	}
+	return status, resetsAt
+}
+
+// AggregateQuota 把各额度窗口汇总为资源级状态与重置时间：任一窗口耗尽即视为耗尽，
+// 并取最晚的耗尽重置时间；否则取最早的重置时间。
+func AggregateQuota(quotas []ResourceQuota) (string, *time.Time) {
 	status := QuotaUnknown
 	var resetsAt *time.Time
 	exhaustedResetUnknown := false

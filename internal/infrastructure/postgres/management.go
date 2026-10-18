@@ -682,11 +682,15 @@ func (s *managementSession) DeleteResource(ctx context.Context, id int64, at tim
 	return rows > 0, err
 }
 func (s *managementSession) ReplaceResourceQuotas(ctx context.Context, id int64, quotas []mgmt.ResourceQuota) error {
-	if err := s.q.ManageDeleteResourceQuotas(ctx, id); err != nil {
+	return replaceResourceQuotas(ctx, s.q, id, quotas)
+}
+
+func replaceResourceQuotas(ctx context.Context, q *dbgen.Queries, id int64, quotas []mgmt.ResourceQuota) error {
+	if err := q.ManageDeleteResourceQuotas(ctx, id); err != nil {
 		return err
 	}
 	for _, quota := range quotas {
-		if err := s.q.ManageCreateResourceQuota(ctx, dbgen.ManageCreateResourceQuotaParams{
+		if err := q.ManageCreateResourceQuota(ctx, dbgen.ManageCreateResourceQuotaParams{
 			ProviderCredentialID: id, QuotaCode: quota.Code, QuotaName: quota.Name,
 			QuotaStatus: quota.Status, QuotaUnit: quota.Unit, LimitValue: pgNumeric(quota.LimitValue),
 			UsedValue: pgNumeric(quota.UsedValue), RemainingValue: pgNumeric(quota.RemainingValue),

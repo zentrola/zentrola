@@ -895,7 +895,7 @@ export const i18n = createI18n({
         },
         addCredential: '新增凭据',
         listHint:
-          '凭据保存后仅展示非敏感信息；OpenAI 个人订阅可导出为 auth.json，其连接测试会刷新额度。Claude 订阅连接测试会调用所选模型。',
+          '凭据保存后仅展示非敏感信息；OpenAI 个人订阅可导出为 auth.json，其连接测试会刷新额度。Claude 订阅连接测试会调用所选模型，额度来自推理响应中的统一限额，网关转发请求时也会定期同步。',
         emptyCredentials: '暂无认证凭据',
         emptyCredentialsHint: '点击“新增凭据”添加 API Key 或支持的订阅认证。',
         provider: '服务商',
@@ -983,7 +983,7 @@ export const i18n = createI18n({
         subscriptionTestHint:
           '通过 ChatGPT 额度接口验证订阅认证；成功后会更新额度状态、额度重置时间和检查时间，不会发起模型调用。',
         claudeSubscriptionTestHint:
-          '使用长期 OAuth Token 和所选模型发送一次最小真实请求，可能产生极少量上游费用；本次测试不刷新额度。',
+          '使用长期 OAuth Token 和所选模型发送一次最小真实请求，可能产生极少量上游费用；会根据响应中的统一限额更新额度状态、额度重置时间和检查时间，被限流时同样更新。',
         syncModels: '同步模型',
         syncingModels: '正在读取模型目录…',
         syncPassed: '模型目录同步完成',

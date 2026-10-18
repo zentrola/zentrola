@@ -111,7 +111,13 @@ type gatewayStoreStub struct {
 	blocks         int
 	updates        int
 	refreshUpdates int
+	quotaRecords   int
 	routes         []gw.Route
+}
+
+func (s *gatewayStoreStub) RecordResourceQuotas(context.Context, gw.Route, string, *time.Time, time.Time, []management.ResourceQuota) error {
+	s.quotaRecords++
+	return nil
 }
 
 func (s *gatewayStoreStub) Resolve(context.Context, appsec.PrincipalIdentity, string, ...string) (gw.Route, error) {
@@ -221,6 +227,33 @@ func TestGatewayStoreCachesRoutesAndInvalidatesRuntimeChanges(t *testing.T) {
 	}
 	if err := store.UpdateResourceCredentialRefreshMetadata(context.Background(), next.routes[0]); err != nil || next.refreshUpdates != 1 || cache.clears != 3 {
 		t.Fatal("credential refresh metadata update did not invalidate cache", err)
+	}
+}
+
+func TestGatewayStoreInvalidatesOnlyWhenQuotaRoutabilityChanges(t *testing.T) {
+	tests := []struct {
+		name, previous, next string
+		wantClear            bool
+	}{
+		{name: "available to near limit", previous: management.QuotaAvailable, next: management.QuotaNearLimit},
+		{name: "available unchanged", previous: management.QuotaAvailable, next: management.QuotaAvailable},
+		{name: "available to exhausted", previous: management.QuotaAvailable, next: management.QuotaExhausted, wantClear: true},
+		{name: "exhausted to available", previous: management.QuotaExhausted, next: management.QuotaAvailable, wantClear: true},
+		{name: "unknown to available", previous: management.QuotaUnknown, next: management.QuotaAvailable, wantClear: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cache := &cacheStub{}
+			next := &gatewayStoreStub{}
+			store := NewGatewayStore(next, cache)
+			route := gw.Route{ProviderID: 1, ResourceID: 2, QuotaStatus: test.previous}
+			if err := store.RecordResourceQuotas(context.Background(), route, test.next, nil, time.Now().UTC(), nil); err != nil {
+				t.Fatal(err)
+			}
+			if next.quotaRecords != 1 || (cache.clears == 1) != test.wantClear {
+				t.Fatalf("records=%d clears=%d, want clear %v", next.quotaRecords, cache.clears, test.wantClear)
+			}
+		})
 	}
 }
 

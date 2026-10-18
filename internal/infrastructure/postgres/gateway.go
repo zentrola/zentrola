@@ -273,6 +273,37 @@ func (s *GatewayStore) UpdateResourceCredentialRefreshMetadata(ctx context.Conte
 	return nil
 }
 
+// RecordResourceQuotas 保存网关从订阅响应中观测到的额度；资源已删除、认证方式变化或
+// 已有更新的观测时静默忽略。
+func (s *GatewayStore) RecordResourceQuotas(ctx context.Context, route gw.Route, status string, resetsAt *time.Time, checkedAt time.Time, quotas []mgmt.ResourceQuota) error {
+	if route.ResourceID <= 0 || route.ProviderID <= 0 || route.AuthAdapter == "" || status == "" {
+		return gw.ErrInvalid
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return s.gatewayError(ctx, "begin_record_resource_quotas", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := dbgen.New(tx)
+	updated, err := q.UpdateGatewayResourceQuota(ctx, dbgen.UpdateGatewayResourceQuotaParams{
+		ResourceID: route.ResourceID, ProviderID: route.ProviderID, AuthAdapter: route.AuthAdapter,
+		QuotaStatus: status, QuotaCheckedAt: pgTime(checkedAt), QuotaResetsAt: nullableTime(resetsAt),
+	})
+	if err != nil {
+		return s.gatewayError(ctx, "update_resource_quota", err)
+	}
+	if updated != 1 {
+		return nil
+	}
+	if err := replaceResourceQuotas(ctx, q, route.ResourceID, quotas); err != nil {
+		return s.gatewayError(ctx, "replace_resource_quotas", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return s.gatewayError(ctx, "commit_record_resource_quotas", err)
+	}
+	return nil
+}
+
 func (s *GatewayStore) LoadResourceCredential(ctx context.Context, route gw.Route) (catalog.SealedCredential, error) {
 	if route.ResourceID <= 0 || route.ProviderID <= 0 {
 		return catalog.SealedCredential{}, gw.ErrInvalid

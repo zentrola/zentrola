@@ -13,8 +13,10 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 
 ### Changed / 变更
 
-- Claude subscription connection tests now send one minimal request to the selected model instead of reading the usage endpoint, and no longer refresh quota data. Enabling a provider with a Claude subscription also requires choosing a model mapping.
-- Claude 订阅连接测试改为向所选模型发送一次最小请求，不再读取额度接口，也不再刷新额度；使用 Claude 订阅启用服务商时需要选择模型映射。
+- Claude subscription connection tests now send one minimal request to the selected model instead of reading the usage endpoint. Quota status, reset time, and check time are updated from the unified 5-hour and 7-day rate limits returned in the response. Enabling a provider with a Claude subscription also requires choosing a model mapping.
+- Claude subscription quota data is also synced from gateway responses, at most once every 5 minutes per credential unless the quota status or reset time changes. When the quota is exhausted, the gateway stops routing to that credential until the reset time.
+- Claude 订阅连接测试改为向所选模型发送一次最小请求，不再读取额度接口；额度状态、重置时间和检查时间改为根据响应中的 5 小时、7 天统一限额更新。使用 Claude 订阅启用服务商时需要选择模型映射。
+- 网关转发 Claude 订阅请求时也会同步额度：额度状态或重置时间不变时，每个凭据最多每 5 分钟写入一次；额度耗尽后网关在重置前不再路由到该凭据。
 
 ### Fixed / 修复
 

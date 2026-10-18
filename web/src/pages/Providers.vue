@@ -788,7 +788,9 @@ function quotaWindowLabel(quota: ResourceQuota) {
     window = t('resources.quotaWindowHours', { value: seconds / 3600 })
   else if (seconds && seconds % 60 === 0)
     window = t('resources.quotaWindowMinutes', { value: seconds / 60 })
-  const defaultWindow = quota.code === 'codex.primary' || quota.code === 'codex.secondary'
+  const defaultWindow = ['codex.primary', 'codex.secondary', 'five_hour', 'seven_day'].includes(
+    quota.code,
+  )
   const name = quota.name?.trim() || (defaultWindow ? '' : quota.code)
   return [name, window].filter(Boolean).join(' · ') || quota.code
 }
@@ -871,15 +873,36 @@ async function consumeResetCredit(resource: Resource) {
   }
 }
 
+// Claude 订阅的额度来自连接测试和网关转发时的推理响应头；打开凭据弹窗只读取已记录的额度，
+// 不为刷新额度额外发起会产生费用的模型调用。
+async function loadObservedQuota(resource: Resource) {
+  try {
+    credentialQuotas[resource.id] = await api<ResourceQuota[]>(`/resources/${resource.id}/quotas`)
+  } catch (error) {
+    quotaRefreshError[resource.id] = errorText(error)
+  }
+}
+
 async function refreshProviderQuotas(provider: Provider) {
   await loadResources()
   const subscriptions = resourcesFor(provider).filter(
-    (resource) => resource.authType === 'SUBSCRIPTION' && resource.authAdapter === 'OPENAI_CODEX',
+    (resource) => resource.authType === 'SUBSCRIPTION',
+  )
+  await Promise.all(
+    subscriptions
+      .filter((resource) => resource.authAdapter === 'ANTHROPIC_CLAUDE_CODE')
+      .map((resource) => {
+        delete quotaRefreshError[resource.id]
+        return loadObservedQuota(resource)
+      }),
+  )
+  const codexSubscriptions = subscriptions.filter(
+    (resource) => resource.authAdapter === 'OPENAI_CODEX',
   )
   // Codex App Server 的账号额度读取不适合在同一服务商下并发执行；串行刷新可避免
   // 多个个人订阅同时启动探测进程时，后续账号被上游或本地进程链路拒绝。
-  for (const subscription of subscriptions) await refreshSubscriptionQuota(subscription)
-  if (subscriptions.length) await loadResources()
+  for (const subscription of codexSubscriptions) await refreshSubscriptionQuota(subscription)
+  if (codexSubscriptions.length) await loadResources()
 }
 
 async function loadActiveModels() {
