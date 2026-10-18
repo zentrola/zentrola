@@ -372,13 +372,50 @@ func TestActivateProviderUsesSelectedConnection(t *testing.T) {
 	}
 }
 
+func TestActivateClaudeSubscriptionUsesSelectedModel(t *testing.T) {
+	writer := &providerStatusWriter{
+		provider: Provider{ID: 8, Code: catalog.AnthropicOfficialCode, Status: "DISABLED"},
+		mappings: []ProviderMapping{
+			{ID: 10, ProviderID: 8, ModelID: 1, UpstreamModelCode: "unavailable-model"},
+			{ID: 11, ProviderID: 8, ModelID: 2, UpstreamModelCode: "working-model"},
+		},
+		models:               []Model{{ID: 1, Status: "ACTIVE"}, {ID: 2, Status: "ACTIVE"}},
+		credentialConfigured: true,
+		resources: []Resource{{
+			ID: 20, ProviderID: 8, Version: 1, AuthType: AuthTypeSubscription,
+			AuthAdapter: AuthAdapterClaudeCode, CredentialConfigured: true,
+		}},
+	}
+	service := New(providerStatusStore{writer: writer}, nil, nil, nil)
+	service.ProviderService.connectionProbe = providerSelectionProbeFunc(func(_ context.Context, _ admin.Identity, id int64, protocol string, mappingID int64, _ appsec.RequestMeta) (ConnectionResult, error) {
+		if id != 20 || protocol != "" || mappingID != 11 {
+			t.Fatalf("selection = resource %d, protocol %s, mapping %d", id, protocol, mappingID)
+		}
+		return ConnectionResult{OK: true, Code: "OK", ProviderModelMappingID: 11, TestedModelID: 2, TestedModelCode: "working-model", verifiedResourceVersion: 1}, nil
+	})
+	result, err := service.ActivateProvider(context.Background(), admin.Identity{}, 8, ProviderActivationSelection{
+		ResourceID: 20, ProviderModelMappingID: 11,
+	}, appsec.RequestMeta{})
+	if err != nil || !result.OK || len(writer.statusChanges) != 1 || writer.statusChanges[0] != "ACTIVE" {
+		t.Fatalf("Claude activation failed: result=%+v err=%v statuses=%v", result, err, writer.statusChanges)
+	}
+}
+
 func TestActivateProviderLeavesDisabledOnFailedTestOrChangedMapping(t *testing.T) {
+	apiKey := Resource{ID: 20, ProviderID: 8, Version: 1, AuthType: AuthTypeAPIKey, CredentialConfigured: true}
+	claude := Resource{
+		ID: 20, ProviderID: 8, Version: 1, AuthType: AuthTypeSubscription,
+		AuthAdapter: AuthAdapterClaudeCode, CredentialConfigured: true,
+	}
 	for _, test := range []struct {
 		name          string
+		resource      Resource
+		protocol      string
 		changeMapping bool
 	}{
-		{name: "failed test"},
-		{name: "mapping changed after test", changeMapping: true},
+		{name: "failed test", resource: apiKey, protocol: "OPENAI"},
+		{name: "mapping changed after test", resource: apiKey, protocol: "OPENAI", changeMapping: true},
+		{name: "Claude subscription mapping changed after test", resource: claude, changeMapping: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			writer := &providerStatusWriter{
@@ -386,7 +423,7 @@ func TestActivateProviderLeavesDisabledOnFailedTestOrChangedMapping(t *testing.T
 				mappings:             []ProviderMapping{{ID: 11, ProviderID: 8, ModelID: 2, UpstreamModelCode: "working-model"}},
 				models:               []Model{{ID: 2, Status: "ACTIVE"}},
 				credentialConfigured: true,
-				resources:            []Resource{{ID: 20, ProviderID: 8, Version: 1, AuthType: AuthTypeAPIKey, CredentialConfigured: true}},
+				resources:            []Resource{test.resource},
 			}
 			service := New(providerStatusStore{writer: writer}, nil, nil, nil)
 			service.ProviderService.connectionProbe = providerSelectionProbeFunc(func(context.Context, admin.Identity, int64, string, int64, appsec.RequestMeta) (ConnectionResult, error) {
@@ -397,7 +434,7 @@ func TestActivateProviderLeavesDisabledOnFailedTestOrChangedMapping(t *testing.T
 				return ConnectionResult{Code: "UPSTREAM_AUTH_FAILED"}, nil
 			})
 			result, err := service.ActivateProvider(context.Background(), admin.Identity{}, 8, ProviderActivationSelection{
-				ResourceID: 20, Protocol: "OPENAI", ProviderModelMappingID: 11,
+				ResourceID: 20, Protocol: test.protocol, ProviderModelMappingID: 11,
 			}, appsec.RequestMeta{})
 			if test.changeMapping {
 				if !errors.Is(err, ErrConflict) {

@@ -5,6 +5,7 @@ import {
   preferredTestMappingID,
   preferredTestProtocol,
   testModelOptionsFor,
+  usesInferenceModel,
 } from '../providerConnectionSelection'
 import type { Provider, ProviderDetail, ProviderProtocol, Resource } from '../types'
 import Modal from './Modal.vue'
@@ -53,7 +54,8 @@ const showProtocolSelection = computed(
 )
 const showModelSelection = computed(
   () =>
-    selectedResource.value?.authType === 'API_KEY' &&
+    !!selectedResource.value &&
+    usesInferenceModel(selectedResource.value) &&
     (props.mode === 'ACTIVATE' || modelOptions.value.length > 1),
 )
 const ready = computed(
@@ -79,8 +81,9 @@ function submit() {
   emit('submit', {
     resource,
     protocol: resource.authType === 'API_KEY' ? selectedProtocol.value || undefined : undefined,
-    providerModelMappingID:
-      resource.authType === 'API_KEY' ? selectedMappingID.value || undefined : undefined,
+    providerModelMappingID: usesInferenceModel(resource)
+      ? selectedMappingID.value || undefined
+      : undefined,
   })
 }
 </script>

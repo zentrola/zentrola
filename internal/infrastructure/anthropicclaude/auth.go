@@ -24,6 +24,13 @@ const (
 	credentialKind       = "claude_code_setup_token"
 )
 
+// 订阅 Token 只接受带 Claude Code 身份的推理请求，缺少系统提示时上游返回 429 rate_limit_error。
+const (
+	ClaudeCodeBeta         = "claude-code-20250219"
+	ClaudeCodeSystemPrompt = "You are Claude Code, Anthropic's official CLI for Claude."
+	ClaudeCodeUserAgent    = "claude-cli/2.1.0 (external, cli)"
+)
+
 var errInvalidCredential = errors.New("invalid Claude Code setup token")
 
 type connectionFailure struct {

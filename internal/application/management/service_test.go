@@ -789,6 +789,52 @@ func TestPersonalSubscriptionConnectionUsesQuotaProbeWithoutModelMapping(t *test
 	}
 }
 
+func TestClaudeSubscriptionConnectionUsesInferenceInsteadOfUsage(t *testing.T) {
+	writer := &resourceTestWriter{
+		resource: ResourceRecord{
+			Resource: Resource{
+				ID: 48, ProviderID: 40, Name: "Claude 订阅",
+				AuthType: AuthTypeSubscription, AuthAdapter: AuthAdapterClaudeCode,
+				RuntimeStatus: "BLOCKED",
+			},
+			Sealed: catalog.SealedCredential{Ciphertext: []byte("setup-token"), KeyVersion: 1},
+		},
+		provider: Provider{
+			ID: 40, Code: catalog.AnthropicOfficialCode, ProxyEnabled: true,
+			ProxyURLSealed: catalog.SealedCredential{Ciphertext: []byte("http://127.0.0.1:17897"), KeyVersion: 1},
+			Endpoints:      []ProviderEndpoint{{ProtocolType: "ANTHROPIC", BaseURL: "https://api.anthropic.com"}},
+		},
+		model:    Model{ID: 90, Code: "claude-test", Status: "ACTIVE"},
+		mappings: []ProviderMapping{{ID: 1, ProviderID: 40, ModelID: 90, UpstreamModelCode: "claude-test"}},
+	}
+	testCalls := 0
+	service := New(resourceTestStore{writer: writer}, nil, providerTestCipher{}, connectionTesterFunc(
+		func(_ context.Context, target ConnectionTarget, credential []byte, proxy *catalog.OutboundProxy) ConnectionResult {
+			testCalls++
+			if target.ProviderCode != catalog.AnthropicOfficialCode || target.Protocol != "ANTHROPIC" ||
+				target.BaseURL != "https://api.anthropic.com" || target.UpstreamModelCode != "claude-test" ||
+				target.AuthType != AuthTypeSubscription || target.AuthAdapter != AuthAdapterClaudeCode ||
+				string(credential) != "setup-token" || proxy == nil || proxy.URL != "http://127.0.0.1:17897" {
+				t.Fatalf("unexpected Claude inference target: %+v proxy=%+v", target, proxy)
+			}
+			return ConnectionResult{OK: true, Code: "OK", HTTPStatus: 200}
+		},
+	), WithSubscriptionAdapter(claudeSubscriptionAdapterStub{subscriptionAdapterStub{
+		onProbe: func(*catalog.OutboundProxy) { t.Fatal("usage probe must not run") },
+	}}))
+
+	result, err := service.TestResource(context.Background(), admin.Identity{ID: 1}, 48, appsec.RequestMeta{})
+	if err != nil || !result.OK || testCalls != 1 || !writer.restored {
+		t.Fatalf("Claude inference test failed: result=%+v calls=%d restored=%v err=%v", result, testCalls, writer.restored, err)
+	}
+	if result.ProviderModelMappingID != 1 || result.TestedModelID != 90 || result.TestedModelCode != "claude-test" {
+		t.Fatalf("unexpected tested model metadata: %+v", result)
+	}
+	if writer.updated.QuotaCheckedAt != nil || len(writer.quotas) != 0 {
+		t.Fatalf("inference test must not claim quota was refreshed: %+v", writer.updated.Resource)
+	}
+}
+
 func TestConsumeResourceResetCreditRefreshesQuotaAndRestoresResource(t *testing.T) {
 	updatedAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	reset := time.Now().UTC().Add(time.Hour).Truncate(time.Second)

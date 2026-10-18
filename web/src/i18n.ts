@@ -895,7 +895,7 @@ export const i18n = createI18n({
         },
         addCredential: '新增凭据',
         listHint:
-          '凭据保存后仅展示非敏感信息；OpenAI 个人订阅可导出为 auth.json，测试连接成功后会重新获取额度状态、额度重置时间和检查时间。',
+          '凭据保存后仅展示非敏感信息；OpenAI 个人订阅可导出为 auth.json，其连接测试会刷新额度。Claude 订阅连接测试会调用所选模型。',
         emptyCredentials: '暂无认证凭据',
         emptyCredentialsHint: '点击“新增凭据”添加 API Key 或支持的订阅认证。',
         provider: '服务商',
@@ -983,7 +983,7 @@ export const i18n = createI18n({
         subscriptionTestHint:
           '通过 ChatGPT 额度接口验证订阅认证；成功后会更新额度状态、额度重置时间和检查时间，不会发起模型调用。',
         claudeSubscriptionTestHint:
-          '通过 Claude 额度接口验证长期 OAuth Token；成功后会更新额度状态、额度重置时间和检查时间，不会发起模型调用。',
+          '使用长期 OAuth Token 和所选模型发送一次最小真实请求，可能产生极少量上游费用；本次测试不刷新额度。',
         syncModels: '同步模型',
         syncingModels: '正在读取模型目录…',
         syncPassed: '模型目录同步完成',
@@ -1194,6 +1194,7 @@ export const i18n = createI18n({
         UPSTREAM_ACCOUNT_SUSPENDED: '上游账号已被暂停或停用。',
         UPSTREAM_RATE_LIMITED: '上游限流，请稍后重试。',
         UPSTREAM_MODEL_UNAVAILABLE: '上游模型不存在或当前账号无权使用。',
+        UPSTREAM_REQUEST_REJECTED: '上游拒绝了请求，请检查模型和请求参数。',
         UPSTREAM_TIMEOUT: '上游连接超时。',
         UPSTREAM_UNAVAILABLE: '上游服务暂不可用。',
         CODEX_APP_SERVER_UNAVAILABLE:

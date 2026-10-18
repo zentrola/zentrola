@@ -1287,7 +1287,8 @@ async function fixture(page: Page) {
         !provider ||
         !resource ||
         resource.providerId !== provider.id ||
-        (resource.authType !== 'SUBSCRIPTION' && (!body.protocol || !mapping || !model))
+        (resource.authType === 'API_KEY' && (!body.protocol || !mapping || !model)) ||
+        (resource.authAdapter === 'ANTHROPIC_CLAUDE_CODE' && (body.protocol || !mapping || !model))
       )
         return reply(null, 400, 'INVALID_ARGUMENT')
       if (!failedTest) provider.status = 'ACTIVE'
@@ -1443,7 +1444,7 @@ async function fixture(page: Page) {
         .flat()
         .find((mapping) => mapping.id === providerModelMappingId)
       const testedModel = models.find((model) => model.id === testedMapping?.modelId)
-      if (resource?.authType === 'SUBSCRIPTION' && !failedTest) {
+      if (resource?.authAdapter === 'OPENAI_CODEX' && !failedTest) {
         resource.quotaStatus = 'AVAILABLE'
         resource.quotaCheckedAt = stamp
         resource.quotaResetsAt = stamp
@@ -4750,7 +4751,7 @@ test('服务商支持个人订阅优先并保留 API Key 兜底', async ({ page 
   await modal(page).getByRole('button', { name: '保存', exact: true }).click()
   const credentialList = modal(page)
   await expect(credentialList).toContainText(
-    '测试连接成功后会重新获取额度状态、额度重置时间和检查时间。',
+    'OpenAI 个人订阅可导出为 auth.json，其连接测试会刷新额度。Claude 订阅连接测试会调用所选模型。',
   )
   await expect(credentialList.getByRole('columnheader')).toHaveText([
     '认证凭据',
@@ -4969,6 +4970,34 @@ test('Anthropic 官方渠道直接输入 Claude 个人订阅 Token', async ({ pa
     createdAt: stamp,
     updatedAt: stamp,
   })
+  state.models[1].publisherProviderId = '83'
+  state.models[1].publisherProviderName = 'Anthropic'
+  state.models.push({
+    ...state.models[1],
+    id: '73',
+    code: 'claude-opus',
+    name: 'Claude Opus',
+  })
+  state.providerMappings.set('83', [
+    {
+      id: '95',
+      providerId: '83',
+      modelId: '72',
+      upstreamModelCode: 'claude-sonnet',
+      priority: 100,
+      createdAt: stamp,
+      updatedAt: stamp,
+    },
+    {
+      id: '96',
+      providerId: '83',
+      modelId: '73',
+      upstreamModelCode: 'claude-opus',
+      priority: 100,
+      createdAt: stamp,
+      updatedAt: stamp,
+    },
+  ])
   await signIn(page)
   await page.getByRole('link', { name: '服务商', exact: true }).click()
   const providerRow = page.getByRole('row').filter({ hasText: 'Anthropic' })
@@ -5001,6 +5030,26 @@ test('Anthropic 官方渠道直接输入 Claude 个人订阅 Token', async ({ pa
     }),
   ])
   await expect(modal(page).getByRole('row').filter({ hasText: 'Anthropic 个人订阅' })).toBeVisible()
+
+  await modal(page)
+    .getByRole('row')
+    .filter({ hasText: 'Anthropic 个人订阅' })
+    .getByRole('button', { name: /验证 Anthropic 个人订阅.*的可用性/ })
+    .click()
+  const selectionDialog = page.getByRole('dialog', { name: 'Anthropic / 选择测试模型' })
+  await expect(selectionDialog).toBeVisible()
+  await expect(selectionDialog.getByRole('radio', { name: /使用 Claude .* 测试连接/ })).toHaveCount(
+    2,
+  )
+  await selectionDialog.getByRole('radio', { name: '使用 Claude Opus 测试连接' }).check()
+  const testRequest = page.waitForRequest(
+    (request) => request.method() === 'POST' && request.url().includes('/test-connection'),
+  )
+  await selectionDialog.getByRole('button', { name: '开始测试' }).click()
+  expect(new URL((await testRequest).url()).searchParams.get('providerModelMappingId')).toBe('96')
+  await expect(modal(page).getByRole('status')).toContainText('模型调用验证通过')
+  await expect(modal(page)).toContainText('本次测试不刷新额度')
+  expect(state.resources[0].quotaCheckedAt).toBeNull()
 })
 
 test('状态 switch 直接生效且危险操作仍需确认', async ({ page }) => {

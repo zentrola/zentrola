@@ -895,7 +895,7 @@ export default {
     },
     addCredential: 'Add credential',
     listHint:
-      'Only non-sensitive details are shown after saving. OpenAI personal subscriptions can be exported as auth.json; a successful connection test refreshes quota status, quota reset time, and check time.',
+      'Only non-sensitive details are shown after saving. OpenAI personal subscriptions can be exported as auth.json, and their connection test refreshes quota data. Claude subscription connection tests call the selected model.',
     emptyCredentials: 'No credentials yet',
     emptyCredentialsHint: 'Select Add credential to add an API key or supported subscription.',
     provider: 'Provider',
@@ -987,7 +987,7 @@ export default {
     subscriptionTestHint:
       'Verifies subscription authentication through the ChatGPT quota endpoint. On success, it updates quota status, quota reset time, and check time without making a model request.',
     claudeSubscriptionTestHint:
-      'Verifies the long-lived OAuth token through the Claude usage endpoint. On success, it updates quota status, quota reset time, and check time without making a model request.',
+      'Sends one minimal real request with the long-lived OAuth token and selected model. This may incur a small upstream charge. This test does not refresh quota data.',
     syncModels: 'Sync models',
     syncingModels: 'Reading the model catalog…',
     syncPassed: 'Model catalog synchronized',
@@ -1212,6 +1212,8 @@ export default {
     UPSTREAM_RATE_LIMITED: 'The upstream provider is rate-limiting requests. Try again later.',
     UPSTREAM_MODEL_UNAVAILABLE:
       'The upstream model is unavailable or not permitted for this account.',
+    UPSTREAM_REQUEST_REJECTED:
+      'The upstream rejected the request. Check the model and request parameters.',
     UPSTREAM_TIMEOUT: 'The upstream connection timed out.',
     UPSTREAM_UNAVAILABLE: 'The upstream service is unavailable.',
     CODEX_APP_SERVER_UNAVAILABLE:

@@ -8,6 +8,7 @@ import {
   preferredTestMappingID,
   preferredTestProtocol,
   testModelOptionsFor,
+  usesInferenceModel,
 } from '../providerConnectionSelection'
 import { showErrorToast, showSuccessToast } from '../toast'
 import type {
@@ -873,7 +874,7 @@ async function consumeResetCredit(resource: Resource) {
 async function refreshProviderQuotas(provider: Provider) {
   await loadResources()
   const subscriptions = resourcesFor(provider).filter(
-    (resource) => resource.authType === 'SUBSCRIPTION',
+    (resource) => resource.authType === 'SUBSCRIPTION' && resource.authAdapter === 'OPENAI_CODEX',
   )
   // Codex App Server 的账号额度读取不适合在同一服务商下并发执行；串行刷新可避免
   // 多个个人订阅同时启动探测进程时，后续账号被上游或本地进程链路拒绝。
@@ -1253,12 +1254,13 @@ function prepareTestConnection(provider: Provider, resource?: Resource) {
   void run(async () => {
     const detail = await api<ProviderDetail>(`/providers/${provider.id}`)
     const selectedResource = resource ?? candidates[0]
-    const mappingID =
-      selectedResource.authType === 'API_KEY' ? preferredTestMappingID(detail) : undefined
+    const mappingID = usesInferenceModel(selectedResource)
+      ? preferredTestMappingID(detail)
+      : undefined
     const selectionRequired =
       (!resource && candidates.length > 1) ||
-      (selectedResource.authType === 'API_KEY' &&
-        (provider.endpoints.length > 1 || testModelOptionsFor(detail).length > 1))
+      (selectedResource.authType === 'API_KEY' && provider.endpoints.length > 1) ||
+      (usesInferenceModel(selectedResource) && testModelOptionsFor(detail).length > 1)
     if (selectionRequired) {
       openTestSelection(provider, detail, resource)
       return
@@ -1330,7 +1332,7 @@ function resultMessage(result: ConnectionResult, resource?: Resource) {
   if (result.ok) {
     if (testTarget.value?.activation) return t('providers.activationPassed')
     return t(
-      resource?.authType === 'SUBSCRIPTION'
+      resource?.authType === 'SUBSCRIPTION' && resource.authAdapter !== 'ANTHROPIC_CLAUDE_CODE'
         ? 'resources.subscriptionTestPassed'
         : 'resources.testPassed',
     )
@@ -2836,7 +2838,8 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
         t(
           testTarget.activation
             ? 'providers.testingAndEnabling'
-            : testTarget.resource.authType === 'SUBSCRIPTION'
+            : testTarget.resource.authType === 'SUBSCRIPTION' &&
+                testTarget.resource.authAdapter !== 'ANTHROPIC_CLAUDE_CODE'
               ? 'resources.subscriptionTesting'
               : 'resources.testing',
         )

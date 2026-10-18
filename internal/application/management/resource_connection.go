@@ -22,7 +22,7 @@ func (s *ResourceService) TestResourceProtocol(ctx context.Context, actor admin.
 	return s.TestResourceSelection(ctx, actor, id, protocol, 0, meta)
 }
 
-// TestResourceSelection 使用指定的上游协议和模型映射测试 API Key 资源。
+// TestResourceSelection 使用指定的上游协议和模型映射测试 API Key 或 Claude 订阅资源。
 // providerModelMappingID 为零时自动选择有效映射；指定后不会回退到其他模型。
 func (s *ResourceService) TestResourceSelection(ctx context.Context, actor admin.Identity, id int64, protocol string, providerModelMappingID int64, meta appsec.RequestMeta) (ConnectionResult, error) {
 	if id <= 0 || providerModelMappingID < 0 {
@@ -52,7 +52,7 @@ func (s *ResourceService) TestResourceSelection(ctx context.Context, actor admin
 		if err != nil {
 			return err
 		}
-		if resource.AuthType == AuthTypeSubscription {
+		if resource.AuthType == AuthTypeSubscription && resource.AuthAdapter != AuthAdapterClaudeCode {
 			if providerModelMappingID > 0 {
 				return appsec.ErrInvalidArgument
 			}
@@ -118,7 +118,7 @@ func (s *ResourceService) TestResourceSelection(ctx context.Context, actor admin
 	plain, decryptErr := s.cipher.Decrypt(resource.Sealed, owner(actor, resource.Resource))
 	if decryptErr != nil {
 		result.Code = "CREDENTIAL_UNRECOVERABLE"
-	} else if resource.AuthType == AuthTypeSubscription {
+	} else if resource.AuthType == AuthTypeSubscription && resource.AuthAdapter != AuthAdapterClaudeCode {
 		defer clear(plain)
 		startedAt := time.Now()
 		subscription := s.subscriptionAdapter(resource.AuthAdapter)
@@ -161,6 +161,14 @@ func (s *ResourceService) TestResourceSelection(ctx context.Context, actor admin
 	} else {
 		defer clear(plain)
 		selectedProtocol, baseURL, networkScope := preferredProviderEndpoint(provider)
+		var claudeSubscription SubscriptionAdapter
+		if resource.AuthAdapter == AuthAdapterClaudeCode {
+			if protocol != "" && protocol != "ANTHROPIC" {
+				return ConnectionResult{}, appsec.ErrInvalidArgument
+			}
+			claudeSubscription = s.subscriptionAdapter(resource.AuthAdapter)
+			selectedProtocol, baseURL, networkScope = providerEndpoint(provider, "ANTHROPIC")
+		}
 		if protocol != "" {
 			selectedProtocol, baseURL, networkScope = providerEndpoint(provider, protocol)
 			if baseURL == "" {
@@ -172,7 +180,9 @@ func (s *ResourceService) TestResourceSelection(ctx context.Context, actor admin
 			UpstreamModelCode: upstreamModelCode,
 			AuthType:          resource.AuthType, AuthAdapter: resource.AuthAdapter,
 		}
-		if baseURL == "" {
+		if resource.AuthAdapter == AuthAdapterClaudeCode && (claudeSubscription == nil || !claudeSubscription.SupportsProvider(provider)) {
+			result.Code = "SUBSCRIPTION_ADAPTER_UNAVAILABLE"
+		} else if baseURL == "" {
 			result.Code = "PROVIDER_UNAVAILABLE"
 		} else if s.tester == nil {
 			return ConnectionResult{}, appsec.ErrUnavailable

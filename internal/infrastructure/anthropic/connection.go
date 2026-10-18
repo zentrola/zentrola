@@ -48,7 +48,7 @@ func (standardConnectionProbeAdapter) Build(target mgmt.ConnectionTarget, base s
 	case "ANTHROPIC":
 		return connectionProbe{
 			URL:            strings.TrimSuffix(base, "/") + "/v1/messages",
-			Body:           anthropicProbeBody(target.UpstreamModelCode),
+			Body:           anthropicProbeBody(target.UpstreamModelCode, ""),
 			ResponseFormat: anthropicInferenceProbe,
 		}, true
 	default:
@@ -150,6 +150,7 @@ func (t *ConnectionTester) Test(ctx context.Context, target mgmt.ConnectionTarge
 				return
 			}
 			requestCredential, oauthBearer = accessToken, true
+			probe.Body = anthropicProbeBody(target.UpstreamModelCode, anthropicclaude.ClaudeCodeSystemPrompt)
 		default:
 			result.Code = "SUBSCRIPTION_ADAPTER_UNAVAILABLE"
 			return
@@ -179,7 +180,9 @@ func (t *ConnectionTester) Test(ctx context.Context, target mgmt.ConnectionTarge
 		}
 		if oauthBearer {
 			req.Header.Set("anthropic-version", "2023-06-01")
-			req.Header.Set("anthropic-beta", anthropicclaude.OAuthBeta)
+			req.Header.Set("anthropic-beta", anthropicclaude.ClaudeCodeBeta+","+anthropicclaude.OAuthBeta)
+			req.Header.Set("User-Agent", anthropicclaude.ClaudeCodeUserAgent)
+			req.Header.Set("X-App", "cli")
 		}
 	} else {
 		req.Header.Set("x-api-key", requestCredential)
@@ -281,14 +284,24 @@ func openAIResponsesProbeBody(model string) []byte {
 	return body
 }
 
-func anthropicProbeBody(model string) []byte {
+type probeTextBlock struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+// anthropicProbeBody 在 system 非空时附加系统提示，供需要声明客户端身份的订阅凭据使用。
+func anthropicProbeBody(model, system string) []byte {
+	var systemBlocks []probeTextBlock
+	if system != "" {
+		systemBlocks = []probeTextBlock{{Type: "text", Text: system}}
+	}
 	body, _ := json.Marshal(struct {
-		Model       string         `json:"model"`
-		MaxTokens   int            `json:"max_tokens"`
-		Temperature int            `json:"temperature"`
-		Stream      bool           `json:"stream"`
-		Messages    []probeMessage `json:"messages"`
-	}{Model: model, MaxTokens: connectionProbeMaxOutputTokens, Messages: []probeMessage{{Role: "user", Content: "Reply only with OK."}}})
+		Model     string           `json:"model"`
+		MaxTokens int              `json:"max_tokens"`
+		Stream    bool             `json:"stream"`
+		System    []probeTextBlock `json:"system,omitempty"`
+		Messages  []probeMessage   `json:"messages"`
+	}{Model: model, MaxTokens: connectionProbeMaxOutputTokens, System: systemBlocks, Messages: []probeMessage{{Role: "user", Content: "Hi, how are you?"}}})
 	return body
 }
 
@@ -298,14 +311,20 @@ func validInferenceResponse(data []byte, format inferenceProbeFormat) bool {
 		var payload struct {
 			Type    string `json:"type"`
 			Content []struct {
-				Text string `json:"text"`
+				Type      string `json:"type"`
+				Text      string `json:"text"`
+				Signature string `json:"signature"`
+				Data      string `json:"data"`
 			} `json:"content"`
 		}
 		if json.Unmarshal(data, &payload) != nil || payload.Type != "message" {
 			return false
 		}
+		// 默认开启思考的模型可能把探测的少量输出 Token 全部用于思考，带签名的思考块同样证明推理成功。
 		for _, content := range payload.Content {
-			if strings.TrimSpace(content.Text) != "" {
+			if strings.TrimSpace(content.Text) != "" ||
+				content.Type == "thinking" && content.Signature != "" ||
+				content.Type == "redacted_thinking" && content.Data != "" {
 				return true
 			}
 		}
@@ -371,6 +390,8 @@ func inferenceStatusCode(status int, body []byte) string {
 		return "UPSTREAM_RATE_LIMITED"
 	case http.StatusNotFound:
 		return "UPSTREAM_MODEL_UNAVAILABLE"
+	case http.StatusBadRequest:
+		return "UPSTREAM_REQUEST_REJECTED"
 	default:
 		return "UPSTREAM_UNAVAILABLE"
 	}

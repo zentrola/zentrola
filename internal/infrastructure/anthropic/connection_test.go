@@ -29,6 +29,9 @@ func TestAnthropicConnectionUsesRealInference(t *testing.T) {
 		body, code string
 	}{
 		{"valid", 200, `{"type":"message","content":[{"type":"text","text":"OK"}]}`, "OK"},
+		{"thinking only", 200, `{"type":"message","content":[{"type":"thinking","thinking":"","signature":"sig"}],"stop_reason":"max_tokens"}`, "OK"},
+		{"redacted thinking only", 200, `{"type":"message","content":[{"type":"redacted_thinking","data":"encrypted"}]}`, "OK"},
+		{"unsigned thinking", 200, `{"type":"message","content":[{"type":"thinking","thinking":""}]}`, "UPSTREAM_INVALID_RESPONSE"},
 		{"empty content", 200, `{"type":"message","content":[]}`, "UPSTREAM_INVALID_RESPONSE"},
 		{"wrong body", 200, `{"data":[]}`, "UPSTREAM_INVALID_RESPONSE"},
 		{"malformed", 200, `{`, "UPSTREAM_INVALID_RESPONSE"},
@@ -36,6 +39,7 @@ func TestAnthropicConnectionUsesRealInference(t *testing.T) {
 		{"invalid key", 401, `{"error":"invalid key"}`, "UPSTREAM_AUTH_FAILED"},
 		{"model denied", 403, `{"error":{"message":"permission denied"}}`, "UPSTREAM_MODEL_UNAVAILABLE"},
 		{"billing", 400, `{"error":{"message":"insufficient balance"}}`, "UPSTREAM_BILLING_BLOCKED"},
+		{"invalid request", 400, `{"error":{"type":"invalid_request_error","message":"unsupported parameter"}}`, "UPSTREAM_REQUEST_REJECTED"},
 		{"expired subscription", 403, `{"error":{"message":"subscription expired"}}`, "UPSTREAM_BILLING_BLOCKED"},
 		{"suspended", 403, `{"error":{"message":"account suspended"}}`, "UPSTREAM_ACCOUNT_SUSPENDED"},
 		{"rate limit", 429, `{}`, "UPSTREAM_RATE_LIMITED"},
@@ -44,21 +48,24 @@ func TestAnthropicConnectionUsesRealInference(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tester := NewConnectionTester()
 			tester.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
-				if r.Method != http.MethodPost || r.URL.String() != "https://api.anthropic.com/v1/messages" || r.Header.Get("x-api-key") != "test-secret" || r.Header.Get("anthropic-version") != "2023-06-01" {
+				if r.Method != http.MethodPost || r.URL.String() != "https://api.anthropic.com/v1/messages" || r.Header.Get("x-api-key") != "test-secret" || r.Header.Get("anthropic-version") != "2023-06-01" ||
+					r.Header.Get("anthropic-beta") != "" || r.Header.Get("X-App") != "" || r.Header.Get("User-Agent") == anthropicclaude.ClaudeCodeUserAgent {
 					t.Fatal("invalid upstream request")
 				}
 				var payload struct {
-					Model     string `json:"model"`
-					MaxTokens int    `json:"max_tokens"`
-					Stream    bool   `json:"stream"`
-					Thinking  any    `json:"thinking"`
+					Model       string   `json:"model"`
+					MaxTokens   int      `json:"max_tokens"`
+					Stream      bool     `json:"stream"`
+					Thinking    any      `json:"thinking"`
+					Temperature *float64 `json:"temperature"`
+					System      any      `json:"system"`
 				}
-				if json.NewDecoder(r.Body).Decode(&payload) != nil || payload.Model != "claude-test" || payload.MaxTokens != 5 || payload.Stream || payload.Thinking != nil {
+				if json.NewDecoder(r.Body).Decode(&payload) != nil || payload.Model != "claude-sonnet-5-5" || payload.MaxTokens != 5 || payload.Stream || payload.Thinking != nil || payload.Temperature != nil || payload.System != nil {
 					t.Fatal("invalid inference probe body")
 				}
 				return &http.Response{StatusCode: tt.status, Body: io.NopCloser(strings.NewReader(tt.body)), Header: make(http.Header)}, nil
 			})
-			result := tester.Test(context.Background(), mgmt.ConnectionTarget{Protocol: "ANTHROPIC", BaseURL: "https://api.anthropic.com", UpstreamModelCode: "claude-test", AuthType: mgmt.AuthTypeAPIKey}, []byte("test-secret"), nil)
+			result := tester.Test(context.Background(), mgmt.ConnectionTarget{Protocol: "ANTHROPIC", BaseURL: "https://api.anthropic.com", UpstreamModelCode: "claude-sonnet-5-5", AuthType: mgmt.AuthTypeAPIKey}, []byte("test-secret"), nil)
 			if result.Code != tt.code || result.OK != (tt.code == "OK") || result.HTTPStatus != tt.status {
 				t.Fatalf("unexpected result: %+v", result)
 			}
@@ -84,14 +91,38 @@ func TestConnectionTestReportsProxyAuthenticationRejection(t *testing.T) {
 func TestClaudeSubscriptionConnectionUsesOAuthBearer(t *testing.T) {
 	tester := NewConnectionTester()
 	tester.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodPost || r.URL.String() != "https://api.anthropic.com/v1/messages" {
+			t.Fatalf("unexpected Claude inference request: %s %s", r.Method, r.URL)
+		}
 		if r.Header.Get("Authorization") != "Bearer sk-ant-oat01-test" || r.Header.Get("x-api-key") != "" ||
-			r.Header.Get("anthropic-beta") != anthropicclaude.OAuthBeta {
+			r.Header.Get("anthropic-beta") != anthropicclaude.ClaudeCodeBeta+","+anthropicclaude.OAuthBeta ||
+			r.Header.Get("User-Agent") != anthropicclaude.ClaudeCodeUserAgent || r.Header.Get("X-App") != "cli" {
 			t.Fatalf("unexpected Claude OAuth headers: %+v", r.Header)
 		}
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"type":"message","content":[{"type":"text","text":"OK"}]}`)), Header: make(http.Header)}, nil
+		var payload struct {
+			Model       string   `json:"model"`
+			MaxTokens   int      `json:"max_tokens"`
+			Temperature *float64 `json:"temperature"`
+			System      []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"system"`
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil || payload.Model != "claude-sonnet-5-5" ||
+			payload.MaxTokens != 5 || payload.Temperature != nil || len(payload.Messages) != 1 || payload.Messages[0].Content != "Hi, how are you?" ||
+			len(payload.System) != 1 || payload.System[0].Type != "text" || payload.System[0].Text != anthropicclaude.ClaudeCodeSystemPrompt {
+			t.Fatalf("unexpected Claude inference body: %+v err=%v", payload, err)
+		}
+		// 上游实测：默认思考模型在 5 个输出 Token 内只返回带签名的空思考块。
+		body := `{"type":"message","content":[{"type":"thinking","thinking":"","signature":"sig"}],"stop_reason":"max_tokens"}`
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
 	})
 	result := tester.Test(context.Background(), mgmt.ConnectionTarget{
-		Protocol: "ANTHROPIC", BaseURL: "https://api.anthropic.com", UpstreamModelCode: "claude-test",
+		Protocol: "ANTHROPIC", BaseURL: "https://api.anthropic.com", UpstreamModelCode: "claude-sonnet-5-5",
 		AuthType: mgmt.AuthTypeSubscription, AuthAdapter: anthropicclaude.AdapterCode,
 	}, []byte(`{"kind":"claude_code_setup_token","access_token":"sk-ant-oat01-test"}`), nil)
 	if !result.OK {

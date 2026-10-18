@@ -626,6 +626,10 @@ func (s *ProviderService) ActivateProvider(ctx context.Context, actor admin.Iden
 			if selection.Protocol == "" || selection.ProviderModelMappingID <= 0 {
 				return appsec.ErrInvalidArgument
 			}
+		} else if resource.AuthAdapter == AuthAdapterClaudeCode {
+			if selection.Protocol != "" || selection.ProviderModelMappingID <= 0 {
+				return appsec.ErrInvalidArgument
+			}
 		} else if selection.Protocol != "" || selection.ProviderModelMappingID != 0 {
 			return appsec.ErrInvalidArgument
 		}
@@ -639,7 +643,7 @@ func (s *ProviderService) ActivateProvider(ctx context.Context, actor admin.Iden
 		return result, err
 	}
 	if result.verifiedResourceVersion <= 0 ||
-		(resource.AuthType == AuthTypeAPIKey &&
+		(usesInferenceProbe(resource.Resource) &&
 			(result.ProviderModelMappingID != selection.ProviderModelMappingID || result.TestedModelID <= 0 || result.TestedModelCode == "")) {
 		return result, ErrConflict
 	}
@@ -730,7 +734,7 @@ func (s *ProviderService) setProviderStatusVerified(ctx context.Context, actor a
 				(resource.ExpiresAt != nil && !resource.ExpiresAt.After(now)) {
 				return ErrConflict
 			}
-			if resource.AuthType == AuthTypeAPIKey {
+			if usesInferenceProbe(resource.Resource) {
 				if verified.mappingID <= 0 || verified.modelID <= 0 {
 					return ErrConflict
 				}
@@ -766,6 +770,11 @@ func (s *ProviderService) setProviderStatusVerified(ctx context.Context, actor a
 		}
 		return w.Audit(ctx, Audit{Event: operation.ProviderStatusChange, Target: "PROVIDER", ID: id, Name: provider.Name, Before: map[string]string{"status": provider.Status}, After: map[string]string{"status": status}}, meta)
 	})
+}
+
+// usesInferenceProbe 表示连接测试会调用具体模型，启用时必须复核被验证的模型映射仍然有效。
+func usesInferenceProbe(resource Resource) bool {
+	return resource.AuthType == AuthTypeAPIKey || resource.AuthAdapter == AuthAdapterClaudeCode
 }
 
 func testedMappingCode(mapping ProviderMapping, model Model) string {

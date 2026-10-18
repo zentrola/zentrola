@@ -1,4 +1,8 @@
-import type { Provider, ProviderDetail, ProviderProtocol } from './types'
+import type { Provider, ProviderDetail, ProviderProtocol, Resource } from './types'
+
+export function usesInferenceModel(resource: Resource): boolean {
+  return resource.authType === 'API_KEY' || resource.authAdapter === 'ANTHROPIC_CLAUDE_CODE'
+}
 
 export function preferredTestProtocol(provider: Provider): ProviderProtocol | undefined {
   return (
