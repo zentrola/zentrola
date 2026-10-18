@@ -3,6 +3,7 @@ package anthropic
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -84,6 +85,13 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 		if credentialErr != nil {
 			return nil, gw.ErrCredential
 		}
+		// 订阅 Token 只接受 Claude Code 身份的请求，缺少系统提示时上游返回 429；
+		// count_tokens 同样补上，使计数与实际推理请求一致。
+		body, err := withClaudeCodeSystem(input.Body)
+		if err != nil {
+			return nil, err
+		}
+		input.Body = body
 	} else {
 		if len(credential) == 0 || len(credential) > 4096 {
 			return nil, gw.ErrCredential
@@ -131,7 +139,10 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 		req.Header.Set("anthropic-beta", input.Beta)
 	}
 	if claudeSubscription {
+		addAnthropicBeta(req.Header, anthropicclaude.ClaudeCodeBeta)
 		addAnthropicBeta(req.Header, anthropicclaude.OAuthBeta)
+		req.Header.Set("User-Agent", anthropicclaude.ClaudeCodeUserAgent)
+		req.Header.Set("X-App", "cli")
 	}
 	if input.RequestID != "" {
 		req.Header.Set("X-Request-ID", input.RequestID)
@@ -242,4 +253,92 @@ func addAnthropicBeta(header http.Header, beta string) {
 		return
 	}
 	header.Set("anthropic-beta", values+","+beta)
+}
+
+// withClaudeCodeSystem 确保 system 首段为 Claude Code 系统提示。已声明该身份的请求原样返回；
+// 否则在最前面插入文本块，并保留客户端原有系统提示及请求中其他 JSON 原文（如 cache_control）。
+func withClaudeCodeSystem(body []byte) ([]byte, error) {
+	d := json.NewDecoder(bytes.NewReader(body))
+	if token, err := d.Token(); err != nil || token != json.Delim('{') {
+		return nil, gw.ErrInvalid
+	}
+	objectStart := int(d.InputOffset())
+	systemStart, systemEnd, fields := 0, 0, 0
+	for d.More() {
+		token, err := d.Token()
+		if err != nil {
+			return nil, gw.ErrInvalid
+		}
+		key, _ := token.(string)
+		var raw json.RawMessage
+		if err := d.Decode(&raw); err != nil {
+			return nil, gw.ErrInvalid
+		}
+		fields++
+		if key == "system" {
+			if systemEnd != 0 {
+				return nil, gw.ErrInvalid
+			}
+			systemEnd = int(d.InputOffset())
+			systemStart = systemEnd - len(raw)
+		}
+	}
+	block, _ := json.Marshal(claudeCodeTextBlock{Type: "text", Text: anthropicclaude.ClaudeCodeSystemPrompt})
+	if systemEnd == 0 {
+		insert := append([]byte(`"system":[`), block...)
+		insert = append(insert, ']')
+		if fields > 0 {
+			insert = append(insert, ',')
+		}
+		return splice(body, objectStart, objectStart, insert), nil
+	}
+	raw := body[systemStart:systemEnd]
+	switch raw[0] {
+	case '"':
+		var text string
+		if err := json.Unmarshal(raw, &text); err != nil {
+			return nil, gw.ErrInvalid
+		}
+		if strings.HasPrefix(text, anthropicclaude.ClaudeCodeSystemPrompt) {
+			return body, nil
+		}
+		blocks := []claudeCodeTextBlock{{Type: "text", Text: anthropicclaude.ClaudeCodeSystemPrompt}}
+		if text != "" {
+			blocks = append(blocks, claudeCodeTextBlock{Type: "text", Text: text})
+		}
+		encoded, _ := json.Marshal(blocks)
+		return splice(body, systemStart, systemEnd, encoded), nil
+	case '[':
+		var blocks []json.RawMessage
+		if err := json.Unmarshal(raw, &blocks); err != nil {
+			return nil, gw.ErrInvalid
+		}
+		if len(blocks) > 0 {
+			var first claudeCodeTextBlock
+			if json.Unmarshal(blocks[0], &first) == nil && first.Type == "text" && strings.HasPrefix(first.Text, anthropicclaude.ClaudeCodeSystemPrompt) {
+				return body, nil
+			}
+			block = append(block, ',')
+		}
+		// 在 '[' 之后插入，客户端原有文本块按原文保留。
+		return splice(body, systemStart+1, systemStart+1, block), nil
+	case 'n':
+		encoded := append([]byte{'['}, block...)
+		return splice(body, systemStart, systemEnd, append(encoded, ']')), nil
+	default:
+		// 非法的 system 类型交由上游返回协议错误。
+		return body, nil
+	}
+}
+
+type claudeCodeTextBlock struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+func splice(body []byte, start, end int, insert []byte) []byte {
+	out := make([]byte, 0, len(body)-(end-start)+len(insert))
+	out = append(out, body[:start]...)
+	out = append(out, insert...)
+	return append(out, body[end:]...)
 }
