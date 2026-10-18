@@ -21,6 +21,8 @@ type catalogRequest struct {
 	Bearer       bool
 	APIKeyHeader string
 	NetworkScope string
+	// Headers 只承载协议版本等非敏感请求头，凭据始终由 Bearer 或 APIKeyHeader 注入。
+	Headers map[string]string
 }
 
 const (
@@ -35,6 +37,12 @@ type adapter interface {
 	Name() string
 	Request(mgmt.ModelDiscoverySource, int, string) (catalogRequest, error)
 	Decode([]byte, int) ([]mgmt.DiscoveredModel, string, error)
+}
+
+// subscriptionAdapter 由支持订阅凭据读取模型目录的适配器实现，负责把存储凭据转换为请求 Token。
+type subscriptionAdapter interface {
+	SupportsSubscription(authAdapter string) bool
+	SubscriptionCredential([]byte) ([]byte, error)
 }
 
 type Discoverer struct {
@@ -67,13 +75,14 @@ func NewDiscoverer(logger *slog.Logger) *Discoverer {
 		privateClient: newClient(catalog.NetworkScopePrivate),
 		logger:        logger,
 		adapters: map[string]adapter{
-			catalog.OpenAIOfficialCode:   openAIAdapter{},
-			catalog.GoogleOfficialCode:   googleAdapter{},
-			catalog.DeepSeekOfficialCode: deepSeekAdapter{},
-			catalog.ZhipuOfficialCode:    zhipuAdapter{},
-			catalog.KimiOfficialCode:     moonshotAdapter{},
-			catalog.QwenOfficialCode:     qwenAdapter{},
-			catalog.XAIOfficialCode:      xAIAdapter{},
+			catalog.AnthropicOfficialCode: anthropicAdapter{},
+			catalog.OpenAIOfficialCode:    openAIAdapter{},
+			catalog.GoogleOfficialCode:    googleAdapter{},
+			catalog.DeepSeekOfficialCode:  deepSeekAdapter{},
+			catalog.ZhipuOfficialCode:     zhipuAdapter{},
+			catalog.KimiOfficialCode:      moonshotAdapter{},
+			catalog.QwenOfficialCode:      qwenAdapter{},
+			catalog.XAIOfficialCode:       xAIAdapter{},
 		},
 	}
 }
@@ -81,6 +90,22 @@ func NewDiscoverer(logger *slog.Logger) *Discoverer {
 func (d *Discoverer) Supports(providerCode string) bool {
 	_, ok := d.adapters[providerCode]
 	return ok
+}
+
+func (d *Discoverer) SupportsCredential(providerCode, authType, authAdapter string) bool {
+	adapter, ok := d.adapters[providerCode]
+	if !ok {
+		return false
+	}
+	switch authType {
+	case "", mgmt.AuthTypeAPIKey:
+		return true
+	case mgmt.AuthTypeSubscription:
+		subscription, ok := adapter.(subscriptionAdapter)
+		return ok && subscription.SupportsSubscription(authAdapter)
+	default:
+		return false
+	}
 }
 
 func (d *Discoverer) Discover(ctx context.Context, source mgmt.ModelDiscoverySource, credential []byte, proxy *catalog.OutboundProxy) (models []mgmt.DiscoveredModel, result mgmt.ConnectionResult) {
@@ -91,6 +116,19 @@ func (d *Discoverer) Discover(ctx context.Context, source mgmt.ModelDiscoverySou
 	if !ok {
 		result.Code = "MODEL_CATALOG_UNSUPPORTED"
 		return
+	}
+	if source.AuthType == mgmt.AuthTypeSubscription {
+		if !d.SupportsCredential(source.ProviderCode, source.AuthType, source.AuthAdapter) {
+			result.Code = "MODEL_CATALOG_UNSUPPORTED"
+			return
+		}
+		token, err := adapter.(subscriptionAdapter).SubscriptionCredential(credential)
+		if err != nil {
+			result.Code = "CREDENTIAL_INVALID"
+			return
+		}
+		defer clear(token)
+		credential = token
 	}
 	if !validCredential(credential) {
 		result.Code = "CREDENTIAL_INVALID"
@@ -128,6 +166,9 @@ func (d *Discoverer) Discover(ctx context.Context, source mgmt.ModelDiscoverySou
 		}
 		if requestSpec.APIKeyHeader != "" {
 			req.Header.Set(requestSpec.APIKeyHeader, string(credential))
+		}
+		for name, value := range requestSpec.Headers {
+			req.Header.Set(name, value)
 		}
 		req.Header.Set("Accept", "application/json")
 

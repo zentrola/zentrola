@@ -275,6 +275,9 @@ func TestQwenCatalogRequestUsesConfiguredRegionalHost(t *testing.T) {
 
 func TestDiscovererReportsRegisteredProviderCapabilities(t *testing.T) {
 	discoverer := NewDiscoverer(nil)
+	if !discoverer.Supports(catalog.AnthropicOfficialCode) {
+		t.Fatal("Anthropic model catalog adapter should be reported as supported")
+	}
 	if !discoverer.Supports(catalog.OpenAIOfficialCode) {
 		t.Fatal("OpenAI model catalog adapter should be reported as supported")
 	}

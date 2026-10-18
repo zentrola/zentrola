@@ -114,10 +114,12 @@ func (syncCipher) Decrypt(catalog.SealedCredential, catalog.CredentialOwner) ([]
 }
 
 type syncDiscoverer struct {
-	models       []DiscoveredModel
-	result       ConnectionResult
-	source       ModelDiscoverySource
-	supportsCode string
+	models              []DiscoveredModel
+	result              ConnectionResult
+	source              ModelDiscoverySource
+	supportsCode        string
+	subscriptionAdapter string
+	calls               int
 }
 
 func (d *syncDiscoverer) Supports(providerCode string) bool {
@@ -128,8 +130,19 @@ func (d *syncDiscoverer) Supports(providerCode string) bool {
 	return providerCode == code
 }
 
+func (d *syncDiscoverer) SupportsCredential(providerCode, authType, authAdapter string) bool {
+	if !d.Supports(providerCode) {
+		return false
+	}
+	if authType == "" || authType == AuthTypeAPIKey {
+		return true
+	}
+	return authType == AuthTypeSubscription && d.subscriptionAdapter != "" && authAdapter == d.subscriptionAdapter
+}
+
 func (d *syncDiscoverer) Discover(_ context.Context, source ModelDiscoverySource, _ []byte, _ *catalog.OutboundProxy) ([]DiscoveredModel, ConnectionResult) {
 	d.source = source
+	d.calls++
 	return d.models, d.result
 }
 
@@ -144,11 +157,12 @@ func (s syncStore) Write(_ context.Context, _ admin.Identity, fn func(Writer) er
 
 type syncState struct {
 	Writer
-	resource ResourceRecord
-	provider Provider
-	models   []Model
-	mappings []ProviderMapping
-	audits   []Audit
+	resource  ResourceRecord
+	resources []Resource
+	provider  Provider
+	models    []Model
+	mappings  []ProviderMapping
+	audits    []Audit
 }
 
 type providerCapabilityReader struct {
@@ -190,10 +204,23 @@ func (providerCapabilityStore) Write(context.Context, admin.Identity, func(Write
 	return nil
 }
 
-func (s *syncState) Resource(context.Context, int64) (ResourceRecord, error) { return s.resource, nil }
-func (s *syncState) Provider(context.Context, int64) (Provider, error)       { return s.provider, nil }
+func (s *syncState) Resource(_ context.Context, id int64) (ResourceRecord, error) {
+	for _, resource := range s.resources {
+		if resource.ID == id {
+			return ResourceRecord{Resource: resource}, nil
+		}
+	}
+	return s.resource, nil
+}
+func (s *syncState) Provider(context.Context, int64) (Provider, error) { return s.provider, nil }
 func (s *syncState) Resources(_ context.Context, page Page) ([]Resource, error) {
-	if page.After != 0 || s.resource.ID == 0 {
+	if page.After != 0 {
+		return []Resource{}, nil
+	}
+	if s.resources != nil {
+		return append([]Resource(nil), s.resources...), nil
+	}
+	if s.resource.ID == 0 {
 		return []Resource{}, nil
 	}
 	return []Resource{s.resource.Resource}, nil
@@ -304,6 +331,62 @@ func TestSyncProviderModelsRequiresCredential(t *testing.T) {
 	)
 	if !errors.Is(err, ErrModelSyncCredentialRequired) {
 		t.Fatalf("error=%v; want model sync credential required", err)
+	}
+}
+
+func TestSyncProviderModelsSelectsSupportedCredential(t *testing.T) {
+	claude := Resource{ID: 11, ProviderID: 20, AuthType: AuthTypeSubscription, AuthAdapter: AuthAdapterClaudeCode, Priority: 1}
+	codex := Resource{ID: 12, ProviderID: 20, AuthType: AuthTypeSubscription, AuthAdapter: AuthAdapterOpenAICodex, Priority: 0}
+	apiKey := Resource{ID: 13, ProviderID: 20, AuthType: AuthTypeAPIKey, AuthAdapter: "API_KEY", Priority: 100}
+	for _, tt := range []struct {
+		name      string
+		resources []Resource
+		want      Resource
+	}{
+		{"subscription fallback", []Resource{codex, claude}, claude},
+		{"API key before subscription", []Resource{claude, apiKey, codex}, apiKey},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			state := &syncState{
+				resources: tt.resources,
+				provider:  Provider{ID: 20, Code: catalog.AnthropicOfficialCode, Name: "Anthropic"},
+			}
+			discoverer := &syncDiscoverer{
+				supportsCode: catalog.AnthropicOfficialCode, subscriptionAdapter: AuthAdapterClaudeCode,
+				models: []DiscoveredModel{{Code: "claude-sonnet-5-5", Name: "Claude Sonnet 5.5"}},
+				result: ConnectionResult{OK: true, Code: "OK", HTTPStatus: 200},
+			}
+			service := New(syncStore{state}, &syncIDs{next: 100}, syncCipher{}, nil, WithModelDiscoverer(discoverer))
+
+			result, err := service.SyncProviderModels(context.Background(), admin.Identity{ID: 1}, 20, appsec.RequestMeta{})
+			if err != nil || !result.OK || result.Created != 1 || result.Mapped != 1 {
+				t.Fatalf("sync failed: result=%+v err=%v", result, err)
+			}
+			if discoverer.source.AuthType != tt.want.AuthType || discoverer.source.AuthAdapter != tt.want.AuthAdapter {
+				t.Fatalf("discovery source = %+v, want credential %+v", discoverer.source, tt.want)
+			}
+			if len(state.audits) != 1 || state.audits[0].After.(map[string]any)["resourceId"] != idString(tt.want.ID) {
+				t.Fatalf("sync audit did not record selected resource: %+v", state.audits)
+			}
+		})
+	}
+}
+
+func TestSyncProviderModelsIgnoresUnsupportedSubscription(t *testing.T) {
+	state := &syncState{
+		resources: []Resource{{ID: 12, ProviderID: 20, AuthType: AuthTypeSubscription, AuthAdapter: AuthAdapterOpenAICodex}},
+		provider:  Provider{ID: 20, Code: catalog.OpenAIOfficialCode, Name: "OpenAI"},
+	}
+	discoverer := &syncDiscoverer{supportsCode: catalog.OpenAIOfficialCode}
+	service := New(syncStore{state}, &syncIDs{}, syncCipher{}, nil, WithModelDiscoverer(discoverer))
+
+	_, err := service.SyncProviderModels(context.Background(), admin.Identity{ID: 1}, 20, appsec.RequestMeta{})
+	if !errors.Is(err, ErrModelSyncCredentialRequired) || discoverer.calls != 0 {
+		t.Fatalf("error=%v calls=%d; want credential required without discovery", err, discoverer.calls)
+	}
+	_, err = service.SyncResourceModels(context.Background(), admin.Identity{ID: 1}, 12, appsec.RequestMeta{})
+	if !errors.Is(err, ErrProvider) || discoverer.calls != 0 {
+		t.Fatalf("error=%v calls=%d; want provider unavailable without discovery", err, discoverer.calls)
 	}
 }
 

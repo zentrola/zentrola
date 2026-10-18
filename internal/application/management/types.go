@@ -533,6 +533,8 @@ type DiscoveredModel struct {
 type ModelDiscoverySource struct {
 	ProviderCode string
 	Endpoints    []ProviderEndpoint
+	AuthType     string
+	AuthAdapter  string
 }
 
 type ModelSyncResult struct {
@@ -546,5 +548,7 @@ type ModelSyncResult struct {
 
 type ModelDiscoverer interface {
 	Supports(providerCode string) bool
+	// SupportsCredential 判断该服务商的模型目录能否使用指定类型的凭据读取。
+	SupportsCredential(providerCode, authType, authAdapter string) bool
 	Discover(context.Context, ModelDiscoverySource, []byte, *catalog.OutboundProxy) ([]DiscoveredModel, ConnectionResult)
 }

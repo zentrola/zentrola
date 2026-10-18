@@ -62,10 +62,10 @@ func (s *ProviderService) SyncProviderModels(ctx context.Context, actor admin.Id
 			}
 			for _, resource := range resources {
 				if resource.ProviderID != id ||
-					(resource.AuthType != AuthTypeAPIKey && resource.AuthType != "") {
+					!s.discoverer.SupportsCredential(provider.Code, resource.AuthType, resource.AuthAdapter) {
 					continue
 				}
-				if resourceID == 0 || resource.Priority < selected.Priority {
+				if resourceID == 0 || preferModelSyncResource(resource, selected) {
 					selected = resource
 					resourceID = resource.ID
 				}
@@ -90,6 +90,16 @@ func (s *ProviderService) SyncProviderModels(ctx context.Context, actor admin.Id
 	return ModelSyncResult{}, ErrModelSyncCredentialRequired
 }
 
+// preferModelSyncResource 优先使用 API Key 读取目录，订阅凭据仅在没有 API Key 时兜底；同类凭据按优先级选择。
+func preferModelSyncResource(candidate, selected Resource) bool {
+	candidateAPIKey := candidate.AuthType != AuthTypeSubscription
+	selectedAPIKey := selected.AuthType != AuthTypeSubscription
+	if candidateAPIKey != selectedAPIKey {
+		return candidateAPIKey
+	}
+	return candidate.Priority < selected.Priority
+}
+
 func (s *ProviderService) SyncResourceModels(ctx context.Context, actor admin.Identity, id int64, meta appsec.RequestMeta) (ModelSyncResult, error) {
 	if id <= 0 {
 		return ModelSyncResult{}, appsec.ErrInvalidArgument
@@ -112,7 +122,7 @@ func (s *ProviderService) SyncResourceModels(ctx context.Context, actor admin.Id
 	if err != nil {
 		return ModelSyncResult{}, err
 	}
-	if !s.discoverer.Supports(provider.Code) {
+	if !s.discoverer.SupportsCredential(provider.Code, resource.AuthType, resource.AuthAdapter) {
 		return ModelSyncResult{}, ErrProvider
 	}
 
@@ -129,6 +139,8 @@ func (s *ProviderService) SyncResourceModels(ctx context.Context, actor admin.Id
 	discovered, connection := s.discoverer.Discover(ctx, ModelDiscoverySource{
 		ProviderCode: provider.Code,
 		Endpoints:    slices.Clone(provider.Endpoints),
+		AuthType:     resource.AuthType,
+		AuthAdapter:  resource.AuthAdapter,
 	}, plain, proxy)
 	result := ModelSyncResult{ConnectionResult: connection, Discovered: len(discovered), Source: "PROVIDER"}
 	if len(discovered) > modelSyncLimit {
