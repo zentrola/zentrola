@@ -4,6 +4,27 @@ All notable changes to Zentrola are documented here. Dates use UTC. The project 
 
 Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循语义化版本。
 
+## [1.2.1] - 2026-10-18
+
+### Added / 新增
+
+- Anthropic official model catalog sync: model synchronization reads `/v1/models` with an API Key, or with a Claude Code subscription token when no supported API Key is configured. Deprecated models are skipped, and image input support is recorded from the catalog.
+- Anthropic 官方模型目录同步：优先使用 API Key 读取 `/v1/models`，没有可用 API Key 时使用 Claude Code 订阅 Token；已弃用的模型不会同步，并按目录记录是否支持图片输入。
+
+### Changed / 变更
+
+- Claude subscription connection tests now send one minimal request to the selected model instead of reading the usage endpoint, and no longer refresh quota data. Enabling a provider with a Claude subscription also requires choosing a model mapping.
+- Claude 订阅连接测试改为向所选模型发送一次最小请求，不再读取额度接口，也不再刷新额度；使用 Claude 订阅启用服务商时需要选择模型映射。
+
+### Fixed / 修复
+
+- Claude subscription connection tests no longer fail with HTTP 429: the probe now identifies itself as Claude Code and accepts responses that contain only a signed thinking block.
+- Claude subscription OAuth tokens are sent only to `https://api.anthropic.com` by the gateway and connection tests, even when the provider endpoint points to another host.
+- Enabling a provider with a Claude subscription rechecks that the tested model mapping is still valid, matching the API Key behavior.
+- Claude 订阅连接测试不再返回 HTTP 429：探测请求会声明 Claude Code 身份，并接受只包含带签名思考块的响应。
+- 网关和连接测试只会把 Claude 订阅 OAuth Token 发往 `https://api.anthropic.com`，即使服务商端点指向其他主机。
+- 使用 Claude 订阅启用服务商时，会与 API Key 一样复核被测试的模型映射仍然有效。
+
 ## [1.2.0] - 2026-10-13
 
 ### Added / 新增
