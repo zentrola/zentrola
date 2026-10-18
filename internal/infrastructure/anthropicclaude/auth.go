@@ -18,7 +18,9 @@ import (
 )
 
 const (
-	AdapterCode          = mgmt.AuthAdapterClaudeCode
+	AdapterCode = mgmt.AuthAdapterClaudeCode
+	// APIBaseURL 是订阅 OAuth Token 唯一允许的推理主机；长期 Token 不随服务商端点配置发往其他地址。
+	APIBaseURL           = "https://api.anthropic.com"
 	OAuthBeta            = "oauth-2025-04-20"
 	defaultUsageEndpoint = "https://api.anthropic.com/api/oauth/usage"
 	credentialKind       = "claude_code_setup_token"

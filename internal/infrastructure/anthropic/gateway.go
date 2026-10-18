@@ -52,6 +52,11 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 	if input.Path != "/v1/messages" && input.Path != "/v1/messages/count_tokens" {
 		return nil, gw.ErrInvalid
 	}
+	networkScope := route.NetworkScope
+	claudeSubscription := route.AuthType == "SUBSCRIPTION"
+	if claudeSubscription {
+		baseURL, networkScope = anthropicclaude.APIBaseURL, catalog.NetworkScopePublic
+	}
 	// 根据服务商能力自动过滤不支持的功能
 	capabilities := catalog.GetProviderCapabilities(baseURL)
 	if !capabilities.SupportsAdvisor {
@@ -70,7 +75,6 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 		}
 	}
 	requestCredential := string(credential)
-	claudeSubscription := route.AuthType == "SUBSCRIPTION"
 	if claudeSubscription {
 		if route.AuthAdapter != anthropicclaude.AdapterCode {
 			return nil, gw.ErrCredential
@@ -133,10 +137,10 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 		req.Header.Set("X-Request-ID", input.RequestID)
 	}
 	baseClient := c.client
-	if route.NetworkScope == catalog.NetworkScopePrivate {
+	if networkScope == catalog.NetworkScopePrivate {
 		baseClient = c.privateClient
 	}
-	client, cleanup, err := provider.ClientWithProxyForScope(ctx, baseClient, route.Proxy, route.NetworkScope, provider.ProxyRequestLog{
+	client, cleanup, err := provider.ClientWithProxyForScope(ctx, baseClient, route.Proxy, networkScope, provider.ProxyRequestLog{
 		Logger: c.logger, Operation: "gateway_inference", ProviderID: route.ProviderID, ResourceID: route.ResourceID, Protocol: gw.AnthropicEndpoint,
 	})
 	if err != nil {

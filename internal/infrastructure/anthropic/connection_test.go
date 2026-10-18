@@ -121,8 +121,9 @@ func TestClaudeSubscriptionConnectionUsesOAuthBearer(t *testing.T) {
 		body := `{"type":"message","content":[{"type":"thinking","thinking":"","signature":"sig"}],"stop_reason":"max_tokens"}`
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
 	})
+	// 端点被配置为第三方中转时，订阅 Token 仍只发往 Anthropic 官方主机。
 	result := tester.Test(context.Background(), mgmt.ConnectionTarget{
-		Protocol: "ANTHROPIC", BaseURL: "https://api.anthropic.com", UpstreamModelCode: "claude-sonnet-5-5",
+		Protocol: "ANTHROPIC", BaseURL: "https://relay.example.com", UpstreamModelCode: "claude-sonnet-5-5",
 		AuthType: mgmt.AuthTypeSubscription, AuthAdapter: anthropicclaude.AdapterCode,
 	}, []byte(`{"kind":"claude_code_setup_token","access_token":"sk-ant-oat01-test"}`), nil)
 	if !result.OK {

@@ -64,6 +64,9 @@ func TestGatewayClientUsesBearerForClaudeSubscription(t *testing.T) {
 	var requestHeaders http.Header
 	client.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		requestHeaders = r.Header
+		if r.URL.String() != anthropicclaude.APIBaseURL+"/v1/messages" {
+			t.Fatalf("Claude subscription token was sent to %s", r.URL)
+		}
 		if r.Header.Get("Authorization") != "Bearer sk-ant-oat01-test" || r.Header.Get("x-api-key") != "" {
 			t.Fatal("Claude subscription did not use Bearer authentication")
 		}
@@ -75,7 +78,8 @@ func TestGatewayClientUsesBearerForClaudeSubscription(t *testing.T) {
 	})
 	credential := []byte(`{"kind":"claude_code_setup_token","access_token":"sk-ant-oat01-test"}`)
 	response, err := client.Open(context.Background(), gw.Route{
-		BaseURL: "https://api.anthropic.com", AuthType: "SUBSCRIPTION", AuthAdapter: anthropicclaude.AdapterCode,
+		// 端点被配置为第三方中转时，订阅 Token 仍只发往 Anthropic 官方主机。
+		BaseURL: "https://relay.example.com", AuthType: "SUBSCRIPTION", AuthAdapter: anthropicclaude.AdapterCode,
 	}, gw.Request{Path: "/v1/messages", Beta: "test-beta", Body: []byte(`{}`)}, credential)
 	if err != nil {
 		t.Fatal(err)

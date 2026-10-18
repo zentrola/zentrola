@@ -150,7 +150,14 @@ func (t *ConnectionTester) Test(ctx context.Context, target mgmt.ConnectionTarge
 				return
 			}
 			requestCredential, oauthBearer = accessToken, true
-			probe.Body = anthropicProbeBody(target.UpstreamModelCode, anthropicclaude.ClaudeCodeSystemPrompt)
+			target.NetworkScope = catalog.NetworkScopePublic
+			probeAdapter = t.standardAdapter
+			probe = connectionProbe{
+				URL:            anthropicclaude.APIBaseURL + "/v1/messages",
+				Body:           anthropicProbeBody(target.UpstreamModelCode, anthropicclaude.ClaudeCodeSystemPrompt),
+				ResponseFormat: anthropicInferenceProbe,
+			}
+			ok = true
 		default:
 			result.Code = "SUBSCRIPTION_ADAPTER_UNAVAILABLE"
 			return
