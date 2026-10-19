@@ -477,13 +477,8 @@ type rpcClient struct {
 
 func startClient(ctx context.Context, executable, directory string, proxy *catalog.OutboundProxy) (*rpcClient, error) {
 	command := exec.CommandContext(ctx, executable, "app-server", "--stdio", "-c", `cli_auth_credentials_store="file"`)
-	environment := make([]string, 0, len(os.Environ())+1)
-	for _, item := range os.Environ() {
-		if !strings.HasPrefix(strings.ToUpper(item), "CODEX_HOME=") {
-			environment = append(environment, item)
-		}
-	}
-	environment, err := provider.EnvironmentWithProxy(ctx, environment, proxy, provider.ProxyRequestLog{
+	// 子进程只继承白名单环境变量，再叠加服务商代理与隔离的 CODEX_HOME。
+	environment, err := provider.EnvironmentWithProxy(ctx, codexEnvironment(os.Environ()), proxy, provider.ProxyRequestLog{
 		Operation: "subscription_refresh", ProviderCode: catalog.OpenAIOfficialCode, Protocol: "OPENAI",
 	})
 	if err != nil {
