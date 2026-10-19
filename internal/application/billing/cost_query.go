@@ -95,7 +95,7 @@ type UsageCostRating struct {
 	InputPrice       string    `json:"inputPrice"`
 	CachedInputPrice string    `json:"cachedInputPrice"`
 	// CacheCreationInputPrice 为 nil 表示价格未配置缓存写入单价，按普通输入单价核算。
-	CacheCreationInputPrice *string   `json:"cacheCreationInputPrice"`
+	CacheCreationInputPrice *string   `json:"cacheCreationInputPrice" extensions:"x-nullable"`
 	OutputPrice             string    `json:"outputPrice"`
 	InputCost               string    `json:"inputCost"`
 	CachedInputCost         string    `json:"cachedInputCost"`

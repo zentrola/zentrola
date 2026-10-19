@@ -25,7 +25,7 @@ type ModelPrice struct {
 	OutputPrice          string `json:"outputPrice"`
 	CachedInputPrice     string `json:"cachedInputPrice"`
 	// CacheCreationInputPrice 为 nil 表示未配置缓存写入单价，核算时按普通输入单价计费。
-	CacheCreationInputPrice *string   `json:"cacheCreationInputPrice"`
+	CacheCreationInputPrice *string   `json:"cacheCreationInputPrice" extensions:"x-nullable"`
 	EffectiveAt             time.Time `json:"effectiveAt"`
 	CreatedAt               time.Time `json:"createdAt"`
 }

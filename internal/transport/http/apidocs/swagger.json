@@ -1094,7 +1094,7 @@
                     },
                     {
                         "type": "string",
-                        "description": "操作类型，精确匹配",
+                        "description": "操作类型，精确匹配；去除首尾空白后须匹配 ^[A-Z][A-Z0-9_]{0,47}$，否则返回 400",
                         "name": "type",
                         "in": "query"
                     },
@@ -5854,7 +5854,7 @@
                     },
                     {
                         "type": "string",
-                        "description": "操作类型，精确匹配，例如 RESOURCE_PRICE_UPDATE",
+                        "description": "操作类型，精确匹配，例如 RESOURCE_PRICE_UPDATE；去除首尾空白后须匹配 ^[A-Z][A-Z0-9_]{0,47}$，否则返回 400",
                         "name": "type",
                         "in": "query"
                     },
@@ -9563,7 +9563,8 @@
                 },
                 "cacheCreationInputPrice": {
                     "description": "CacheCreationInputPrice 为 nil 表示价格未配置缓存写入单价，按普通输入单价核算。",
-                    "type": "string"
+                    "type": "string",
+                    "x-nullable": true
                 },
                 "cachedInputCost": {
                     "type": "string"
@@ -10955,7 +10956,8 @@
             "properties": {
                 "cacheCreationInputPrice": {
                     "description": "CacheCreationInputPrice 为 nil 表示未配置缓存写入单价，核算时按普通输入单价计费。",
-                    "type": "string"
+                    "type": "string",
+                    "x-nullable": true
                 },
                 "cachedInputPrice": {
                     "type": "string"

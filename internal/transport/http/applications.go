@@ -87,7 +87,7 @@ func (s *SecurityHandlers) mountApplicationRoutes(r chi.Router) {
 	// @Param after query string false "上一页 nextCursor，默认从头查询"
 	// @Param limit query int false "每页数量" minimum(1) maximum(100) default(50)
 	// @Param keyword query string false "关键字：去除首尾空白后最多 100 个字符；不区分大小写包含匹配操作人、操作类型、目标类型、目标名称、目标 ID、请求 ID 和结果" maxlength(100)
-	// @Param type query string false "操作类型，精确匹配"
+	// @Param type query string false "操作类型，精确匹配；去除首尾空白后须匹配 ^[A-Z][A-Z0-9_]{0,47}$，否则返回 400"
 	// @Param result query string false "操作结果" Enums(SUCCESS,FAILED)
 	// @Success 200 {object} response{data=PageResponse[mgmt.Operation]}
 	// @Failure 400,401,503 {object} response
