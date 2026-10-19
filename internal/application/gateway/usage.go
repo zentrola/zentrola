@@ -3,6 +3,7 @@ package gateway
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -23,10 +24,13 @@ type UsageObserver struct {
 	protocolInvalid               bool
 	blocks                        map[int]bool
 	nextBlock                     int
-	input, output, cached         *int64
-	eventCount                    int64
-	lastEvent                     string
-	json                          metadataJSON
+	// input 保存上游原始输入计数。Anthropic 的 input_tokens 不含缓存，
+	// cacheCreation / cached 分别保存 cache_creation / cache_read，产出时再归一。
+	input, output, cached *int64
+	cacheCreation         *int64
+	eventCount            int64
+	lastEvent             string
+	json                  metadataJSON
 }
 
 type UsageDiagnostics struct {
@@ -463,11 +467,14 @@ func (o *UsageObserver) update(raw []byte) {
 				}
 			}
 		} else {
+			// Anthropic 的三类输入计数互不包含，分别记录，Tokens 产出时再归一。
 			switch key {
 			case "input_tokens":
 				dst = &o.input
 			case "output_tokens":
 				dst = &o.output
+			case "cache_creation_input_tokens":
+				dst = &o.cacheCreation
 			case "cache_read_input_tokens":
 				dst = &o.cached
 			default:
@@ -519,10 +526,35 @@ func (o *UsageObserver) Tokens(complete bool) (*int64, *int64, *int64) {
 	if o.badUsage || o.json.invalid {
 		return nil, nil, nil
 	}
-	if !complete {
-		return o.input, nil, o.cached
+	input := o.input
+	if !o.openai && input != nil {
+		// 下游计费与配额按 OpenAI 语义处理：input 为总输入且 cached <= input。
+		total, ok := anthropicTotalInput(*input, o.cacheCreation, o.cached)
+		if !ok {
+			return nil, nil, nil
+		}
+		input = &total
 	}
-	return o.input, o.output, o.cached
+	if !complete {
+		return input, nil, o.cached
+	}
+	return input, o.output, o.cached
+}
+
+// anthropicTotalInput 将 Anthropic 互不包含的 input / cache_creation / cache_read
+// 合并为总输入。溢出时视为计量不可靠。
+func anthropicTotalInput(input int64, parts ...*int64) (int64, bool) {
+	total := input
+	for _, part := range parts {
+		if part == nil {
+			continue
+		}
+		if *part > math.MaxInt64-total {
+			return 0, false
+		}
+		total += *part
+	}
+	return total, true
 }
 
 func (o *UsageObserver) Diagnostics() UsageDiagnostics {

@@ -228,9 +228,10 @@ func TestStage5Integration(t *testing.T) {
 			t.Fatal("wrong principal attribution")
 		}
 	}
+	// Anthropic 的 input_tokens 不含缓存读取，入库时归一为总输入 11 + 4。
 	for _, name := range []string{"normal", "stream"} {
 		r := byID[requestIDs[name]]
-		if r.Status != "SUCCESS" || r.ModelID != modelID || r.ResourceID != resource.ID || r.ProviderID != provider.ID || r.AttemptNo != 1 || r.InputTokens == nil || *r.InputTokens != 11 || r.OutputTokens == nil || *r.OutputTokens != 7 || r.CachedInputTokens == nil || *r.CachedInputTokens != 4 {
+		if r.Status != "SUCCESS" || r.ModelID != modelID || r.ResourceID != resource.ID || r.ProviderID != provider.ID || r.AttemptNo != 1 || r.InputTokens == nil || *r.InputTokens != 15 || r.OutputTokens == nil || *r.OutputTokens != 7 || r.CachedInputTokens == nil || *r.CachedInputTokens != 4 {
 			t.Fatalf("wrong usage attribution: %+v", r)
 		}
 	}
@@ -254,8 +255,9 @@ func TestStage5Integration(t *testing.T) {
 	if _, ok := byID[requestIDs["count"]]; ok {
 		t.Fatal("count_tokens recorded as inference")
 	}
+	// 4 条记录含 message_start 的缓存读取 4，归一后总输入各增加 4，合计 58 + 16。
 	dashboard, err := app.NewQuery(store).Dashboard(ctx, actor, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
-	if err != nil || dashboard.ActiveMemberCount < 1 || dashboard.ModelCount < 1 || dashboard.ProviderCount < 1 || dashboard.TotalTokens != 58 || len(dashboard.TokenRanking) != 1 || dashboard.TokenRanking[0].PrincipalID != member.ID || len(dashboard.ClientModelRanking) != 1 || dashboard.ClientModelRanking[0].ModelID != sonnet.ID || dashboard.ClientModelRanking[0].Requests != 7 || len(dashboard.ProviderRanking) != 1 || dashboard.ProviderRanking[0].ProviderID != provider.ID || dashboard.ProviderRanking[0].Calls != 7 {
+	if err != nil || dashboard.ActiveMemberCount < 1 || dashboard.ModelCount < 1 || dashboard.ProviderCount < 1 || dashboard.TotalTokens != 74 || len(dashboard.TokenRanking) != 1 || dashboard.TokenRanking[0].PrincipalID != member.ID || len(dashboard.ClientModelRanking) != 1 || dashboard.ClientModelRanking[0].ModelID != sonnet.ID || dashboard.ClientModelRanking[0].Requests != 7 || len(dashboard.ProviderRanking) != 1 || dashboard.ProviderRanking[0].ProviderID != provider.ID || dashboard.ProviderRanking[0].Calls != 7 {
 		t.Fatalf("dashboard aggregation incorrect: result=%+v err=%v", dashboard, err)
 	}
 	var opusProviderModelID int64
@@ -325,7 +327,7 @@ func TestStage5Integration(t *testing.T) {
 		t.Fatal(err)
 	}
 	dashboard, err = app.NewQuery(store).Dashboard(ctx, actor, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
-	if err != nil || dashboard.TotalTokens != 65 || len(dashboard.ClientModelRanking) != 2 || dashboard.ClientModelRanking[0].ModelID != sonnet.ID || dashboard.ClientModelRanking[0].Requests != 8 || dashboard.ClientModelRanking[1].ModelID != opus.ID || dashboard.ClientModelRanking[1].Requests != 1 || len(dashboard.ProviderRanking) != 2 || dashboard.ProviderRanking[0].ProviderID != provider.ID || dashboard.ProviderRanking[0].Calls != 8 || dashboard.ProviderRanking[0].Tokens != 63 || dashboard.ProviderRanking[1].ProviderID != backupProvider.ID || dashboard.ProviderRanking[1].Calls != 1 || dashboard.ProviderRanking[1].Tokens != 2 {
+	if err != nil || dashboard.TotalTokens != 81 || len(dashboard.ClientModelRanking) != 2 || dashboard.ClientModelRanking[0].ModelID != sonnet.ID || dashboard.ClientModelRanking[0].Requests != 8 || dashboard.ClientModelRanking[1].ModelID != opus.ID || dashboard.ClientModelRanking[1].Requests != 1 || len(dashboard.ProviderRanking) != 2 || dashboard.ProviderRanking[0].ProviderID != provider.ID || dashboard.ProviderRanking[0].Calls != 8 || dashboard.ProviderRanking[0].Tokens != 79 || dashboard.ProviderRanking[1].ProviderID != backupProvider.ID || dashboard.ProviderRanking[1].Calls != 1 || dashboard.ProviderRanking[1].Tokens != 2 {
 		t.Fatalf("model and provider rankings were not aggregated independently: result=%+v err=%v", dashboard, err)
 	}
 	selfRequest, _ := http.NewRequest(http.MethodGet, server.URL+"/api/v1/me/usage", nil)
@@ -345,7 +347,7 @@ func TestStage5Integration(t *testing.T) {
 	selfResponse.Body.Close()
 	reportedAt := selfBody.Data.To.UTC()
 	wantMonthStart := time.Date(reportedAt.Year(), reportedAt.Month(), 1, 0, 0, 0, 0, time.UTC)
-	if selfResponse.StatusCode != http.StatusOK || selfBody.Code != "OK" || selfBody.Data.Tokens != 65 || !selfBody.Data.From.Equal(wantMonthStart) || selfBody.Data.To.Before(now) {
+	if selfResponse.StatusCode != http.StatusOK || selfBody.Code != "OK" || selfBody.Data.Tokens != 81 || !selfBody.Data.From.Equal(wantMonthStart) || selfBody.Data.To.Before(now) {
 		t.Fatalf("self usage query incorrect: status=%d body=%+v", selfResponse.StatusCode, selfBody)
 	}
 	// 查询 API：组合过滤、分页、时间、认证和非法参数。
@@ -392,7 +394,7 @@ func TestStage5Integration(t *testing.T) {
 		statistics, statisticErr := app.NewQuery(store).Statistics(ctx, actor, app.StatisticFilter{
 			Dimension: dimension, From: time.Now().Add(-time.Hour), To: time.Now().Add(time.Hour), Limit: 100,
 		})
-		if statisticErr != nil || len(statistics.Items) == 0 || statistics.Total == 0 || statistics.Items[0].OverallTokens != 65 {
+		if statisticErr != nil || len(statistics.Items) == 0 || statistics.Total == 0 || statistics.Items[0].OverallTokens != 81 {
 			t.Fatalf("%s statistics aggregation failed: result=%+v err=%v", dimension, statistics, statisticErr)
 		}
 	}

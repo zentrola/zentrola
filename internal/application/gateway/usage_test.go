@@ -16,7 +16,8 @@ func TestUsageJSONProjection(t *testing.T) {
 			t.Fatal("valid large JSON did not complete")
 		}
 		i, out, c := o.Tokens(true)
-		if i == nil || *i != 9007199254740993 || out == nil || *out != 0 || c == nil || *c != 2 {
+		// Anthropic input_tokens 不含缓存，总输入 = input + cache_read。
+		if i == nil || *i != 9007199254740995 || out == nil || *out != 0 || c == nil || *c != 2 {
 			t.Fatal("usage corrupted or nested usage extracted")
 		}
 		if cap(o.json.capture) > 64<<10 || len(o.json.stack) > 256 {
@@ -119,5 +120,78 @@ func TestUsageOversizedSSEDoesNotGrowOrRecoverFalseCounts(t *testing.T) {
 	in, out, c := o.Tokens(true)
 	if in != nil || out != nil || c != nil || len(o.line) > 256<<10 || len(o.data) > 256<<10 {
 		t.Fatal("oversized event not bounded")
+	}
+}
+
+func TestUsageAnthropicCacheTokensNormalizeToTotalInput(t *testing.T) {
+	// Claude Code 典型样本：input_tokens 很小，绝大部分输入来自缓存读取。
+	stream := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":3,\"cache_creation_input_tokens\":1200,\"cache_read_input_tokens\":45000,\"output_tokens\":1}}}\n\n" +
+		"event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"input_tokens\":3,\"cache_creation_input_tokens\":1200,\"cache_read_input_tokens\":45000,\"output_tokens\":350}}\n\n" +
+		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+	tests := []struct {
+		name                  string
+		stream                bool
+		body                  string
+		input, output, cached int64
+		complete              bool
+	}{
+		{name: "stream", stream: true, body: stream, input: 46203, output: 350, cached: 45000, complete: true},
+		{name: "stream without cumulative input in delta", stream: true, body: strings.Replace(stream,
+			`"usage":{"input_tokens":3,"cache_creation_input_tokens":1200,"cache_read_input_tokens":45000,"output_tokens":350}`,
+			`"usage":{"output_tokens":350}`, 1), input: 46203, output: 350, cached: 45000, complete: true},
+		{name: "json", body: `{"type":"message","usage":{"input_tokens":3,"cache_creation_input_tokens":1200,"cache_read_input_tokens":45000,"output_tokens":350}}`,
+			input: 46203, output: 350, cached: 45000, complete: true},
+		{name: "json without cache fields", body: `{"type":"message","usage":{"input_tokens":12,"output_tokens":5}}`,
+			input: 12, output: 5, cached: -1, complete: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			for _, chunk := range []int{1, 19, 32768} {
+				o := NewUsageObserver(test.stream)
+				for i := 0; i < len(test.body); i += chunk {
+					o.Feed([]byte(test.body[i:min(i+chunk, len(test.body))]))
+				}
+				in, out, cached := o.Tokens(o.Complete())
+				if o.Complete() != test.complete || in == nil || *in != test.input || out == nil || *out != test.output {
+					t.Fatalf("chunk=%d complete=%v input=%v output=%v", chunk, o.Complete(), in, out)
+				}
+				if test.cached < 0 && cached != nil || test.cached >= 0 && (cached == nil || *cached != test.cached) {
+					t.Fatalf("chunk=%d cached=%v", chunk, cached)
+				}
+				if *cached0(cached) > *in {
+					t.Fatalf("cached exceeds total input: cached=%d input=%d", *cached, *in)
+				}
+			}
+		})
+	}
+}
+
+func cached0(value *int64) *int64 {
+	if value == nil {
+		zero := int64(0)
+		return &zero
+	}
+	return value
+}
+
+func TestUsageAnthropicCacheRegressionAndOverflowAreUnreliable(t *testing.T) {
+	for name, body := range map[string]string{
+		"cache read regressed": "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":3,\"cache_read_input_tokens\":100}}}\n\n" +
+			"data: {\"type\":\"message_delta\",\"usage\":{\"cache_read_input_tokens\":10,\"output_tokens\":2}}\n\n" +
+			"data: {\"type\":\"message_stop\"}\n\n",
+		"cache creation regressed": "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":3,\"cache_creation_input_tokens\":100}}}\n\n" +
+			"data: {\"type\":\"message_delta\",\"usage\":{\"cache_creation_input_tokens\":10,\"output_tokens\":2}}\n\n" +
+			"data: {\"type\":\"message_stop\"}\n\n",
+		"total overflow": "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":9223372036854775807,\"cache_read_input_tokens\":1}}}\n\n" +
+			"data: {\"type\":\"message_stop\"}\n\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			o := NewUsageObserver(true)
+			o.Feed([]byte(body))
+			in, out, cached := o.Tokens(o.Complete())
+			if in != nil || out != nil || cached != nil {
+				t.Fatalf("unreliable usage reported: input=%v output=%v cached=%v", in, out, cached)
+			}
+		})
 	}
 }
