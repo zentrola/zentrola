@@ -16,6 +16,10 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - OpenAI 模型目录支持 Codex 订阅同步：没有可用 API Key 时，使用 Codex 订阅凭据读取 ChatGPT Codex 模型目录；跳过隐藏模型，记录是否支持图片输入，模型名称与 API Key 同步规则一致。同步时不刷新已过期的访问令牌，并返回 `SUBSCRIPTION_CREDENTIAL_EXPIRED`。
 - Claude 订阅手动刷新额度：凭据列表可发送一次最小请求（输出 1 个 Token，优先使用 Haiku 模型映射），只从响应头读取统一限额。会消耗极少量订阅额度，可能开启新的 5 小时窗口，不改变凭据运行状态；刷新记录为审计事件 `RESOURCE_QUOTA_REFRESH`。
 - 新增 `CLAUDE_CODE_VERSION`，统一设置所有 Claude 订阅请求声明的客户端版本（`User-Agent: claude-cli/<版本> (external, cli)`）；留空时使用内置默认版本，必须为 `x.y.z` 格式。Claude 订阅请求被上游拒绝时，后端日志会记录上游的 `error.type` 和截断后的 `error.message`。
+- `GATEWAY_STREAM_IDLE_TIMEOUT` (default `120s`, `0` disables it) stops an upstream response, including SSE, that sends no data for longer than the configured time; the request is recorded as `UPSTREAM_TIMEOUT`.
+- Operation log APIs (`/api/v1/operation-logs` and `/api/v1/applications/{id}/operations`) accept `keyword`, `type`, and `result` filters. The Admin Web searches operation logs on the server and adds operation type and result filters.
+- 新增 `GATEWAY_STREAM_IDLE_TIMEOUT`（默认 `120s`，`0` 表示关闭）：上游响应（含 SSE）连续无数据超过该时长即中断，并记录为 `UPSTREAM_TIMEOUT`。
+- 操作日志接口（`/api/v1/operation-logs` 与 `/api/v1/applications/{id}/operations`）支持 `keyword`、`type`、`result` 筛选；管理端改为服务端搜索操作日志，并新增操作类型与结果筛选。
 
 ### Changed / 变更
 
@@ -27,6 +31,22 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - 网关转发 Claude 订阅请求时也会同步额度：额度状态或重置时间不变时，每个凭据最多每 5 分钟写入一次；额度耗尽后网关在重置前不再路由到该凭据。
 - 服务商级模型同步会跳过运行状态为 `BLOCKED` 的凭据，避免失效的 API Key 导致正常的订阅凭据始终用不上；全部凭据都被封禁时，仍按 API Key 优先、再按优先级的顺序选择，以返回上游的真实错误。
 - Claude 订阅请求统一使用 `CLAUDE_CODE_VERSION` 声明的版本，不再透传客户端的 `User-Agent`。
+- Anthropic usage is recorded with OpenAI semantics: input tokens now include cache writes and cache reads, and cached input tokens are cache reads. Monthly Token quotas therefore count cached prompts, and cache writes are rated at the input price.
+- Streaming OpenAI Chat requests always ask the upstream for usage (`stream_options.include_usage`). If the client did not request it, the extra usage chunk is removed from the response; a stream that ends without usage is recorded as `FAILED` with `UPSTREAM_RESPONSE_INCOMPLETE`.
+- Subscription prices whose effective time is earlier than the end of an already billed period can no longer be added, moved, or deleted; amount-only changes are still allowed and settled through adjustments. Model price changes rejected by billing history return `409 CONFLICT` instead of `503`.
+- Model sync no longer overwrites the display name or publisher of an existing model.
+- The current-month cost allocation prorates subscription fees by the overlap between the query window and the current billing period, instead of counting the full period fee.
+- Codex app-server processes only inherit an allowlist of environment variables, and app-server errors no longer block a subscription permanently.
+- Proxy connections are reused per proxy configuration, and per-request proxy logs are written at Debug level. Upstream credentials may be up to 16 KiB.
+- The Admin Web shows a UTC marker next to date ranges, shows price effective dates in UTC, and uses the same provider health rules on the home page and the provider page.
+- Anthropic 用量改按 OpenAI 口径记录：输入 Token 包含缓存写入与缓存读取，缓存输入 Token 为缓存读取。月度 Token 配额因此会计入缓存提示，缓存写入暂按输入单价核算。
+- OpenAI Chat 流式请求统一向上游请求用量（`stream_options.include_usage`）；客户端未请求时会从响应中剥离额外的用量分片。流结束仍没有用量时记为 `FAILED`（`UPSTREAM_RESPONSE_INCOMPLETE`）。
+- 生效时间早于已出账账期结束时间的订阅价格不能再新增、移动或删除；只改金额仍然允许，通过调整单结算。被计费历史拒绝的模型价格变更返回 `409 CONFLICT`，不再返回 `503`。
+- 模型同步不再覆盖已有模型的显示名称和发布方。
+- 当月预计费用分摊按查询窗口与当前账期的重叠时长折算订阅费用，不再计入整期费用。
+- Codex app-server 子进程只继承白名单环境变量；app-server 返回的错误不再导致订阅被永久封禁。
+- 代理连接按代理配置复用，逐请求的代理日志降为 Debug 级别；上游凭据长度上限放宽到 16 KiB。
+- 管理端在日期范围旁标注 UTC，价格生效日期按 UTC 展示，首页与服务商页使用同一套服务商运行状态判定。
 
 ### Fixed / 修复
 
@@ -38,16 +58,38 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - Claude 订阅连接测试不再返回 HTTP 429：探测请求会声明 Claude Code 身份，并接受只包含带签名思考块的响应。
 - 网关和连接测试只会把 Claude 订阅 OAuth Token 发往 `https://api.anthropic.com`，即使服务商端点指向其他主机。
 - 使用 Claude 订阅启用服务商时，会与 API Key 一样复核被测试的模型映射仍然有效。
+- Anthropic calls that used prompt caching were classified as `INCOMPLETE_TOKENS` and not billed; they are now rated normally. Cross-protocol conversions keep cached Token fields.
+- Backfilling an earlier subscription price could create billing periods that overlapped issued charges; settlement and the database now reject overlapping periods.
+- Usage rating and API Key settlement no longer rescan all history on every run, a failing record no longer blocks the rest of the run, and billing workers log sanitized error details.
+- Responses streams whose final event exceeds 256 KiB, such as image generation results, no longer lose usage or get recorded as failed.
+- A client disconnect no longer marks Redis as unavailable or invalidates gateway caches on every instance.
+- Concurrent failover in the same session no longer discards a successful upstream response with `503`, and a busy subscription refresh lock no longer cools down a credential that is still valid.
+- When converting OpenAI streams to Anthropic, an upstream stream that ends early is reported as an error instead of a normal completion. Non-standard upstream 4xx bodies keep their status code and no longer cool down every candidate credential.
+- Codex app-server timeouts are classified as `UPSTREAM_TIMEOUT`, and the whole app-server process tree is stopped. Management probes and reset-credit redemption hold the subscription refresh lock and keep rotated credentials on version conflicts.
+- In the Admin Web, lists no longer show stale results after filters change during loading, quota status no longer fails for more than 100 rows, deleted credentials no longer reappear after concurrent reloads, price dates no longer show one day off west of UTC, and CSV export works reliably for long ranges. Missing English error text and full-width punctuation on English pages were fixed.
+- 使用提示缓存的 Anthropic 调用此前被归为 `INCOMPLETE_TOKENS` 而不计费，现已正常核算；跨协议转换保留缓存 Token 字段。
+- 补录更早生效的订阅价格可能生成与已出账单据重叠的账期；结算与数据库现在都会拒绝重叠账期。
+- 用量核算和 API Key 结算不再每轮重扫全部历史，单条失败不再阻塞整轮，计费任务日志记录脱敏后的错误详情。
+- Responses 流的终止事件超过 256 KiB（如图像生成结果）时，不再丢失用量或被记为失败。
+- 客户端断开连接不再被当作 Redis 不可用，也不再导致所有实例的网关缓存失效。
+- 同一会话并发故障转移时不再以 `503` 丢弃已成功的上游响应；订阅刷新锁被占用时不再冷却仍然有效的凭据。
+- OpenAI 流转换为 Anthropic 时，上游提前结束会返回错误事件，不再伪装成正常完成；非标准格式的上游 4xx 保留原状态码，不再冷却所有候选凭据。
+- Codex app-server 超时归类为 `UPSTREAM_TIMEOUT`，并终止整棵进程树；管理端订阅探测与重置卡兑换持有订阅刷新锁，版本冲突时保留轮换后的凭据。
+- 管理端修复：加载中切换筛选后列表仍显示旧结果、超过 100 行时额度状态查询失败、并发刷新后已删除的凭据重新出现、西半球时区价格日期差一天、长时间范围 CSV 导出不稳定，以及英文界面缺失错误文案和混用全角标点。
 
 ### Database / 数据库
 
 - Added migration `00055` to allow the `RESOURCE_QUOTA_REFRESH` audit event. Rolling it back is refused once quota refresh audit records exist.
 - 新增 `00055` 迁移，允许记录 `RESOURCE_QUOTA_REFRESH` 审计事件；已存在额度刷新审计记录时拒绝回滚。
+- Added migration `00056` with indexes for usage rating scans, a price-consistency SQL function, and a trigger that rejects partially overlapping subscription charges. Existing overlapping charges are not changed.
+- 新增 `00056` 迁移：增加用量核算扫描索引、价格一致性 SQL 函数，以及拒绝订阅账期部分重叠的触发器；不修改已存在的重叠单据。
 
 ### Upgrade notes / 升级说明
 
-- No configuration changes are required: `CLAUDE_CODE_VERSION` is optional. Upgrading only needs migration `00055`, which is applied at startup when `MIGRATIONS_AUTO_APPLY=true`; otherwise run `zentrola migrate` before starting the new version.
-- 无需修改现有配置，`CLAUDE_CODE_VERSION` 为可选项。升级时只需执行迁移 `00055`：`MIGRATIONS_AUTO_APPLY=true` 时 Backend 启动会自动执行，否则请在启动新版本前运行 `zentrola migrate`。
+- No configuration changes are required: `CLAUDE_CODE_VERSION` and `GATEWAY_STREAM_IDLE_TIMEOUT` are optional. Upgrading needs migrations `00055` and `00056`, which are applied at startup when `MIGRATIONS_AUTO_APPLY=true`; otherwise run `zentrola migrate` before starting the new version. Migration `00056` builds indexes on `usage_record` and `usage_rating` and blocks writes to them while it runs, so upgrade large deployments during low traffic.
+- Anthropic input Token counts and monthly quota usage increase after the upgrade because cached prompts are now counted. OpenAI-compatible upstreams that reject `stream_options` will fail streaming Chat requests.
+- 无需修改现有配置，`CLAUDE_CODE_VERSION` 与 `GATEWAY_STREAM_IDLE_TIMEOUT` 均为可选项。升级时需执行迁移 `00055` 和 `00056`：`MIGRATIONS_AUTO_APPLY=true` 时 Backend 启动会自动执行，否则请在启动新版本前运行 `zentrola migrate`。`00056` 会在 `usage_record` 与 `usage_rating` 上建索引，执行期间阻塞这两张表的写入，数据量大的部署请在低峰期升级。
+- 升级后 Anthropic 输入 Token 与月度配额用量会因计入缓存提示而增加；不支持 `stream_options` 的 OpenAI 兼容上游会导致 Chat 流式请求失败。
 
 ## [1.2.0] - 2026-10-13
 
