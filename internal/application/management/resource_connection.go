@@ -38,7 +38,7 @@ func (s *ResourceService) TestResourceSelection(ctx context.Context, actor admin
 	selectedMappingID := int64(0)
 	selectedModelID := int64(0)
 	upstreamModelCode := ""
-	err := s.store.ReadResource(ctx, actor, func(r ResourceReadSession) error {
+	readResource := func(r ResourceReadSession) error {
 		var err error
 		resource, err = r.Resource(ctx, id)
 		if err != nil {
@@ -103,9 +103,22 @@ func (s *ResourceService) TestResourceSelection(ctx context.Context, actor admin
 			return appsec.ErrInvalidArgument
 		}
 		return nil
-	})
+	}
+	err := s.store.ReadResource(ctx, actor, readResource)
 	if err != nil {
 		return ConnectionResult{}, err
+	}
+	if resource.AuthType == AuthTypeSubscription && resource.AuthAdapter != AuthAdapterClaudeCode {
+		// 订阅探测可能轮换 refresh token：持有与网关相同的刷新锁直到结果落盘，
+		// 并在加锁后重新读取，确保使用网关刚刷新过的最新凭据。
+		release, lockErr := s.lockSubscriptionRefresh(ctx, id)
+		if lockErr != nil {
+			return ConnectionResult{}, lockErr
+		}
+		defer release()
+		if err = s.store.ReadResource(ctx, actor, readResource); err != nil {
+			return ConnectionResult{}, err
+		}
 	}
 	result := ConnectionResult{
 		Code:                   "PROVIDER_UNAVAILABLE",
@@ -209,6 +222,12 @@ func (s *ResourceService) TestResourceSelection(ctx context.Context, actor admin
 		if current.Version != resource.Version {
 			result.OK = false
 			result.Code = "RESOURCE_CHANGED"
+			if subscriptionProbe != nil {
+				if err := persistRotatedCredential(auditCtx, w, current, resource.Sealed, refreshedSealed,
+					resource.CredentialRefreshedAt, resource.CredentialExpiresAt, businessTime(s.now)); err != nil {
+					return err
+				}
+			}
 		}
 		expectedVersion := current.Version
 		if result.OK && subscriptionProbe != nil {
@@ -323,6 +342,12 @@ func (s *ResourceService) ConsumeResourceResetCredit(ctx context.Context, actor 
 	if id <= 0 || !validText(idempotencyKey, 128) || (creditID != "" && !validText(creditID, 256)) {
 		return ResetCreditConsumeResult{}, appsec.ErrInvalidArgument
 	}
+	// 兑换会返回轮换后的凭据：在读取凭据前持有与网关相同的刷新锁，直到结果落盘。
+	release, err := s.lockSubscriptionRefresh(ctx, id)
+	if err != nil {
+		return ResetCreditConsumeResult{}, err
+	}
+	defer release()
 	var resource ResourceRecord
 	var provider Provider
 	if err := s.store.ReadResource(ctx, actor, func(r ResourceReadSession) error {
@@ -362,6 +387,7 @@ func (s *ResourceService) ConsumeResourceResetCredit(ctx context.Context, actor 
 	if consumed.Outcome != "reset" && consumed.Outcome != "alreadyRedeemed" && consumed.Outcome != "nothingToReset" && consumed.Outcome != "noCredit" {
 		return ResetCreditConsumeResult{}, appsec.ErrUnavailable
 	}
+	readSealed := resource.Sealed
 	var refreshedSealed catalog.SealedCredential
 	if len(consumed.Probe.Credential) > 0 {
 		refreshedSealed, err = s.cipher.Encrypt(consumed.Probe.Credential, owner(actor, resource.Resource))
@@ -386,13 +412,17 @@ func (s *ResourceService) ConsumeResourceResetCredit(ctx context.Context, actor 
 	result := ResetCreditConsumeResult{Outcome: consumed.Outcome, ResetCredits: consumed.Probe.ResetCredits}
 	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
+	changed := false
 	err = s.store.WriteResource(auditCtx, actor, func(w ResourceSession) error {
 		current, err := w.Resource(auditCtx, id)
 		if err != nil {
 			return err
 		}
 		if current.Version != resource.Version {
-			return ErrConflict
+			// 重置卡已经兑换且上游可能已轮换凭据：提交新凭据后再向调用方报告冲突。
+			changed = true
+			return persistRotatedCredential(auditCtx, w, current, readSealed, refreshedSealed,
+				resource.CredentialRefreshedAt, resource.CredentialExpiresAt, businessTime(s.now))
 		}
 		resource.UpdatedAt = businessTime(s.now)
 		if err := w.UpdateResource(auditCtx, resource); err != nil {
@@ -413,6 +443,9 @@ func (s *ResourceService) ConsumeResourceResetCredit(ctx context.Context, actor 
 			After: map[string]any{"outcome": result.Outcome, "availableResetCredits": available},
 		}, meta)
 	})
+	if err == nil && changed {
+		err = ErrConflict
+	}
 	return result, err
 }
 

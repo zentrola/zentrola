@@ -696,6 +696,18 @@ func (s *managementSession) UpdateResource(ctx context.Context, r mgmt.ResourceR
 	}
 	return nil
 }
+func (s *managementSession) ReplaceSubscriptionCredential(ctx context.Context, id int64, expected, replacement catalog.SealedCredential,
+	refreshedAt, expiresAt *time.Time, at time.Time,
+) (bool, error) {
+	updated, err := s.q.ManageReplaceSubscriptionCredential(ctx, dbgen.ManageReplaceSubscriptionCredentialParams{
+		ID: id, CredentialCiphertext: replacement.Ciphertext, CredentialNonce: replacement.Nonce,
+		KeyVersion: replacement.KeyVersion, CredentialRefreshedAt: nullableTime(refreshedAt),
+		CredentialExpiresAt: nullableTime(expiresAt), UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(at),
+		ExpectedCredentialCiphertext: expected.Ciphertext, ExpectedCredentialNonce: expected.Nonce,
+		ExpectedKeyVersion: expected.KeyVersion,
+	})
+	return updated == 1, err
+}
 func (s *managementSession) DeleteResource(ctx context.Context, id int64, at time.Time) (bool, error) {
 	rows, err := s.q.ManageDeleteResource(ctx, dbgen.ManageDeleteResourceParams{ID: id, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(at)})
 	return rows > 0, err

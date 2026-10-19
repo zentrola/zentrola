@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -326,38 +325,11 @@ func (s *GatewayStore) LockSubscriptionRefresh(ctx context.Context, resourceID i
 	if resourceID <= 0 {
 		return ctx, nil, gw.ErrInvalid
 	}
-	conn, err := s.pool.Acquire(ctx)
+	conn, release, err := acquireSubscriptionRefreshLock(ctx, s.pool, resourceID, s.gatewayError)
 	if err != nil {
-		return ctx, nil, s.gatewayError(ctx, "acquire_subscription_refresh_connection", err)
+		return ctx, nil, err
 	}
-	if _, err := dbgen.New(conn).LockGatewaySubscriptionRefresh(ctx, resourceID); err != nil {
-		conn.Release()
-		return ctx, nil, s.gatewayError(ctx, "lock_subscription_refresh", err)
-	}
-	var once sync.Once
-	lockedCtx := context.WithValue(ctx, subscriptionRefreshConnectionKey{}, conn)
-	return lockedCtx, func() {
-		once.Do(func() {
-			unlockCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			defer cancel()
-			unlocked, unlockErr := dbgen.New(conn).UnlockGatewaySubscriptionRefresh(unlockCtx, resourceID)
-			if unlockErr == nil && unlocked {
-				conn.Release()
-				return
-			}
-			if unlockErr == nil {
-				unlockErr = errors.New("subscription refresh lock was not held")
-			}
-			_ = s.gatewayError(unlockCtx, "unlock_subscription_refresh", unlockErr)
-			// 不能把仍持有 session advisory lock 的连接放回连接池。
-			hijacked := conn.Hijack()
-			closeCtx, closeCancel := context.WithTimeout(context.Background(), 3*time.Second)
-			defer closeCancel()
-			if closeErr := hijacked.Close(closeCtx); closeErr != nil {
-				_ = s.gatewayError(closeCtx, "close_hijacked_subscription_connection", closeErr)
-			}
-		})
-	}, nil
+	return context.WithValue(ctx, subscriptionRefreshConnectionKey{}, conn), release, nil
 }
 
 func (s *GatewayStore) ListSubscriptionCredentials(ctx context.Context, after int64, limit int32, refreshBefore time.Time) ([]gw.SubscriptionCredential, error) {

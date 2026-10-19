@@ -339,6 +339,19 @@ SET runtime_status='HEALTHY',blocked_reason=NULL,blocked_at=NULL,last_error_at=N
     version=version+CASE WHEN runtime_status='BLOCKED' THEN 1 ELSE 0 END
 WHERE id=$1 AND is_deleted=false AND version=sqlc.arg(expected_version);
 
+-- name: ManageReplaceSubscriptionCredential :execrows
+-- 管理端探测轮换出的新凭据单独落盘：仅当库中密文仍是本次探测读取的版本时更新，
+-- 避免覆盖网关并发刷新的结果；资源其他字段的版本冲突不影响凭据保存。
+UPDATE provider_credential
+SET credential_ciphertext=sqlc.arg(credential_ciphertext),credential_nonce=sqlc.arg(credential_nonce),
+    key_version=sqlc.arg(key_version),credential_refreshed_at=sqlc.narg(credential_refreshed_at),
+    credential_expires_at=sqlc.narg(credential_expires_at),updated_by=sqlc.arg(updated_by),
+    updated_at=sqlc.arg(updated_at),version=version+1
+WHERE id=sqlc.arg(id) AND is_deleted=false AND auth_type='SUBSCRIPTION'
+  AND credential_ciphertext=sqlc.arg(expected_credential_ciphertext)
+  AND credential_nonce=sqlc.arg(expected_credential_nonce)
+  AND key_version=sqlc.arg(expected_key_version);
+
 -- name: ManageBlockResourceRuntime :execrows
 UPDATE provider_credential
 SET runtime_status='BLOCKED',blocked_reason=$2,blocked_at=$3,last_error_at=$3,

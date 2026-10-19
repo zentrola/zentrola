@@ -2304,6 +2304,54 @@ func (q *Queries) ManageRemoveMember(ctx context.Context, arg ManageRemoveMember
 	return err
 }
 
+const manageReplaceSubscriptionCredential = `-- name: ManageReplaceSubscriptionCredential :execrows
+UPDATE provider_credential
+SET credential_ciphertext=$1,credential_nonce=$2,
+    key_version=$3,credential_refreshed_at=$4,
+    credential_expires_at=$5,updated_by=$6,
+    updated_at=$7,version=version+1
+WHERE id=$8 AND is_deleted=false AND auth_type='SUBSCRIPTION'
+  AND credential_ciphertext=$9
+  AND credential_nonce=$10
+  AND key_version=$11
+`
+
+type ManageReplaceSubscriptionCredentialParams struct {
+	CredentialCiphertext         []byte
+	CredentialNonce              []byte
+	KeyVersion                   int32
+	CredentialRefreshedAt        pgtype.Timestamptz
+	CredentialExpiresAt          pgtype.Timestamptz
+	UpdatedBy                    string
+	UpdatedAt                    pgtype.Timestamptz
+	ID                           int64
+	ExpectedCredentialCiphertext []byte
+	ExpectedCredentialNonce      []byte
+	ExpectedKeyVersion           int32
+}
+
+// 管理端探测轮换出的新凭据单独落盘：仅当库中密文仍是本次探测读取的版本时更新，
+// 避免覆盖网关并发刷新的结果；资源其他字段的版本冲突不影响凭据保存。
+func (q *Queries) ManageReplaceSubscriptionCredential(ctx context.Context, arg ManageReplaceSubscriptionCredentialParams) (int64, error) {
+	result, err := q.db.Exec(ctx, manageReplaceSubscriptionCredential,
+		arg.CredentialCiphertext,
+		arg.CredentialNonce,
+		arg.KeyVersion,
+		arg.CredentialRefreshedAt,
+		arg.CredentialExpiresAt,
+		arg.UpdatedBy,
+		arg.UpdatedAt,
+		arg.ID,
+		arg.ExpectedCredentialCiphertext,
+		arg.ExpectedCredentialNonce,
+		arg.ExpectedKeyVersion,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const manageResource = `-- name: ManageResource :one
 SELECT id, is_deleted, provider_id, resource_name, credential_ciphertext, credential_nonce, runtime_status, blocked_reason, blocked_at, last_error_at, last_http_status, last_error_code, auth_type, auth_adapter, subscription_type, plan_code, external_account_ref, priority, effective_at, expires_at, quota_status, quota_checked_at, quota_resets_at, credential_refreshed_at, credential_expires_at, key_version, created_by, updated_by, created_at, updated_at, version FROM provider_credential WHERE id=$1 AND is_deleted=false
 `

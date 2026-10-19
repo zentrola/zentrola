@@ -1,6 +1,7 @@
 package management
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"strings"
@@ -39,7 +40,28 @@ type ResourceStore interface {
 	WriteResource(context.Context, admin.Identity, func(ResourceSession) error) error
 }
 
+// SubscriptionRefreshLocker 由存储适配器实现：在订阅探测或兑换重置卡期间持有与网关相同的
+// per-resource 刷新锁，避免两边并发向上游轮换同一凭据导致旧 refresh token 失效。
+type SubscriptionRefreshLocker interface {
+	LockSubscriptionRefresh(context.Context, int64) (func(), error)
+}
+
+// SubscriptionCredentialReplacer 由写事务实现：仅当库中密文仍等于 expected 时保存新凭据，
+// 用于资源其他字段发生版本冲突时单独落盘已经轮换的订阅凭据。
+type SubscriptionCredentialReplacer interface {
+	ReplaceSubscriptionCredential(ctx context.Context, id int64, expected, replacement catalog.SealedCredential,
+		refreshedAt, expiresAt *time.Time, at time.Time) (bool, error)
+}
+
 type resourceStoreAdapter struct{ Store }
+
+// LockSubscriptionRefresh 在底层存储支持时持有订阅刷新锁；不支持时（如测试替身）返回空操作。
+func (s resourceStoreAdapter) LockSubscriptionRefresh(ctx context.Context, id int64) (func(), error) {
+	if locker, ok := s.Store.(SubscriptionRefreshLocker); ok {
+		return locker.LockSubscriptionRefresh(ctx, id)
+	}
+	return func() {}, nil
+}
 
 func (s resourceStoreAdapter) ReadResource(ctx context.Context, actor admin.Identity, fn func(ResourceReadSession) error) error {
 	if dependencyMissing(s.Store) {
@@ -53,6 +75,34 @@ func (s resourceStoreAdapter) WriteResource(ctx context.Context, actor admin.Ide
 		return appsec.ErrUnavailable
 	}
 	return s.Write(ctx, actor, func(writer Writer) error { return fn(writer) })
+}
+
+func (s *ResourceService) lockSubscriptionRefresh(ctx context.Context, id int64) (func(), error) {
+	if locker, ok := s.store.(SubscriptionRefreshLocker); ok {
+		return locker.LockSubscriptionRefresh(ctx, id)
+	}
+	return func() {}, nil
+}
+
+// persistRotatedCredential 在资源版本已变化时单独保存探测轮换出的新凭据：只有库中密文仍是探测前
+// 读取的版本才更新，既不覆盖网关的并发刷新结果，也不会因其他字段冲突丢弃已经生效的新凭据。
+func persistRotatedCredential(ctx context.Context, w ResourceSession, current ResourceRecord,
+	read, replacement catalog.SealedCredential, refreshedAt, expiresAt *time.Time, at time.Time,
+) error {
+	if replacement.KeyVersion == 0 || !sameSealedCredential(current.Sealed, read) {
+		return nil
+	}
+	replacer, ok := w.(SubscriptionCredentialReplacer)
+	if !ok {
+		return nil
+	}
+	_, err := replacer.ReplaceSubscriptionCredential(ctx, current.ID, read, replacement, refreshedAt, expiresAt, at)
+	return err
+}
+
+func sameSealedCredential(left, right catalog.SealedCredential) bool {
+	return left.KeyVersion == right.KeyVersion && bytes.Equal(left.Ciphertext, right.Ciphertext) &&
+		bytes.Equal(left.Nonce, right.Nonce)
 }
 
 func (s *ResourceService) next(ctx context.Context) (int64, error) {

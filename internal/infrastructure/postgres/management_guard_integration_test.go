@@ -9,6 +9,7 @@ import (
 	mgmt "github.com/zentrola/zentrola/internal/application/management"
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	"github.com/zentrola/zentrola/internal/domain/admin"
+	"github.com/zentrola/zentrola/internal/domain/catalog"
 	"github.com/zentrola/zentrola/internal/infrastructure/idgen"
 )
 
@@ -174,5 +175,79 @@ func TestOperationLogFiltersAndCountsMatch(t *testing.T) {
 				t.Fatalf("items=%v total=%d; want %v total=%d", got, page.Total, tt.want, tt.wantTotal)
 			}
 		})
+	}
+}
+
+func TestManagementSubscriptionRefreshLockAndConditionalCredentialReplace(t *testing.T) {
+	ctx, pool, _ := integrationDatabase(t)
+	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	const resourceID = 987654321
+	for _, statement := range []string{
+		`INSERT INTO admin_user (id,username,password_hash,display_name,status,created_by,updated_by,created_at,updated_at)
+         VALUES (73,'lock-admin','test-hash','Lock Admin','ACTIVE','system','system',$1,$1)`,
+		`INSERT INTO provider (id,provider_code,provider_name,provider_type,status,created_by,updated_by,created_at,updated_at)
+         VALUES (3501,'lock-provider','Lock Provider','OFFICIAL','ACTIVE','system','system',$1,$1)`,
+		`INSERT INTO provider_credential (
+             id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,
+             auth_type,auth_adapter,subscription_type,created_by,updated_by,created_at,updated_at
+         ) VALUES (987654321,3501,'Lock Subscription',decode(repeat('51',32),'hex'),decode(repeat('52',12),'hex'),1,
+             'SUBSCRIPTION','OPENAI_CODEX','PERSONAL','system','system',$1,$1)`,
+	} {
+		if _, err := pool.Exec(ctx, statement, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := NewManagementStore(pool, idgen.New(pool))
+	release, err := store.LockSubscriptionRefresh(ctx, resourceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var acquired bool
+	if err := pool.QueryRow(ctx, `SELECT pg_try_advisory_lock(-$1::bigint)`, resourceID).Scan(&acquired); err != nil || acquired {
+		t.Fatalf("gateway refresh lock was not held by management: acquired=%v err=%v", acquired, err)
+	}
+	release()
+	release()
+	gatewayCtx, gatewayRelease, err := NewGatewayStore(pool).LockSubscriptionRefresh(ctx, resourceID)
+	if err != nil || gatewayCtx == nil {
+		t.Fatalf("gateway lock after management release: %v", err)
+	}
+	gatewayRelease()
+
+	var original catalog.SealedCredential
+	if err := pool.QueryRow(ctx, `SELECT credential_ciphertext,credential_nonce,key_version FROM provider_credential WHERE id=$1`, resourceID).
+		Scan(&original.Ciphertext, &original.Nonce, &original.KeyVersion); err != nil {
+		t.Fatal(err)
+	}
+	replacement := catalog.SealedCredential{Ciphertext: []byte("rotated-credential"), Nonce: make([]byte, 12), KeyVersion: 1}
+	stale := catalog.SealedCredential{Ciphertext: []byte("stale"), Nonce: original.Nonce, KeyVersion: 1}
+	actor := admin.Identity{ID: 73, DisplayName: "Lock Admin"}
+	for _, tt := range []struct {
+		name     string
+		expected catalog.SealedCredential
+		want     bool
+	}{
+		{name: "stale expectation", expected: stale, want: false},
+		{name: "current expectation", expected: original, want: true},
+	} {
+		var replaced bool
+		err := store.Write(ctx, actor, func(writer mgmt.Writer) error {
+			replacer, ok := writer.(mgmt.SubscriptionCredentialReplacer)
+			if !ok {
+				t.Fatal("management session does not support conditional credential replacement")
+			}
+			var replaceErr error
+			replaced, replaceErr = replacer.ReplaceSubscriptionCredential(ctx, resourceID, tt.expected, replacement, nil, nil, now)
+			return replaceErr
+		})
+		if err != nil || replaced != tt.want {
+			t.Fatalf("%s: replaced=%v err=%v", tt.name, replaced, err)
+		}
+	}
+	var stored []byte
+	var version int64
+	if err := pool.QueryRow(ctx, `SELECT credential_ciphertext,version FROM provider_credential WHERE id=$1`, resourceID).
+		Scan(&stored, &version); err != nil || string(stored) != "rotated-credential" || version != 2 {
+		t.Fatalf("stored=%q version=%d err=%v", stored, version, err)
 	}
 }
