@@ -283,7 +283,7 @@ func TestGatewayClientClaudeCodeIdentity(t *testing.T) {
 			if beta != want {
 				t.Fatalf("anthropic-beta = %q, want %q", beta, want)
 			}
-			if headers.Get("User-Agent") != anthropicclaude.ClaudeCodeUserAgent || headers.Get("X-App") != "cli" {
+			if headers.Get("User-Agent") != anthropicclaude.ClaudeCodeUserAgent("") || headers.Get("X-App") != "cli" {
 				t.Fatalf("missing Claude Code client headers: %v", headers)
 			}
 		})

@@ -10,8 +10,10 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 
 - Anthropic official model catalog sync: model synchronization reads `/v1/models` with an API Key, or with a Claude Code subscription token when no supported API Key is configured. Deprecated models are skipped, and image input support is recorded from the catalog.
 - Manual quota refresh for Claude subscriptions: the credential list can send one minimal request (1 output token, preferring a Haiku model mapping) and read only the unified rate limits from the response headers. It uses a tiny amount of subscription quota, may start a new 5-hour window, and does not change the credential runtime status. Refreshes are audited as `RESOURCE_QUOTA_REFRESH` (migration `00055`).
+- `CLAUDE_CODE_VERSION` sets the client version declared by all Claude subscription requests (`User-Agent: claude-cli/<version> (external, cli)`); it defaults to a built-in version when empty, and must use the `x.y.z` format. When the upstream rejects a Claude subscription request, the backend logs the upstream `error.type` and truncated `error.message`.
 - Anthropic 官方模型目录同步：优先使用 API Key 读取 `/v1/models`，没有可用 API Key 时使用 Claude Code 订阅 Token；已弃用的模型不会同步，并按目录记录是否支持图片输入。
 - Claude 订阅手动刷新额度：凭据列表可发送一次最小请求（输出 1 个 Token，优先使用 Haiku 模型映射），只从响应头读取统一限额。会消耗极少量订阅额度，可能开启新的 5 小时窗口，不改变凭据运行状态；刷新记录为审计事件 `RESOURCE_QUOTA_REFRESH`（迁移 `00055`）。
+- 新增 `CLAUDE_CODE_VERSION`，统一设置所有 Claude 订阅请求声明的客户端版本（`User-Agent: claude-cli/<版本> (external, cli)`）；留空时使用内置默认版本，必须为 `x.y.z` 格式。Claude 订阅请求被上游拒绝时，后端日志会记录上游的 `error.type` 和截断后的 `error.message`。
 
 ### Changed / 变更
 

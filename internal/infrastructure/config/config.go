@@ -8,12 +8,16 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
 )
+
+// claudeCodeVersionPattern 与 anthropicclaude.ValidClaudeCodeVersion 保持一致，只接受 x.y.z 形式的版本号。
+var claudeCodeVersionPattern = regexp.MustCompile(`^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}$`)
 
 type Config struct {
 	Environment          string
@@ -58,7 +62,9 @@ type Gateway struct {
 	SubscriptionRefreshAhead, SubscriptionRefreshInterval, SubscriptionRunTimeout time.Duration
 	SubscriptionRefreshCredentialTimeout                                          time.Duration
 	SubscriptionRefreshConcurrency                                                int
-	Development                                                                   bool
+	// ClaudeCodeVersion 是 Claude 订阅请求声明的 Claude Code 版本；为空时使用内置默认版本。
+	ClaudeCodeVersion string
+	Development       bool
 }
 
 type Security struct {
@@ -315,6 +321,7 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 			SubscriptionRunTimeout:               duration("CODEX_SUBSCRIPTION_REFRESH_RUN_TIMEOUT", "4m"),
 			SubscriptionRefreshCredentialTimeout: duration("CODEX_SUBSCRIPTION_REFRESH_CREDENTIAL_TIMEOUT", "45s"),
 			SubscriptionRefreshConcurrency:       integer("CODEX_SUBSCRIPTION_REFRESH_CONCURRENCY", "4", 128),
+			ClaudeCodeVersion:                    strings.TrimSpace(get("CLAUDE_CODE_VERSION", "")),
 		},
 		Security: Security{
 			MasterKey:        get("MASTER_KEY", ""),
@@ -334,6 +341,9 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 	// 资源级 Redis 刷新锁固定为 60s；凭据刷新必须在锁过期前完成，避免多实例重复刷新。
 	if cfg.Gateway.SubscriptionRefreshCredentialTimeout >= 60*time.Second {
 		problems = append(problems, errors.New("CODEX_SUBSCRIPTION_REFRESH_CREDENTIAL_TIMEOUT must be less than 60s"))
+	}
+	if cfg.Gateway.ClaudeCodeVersion != "" && !claudeCodeVersionPattern.MatchString(cfg.Gateway.ClaudeCodeVersion) {
+		problems = append(problems, errors.New("CLAUDE_CODE_VERSION must be a version such as 2.1.293"))
 	}
 	_, port, err := net.SplitHostPort(cfg.HTTPAddr)
 	if err != nil {

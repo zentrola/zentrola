@@ -49,7 +49,7 @@ func TestAnthropicConnectionUsesRealInference(t *testing.T) {
 			tester := NewConnectionTester()
 			tester.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
 				if r.Method != http.MethodPost || r.URL.String() != "https://api.anthropic.com/v1/messages" || r.Header.Get("x-api-key") != "test-secret" || r.Header.Get("anthropic-version") != "2023-06-01" ||
-					r.Header.Get("anthropic-beta") != "" || r.Header.Get("X-App") != "" || r.Header.Get("User-Agent") == anthropicclaude.ClaudeCodeUserAgent {
+					r.Header.Get("anthropic-beta") != "" || r.Header.Get("X-App") != "" || r.Header.Get("User-Agent") == anthropicclaude.ClaudeCodeUserAgent("") {
 					t.Fatal("invalid upstream request")
 				}
 				var payload struct {
@@ -96,7 +96,7 @@ func TestClaudeSubscriptionConnectionUsesOAuthBearer(t *testing.T) {
 		}
 		if r.Header.Get("Authorization") != "Bearer sk-ant-oat01-test" || r.Header.Get("x-api-key") != "" ||
 			r.Header.Get("anthropic-beta") != anthropicclaude.ClaudeCodeBeta+","+anthropicclaude.OAuthBeta ||
-			r.Header.Get("User-Agent") != anthropicclaude.ClaudeCodeUserAgent || r.Header.Get("X-App") != "cli" {
+			r.Header.Get("User-Agent") != anthropicclaude.ClaudeCodeUserAgent("") || r.Header.Get("X-App") != "cli" {
 			t.Fatalf("unexpected Claude OAuth headers: %+v", r.Header)
 		}
 		var payload struct {
@@ -252,7 +252,7 @@ func TestClaudeQuotaProbeReadsOnlyHeaders(t *testing.T) {
 						Text string `json:"text"`
 					} `json:"system"`
 				}
-				if r.URL.String() != anthropicclaude.APIBaseURL+"/v1/messages" || r.Header.Get("User-Agent") != anthropicclaude.ClaudeCodeUserAgent ||
+				if r.URL.String() != anthropicclaude.APIBaseURL+"/v1/messages" || r.Header.Get("User-Agent") != anthropicclaude.ClaudeCodeUserAgent("") ||
 					json.NewDecoder(r.Body).Decode(&payload) != nil || payload.MaxTokens != 1 ||
 					len(payload.System) != 1 || payload.System[0].Text != anthropicclaude.ClaudeCodeSystemPrompt {
 					t.Fatalf("unexpected quota probe request: %s %+v", r.URL, payload)

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -64,13 +65,15 @@ func (standardConnectionProbeAdapter) ValidResponse(data []byte, probe connectio
 }
 
 type ConnectionTester struct {
-	client           *http.Client
-	privateClient    *http.Client
-	standardAdapter  connectionProbeAdapter
-	providerAdapters map[string]connectionProbeAdapter
+	client              *http.Client
+	privateClient       *http.Client
+	standardAdapter     connectionProbeAdapter
+	providerAdapters    map[string]connectionProbeAdapter
+	logger              *slog.Logger
+	claudeCodeUserAgent string
 }
 
-func NewConnectionTester() *ConnectionTester {
+func NewConnectionTester(loggers ...*slog.Logger) *ConnectionTester {
 	newClient := func(networkScope string) *http.Client {
 		transport := http.DefaultTransport.(*http.Transport).Clone()
 		transport.Proxy = nil
@@ -80,15 +83,27 @@ func NewConnectionTester() *ConnectionTester {
 		return &http.Client{Transport: transport, Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	}
 	standardAdapter := standardConnectionProbeAdapter{}
+	logger := slog.Default()
+	if len(loggers) > 0 && loggers[0] != nil {
+		logger = loggers[0]
+	}
 	return &ConnectionTester{
-		client:          newClient(catalog.NetworkScopePublic),
-		privateClient:   newClient(catalog.NetworkScopePrivate),
-		standardAdapter: standardAdapter,
+		client:              newClient(catalog.NetworkScopePublic),
+		privateClient:       newClient(catalog.NetworkScopePrivate),
+		standardAdapter:     standardAdapter,
+		logger:              logger,
+		claudeCodeUserAgent: anthropicclaude.ClaudeCodeUserAgent(""),
 		providerAdapters: map[string]connectionProbeAdapter{
 			catalog.DeepSeekOfficialCode: deepSeekConnectionProbeAdapter{standard: standardAdapter},
 			catalog.GoogleOfficialCode:   googleConnectionProbeAdapter{},
 		},
 	}
+}
+
+// UseClaudeCodeVersion 设置 Claude 订阅探测声明的客户端版本，须在开始处理请求前调用；
+// 空值或无效版本使用内置默认版本。
+func (t *ConnectionTester) UseClaudeCodeVersion(version string) {
+	t.claudeCodeUserAgent = anthropicclaude.ClaudeCodeUserAgent(version)
 }
 
 func (t *ConnectionTester) probeAdapter(providerCode string) connectionProbeAdapter {
@@ -199,7 +214,7 @@ func (t *ConnectionTester) Test(ctx context.Context, target mgmt.ConnectionTarge
 		if oauthBearer {
 			req.Header.Set("anthropic-version", "2023-06-01")
 			req.Header.Set("anthropic-beta", anthropicclaude.ClaudeCodeBeta+","+anthropicclaude.OAuthBeta)
-			req.Header.Set("User-Agent", anthropicclaude.ClaudeCodeUserAgent)
+			req.Header.Set("User-Agent", t.claudeCodeUserAgent)
 			req.Header.Set("X-App", "cli")
 		}
 	} else {
@@ -256,6 +271,9 @@ func (t *ConnectionTester) Test(ctx context.Context, target mgmt.ConnectionTarge
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		result.Code = inferenceStatusCode(resp.StatusCode, data)
+		if oauthBearer {
+			logClaudeSubscriptionRejection(ctx, t.logger, "provider_connection_test", resp.StatusCode, data, t.claudeCodeUserAgent, slog.String("result_code", result.Code))
+		}
 		return
 	}
 	if !probeAdapter.ValidResponse(data, probe) {
@@ -453,4 +471,21 @@ func connectionErrorCode(ctx context.Context, err error, proxy *catalog.Outbound
 		return "UPSTREAM_TIMEOUT"
 	}
 	return "UPSTREAM_UNAVAILABLE"
+}
+
+// logClaudeSubscriptionRejection 记录 Claude 订阅请求被上游拒绝时的错误类型与消息，便于区分凭据问题、
+// 客户端身份或版本被拒等原因。只记录解析出的 error.type 与截断后的 error.message，不记录原始正文或凭据。
+func logClaudeSubscriptionRejection(ctx context.Context, logger *slog.Logger, operation string, status int, body []byte, userAgent string, attrs ...slog.Attr) {
+	errorType, message := anthropicclaude.UpstreamError(body)
+	args := []any{
+		slog.String("operation", operation),
+		slog.Int("upstream_status", status),
+		slog.String("upstream_error_type", errorType),
+		slog.String("upstream_error_message", message),
+		slog.String("claude_code_user_agent", userAgent),
+	}
+	for _, attr := range attrs {
+		args = append(args, attr)
+	}
+	logger.WarnContext(ctx, "claude subscription request rejected by upstream", args...)
 }

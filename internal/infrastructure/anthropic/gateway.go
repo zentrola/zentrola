@@ -20,10 +20,11 @@ import (
 )
 
 type GatewayClient struct {
-	client        *http.Client
-	privateClient *http.Client
-	logger        *slog.Logger
-	observer      SubscriptionResponseObserver
+	client              *http.Client
+	privateClient       *http.Client
+	logger              *slog.Logger
+	observer            SubscriptionResponseObserver
+	claudeCodeUserAgent string
 }
 
 // SubscriptionResponseObserver 旁路观测 Claude 订阅的原始上游响应头（如统一限额），
@@ -35,6 +36,12 @@ type SubscriptionResponseObserver interface {
 // ObserveSubscriptionResponses 在启动阶段设置订阅响应观测器，必须在处理请求前调用。
 func (c *GatewayClient) ObserveSubscriptionResponses(observer SubscriptionResponseObserver) {
 	c.observer = observer
+}
+
+// UseClaudeCodeVersion 设置 Claude 订阅请求声明的客户端版本，必须在处理请求前调用；
+// 空值或无效版本使用内置默认版本。所有订阅请求统一使用该版本，不透传客户端自带的 User-Agent。
+func (c *GatewayClient) UseClaudeCodeVersion(version string) {
+	c.claudeCodeUserAgent = anthropicclaude.ClaudeCodeUserAgent(version)
 }
 
 func NewGatewayClient(headerTimeout time.Duration, loggers ...*slog.Logger) *GatewayClient {
@@ -51,7 +58,10 @@ func NewGatewayClient(headerTimeout time.Duration, loggers ...*slog.Logger) *Gat
 	if len(loggers) > 0 && loggers[0] != nil {
 		logger = loggers[0]
 	}
-	return &GatewayClient{client: newClient(catalog.NetworkScopePublic), privateClient: newClient(catalog.NetworkScopePrivate), logger: logger}
+	return &GatewayClient{
+		client: newClient(catalog.NetworkScopePublic), privateClient: newClient(catalog.NetworkScopePrivate), logger: logger,
+		claudeCodeUserAgent: anthropicclaude.ClaudeCodeUserAgent(""),
+	}
 }
 func (c *GatewayClient) CloseIdleConnections() {
 	c.client.CloseIdleConnections()
@@ -153,7 +163,7 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 	if claudeSubscription {
 		addAnthropicBeta(req.Header, anthropicclaude.ClaudeCodeBeta)
 		addAnthropicBeta(req.Header, anthropicclaude.OAuthBeta)
-		req.Header.Set("User-Agent", anthropicclaude.ClaudeCodeUserAgent)
+		req.Header.Set("User-Agent", c.claudeCodeUserAgent)
 		req.Header.Set("X-App", "cli")
 	}
 	if input.RequestID != "" {
@@ -232,7 +242,49 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 	if claudeSubscription && c.observer != nil {
 		c.observer.ObserveResponse(ctx, route, resp.StatusCode, resp.Header)
 	}
-	return &gw.Response{Status: resp.StatusCode, Headers: resp.Header, Body: &gatewayBody{ReadCloser: resp.Body, sentHeaders: sentHeaders, cleanup: cleanup}}, nil
+	body := resp.Body
+	if claudeSubscription && resp.StatusCode >= http.StatusBadRequest {
+		body = &rejectedSubscriptionBody{ReadCloser: resp.Body, log: func(prefix []byte) {
+			logClaudeSubscriptionRejection(context.WithoutCancel(ctx), c.logger, "gateway_inference", resp.StatusCode, prefix, c.claudeCodeUserAgent,
+				slog.String("request_id", input.RequestID), slog.Int64("provider_id", route.ProviderID), slog.Int64("resource_id", route.ResourceID))
+		}}
+	}
+	return &gw.Response{Status: resp.StatusCode, Headers: resp.Header, Body: &gatewayBody{ReadCloser: body, sentHeaders: sentHeaders, cleanup: cleanup}}, nil
+}
+
+// rejectedSubscriptionBody 在不额外读取上游的前提下，保存调用方读过的错误响应前缀，关闭时交给 log 记录。
+// 故障转移会先读取错误正文前缀做分类，并可能在超时后从另一协程关闭正文，因此读写共享缓冲需要加锁。
+type rejectedSubscriptionBody struct {
+	io.ReadCloser
+	log    func([]byte)
+	mu     sync.Mutex
+	prefix []byte
+	once   sync.Once
+}
+
+const rejectedSubscriptionBodyLogLimit = 8 << 10
+
+func (b *rejectedSubscriptionBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if n > 0 {
+		b.mu.Lock()
+		if remaining := rejectedSubscriptionBodyLogLimit - len(b.prefix); remaining > 0 {
+			b.prefix = append(b.prefix, p[:min(n, remaining)]...)
+		}
+		b.mu.Unlock()
+	}
+	return n, err
+}
+
+func (b *rejectedSubscriptionBody) Close() error {
+	err := b.ReadCloser.Close()
+	b.once.Do(func() {
+		b.mu.Lock()
+		prefix := append([]byte(nil), b.prefix...)
+		b.mu.Unlock()
+		b.log(prefix)
+	})
+	return err
 }
 
 // 请求 Header 仅保留到 HTTP 事务结束；Body 关闭后再修改，避免与 transport 并发使用。

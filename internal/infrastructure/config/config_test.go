@@ -34,6 +34,8 @@ func TestConfigValidation(t *testing.T) {
 		{"invalid subscription credential timeout", "CODEX_SUBSCRIPTION_REFRESH_CREDENTIAL_TIMEOUT", "0s", "CODEX_SUBSCRIPTION_REFRESH_CREDENTIAL_TIMEOUT"},
 		{"subscription credential timeout exceeds lock TTL", "CODEX_SUBSCRIPTION_REFRESH_CREDENTIAL_TIMEOUT", "60s", "CODEX_SUBSCRIPTION_REFRESH_CREDENTIAL_TIMEOUT"},
 		{"invalid subscription concurrency", "CODEX_SUBSCRIPTION_REFRESH_CONCURRENCY", "0", "CODEX_SUBSCRIPTION_REFRESH_CONCURRENCY"},
+		{"invalid Claude Code version", "CLAUDE_CODE_VERSION", "latest", "CLAUDE_CODE_VERSION"},
+		{"Claude Code version with prefix", "CLAUDE_CODE_VERSION", "v2.1.293", "CLAUDE_CODE_VERSION"},
 		{"oversized body limit", "GATEWAY_MAX_BODY_BYTES", "2147483647", "GATEWAY_MAX_BODY_BYTES"},
 		{"empty usage queue", "USAGE_QUEUE_SIZE", "0", "USAGE_QUEUE_SIZE"},
 		{"oversized usage batch", "USAGE_BATCH_SIZE", "10001", "USAGE_BATCH_SIZE"},
@@ -377,6 +379,22 @@ func TestLoadDoesNotModifyProcessEnvironment(t *testing.T) {
 	}
 	if os.Getenv(key) != "process-value" {
 		t.Fatal("loading files must not modify the process environment")
+	}
+}
+
+func TestClaudeCodeVersionConfiguration(t *testing.T) {
+	for _, tt := range []struct{ name, value, want string }{
+		{"unset uses built-in default", "", ""},
+		{"configured version", "2.1.293", "2.1.293"},
+		{"trimmed version", " 2.1.300 ", "2.1.300"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			values := map[string]string{"POSTGRES_PASSWORD": "test-only", "CLAUDE_CODE_VERSION": tt.value}
+			cfg, err := parse(func(key string) (string, bool) { value, ok := values[key]; return value, ok })
+			if err != nil || cfg.Gateway.ClaudeCodeVersion != tt.want {
+				t.Fatalf("ClaudeCodeVersion = %q, err=%v; want %q", cfg.Gateway.ClaudeCodeVersion, err, tt.want)
+			}
+		})
 	}
 }
 

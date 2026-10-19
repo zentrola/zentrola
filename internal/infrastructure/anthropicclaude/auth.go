@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"regexp"
+	"strings"
 
 	mgmt "github.com/zentrola/zentrola/internal/application/management"
 	"github.com/zentrola/zentrola/internal/domain/catalog"
@@ -23,8 +25,47 @@ const (
 const (
 	ClaudeCodeBeta         = "claude-code-20250219"
 	ClaudeCodeSystemPrompt = "You are Claude Code, Anthropic's official CLI for Claude."
-	ClaudeCodeUserAgent    = "claude-cli/2.1.0 (external, cli)"
+	// DefaultClaudeCodeVersion 是未配置 CLAUDE_CODE_VERSION 时声明的客户端版本。上游开始拒绝旧版本时，
+	// 先通过配置更新版本，再在下次发版时同步此默认值。
+	DefaultClaudeCodeVersion = "2.1.293"
 )
+
+// claudeCodeVersionPattern 与 config 包对 CLAUDE_CODE_VERSION 的校验保持一致。
+var claudeCodeVersionPattern = regexp.MustCompile(`^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}$`)
+
+// ValidClaudeCodeVersion 判断版本号是否为 x.y.z 形式，避免把任意文本写入 User-Agent。
+func ValidClaudeCodeVersion(version string) bool {
+	return claudeCodeVersionPattern.MatchString(version)
+}
+
+// ClaudeCodeUserAgent 返回订阅请求声明的 User-Agent；版本为空或无效时使用默认版本。
+func ClaudeCodeUserAgent(version string) string {
+	if !ValidClaudeCodeVersion(version) {
+		version = DefaultClaudeCodeVersion
+	}
+	return "claude-cli/" + version + " (external, cli)"
+}
+
+const maxUpstreamErrorMessage = 300
+
+// UpstreamError 从 Anthropic 错误响应中提取 error.type 与截断后的 error.message，仅用于诊断日志；
+// 不返回原始响应体，响应无法解析时返回空值。
+func UpstreamError(body []byte) (errorType, message string) {
+	var payload struct {
+		Error struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &payload) != nil {
+		return "", ""
+	}
+	message = strings.ToValidUTF8(strings.TrimSpace(payload.Error.Message), "")
+	if runes := []rune(message); len(runes) > maxUpstreamErrorMessage {
+		message = string(runes[:maxUpstreamErrorMessage]) + "…"
+	}
+	return strings.TrimSpace(payload.Error.Type), message
+}
 
 var (
 	errInvalidCredential = errors.New("invalid Claude Code setup token")

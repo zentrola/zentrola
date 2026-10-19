@@ -292,7 +292,8 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 	gatewayCache.Clear(cacheProbe, "application_startup")
 	cacheProbeCancel()
 	keyService := appsec.NewKeys(gatewaycache.NewKeyStore(securityStore, gatewayCache, logger), ids)
-	connectionTester := anthropic.NewConnectionTester()
+	connectionTester := anthropic.NewConnectionTester(logger)
+	connectionTester.UseClaudeCodeVersion(cfg.Gateway.ClaudeCodeVersion)
 	codexSubscription := openaicodex.New(
 		cfg.Gateway.CodexExecutable,
 		openaicodex.WithRefreshAhead(cfg.Gateway.SubscriptionRefreshAhead),
@@ -308,6 +309,7 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 		management.WithPriceStore(postgresManagementStore),
 	)
 	anthropicClient := anthropic.NewGatewayClient(cfg.Gateway.HeaderTimeout, logger)
+	anthropicClient.UseClaudeCodeVersion(cfg.Gateway.ClaudeCodeVersion)
 	defer anthropicClient.CloseIdleConnections()
 	openaiClient := openai.NewGatewayClient(cfg.Gateway.HeaderTimeout, logger)
 	defer openaiClient.CloseIdleConnections()
