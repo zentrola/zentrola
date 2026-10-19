@@ -1,10 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { api, all, errorText } from '../api'
-import { useCollection, useAction, useListSearch, date, validText } from '../composables'
+import { computed, onMounted, ref } from 'vue'
+import { api, all } from '../api'
+import {
+  useCollection,
+  useAction,
+  useListSearch,
+  useTokenQuotaStatuses,
+  date,
+  validText,
+} from '../composables'
 import { t } from '../i18n'
 import { showErrorToast, showSuccessToast } from '../toast'
-import type { Group, Model, TokenQuotaStatus } from '../types'
+import type { Group, Model } from '../types'
 import Icon from '../components/Icon.vue'
 import StatusSwitch from '../components/StatusSwitch.vue'
 import Modal from '../components/Modal.vue'
@@ -50,8 +57,6 @@ const selected = ref<Group | null>(null),
   deleteTarget = ref<Group | null>(null),
   quotaTarget = ref<Group | null>(null),
   quotaRemovalTarget = ref<Group | null>(null)
-const quotaStatuses = ref<Record<string, TokenQuotaStatus>>({})
-let quotaRevision = 0
 const { keyword, query, visible, search, reset, searching, searchingAll } = useListSearch(
   items,
   (g) => `${g.name} ${g.id} ${g.remark || ''}`,
@@ -66,24 +71,7 @@ const editSelectableModelIDs = computed(() =>
   modelCandidates.value.filter(canEditModelSelection).map((model) => model.id),
 )
 onMounted(() => load())
-watch(visible, (rows) => void loadQuotaStatuses(rows), { immediate: true })
-
-async function loadQuotaStatuses(rows: Group[]) {
-  const revision = ++quotaRevision
-  const ids = rows.filter((group) => group.monthlyTokenLimit).map((group) => group.id)
-  if (!ids.length) {
-    quotaStatuses.value = {}
-    return
-  }
-  try {
-    const params = new URLSearchParams({ scopeType: 'GROUP', scopeIds: ids.join(',') })
-    const statuses = await api<TokenQuotaStatus[]>(`/token-quotas?${params}`)
-    if (revision !== quotaRevision) return
-    quotaStatuses.value = Object.fromEntries(statuses.map((status) => [status.scopeId, status]))
-  } catch (error) {
-    if (revision === quotaRevision) showErrorToast(errorText(error))
-  }
-}
+const quotaStatuses = useTokenQuotaStatuses(visible, 'GROUP')
 
 async function quotaSaved() {
   quotaTarget.value = null

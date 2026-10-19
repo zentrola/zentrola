@@ -1,6 +1,6 @@
 import { computed, ref, onBeforeUnmount, watch, type Ref } from 'vue'
 import { all, api, errorText, isAbortError } from './api'
-import type { Page } from './types'
+import type { Page, TokenQuotaStatus } from './types'
 import { activeLocale, t } from './i18n'
 import { showErrorToast } from './toast'
 
@@ -178,6 +178,56 @@ export function useCollection<T>(path: () => string) {
     setPageSize,
   }
 }
+// 后端单次最多接受 100 个 scopeIds，超出部分分批请求后合并。
+const tokenQuotaBatchSize = 100
+
+export function useTokenQuotaStatuses(
+  rows: Ref<Array<{ id: string; monthlyTokenLimit: string | null }>>,
+  scopeType: TokenQuotaStatus['scopeType'],
+) {
+  const statuses = ref<Record<string, TokenQuotaStatus>>({})
+  let revision = 0
+  let controller: AbortController | null = null
+  function cancel() {
+    revision++
+    controller?.abort()
+    controller = null
+  }
+  async function load(list: Array<{ id: string; monthlyTokenLimit: string | null }>) {
+    cancel()
+    const current = revision
+    const signal = (controller = new AbortController()).signal
+    const ids = [...new Set(list.filter((row) => row.monthlyTokenLimit).map((row) => row.id))]
+    if (!ids.length) {
+      statuses.value = {}
+      return
+    }
+    try {
+      const merged: TokenQuotaStatus[] = []
+      for (let start = 0; start < ids.length; start += tokenQuotaBatchSize) {
+        const params = new URLSearchParams({
+          scopeType,
+          scopeIds: ids.slice(start, start + tokenQuotaBatchSize).join(','),
+        })
+        merged.push(
+          ...(await api<TokenQuotaStatus[]>(`/token-quotas?${params}`, 'GET', undefined, {
+            signal,
+          })),
+        )
+        if (current !== revision) return
+      }
+      statuses.value = Object.fromEntries(merged.map((status) => [status.scopeId, status]))
+    } catch (error) {
+      if (current === revision && !isAbortError(error)) showErrorToast(errorText(error))
+    } finally {
+      if (current === revision) controller = null
+    }
+  }
+  watch(rows, (list) => void load(list), { immediate: true })
+  onBeforeUnmount(cancel)
+  return statuses
+}
+
 export function useAction() {
   const busy = ref(false),
     error = ref('')
