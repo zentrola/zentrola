@@ -6,24 +6,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
-	"net"
-	"net/http"
-	"time"
 
 	mgmt "github.com/zentrola/zentrola/internal/application/management"
 	"github.com/zentrola/zentrola/internal/domain/catalog"
-	"github.com/zentrola/zentrola/internal/infrastructure/provider"
 )
 
 const (
 	AdapterCode = mgmt.AuthAdapterClaudeCode
 	// APIBaseURL 是订阅 OAuth Token 唯一允许的推理主机；长期 Token 不随服务商端点配置发往其他地址。
-	APIBaseURL           = "https://api.anthropic.com"
-	OAuthBeta            = "oauth-2025-04-20"
-	defaultUsageEndpoint = "https://api.anthropic.com/api/oauth/usage"
-	credentialKind       = "claude_code_setup_token"
+	APIBaseURL     = "https://api.anthropic.com"
+	OAuthBeta      = "oauth-2025-04-20"
+	credentialKind = "claude_code_setup_token"
 )
 
 // 订阅 Token 只接受带 Claude Code 身份的推理请求，缺少系统提示时上游返回 429 rate_limit_error。
@@ -33,40 +26,19 @@ const (
 	ClaudeCodeUserAgent    = "claude-cli/2.1.0 (external, cli)"
 )
 
-var errInvalidCredential = errors.New("invalid Claude Code setup token")
-
-type connectionFailure struct {
-	code  string
-	cause error
-}
-
-func (e *connectionFailure) Error() string          { return e.cause.Error() }
-func (e *connectionFailure) Unwrap() error          { return e.cause }
-func (e *connectionFailure) ConnectionCode() string { return e.code }
-
-func connectionError(code string, cause error) error {
-	return &connectionFailure{code: code, cause: cause}
-}
+var (
+	errInvalidCredential = errors.New("invalid Claude Code setup token")
+	errProbeUnsupported  = errors.New("setup token cannot read Claude subscription usage")
+)
 
 type storedCredential struct {
 	Kind        string `json:"kind"`
 	AccessToken string `json:"access_token"`
 }
 
-type Adapter struct {
-	client        *http.Client
-	usageEndpoint string
-}
+type Adapter struct{}
 
-func New() *Adapter {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.Proxy = nil
-	transport.DialContext = provider.PublicDialContext(&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second})
-	return &Adapter{
-		client:        &http.Client{Transport: transport, Timeout: 20 * time.Second},
-		usageEndpoint: defaultUsageEndpoint,
-	}
-}
+func New() *Adapter { return &Adapter{} }
 
 func (a *Adapter) Code() string              { return AdapterCode }
 func (a *Adapter) Supports(code string) bool { return code == AdapterCode }
@@ -114,14 +86,6 @@ func RequestCredential(raw []byte) (string, error) {
 	return credential.AccessToken, nil
 }
 
-func canonicalCredential(credential storedCredential) ([]byte, error) {
-	encoded, err := json.Marshal(credential)
-	if err != nil {
-		return nil, errInvalidCredential
-	}
-	return encoded, nil
-}
-
 func (a *Adapter) Inspect(raw []byte) (mgmt.SubscriptionInspection, error) {
 	if _, err := parseCredential(raw); err != nil {
 		return mgmt.SubscriptionInspection{}, err
@@ -129,18 +93,7 @@ func (a *Adapter) Inspect(raw []byte) (mgmt.SubscriptionInspection, error) {
 	return mgmt.SubscriptionInspection{}, nil
 }
 
-type usageWindow struct {
-	Utilization *float64   `json:"utilization"`
-	ResetsAt    *time.Time `json:"resets_at"`
-}
-
-type usageResponse struct {
-	SubscriptionType string       `json:"subscription_type"`
-	FiveHour         *usageWindow `json:"five_hour"`
-	SevenDay         *usageWindow `json:"seven_day"`
-	SevenDayOpus     *usageWindow `json:"seven_day_opus"`
-}
-
+// quotaStatus 把订阅窗口的已用百分比换算为额度状态。
 func quotaStatus(utilization *float64) string {
 	if utilization == nil {
 		return mgmt.QuotaUnknown
@@ -154,106 +107,11 @@ func quotaStatus(utilization *float64) string {
 	return mgmt.QuotaAvailable
 }
 
-func (u usageResponse) quotas(observedAt time.Time) []mgmt.ResourceQuota {
-	windows := []struct {
-		code, name string
-		window     *usageWindow
-	}{
-		{code: "five_hour", name: "5 hours", window: u.FiveHour},
-		{code: "seven_day", name: "7 days", window: u.SevenDay},
-		{code: "seven_day_opus", name: "7 days · Opus", window: u.SevenDayOpus},
-	}
-	availabilityName := "Subscription"
-	quotas := []mgmt.ResourceQuota{{
-		Code: "subscription", Name: &availabilityName, Status: mgmt.QuotaAvailable, ObservedAt: observedAt,
-	}}
-	for _, item := range windows {
-		if item.window == nil {
-			continue
-		}
-		name, unit := item.name, "PERCENT"
-		quotas = append(quotas, mgmt.ResourceQuota{
-			Code: item.code, Name: &name, Status: quotaStatus(item.window.Utilization), Unit: &unit,
-			UsedPercent: item.window.Utilization, ResetsAt: item.window.ResetsAt, ObservedAt: observedAt,
-		})
-	}
-	return quotas
-}
-
-func (a *Adapter) Probe(ctx context.Context, raw []byte, proxy *catalog.OutboundProxy) (mgmt.SubscriptionProbe, error) {
-	credential, err := parseCredential(raw)
-	if err != nil {
-		return mgmt.SubscriptionProbe{}, connectionError("CREDENTIAL_INVALID", err)
-	}
-	usage, err := a.readUsage(ctx, credential.AccessToken, proxy)
-	if err != nil {
-		return mgmt.SubscriptionProbe{}, err
-	}
-	canonical, err := canonicalCredential(credential)
-	if err != nil {
-		return mgmt.SubscriptionProbe{}, err
-	}
-	inspection := mgmt.SubscriptionInspection{PlanCode: usage.SubscriptionType}
-	return mgmt.SubscriptionProbe{
-		Inspection: inspection,
-		Credential: canonical,
-		Quotas:     usage.quotas(time.Now().UTC().Truncate(time.Microsecond)),
-	}, nil
-}
-
-func (a *Adapter) readUsage(ctx context.Context, token string, proxy *catalog.OutboundProxy) (usageResponse, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, a.usageEndpoint, nil)
-	if err != nil {
-		return usageResponse{}, connectionError("UPSTREAM_UNAVAILABLE", errors.New("cannot create Claude usage request"))
-	}
-	request.Header.Set("Accept", "application/json")
-	request.Header.Set("Authorization", "Bearer "+token)
-	request.Header.Set("anthropic-beta", OAuthBeta)
-	defer request.Header.Del("Authorization")
-
-	client, cleanup, err := provider.ClientWithProxy(ctx, a.client, proxy, provider.ProxyRequestLog{
-		Operation: "subscription_usage", ProviderCode: catalog.AnthropicOfficialCode, Protocol: "ANTHROPIC",
-	})
-	if err != nil {
-		return usageResponse{}, connectionError("SUBSCRIPTION_UNAVAILABLE", errors.New("invalid Claude proxy configuration"))
-	}
-	defer cleanup()
-	response, err := client.Do(request)
-	if err != nil {
-		code := "SUBSCRIPTION_UNAVAILABLE"
-		if errors.Is(err, provider.ErrProxyAuthentication) {
-			code = "PROXY_AUTH_REJECTED"
-		} else if proxy != nil {
-			code = "PROXY_SERVER_UNAVAILABLE"
-		} else if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			code = "UPSTREAM_TIMEOUT"
-		}
-		return usageResponse{}, connectionError(code, errors.New("cannot reach Claude usage service"))
-	}
-	defer response.Body.Close()
-	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
-		return usageResponse{}, connectionError(usageStatusCode(response.StatusCode), fmt.Errorf("claude usage request failed with HTTP %d", response.StatusCode))
-	}
-	var usage usageResponse
-	decoder := json.NewDecoder(io.LimitReader(response.Body, 1<<20))
-	if decoder.Decode(&usage) != nil {
-		return usageResponse{}, connectionError("UPSTREAM_INVALID_RESPONSE", errors.New("invalid Claude usage response"))
-	}
-	return usage, nil
-}
-
-func usageStatusCode(status int) string {
-	switch status {
-	case http.StatusUnauthorized, http.StatusForbidden:
-		return "UPSTREAM_AUTH_FAILED"
-	case http.StatusPaymentRequired:
-		return "UPSTREAM_BILLING_BLOCKED"
-	case http.StatusTooManyRequests:
-		return "UPSTREAM_RATE_LIMITED"
-	default:
-		return "UPSTREAM_UNAVAILABLE"
-	}
+// Probe 仅为满足 SubscriptionAdapter 接口而保留。setup-token 只有 user:inference 权限，
+// 额度接口 /api/oauth/usage 会以 403 oauth_scope_insufficient 拒绝（要求 user:profile），
+// 因此 Claude 订阅的连接测试走推理探测，不会调用此方法。
+func (a *Adapter) Probe(context.Context, []byte, *catalog.OutboundProxy) (mgmt.SubscriptionProbe, error) {
+	return mgmt.SubscriptionProbe{}, errProbeUnsupported
 }
 
 // setup-token 是长期 OAuth Token，没有可供第三方调用的公开刷新接口。
