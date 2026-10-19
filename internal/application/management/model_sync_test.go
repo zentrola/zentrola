@@ -338,6 +338,10 @@ func TestSyncProviderModelsSelectsSupportedCredential(t *testing.T) {
 	claude := Resource{ID: 11, ProviderID: 20, AuthType: AuthTypeSubscription, AuthAdapter: AuthAdapterClaudeCode, Priority: 1}
 	codex := Resource{ID: 12, ProviderID: 20, AuthType: AuthTypeSubscription, AuthAdapter: AuthAdapterOpenAICodex, Priority: 0}
 	apiKey := Resource{ID: 13, ProviderID: 20, AuthType: AuthTypeAPIKey, AuthAdapter: "API_KEY", Priority: 100}
+	blockedKey := Resource{ID: 14, ProviderID: 20, AuthType: AuthTypeAPIKey, AuthAdapter: "API_KEY", Priority: 1, RuntimeStatus: "BLOCKED"}
+	blockedClaude := Resource{
+		ID: 15, ProviderID: 20, AuthType: AuthTypeSubscription, AuthAdapter: AuthAdapterClaudeCode, Priority: 1, RuntimeStatus: "BLOCKED",
+	}
 	for _, tt := range []struct {
 		name      string
 		resources []Resource
@@ -345,6 +349,9 @@ func TestSyncProviderModelsSelectsSupportedCredential(t *testing.T) {
 	}{
 		{"subscription fallback", []Resource{codex, claude}, claude},
 		{"API key before subscription", []Resource{claude, apiKey, codex}, apiKey},
+		{"healthy subscription before blocked API key", []Resource{blockedKey, claude}, claude},
+		{"healthy API key before blocked higher-priority API key", []Resource{blockedKey, apiKey}, apiKey},
+		{"all blocked keeps API key fallback", []Resource{blockedClaude, blockedKey}, blockedKey},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			state := &syncState{

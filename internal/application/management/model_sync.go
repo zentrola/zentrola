@@ -90,8 +90,14 @@ func (s *ProviderService) SyncProviderModels(ctx context.Context, actor admin.Id
 	return ModelSyncResult{}, ErrModelSyncCredentialRequired
 }
 
-// preferModelSyncResource 优先使用 API Key 读取目录，订阅凭据仅在没有 API Key 时兜底；同类凭据按优先级选择。
+// preferModelSyncResource 优先使用未封禁的凭据读取目录，全部封禁时仍按原顺序兜底，以便返回上游的真实错误；
+// 其次 API Key 优先于订阅凭据，同类凭据按优先级选择。
 func preferModelSyncResource(candidate, selected Resource) bool {
+	candidateUsable := candidate.RuntimeStatus != "BLOCKED"
+	selectedUsable := selected.RuntimeStatus != "BLOCKED"
+	if candidateUsable != selectedUsable {
+		return candidateUsable
+	}
 	candidateAPIKey := candidate.AuthType != AuthTypeSubscription
 	selectedAPIKey := selected.AuthType != AuthTypeSubscription
 	if candidateAPIKey != selectedAPIKey {
