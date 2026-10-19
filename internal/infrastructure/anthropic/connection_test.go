@@ -194,6 +194,85 @@ func TestClaudeSubscriptionConnectionObservesUnifiedRateLimits(t *testing.T) {
 	}
 }
 
+func TestClaudeQuotaProbeReadsOnlyHeaders(t *testing.T) {
+	unified := map[string]string{
+		"anthropic-ratelimit-unified-status":         "allowed",
+		"anthropic-ratelimit-unified-5h-utilization": "0.01",
+		"anthropic-ratelimit-unified-5h-reset":       "1792000000",
+	}
+	tests := []struct {
+		name       string
+		target     mgmt.ConnectionTarget
+		status     int
+		body       string
+		headers    map[string]string
+		wantCalls  int
+		wantOK     bool
+		wantCode   string
+		wantQuotas int
+	}{
+		{
+			name:   "reply content is not validated",
+			target: mgmt.ConnectionTarget{AuthType: mgmt.AuthTypeSubscription, AuthAdapter: anthropicclaude.AdapterCode},
+			status: 200, body: `not json`, headers: unified,
+			wantCalls: 1, wantOK: true, wantCode: "OK", wantQuotas: 2,
+		},
+		{
+			name:   "successful probe without unified headers",
+			target: mgmt.ConnectionTarget{AuthType: mgmt.AuthTypeSubscription, AuthAdapter: anthropicclaude.AdapterCode},
+			status: 200, body: `{}`,
+			wantCalls: 1, wantOK: true, wantCode: "OK",
+		},
+		{
+			name:   "rate limited probe keeps quota headers",
+			target: mgmt.ConnectionTarget{AuthType: mgmt.AuthTypeSubscription, AuthAdapter: anthropicclaude.AdapterCode},
+			status: 429, body: `{"type":"error"}`, headers: unified,
+			wantCalls: 1, wantCode: "UPSTREAM_RATE_LIMITED", wantQuotas: 2,
+		},
+		{
+			name:     "API key target is rejected",
+			target:   mgmt.ConnectionTarget{NetworkScope: "PUBLIC"},
+			wantCode: "SUBSCRIPTION_ADAPTER_UNAVAILABLE",
+		},
+		{
+			name:     "Codex subscription target is rejected",
+			target:   mgmt.ConnectionTarget{AuthType: mgmt.AuthTypeSubscription, AuthAdapter: "OPENAI_CODEX"},
+			wantCode: "SUBSCRIPTION_ADAPTER_UNAVAILABLE",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			calls := 0
+			tester := NewConnectionTester()
+			tester.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				calls++
+				var payload struct {
+					MaxTokens int `json:"max_tokens"`
+					System    []struct {
+						Text string `json:"text"`
+					} `json:"system"`
+				}
+				if r.URL.String() != anthropicclaude.APIBaseURL+"/v1/messages" || r.Header.Get("User-Agent") != anthropicclaude.ClaudeCodeUserAgent ||
+					json.NewDecoder(r.Body).Decode(&payload) != nil || payload.MaxTokens != 1 ||
+					len(payload.System) != 1 || payload.System[0].Text != anthropicclaude.ClaudeCodeSystemPrompt {
+					t.Fatalf("unexpected quota probe request: %s %+v", r.URL, payload)
+				}
+				header := make(http.Header)
+				for name, value := range test.headers {
+					header.Set(name, value)
+				}
+				return &http.Response{StatusCode: test.status, Body: io.NopCloser(strings.NewReader(test.body)), Header: header}, nil
+			})
+			target := test.target
+			target.Protocol, target.BaseURL, target.UpstreamModelCode, target.QuotaProbe = "ANTHROPIC", "https://api.anthropic.com", "claude-haiku", true
+			result := tester.Test(context.Background(), target, []byte("sk-ant-oat01-test"), nil)
+			if calls != test.wantCalls || result.OK != test.wantOK || result.Code != test.wantCode || len(result.ObservedQuotas) != test.wantQuotas {
+				t.Fatalf("calls=%d result=%+v quotas=%+v", calls, result, result.ObservedQuotas)
+			}
+		})
+	}
+}
+
 func TestAPIKeyConnectionIgnoresUnifiedRateLimits(t *testing.T) {
 	tester := NewConnectionTester()
 	tester.client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {

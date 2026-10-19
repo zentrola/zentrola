@@ -747,6 +747,25 @@ func (s *SecurityHandlers) mountManagementQueryRoutes(r chi.Router) {
 		data, err := m.ResourceQuotas(req.Context(), adminFrom(req), id)
 		adminResult(w, req, 200, data, err)
 	})
+	// @Summary 刷新 Claude 订阅额度
+	// @Tags 模型与资源
+	// @Description 仅支持 Claude 订阅；优先使用 Haiku 系列模型映射发送一次输出 1 个 Token 的最小推理请求，只从响应头读取 5 小时、7 天统一限额并保存。会消耗极少量订阅额度，可能开启新的 5 小时窗口；不改变凭据运行状态。HTTP 200 后仍需检查 data.ok 和 data.code。
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "业务 ID（正整数字符串）"
+	// @Success 200 {object} response{data=mgmt.QuotaRefreshResult}
+	// @Header all {string} X-Request-ID "请求追踪 ID"
+	// @Failure 400,401,404,409,503 {object} response
+	// @Router /api/v1/resources/{id}/refresh-quota [post]
+	r.Post("/resources/{id}/refresh-quota", func(w http.ResponseWriter, req *http.Request) {
+		id, err := routeID(req, "id")
+		if err != nil {
+			securityError(w, req, err)
+			return
+		}
+		data, err := m.RefreshResourceQuota(req.Context(), adminFrom(req), id, requestMeta(req))
+		adminResult(w, req, http.StatusOK, data, err)
+	})
 	// @Summary 使用 ChatGPT 额度重置卡
 	// @Tags 模型与资源
 	// @Description 仅支持 OpenAI 个人订阅；调用 Codex 官方 App Server 消耗一张额度重置卡，并立即刷新额度状态。

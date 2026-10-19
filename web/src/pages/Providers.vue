@@ -25,6 +25,7 @@ import type {
   ResourceQuota,
   RateLimitResetCredits,
   ResetCreditConsumeResult,
+  QuotaRefreshResult,
 } from '../types'
 import Icon from '../components/Icon.vue'
 import GuideTour from '../components/InitializationGuide.vue'
@@ -832,6 +833,29 @@ async function refreshSubscriptionQuota(resource: Resource) {
     }
     if (result.resetCredits) credentialResetCredits[resource.id] = result.resetCredits
     credentialQuotas[resource.id] = await api<ResourceQuota[]>(`/resources/${resource.id}/quotas`)
+  } catch (error) {
+    quotaRefreshError[resource.id] = errorText(error)
+  } finally {
+    delete quotaRefreshing[resource.id]
+  }
+}
+
+// 手动刷新 Claude 订阅额度：后端发送一次最小推理请求，只从响应头读取统一限额。
+async function refreshClaudeQuota(resource: Resource) {
+  if (quotaRefreshing[resource.id]) return
+  quotaRefreshing[resource.id] = true
+  delete quotaRefreshError[resource.id]
+  try {
+    const result = await api<QuotaRefreshResult>(`/resources/${resource.id}/refresh-quota`, 'POST')
+    if (result.quotas) credentialQuotas[resource.id] = result.quotas
+    if (result.ok) {
+      await loadResources()
+      showSuccessToast(t('resources.quotaRefreshed'))
+    } else {
+      quotaRefreshError[resource.id] = t(
+        i18n.global.te(`errors.${result.code}`) ? `errors.${result.code}` : 'errors.UNKNOWN',
+      )
+    }
   } catch (error) {
     quotaRefreshError[resource.id] = errorText(error)
   } finally {
@@ -2501,6 +2525,24 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
                     </small>
                   </template>
                   <div
+                    v-if="resource.authAdapter === 'ANTHROPIC_CLAUDE_CODE'"
+                    class="credential-quota-refresh"
+                  >
+                    <small class="credential-detail">
+                      {{ t('resources.quotaCheckedAt') }} · {{ date(resource.quotaCheckedAt) }}
+                    </small>
+                    <button
+                      type="button"
+                      class="text-button"
+                      :aria-label="t('resources.refreshQuotaFor', { name: resource.name })"
+                      :title="t('resources.refreshQuotaHint')"
+                      :disabled="busy || quotaRefreshing[resource.id]"
+                      @click="refreshClaudeQuota(resource)"
+                    >
+                      {{ t('resources.refreshQuota') }}
+                    </button>
+                  </div>
+                  <div
                     v-if="
                       resource.authAdapter === 'OPENAI_CODEX' && credentialResetCredits[resource.id]
                     "
@@ -3432,7 +3474,8 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   text-overflow: clip;
   white-space: normal;
 }
-.credential-reset-credits {
+.credential-reset-credits,
+.credential-quota-refresh {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3441,10 +3484,12 @@ onUnmounted(() => document.removeEventListener('pointerdown', onCreateMenuOutsid
   padding-top: 8px;
   border-top: 1px solid var(--line);
 }
-.credential-reset-credits .credential-detail {
+.credential-reset-credits .credential-detail,
+.credential-quota-refresh .credential-detail {
   margin-top: 0;
 }
-.credential-reset-credits .text-button {
+.credential-reset-credits .text-button,
+.credential-quota-refresh .text-button {
   flex: 0 0 auto;
   font-size: 11px;
 }

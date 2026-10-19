@@ -26,6 +26,7 @@ var (
 	ErrModelSyncCredentialRequired  = errors.New("model sync credential required")
 	ErrCredentialExportUnsupported  = errors.New("credential export unsupported")
 	ErrResetCreditUnsupported       = errors.New("rate-limit reset credit unsupported")
+	ErrQuotaRefreshUnsupported      = errors.New("quota refresh unsupported")
 )
 
 var publicErrors = []error{
@@ -41,6 +42,7 @@ var publicErrors = []error{
 	ErrModelSyncCredentialRequired,
 	ErrCredentialExportUnsupported,
 	ErrResetCreditUnsupported,
+	ErrQuotaRefreshUnsupported,
 }
 
 // PublicErrors 返回允许跨 adapter/transport 边界传播的稳定业务错误。
@@ -519,6 +521,9 @@ type ConnectionTarget struct {
 	UpstreamModelCode string
 	AuthType          string
 	AuthAdapter       string
+	// QuotaProbe 表示只为读取订阅额度发起最小推理：输出 1 个 Token，只读取响应头，
+	// 不校验模型回复。目前仅 Claude 订阅支持。
+	QuotaProbe bool
 }
 
 type ConnectionTester interface {

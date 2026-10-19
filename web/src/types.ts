@@ -217,6 +217,16 @@ export interface ConnectionResult {
   testedModelCode?: string
   resetCredits?: RateLimitResetCredits
 }
+export interface QuotaRefreshResult {
+  ok: boolean
+  code: string
+  httpStatus?: number
+  latencyMs: number
+  providerModelMappingId?: string
+  testedModelId?: string
+  testedModelCode?: string
+  quotas: ResourceQuota[] | null
+}
 export interface ResetCreditConsumeResult {
   outcome: 'reset' | 'alreadyRedeemed' | 'nothingToReset' | 'noCredit'
   resetCredits?: RateLimitResetCredits

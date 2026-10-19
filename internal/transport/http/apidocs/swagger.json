@@ -7702,6 +7702,88 @@
                 }
             }
         },
+        "/api/v1/resources/{id}/refresh-quota": {
+            "post": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "description": "仅支持 Claude 订阅；优先使用 Haiku 系列模型映射发送一次输出 1 个 Token 的最小推理请求，只从响应头读取 5 小时、7 天统一限额并保存。会消耗极少量订阅额度，可能开启新的 5 小时窗口；不改变凭据运行状态。HTTP 200 后仍需检查 data.ok 和 data.code。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "模型与资源"
+                ],
+                "summary": "刷新 Claude 订阅额度",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "业务 ID（正整数字符串）",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/management.QuotaRefreshResult"
+                                        }
+                                    }
+                                }
+                            ]
+                        },
+                        "headers": {
+                            "X-Request-ID": {
+                                "type": "string",
+                                "description": "请求追踪 ID"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/resources/{id}/sync-models": {
             "post": {
                 "security": [
@@ -10334,6 +10416,7 @@
                     "example": "0"
                 },
                 "priority": {
+                    "description": "Priority 仅兼容旧客户端请求，服务商写入时忽略；请使用模型优先级接口。",
                     "type": "integer"
                 },
                 "upstreamModelCode": {
@@ -11158,6 +11241,40 @@
                 },
                 "key": {
                     "type": "string"
+                }
+            }
+        },
+        "management.QuotaRefreshResult": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "httpStatus": {
+                    "type": "integer"
+                },
+                "latencyMs": {
+                    "type": "integer"
+                },
+                "ok": {
+                    "type": "boolean"
+                },
+                "providerModelMappingId": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "quotas": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/management.ResourceQuota"
+                    }
+                },
+                "testedModelCode": {
+                    "type": "string"
+                },
+                "testedModelId": {
+                    "type": "string",
+                    "example": "0"
                 }
             }
         },

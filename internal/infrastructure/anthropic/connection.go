@@ -21,6 +21,9 @@ import (
 
 const connectionProbeMaxOutputTokens = 5
 
+// quotaProbeMaxOutputTokens 是刷新额度时的最小输出 Token 数；额度只从响应头读取，回复内容会被丢弃。
+const quotaProbeMaxOutputTokens = 1
+
 type connectionProbe struct {
 	URL            string
 	Body           []byte
@@ -48,7 +51,7 @@ func (standardConnectionProbeAdapter) Build(target mgmt.ConnectionTarget, base s
 	case "ANTHROPIC":
 		return connectionProbe{
 			URL:            strings.TrimSuffix(base, "/") + "/v1/messages",
-			Body:           anthropicProbeBody(target.UpstreamModelCode, ""),
+			Body:           anthropicProbeBody(target.UpstreamModelCode, "", connectionProbeMaxOutputTokens),
 			ResponseFormat: anthropicInferenceProbe,
 		}, true
 	default:
@@ -118,6 +121,10 @@ func (t *ConnectionTester) Test(ctx context.Context, target mgmt.ConnectionTarge
 	oauthBearer := false
 	probeAdapter := t.probeAdapter(target.ProviderCode)
 	probe, ok := probeAdapter.Build(target, base)
+	if target.QuotaProbe && (target.AuthType != mgmt.AuthTypeSubscription || target.AuthAdapter != anthropicclaude.AdapterCode) {
+		result.Code = "SUBSCRIPTION_ADAPTER_UNAVAILABLE"
+		return
+	}
 	if target.AuthType == mgmt.AuthTypeSubscription {
 		switch target.AuthAdapter {
 		case openaicodex.AdapterCode:
@@ -152,9 +159,13 @@ func (t *ConnectionTester) Test(ctx context.Context, target mgmt.ConnectionTarge
 			requestCredential, oauthBearer = accessToken, true
 			target.NetworkScope = catalog.NetworkScopePublic
 			probeAdapter = t.standardAdapter
+			maxTokens := connectionProbeMaxOutputTokens
+			if target.QuotaProbe {
+				maxTokens = quotaProbeMaxOutputTokens
+			}
 			probe = connectionProbe{
 				URL:            anthropicclaude.APIBaseURL + "/v1/messages",
-				Body:           anthropicProbeBody(target.UpstreamModelCode, anthropicclaude.ClaudeCodeSystemPrompt),
+				Body:           anthropicProbeBody(target.UpstreamModelCode, anthropicclaude.ClaudeCodeSystemPrompt, maxTokens),
 				ResponseFormat: anthropicInferenceProbe,
 			}
 			ok = true
@@ -226,6 +237,13 @@ func (t *ConnectionTester) Test(ctx context.Context, target mgmt.ConnectionTarge
 	if oauthBearer {
 		// 限流拒绝同样携带统一限额头，失败响应也要记录，以便额度耗尽时停止路由。
 		result.ObservedQuotas = anthropicclaude.RateLimitQuotas(resp.Header, time.Now())
+	}
+	if target.QuotaProbe && resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+		// 额度探测只关心响应头，不读取或校验模型回复；丢弃有界正文以便复用连接。
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+		result.OK = true
+		result.Code = "OK"
+		return
 	}
 	data, readErr := io.ReadAll(io.LimitReader(resp.Body, (64<<10)+1))
 	if readErr != nil {
@@ -304,7 +322,7 @@ type probeTextBlock struct {
 }
 
 // anthropicProbeBody 在 system 非空时附加系统提示，供需要声明客户端身份的订阅凭据使用。
-func anthropicProbeBody(model, system string) []byte {
+func anthropicProbeBody(model, system string, maxTokens int) []byte {
 	var systemBlocks []probeTextBlock
 	if system != "" {
 		systemBlocks = []probeTextBlock{{Type: "text", Text: system}}
@@ -315,7 +333,7 @@ func anthropicProbeBody(model, system string) []byte {
 		Stream    bool             `json:"stream"`
 		System    []probeTextBlock `json:"system,omitempty"`
 		Messages  []probeMessage   `json:"messages"`
-	}{Model: model, MaxTokens: connectionProbeMaxOutputTokens, System: systemBlocks, Messages: []probeMessage{{Role: "user", Content: "Hi, how are you?"}}})
+	}{Model: model, MaxTokens: maxTokens, System: systemBlocks, Messages: []probeMessage{{Role: "user", Content: "Hi, how are you?"}}})
 	return body
 }
 

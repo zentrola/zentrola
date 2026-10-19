@@ -938,6 +938,12 @@ export default {
     quotaResetsAt: 'Quota resets at',
     quotaRefreshing: 'Refreshing quota…',
     quotaRefreshFailed: 'Quota refresh failed',
+    refreshQuota: 'Refresh quota',
+    quotaCheckedAt: 'Quota checked at',
+    refreshQuotaFor: 'Refresh quota for {name}',
+    refreshQuotaHint:
+      'Sends one minimal model request, preferring a Haiku model, and reads only the quota data in the response. This uses a tiny amount of subscription quota and may start a new 5-hour window. The credential runtime status is not changed.',
+    quotaRefreshed: 'Quota refreshed',
     quotaAmountUnknown: 'The provider did not report a specific quota',
     quotaWindowDays: '{value}-day window',
     quotaWindowHours: '{value}-hour window',
@@ -1155,6 +1161,7 @@ export default {
       RESOURCE_STATUS_CHANGE: 'Change provider credential status',
       RESOURCE_CONNECTION_TEST: 'Test provider connection',
       RESOURCE_RATE_LIMIT_RESET: 'Use rate-limit reset credit',
+      RESOURCE_QUOTA_REFRESH: 'Refresh subscription quota',
       RESOURCE_PRICE_UPDATE: 'Update credential price',
       MODEL_CATALOG_SYNC: 'Sync official model catalog',
       LOGIN_SUCCESS: 'Sign-in succeeded',
@@ -1210,6 +1217,11 @@ export default {
       'The upstream balance is insufficient, billing is unavailable, or the subscription expired.',
     UPSTREAM_ACCOUNT_SUSPENDED: 'The upstream account is suspended or disabled.',
     UPSTREAM_RATE_LIMITED: 'The upstream provider is rate-limiting requests. Try again later.',
+    UPSTREAM_QUOTA_UNAVAILABLE:
+      'The upstream response did not include quota data. Try again later.',
+    QUOTA_REFRESH_UNSUPPORTED: 'Only Claude subscriptions support manual quota refresh.',
+    SUBSCRIPTION_ADAPTER_UNAVAILABLE:
+      'This provider does not support the subscription authentication.',
     UPSTREAM_MODEL_UNAVAILABLE:
       'The upstream model is unavailable or not permitted for this account.',
     UPSTREAM_REQUEST_REJECTED:

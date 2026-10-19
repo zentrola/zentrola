@@ -35,6 +35,57 @@ async function expectOnlyModalBodyScrolls(dialog: Locator) {
   })
   expect(layout.scrollTop).toBeGreaterThan(0)
 }
+// Claude 订阅额度来自推理响应头中的统一限额，连接测试或手动刷新额度后写入。
+function recordClaudeQuota(resource: any, fiveHour: number, sevenDay: number) {
+  resource.quotaStatus = 'AVAILABLE'
+  resource.quotaCheckedAt = stamp
+  resource.quotaResetsAt = stamp
+  resource.quotaDetails = [
+    {
+      code: 'subscription',
+      name: 'Subscription',
+      status: 'AVAILABLE',
+      unit: null,
+      limitValue: null,
+      usedValue: null,
+      remainingValue: null,
+      usedPercent: null,
+      windowDurationSeconds: null,
+      resetsAt: null,
+      reachedType: null,
+      observedAt: stamp,
+    },
+    {
+      code: 'five_hour',
+      name: null,
+      status: 'AVAILABLE',
+      unit: 'PERCENT',
+      limitValue: null,
+      usedValue: null,
+      remainingValue: null,
+      usedPercent: fiveHour,
+      windowDurationSeconds: 18000,
+      resetsAt: stamp,
+      reachedType: null,
+      observedAt: stamp,
+    },
+    {
+      code: 'seven_day',
+      name: null,
+      status: 'AVAILABLE',
+      unit: 'PERCENT',
+      limitValue: null,
+      usedValue: null,
+      remainingValue: null,
+      usedPercent: sevenDay,
+      windowDurationSeconds: 604800,
+      resetsAt: stamp,
+      reachedType: null,
+      observedAt: stamp,
+    },
+  ]
+}
+
 async function fixture(page: Page) {
   let nextID = 100n
   const next = () => (90071992547409900n + nextID++).toString()
@@ -1437,6 +1488,21 @@ async function fixture(page: Page) {
         resetCredits: { availableCount: 0, credits: [] },
       })
     }
+    if (segments[2] === 'refresh-quota' && method === 'POST') {
+      const resource = resources.find((candidate) => candidate.id === segments[1])
+      if (!resource) return reply(null, 404, 'NOT_FOUND')
+      if (resource.authAdapter !== 'ANTHROPIC_CLAUDE_CODE')
+        return reply(null, 409, 'QUOTA_REFRESH_UNSUPPORTED')
+      recordClaudeQuota(resource, 1, 7)
+      return reply({
+        ok: true,
+        code: 'OK',
+        httpStatus: 200,
+        latencyMs: 90,
+        testedModelCode: 'claude-haiku',
+        quotas: resource.quotaDetails,
+      })
+    }
     if (segments[2] === 'test-connection') {
       const resource = resources.find((candidate) => candidate.id === segments[1])
       const providerModelMappingId = url.searchParams.get('providerModelMappingId')
@@ -1444,56 +1510,8 @@ async function fixture(page: Page) {
         .flat()
         .find((mapping) => mapping.id === providerModelMappingId)
       const testedModel = models.find((model) => model.id === testedMapping?.modelId)
-      if (resource?.authAdapter === 'ANTHROPIC_CLAUDE_CODE' && !failedTest) {
-        // Claude 订阅额度来自推理响应头中的统一限额，连接测试成功后写入。
-        resource.quotaStatus = 'AVAILABLE'
-        resource.quotaCheckedAt = stamp
-        resource.quotaResetsAt = stamp
-        resource.quotaDetails = [
-          {
-            code: 'subscription',
-            name: 'Subscription',
-            status: 'AVAILABLE',
-            unit: null,
-            limitValue: null,
-            usedValue: null,
-            remainingValue: null,
-            usedPercent: null,
-            windowDurationSeconds: null,
-            resetsAt: null,
-            reachedType: null,
-            observedAt: stamp,
-          },
-          {
-            code: 'five_hour',
-            name: null,
-            status: 'AVAILABLE',
-            unit: 'PERCENT',
-            limitValue: null,
-            usedValue: null,
-            remainingValue: null,
-            usedPercent: 50,
-            windowDurationSeconds: 18000,
-            resetsAt: stamp,
-            reachedType: null,
-            observedAt: stamp,
-          },
-          {
-            code: 'seven_day',
-            name: null,
-            status: 'AVAILABLE',
-            unit: 'PERCENT',
-            limitValue: null,
-            usedValue: null,
-            remainingValue: null,
-            usedPercent: 56,
-            windowDurationSeconds: 604800,
-            resetsAt: stamp,
-            reachedType: null,
-            observedAt: stamp,
-          },
-        ]
-      }
+      if (resource?.authAdapter === 'ANTHROPIC_CLAUDE_CODE' && !failedTest)
+        recordClaudeQuota(resource, 50, 56)
       if (resource?.authAdapter === 'OPENAI_CODEX' && !failedTest) {
         resource.quotaStatus = 'AVAILABLE'
         resource.quotaCheckedAt = stamp
@@ -5080,6 +5098,9 @@ test('Anthropic 官方渠道直接输入 Claude 个人订阅 Token', async ({ pa
     }),
   ])
   await expect(modal(page).getByRole('row').filter({ hasText: 'Anthropic 个人订阅' })).toBeVisible()
+  await expect(
+    modal(page).getByRole('row').filter({ hasText: 'Anthropic 个人订阅' }),
+  ).toContainText('额度检查时间 · -')
 
   await modal(page)
     .getByRole('row')
@@ -5119,6 +5140,45 @@ test('Anthropic 官方渠道直接输入 Claude 个人订阅 Token', async ({ pa
   await expect(subscriptionRow).not.toContainText('five_hour')
   await expect(subscriptionRow.locator('.credential-quota-reset')).toHaveCount(2)
   expect(automaticTests).toEqual([])
+
+  const refreshButton = subscriptionRow.getByRole('button', {
+    name: '刷新 Anthropic 个人订阅 的额度',
+    exact: true,
+  })
+  await expect(refreshButton).toHaveText('刷新额度')
+  await expect(refreshButton).toHaveAttribute(
+    'title',
+    /发送一次最小模型请求.*消耗极少量订阅额度.*可能开启新的 5 小时窗口/,
+  )
+  const refreshRequest = page.waitForRequest(
+    (request) =>
+      request.method() === 'POST' &&
+      new URL(request.url()).pathname.endsWith(`/resources/${state.resources[0].id}/refresh-quota`),
+  )
+  await refreshButton.click()
+  await refreshRequest
+  await expect(page.locator('.toast')).toContainText('额度已刷新')
+  await expect(subscriptionRow).toContainText('5 小时窗口 · 剩余 99%')
+  await expect(subscriptionRow).toContainText('7 天窗口 · 剩余 93%')
+  expect(automaticTests).toEqual([])
+
+  await page.route('**/api/v1/resources/*/refresh-quota', (route) =>
+    route.fulfill({
+      json: {
+        code: 'OK',
+        data: {
+          ok: false,
+          code: 'UPSTREAM_QUOTA_UNAVAILABLE',
+          httpStatus: 200,
+          latencyMs: 80,
+          quotas: null,
+        },
+        requestId: 'req_quota_refresh',
+      },
+    }),
+  )
+  await refreshButton.click()
+  await expect(subscriptionRow).toContainText('额度刷新失败 · 上游响应未包含额度信息，请稍后重试。')
 })
 
 test('状态 switch 直接生效且危险操作仍需确认', async ({ page }) => {

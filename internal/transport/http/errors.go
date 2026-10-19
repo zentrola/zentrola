@@ -32,6 +32,7 @@ var managementErrorMappings = []applicationErrorMapping{
 	{mgmt.ErrModelSyncCredentialRequired, http.StatusConflict, "MODEL_SYNC_CREDENTIAL_REQUIRED", "Configure a provider credential before synchronizing models."},
 	{mgmt.ErrCredentialExportUnsupported, http.StatusConflict, "CREDENTIAL_EXPORT_UNSUPPORTED", "Only OpenAI personal subscription credentials can be exported."},
 	{mgmt.ErrResetCreditUnsupported, http.StatusConflict, "RESET_CREDIT_UNSUPPORTED", "Only OpenAI personal subscriptions support rate-limit reset credits."},
+	{mgmt.ErrQuotaRefreshUnsupported, http.StatusConflict, "QUOTA_REFRESH_UNSUPPORTED", "Only Claude subscriptions support manual quota refresh."},
 }
 
 // securityError 是管理 API 的统一应用错误出口。错误语义属于 application，
