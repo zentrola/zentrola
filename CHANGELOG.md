@@ -74,6 +74,7 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - OpenAI Chat and Responses requests routed to an Anthropic endpoint now record cache write tokens, so cache writes are rated at the cache write price instead of the input price. Total input tokens still include cache writes and cache reads.
 - After a successful Codex app-server session, the credential file is read only after the app-server has exited, so a token written back on shutdown is no longer missed.
 - Gateway request bodies preallocate at most 1 MiB from the declared `Content-Length` and grow as data arrives, so a slow client declaring a size close to `GATEWAY_MAX_BODY_BYTES` no longer reserves the whole buffer up front. The body size limit is unchanged.
+- Management subscription probes and reset-credit redemption now take the same Redis subscription refresh lock as the gateway. Previously they held a PostgreSQL lock that the gateway does not use when Redis coordination is configured, so both sides could rotate the same refresh token at once. They wait up to 10 seconds for a gateway refresh to finish and then return `409 CONFLICT`; they return `503` when Redis is unavailable.
 - 使用提示缓存的 Anthropic 调用此前被归为 `INCOMPLETE_TOKENS` 而不计费，现已正常核算；跨协议转换保留缓存 Token 字段。
 - 补录更早生效的订阅价格可能生成与已出账单据重叠的账期；结算与数据库现在都会拒绝重叠账期。
 - 用量核算和 API Key 结算不再每轮重扫全部历史，单条失败不再阻塞整轮，计费任务日志记录脱敏后的错误详情。
@@ -88,6 +89,7 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - 经 OpenAI Chat 或 Responses 协议路由到 Anthropic 端点的请求会记录缓存写入 Token，缓存写入按缓存写入单价核算，不再按输入单价计费；总输入 Token 仍包含缓存写入与缓存读取。
 - Codex app-server 会话成功后，等 app-server 退出再读取凭据文件，不再遗漏退出时才写回的 Token。
 - 网关按客户端声明的 `Content-Length` 预分配请求体缓冲区时最多分配 1 MiB，之后随数据到达增长；声明接近 `GATEWAY_MAX_BODY_BYTES` 的慢速连接不再立即占用整块内存。请求体大小上限不变。
+- 管理端订阅探测与重置卡兑换改为获取与网关相同的 Redis 订阅刷新锁。此前它们持有的 PostgreSQL 锁在配置 Redis 协调后网关并不使用，两侧可能同时轮换同一 refresh token。现在最多等待 10 秒让网关刷新完成，超时返回 `409 CONFLICT`，Redis 不可用时返回 `503`。
 
 ### Database / 数据库
 

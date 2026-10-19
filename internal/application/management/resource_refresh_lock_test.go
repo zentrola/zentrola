@@ -163,3 +163,74 @@ func TestAPIKeyConnectionTestDoesNotTakeSubscriptionRefreshLock(t *testing.T) {
 		}
 	}
 }
+
+// refreshCoordinatorStub 模拟网关的 Redis 订阅刷新锁：前 busy 次返回锁被占用。
+type refreshCoordinatorStub struct {
+	busy   int
+	err    error
+	events *[]string
+}
+
+func (c *refreshCoordinatorStub) AcquireSubscriptionRefreshResource(_ context.Context, id int64) (func(), bool, error) {
+	if c.err != nil {
+		return nil, false, c.err
+	}
+	if c.busy > 0 {
+		c.busy--
+		*c.events = append(*c.events, "busy")
+		return nil, false, nil
+	}
+	*c.events = append(*c.events, "acquire")
+	return func() { *c.events = append(*c.events, "release") }, true, nil
+}
+
+func TestSubscriptionProbeUsesGatewayRefreshCoordinator(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		busy      int
+		err       error
+		wantErr   error
+		wantEvent string
+	}{
+		{name: "acquired after gateway releases", busy: 1, wantEvent: "read,busy,acquire,read,probe,replace,release"},
+		{name: "coordinator unavailable fails closed", err: errors.New("redis unavailable"), wantErr: appsec.ErrUnavailable, wantEvent: "read"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			writer := subscriptionRefreshWriter()
+			events := []string{}
+			adapter := subscriptionAdapterStub{
+				probe: SubscriptionProbe{
+					Inspection: SubscriptionInspection{AccountRef: "account-1", PlanCode: "plus"},
+					Credential: []byte("refreshed-auth-cache"),
+				},
+				onProbe: func(*catalog.OutboundProxy) {
+					events = append(events, "probe")
+					writer.resource.Version++
+				},
+			}
+			coordinator := &refreshCoordinatorStub{busy: tt.busy, err: tt.err, events: &events}
+			service := New(lockingResourceStore{writer: writer, events: &events}, nil, providerTestCipher{}, nil,
+				WithSubscriptionAdapter(adapter), WithSubscriptionRefreshCoordinator(coordinator))
+
+			_, err := service.TestResource(context.Background(), admin.Identity{ID: 1}, 48, appsec.RequestMeta{})
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("error=%v; want %v", err, tt.wantErr)
+			}
+			// 注入协调器后不得再使用存储层的刷新锁，否则与网关持有的不是同一把锁。
+			if sequence := strings.Join(events, ","); sequence != tt.wantEvent {
+				t.Fatalf("event sequence=%s; want %s", sequence, tt.wantEvent)
+			}
+		})
+	}
+}
+
+func TestSubscriptionRefreshCoordinatorWaitStopsWithCaller(t *testing.T) {
+	events := []string{}
+	service := New(lockingResourceStore{writer: subscriptionRefreshWriter(), events: &events}, nil, providerTestCipher{}, nil,
+		WithSubscriptionRefreshCoordinator(&refreshCoordinatorStub{busy: 1 << 30, events: &events}))
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := service.lockSubscriptionRefresh(ctx, 48); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error=%v; want caller deadline", err)
+	}
+}

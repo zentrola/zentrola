@@ -27,6 +27,8 @@ type serviceOptions struct {
 	subscriptions []SubscriptionAdapter
 	now           func() time.Time
 	priceStore    PriceStore
+	// refreshCoordinator 为 nil 时管理端回退到存储层的订阅刷新锁。
+	refreshCoordinator SubscriptionRefreshCoordinator
 }
 
 type Option func(*serviceOptions)
@@ -45,6 +47,16 @@ func WithSubscriptionAdapter(adapter SubscriptionAdapter) Option {
 
 func WithPriceStore(store PriceStore) Option {
 	return func(options *serviceOptions) { options.priceStore = store }
+}
+
+// WithSubscriptionRefreshCoordinator 注入与网关相同的订阅刷新协调器。网关注入协调器后不再持有
+// 存储层的刷新锁，管理端必须同样注入，订阅探测与重置卡兑换才能与网关刷新互斥。
+func WithSubscriptionRefreshCoordinator(coordinator SubscriptionRefreshCoordinator) Option {
+	return func(options *serviceOptions) {
+		if !dependencyMissing(coordinator) {
+			options.refreshCoordinator = coordinator
+		}
+	}
 }
 
 // WithClock 注入业务时间，测试可使用固定时钟；所有结果统一规范化为 UTC 微秒精度。
@@ -77,7 +89,7 @@ func New(store Store, ids shared.IDGenerator, cipher Cipher, tester ConnectionTe
 	subscriptions := append([]SubscriptionAdapter(nil), configuration.subscriptions...)
 	resourceService := ResourceService{
 		store: resourceStoreAdapter{Store: store}, ids: ids, cipher: cipher, tester: tester, now: now,
-		subscriptions: subscriptions,
+		subscriptions: subscriptions, refreshCoordinator: configuration.refreshCoordinator,
 	}
 	return &Service{
 		MemberService: MemberService{store: memberStoreAdapter{Store: store}, ids: ids, now: now},

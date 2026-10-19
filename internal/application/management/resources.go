@@ -21,6 +21,9 @@ type ResourceService struct {
 	tester        ConnectionTester
 	now           func() time.Time
 	subscriptions []SubscriptionAdapter
+	// refreshCoordinator 是网关使用的跨实例订阅刷新锁；注入后管理端改用它与网关互斥，
+	// 未注入时回退到存储适配器的 SubscriptionRefreshLocker。
+	refreshCoordinator SubscriptionRefreshCoordinator
 }
 
 type ResourceReadSession interface {
@@ -45,6 +48,19 @@ type ResourceStore interface {
 type SubscriptionRefreshLocker interface {
 	LockSubscriptionRefresh(context.Context, int64) (func(), error)
 }
+
+// SubscriptionRefreshCoordinator 与网关的 SubscriptionRefreshCoordinator 是同一把 per-resource 锁：
+// 网关注入协调器后只持有它而不持有存储层的刷新锁，管理端必须获取同一把锁才能与网关互斥。
+// 获取是非阻塞的：acquired 为 false 表示锁由其他持有者占用。
+type SubscriptionRefreshCoordinator interface {
+	AcquireSubscriptionRefreshResource(context.Context, int64) (func(), bool, error)
+}
+
+const (
+	// 管理端等待网关释放刷新锁的上限与轮询间隔；超时后返回冲突，由管理员稍后重试。
+	subscriptionRefreshLockWait = 10 * time.Second
+	subscriptionRefreshLockPoll = 200 * time.Millisecond
+)
 
 // SubscriptionCredentialReplacer 由写事务实现：仅当库中密文仍等于 expected 时保存新凭据，
 // 用于资源其他字段发生版本冲突时单独落盘已经轮换的订阅凭据。
@@ -78,10 +94,48 @@ func (s resourceStoreAdapter) WriteResource(ctx context.Context, actor admin.Ide
 }
 
 func (s *ResourceService) lockSubscriptionRefresh(ctx context.Context, id int64) (func(), error) {
+	if s.refreshCoordinator != nil {
+		return s.acquireSubscriptionRefresh(ctx, id)
+	}
 	if locker, ok := s.store.(SubscriptionRefreshLocker); ok {
 		return locker.LockSubscriptionRefresh(ctx, id)
 	}
 	return func() {}, nil
+}
+
+// acquireSubscriptionRefresh 在有限时间内轮询协调器的刷新锁。协调后端不可用时失败关闭：
+// 无法确认网关未在刷新，就不能向上游轮换同一凭据。
+func (s *ResourceService) acquireSubscriptionRefresh(ctx context.Context, id int64) (func(), error) {
+	waitCtx, cancel := context.WithTimeout(ctx, subscriptionRefreshLockWait)
+	defer cancel()
+	var ticker *time.Ticker
+	for {
+		release, acquired, err := s.refreshCoordinator.AcquireSubscriptionRefreshResource(waitCtx, id)
+		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
+			if waitCtx.Err() != nil {
+				return nil, ErrConflict
+			}
+			return nil, appsec.ErrUnavailable
+		}
+		if acquired && release != nil {
+			return release, nil
+		}
+		if ticker == nil {
+			ticker = time.NewTicker(subscriptionRefreshLockPoll)
+			defer ticker.Stop()
+		}
+		select {
+		case <-waitCtx.Done():
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
+			return nil, ErrConflict
+		case <-ticker.C:
+		}
+	}
 }
 
 // persistRotatedCredential 在资源版本已变化时单独保存探测轮换出的新凭据：只有库中密文仍是探测前

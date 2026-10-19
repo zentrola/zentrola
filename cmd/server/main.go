@@ -300,15 +300,6 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 		openaicodex.WithLogger(logger),
 	)
 	claudeSubscription := anthropicclaude.New()
-	postgresManagementStore := postgres.NewManagementStore(pool, ids, logger)
-	managementStore := gatewaycache.NewManagementStore(postgresManagementStore, gatewayCache, logger)
-	managementService := management.New(
-		managementStore, ids, credentials, connectionTester,
-		management.WithModelDiscoverer(modelcatalog.NewDiscoverer(logger)),
-		management.WithSubscriptionAdapter(codexSubscription),
-		management.WithSubscriptionAdapter(claudeSubscription),
-		management.WithPriceStore(postgresManagementStore),
-	)
 	anthropicClient := anthropic.NewGatewayClient(cfg.Gateway.HeaderTimeout, logger)
 	anthropicClient.UseClaudeCodeVersion(cfg.Gateway.ClaudeCodeVersion)
 	anthropicClient.UseStreamIdleTimeout(cfg.Gateway.StreamIdleTimeout)
@@ -324,6 +315,17 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 		logger.Warn("route state Redis unavailable; cooldown state will fail open", "error_code", "REDIS_UNAVAILABLE")
 	}
 	redisProbeCancel()
+	postgresManagementStore := postgres.NewManagementStore(pool, ids, logger)
+	managementStore := gatewaycache.NewManagementStore(postgresManagementStore, gatewayCache, logger)
+	managementService := management.New(
+		managementStore, ids, credentials, connectionTester,
+		management.WithModelDiscoverer(modelcatalog.NewDiscoverer(logger)),
+		management.WithSubscriptionAdapter(codexSubscription),
+		management.WithSubscriptionAdapter(claudeSubscription),
+		management.WithPriceStore(postgresManagementStore),
+		// 与网关共用 Redis 订阅刷新锁：网关注入协调器后只持有这把锁。
+		management.WithSubscriptionRefreshCoordinator(routeState),
+	)
 	quotaService := quotaapp.New(postgres.NewQuotaStore(pool, logger), logger)
 	gatewayStore := gatewaycache.NewGatewayStore(postgres.NewGatewayStore(pool, logger), gatewayCache, logger)
 	anthropicClient.ObserveSubscriptionResponses(anthropicclaude.NewQuotaObserver(gatewayStore, logger))
