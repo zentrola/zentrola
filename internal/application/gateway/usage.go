@@ -681,8 +681,17 @@ func (o *UsageObserver) CacheCreationTokens() *int64 {
 	if cacheCreation == nil {
 		return nil
 	}
-	input, _, _ := o.Tokens(false)
-	if input == nil || *cacheCreation > *input {
+	// 与 usage_record / usage_rating 的约束一致：缓存写入与缓存读取同属总输入，二者之和不得超过总输入。
+	// 计数不一致时只放弃缓存写入（按普通输入计费），不能让整条用量记录因违反约束而写入失败。
+	input, _, cached := o.Tokens(false)
+	if input == nil || *cacheCreation < 0 {
+		return nil
+	}
+	uncached := *input
+	if cached != nil {
+		uncached -= *cached
+	}
+	if *cacheCreation > uncached {
 		return nil
 	}
 	value := *cacheCreation

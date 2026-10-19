@@ -358,3 +358,33 @@ func TestNativeOpenAIObserverHasNoCacheCreation(t *testing.T) {
 		t.Fatalf("complete=%v cache creation=%v", observer.Complete(), observer.CacheCreationTokens())
 	}
 }
+
+func TestCacheCreationTokensStayWithinUncachedInput(t *testing.T) {
+	tests := []struct {
+		name          string
+		usage         string
+		cacheCreation int64
+		want          *int64
+	}{
+		{name: "fits uncached input", usage: `{"prompt_tokens":100,"completion_tokens":1,"prompt_tokens_details":{"cached_tokens":60}}`, cacheCreation: 40, want: ptrInt64(40)},
+		// cache_creation + cached 超过总输入会违反 usage_record 约束，只能放弃缓存写入。
+		{name: "exceeds uncached input", usage: `{"prompt_tokens":100,"completion_tokens":1,"prompt_tokens_details":{"cached_tokens":60}}`, cacheCreation: 41},
+		{name: "no cached tokens", usage: `{"prompt_tokens":100,"completion_tokens":1}`, cacheCreation: 100, want: ptrInt64(100)},
+		{name: "negative", usage: `{"prompt_tokens":100,"completion_tokens":1}`, cacheCreation: -1},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			compatibility := &CompatibilityUsage{}
+			compatibility.record(anthropicUsageCounts{cacheCreation: test.cacheCreation, cacheCreationSeen: true})
+			observer := NewOpenAIUsageObserver(false)
+			observer.UseCompatibilityUsage(compatibility)
+			observer.Feed([]byte(`{"object":"chat.completion","usage":` + test.usage + `}`))
+			got := observer.CacheCreationTokens()
+			if (got == nil) != (test.want == nil) || got != nil && *got != *test.want {
+				t.Fatalf("cache creation=%v want %v", got, test.want)
+			}
+		})
+	}
+}
+
+func ptrInt64(value int64) *int64 { return &value }
