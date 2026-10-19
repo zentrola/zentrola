@@ -123,6 +123,10 @@ func (s *Service) forwardCandidates(ctx context.Context, identity appsec.Princip
 					s.block(ctx, identity, route, ResourceBlock{
 						Reason: subscriptionRefreshBlockReason(refreshFailure.Code), ErrorCode: refreshFailure.Code,
 					})
+				} else if ctx.Err() != nil {
+					// 调用方已结束时，临时失败无法排除是请求取消所致，不能据此冷却路由或计入失败，
+					// 也无需继续尝试后续候选。
+					return nil, err
 				} else if !errors.Is(err, errSubscriptionRefreshBusy) {
 					s.cooldown(ctx, route, defaultRouteCooldown)
 				}
@@ -233,7 +237,9 @@ func (s *Service) refreshCredential(ctx context.Context, route Route, credential
 	refreshCtx := ctx
 	var cancel context.CancelFunc
 	if s.refreshTimeout > 0 {
-		refreshCtx, cancel = context.WithTimeout(ctx, s.refreshTimeout)
+		// 刷新与请求生命周期解耦：客户端断开不能中途终止 app-server，否则已轮换但
+		// 尚未写回的 refresh token 会丢失，后续刷新将永久失败。
+		refreshCtx, cancel = context.WithTimeout(context.WithoutCancel(ctx), s.refreshTimeout)
 		defer cancel()
 	}
 	if s.refreshCoordinator != nil && !hasSubscriptionRefreshLease(refreshCtx) {

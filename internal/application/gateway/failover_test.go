@@ -563,6 +563,61 @@ func TestForwardBlocksPermanentSubscriptionRefreshFailure(t *testing.T) {
 	}
 }
 
+func TestForwardSubscriptionRefreshIgnoresCallerCancellation(t *testing.T) {
+	tests := []struct {
+		name          string
+		refreshErr    error
+		wantPersisted bool
+	}{
+		{name: "rotated credential is persisted", wantPersisted: true},
+		{name: "refresh failure does not cool down route", refreshErr: errors.New("refresh failed")},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			routes := testRoutes()
+			routes[0].AuthType = "SUBSCRIPTION"
+			routes[0].AuthAdapter = "OPENAI_CODEX"
+			routes[1].AuthType = "API_KEY"
+			store := &failoverStore{routes: routes}
+			state := &failoverState{blocked: map[int64]bool{}}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var called []int64
+			var refreshCtxErr error
+			service := New(store, failoverCipher{}, upstreamFunc(func(_ context.Context, route Route, _ Request, _ []byte) (*Response, error) {
+				called = append(called, route.ResourceID)
+				return response(200, `{}`), nil
+			}), WithRouteState(state), WithCredentialRefreshTimeout(time.Second),
+				WithSubscriptionRefresher(subscriptionRefreshFunc(func(refreshCtx context.Context, _ []byte, _ *catalog.OutboundProxy) ([]byte, bool, error) {
+					// 模拟客户端在 app-server 轮换 token 期间断开连接。
+					cancel()
+					refreshCtxErr = refreshCtx.Err()
+					if test.refreshErr != nil {
+						return nil, false, test.refreshErr
+					}
+					return []byte("rotated-auth-cache"), true, nil
+				})))
+
+			got, err := service.Forward(ctx, appsec.PrincipalIdentity{ID: 1, AccessKeyID: 3}, Request{
+				Path: "/v1/responses", Protocol: OpenAIResponsesProtocol, Body: []byte(`{"model":"model"}`),
+			})
+			if got != nil && got.Body != nil {
+				got.Body.Close()
+			}
+			if refreshCtxErr != nil {
+				t.Fatalf("refresh context was canceled with caller: %v", refreshCtxErr)
+			}
+			persisted := store.updatedRoute == routes[0].ResourceID && string(store.updatedSealed.Ciphertext) == "rotated-auth-cache"
+			if persisted != test.wantPersisted {
+				t.Fatalf("persisted=%v want %v (route=%d sealed=%q)", persisted, test.wantPersisted, store.updatedRoute, store.updatedSealed.Ciphertext)
+			}
+			if test.refreshErr != nil && (err == nil || len(state.cooldowns) != 0 || len(store.blocks) != 0 || len(called) != 0) {
+				t.Fatalf("err=%v cooldowns=%v blocks=%v calls=%v", err, state.cooldowns, store.blocks, called)
+			}
+		})
+	}
+}
+
 type failingReadCloser struct{}
 
 func (failingReadCloser) Read([]byte) (int, error) { return 0, errors.New("connection reset") }
