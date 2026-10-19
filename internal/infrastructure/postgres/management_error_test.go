@@ -67,3 +67,27 @@ func TestPostgresDiagnosticsIncludeSafeStructuredFields(t *testing.T) {
 		t.Fatalf("PostgreSQL detail leaked into diagnostic log: %s", line)
 	}
 }
+
+func TestManagementErrorMapsPriceTriggerConflictsPrecisely(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		code    string
+		message string
+		want    error
+	}{
+		{"referenced subscription delete", "23503", "referenced subscription price cannot be deleted", mgmt.ErrConflict},
+		{"referenced subscription structure", "23503", "referenced subscription price structure is immutable", mgmt.ErrConflict},
+		{"referenced model delete", "23503", "referenced model price cannot be deleted", mgmt.ErrConflict},
+		{"referenced model structure", "23503", "referenced model price structure is immutable", mgmt.ErrConflict},
+		{"model history override", "23514", "model price version would override rated usage history", mgmt.ErrConflict},
+		{"message with wrong sqlstate", "23503", "model price version would override rated usage history", appsec.ErrUnavailable},
+		{"unrelated foreign key", "23503", "insert or update on table \"x\" violates foreign key constraint", appsec.ErrUnavailable},
+		{"unrelated check", "23514", "new row violates check constraint", appsec.ErrUnavailable},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := managementError(&pgconn.PgError{Code: tt.code, Message: tt.message}); !errors.Is(err, tt.want) {
+				t.Fatalf("error=%v; want %v", err, tt.want)
+			}
+		})
+	}
+}

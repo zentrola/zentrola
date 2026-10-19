@@ -128,6 +128,70 @@ func (q *Queries) ManageInsertSubscriptionPrice(ctx context.Context, arg ManageI
 	return err
 }
 
+const manageModelPriceOverridesRatedUsage = `-- name: ManageModelPriceOverridesRatedUsage :one
+SELECT EXISTS (
+    SELECT 1
+    FROM usage_record usage
+    JOIN LATERAL (
+        SELECT rating.model_price_id
+        FROM usage_rating rating
+        WHERE rating.usage_record_id = usage.id
+        ORDER BY rating.revision DESC, rating.id DESC
+        LIMIT 1
+    ) latest ON TRUE
+    WHERE usage.provider_credential_id = $1::bigint
+      AND usage.provider_model_id = $2::bigint
+      AND usage.started_at >= $3::timestamptz
+      AND latest.model_price_id <> $4::bigint
+      AND NOT EXISTS (
+          SELECT 1
+          FROM provider_credential_model_price later
+          WHERE later.id <> $4::bigint
+            AND later.provider_credential_id = $1::bigint
+            AND later.provider_model_id = $2::bigint
+            AND later.effective_at <= usage.started_at
+            AND (later.effective_at > $3::timestamptz
+                OR (later.effective_at = $3::timestamptz AND later.id > $4::bigint))
+      )
+)
+`
+
+type ManageModelPriceOverridesRatedUsageParams struct {
+	ProviderCredentialID int64
+	ProviderModelID      int64
+	EffectiveAt          pgtype.Timestamptz
+	PriceID              int64
+}
+
+// 与触发器 reject_model_price_history_override 口径一致：价格版本放在 effective_at 后，
+// 是否会成为某条已核算调用的有效价格而替换其最新核算引用的价格。
+func (q *Queries) ManageModelPriceOverridesRatedUsage(ctx context.Context, arg ManageModelPriceOverridesRatedUsageParams) (bool, error) {
+	row := q.db.QueryRow(ctx, manageModelPriceOverridesRatedUsage,
+		arg.ProviderCredentialID,
+		arg.ProviderModelID,
+		arg.EffectiveAt,
+		arg.PriceID,
+	)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const manageModelPriceReferenced = `-- name: ManageModelPriceReferenced :one
+SELECT EXISTS (
+    SELECT 1
+    FROM usage_rating
+    WHERE model_price_id = $1::bigint
+)
+`
+
+func (q *Queries) ManageModelPriceReferenced(ctx context.Context, priceID int64) (bool, error) {
+	row := q.db.QueryRow(ctx, manageModelPriceReferenced, priceID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const manageModelPrices = `-- name: ManageModelPrices :many
 SELECT id, provider_credential_id, provider_model_id, currency,
     input_price, output_price, cached_input_price, effective_at, created_at

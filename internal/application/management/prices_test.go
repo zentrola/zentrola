@@ -23,6 +23,9 @@ type priceStoreStub struct {
 	auditBefore []any
 	writes      int
 	referenced  bool
+	// modelReferenced 与 overrides 模拟模型价格的核算引用与历史覆盖检查结果。
+	modelReferenced bool
+	overrides       bool
 }
 
 func (s *priceStoreStub) ReadPrice(_ context.Context, _ admin.Identity, fn func(PriceReadSession) error) error {
@@ -98,6 +101,12 @@ func (s *priceStoreStub) Audit(_ context.Context, audit Audit, _ appsec.RequestM
 }
 func (s *priceStoreStub) SubscriptionPriceReferenced(context.Context, int64) (bool, error) {
 	return s.referenced, nil
+}
+func (s *priceStoreStub) ModelPriceReferenced(context.Context, int64) (bool, error) {
+	return s.modelReferenced, nil
+}
+func (s *priceStoreStub) ModelPriceOverridesRatedUsage(context.Context, ModelPrice) (bool, error) {
+	return s.overrides, nil
 }
 
 func TestPriceInputValidationBeforeStore(t *testing.T) {
@@ -262,5 +271,72 @@ func TestReferencedSubscriptionPriceOnlyAllowsAmountCorrection(t *testing.T) {
 	}
 	if err := service.DeleteSubscriptionPrice(context.Background(), admin.Identity{ID: 7}, 1, 9, appsec.RequestMeta{}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("referenced delete error=%v", err)
+	}
+}
+
+func TestModelPricePrechecksReferenceAndHistoryOverride(t *testing.T) {
+	effectiveAt := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	ctx, actor, meta := context.Background(), admin.Identity{ID: 7}, appsec.RequestMeta{}
+	newStore := func(referenced, overrides bool) *priceStoreStub {
+		return &priceStoreStub{
+			resource:        ResourceRecord{Resource: Resource{ID: 1, ProviderID: 3, Name: "key", AuthType: "API_KEY"}},
+			mappings:        []ProviderMapping{{ID: 2, ProviderID: 3}},
+			modelReferenced: referenced, overrides: overrides,
+			models: []ModelPrice{{ID: 9, ProviderCredentialID: 1, ProviderModelID: 2, Currency: "USD",
+				InputPrice: "1", OutputPrice: "2", CachedInputPrice: "0.5", EffectiveAt: effectiveAt}},
+		}
+	}
+	input := func(currency string, at time.Time, inputPrice string) ModelPriceInput {
+		return ModelPriceInput{ProviderModelID: 2, Currency: currency, InputPrice: inputPrice, OutputPrice: "2",
+			CachedInputPrice: "0.5", EffectiveAt: at}
+	}
+	for _, tt := range []struct {
+		name                  string
+		referenced, overrides bool
+		run                   func(*PriceService) error
+		wantErr               error
+	}{
+		{name: "insert overriding rated history", overrides: true, wantErr: ErrConflict, run: func(service *PriceService) error {
+			_, err := service.SaveModelPrice(ctx, actor, 1, input("USD", effectiveAt.AddDate(0, 0, 1), "3"), meta)
+			return err
+		}},
+		{name: "insert future version", run: func(service *PriceService) error {
+			_, err := service.SaveModelPrice(ctx, actor, 1, input("USD", effectiveAt.AddDate(0, 0, 1), "3"), meta)
+			return err
+		}},
+		{name: "correct referenced amount", referenced: true, run: func(service *PriceService) error {
+			_, err := service.UpdateModelPrice(ctx, actor, 1, 9, input("USD", effectiveAt, "3"), meta)
+			return err
+		}},
+		{name: "change referenced currency", referenced: true, wantErr: ErrConflict, run: func(service *PriceService) error {
+			_, err := service.UpdateModelPrice(ctx, actor, 1, 9, input("CNY", effectiveAt, "1"), meta)
+			return err
+		}},
+		{name: "move referenced effective time", referenced: true, wantErr: ErrConflict, run: func(service *PriceService) error {
+			_, err := service.UpdateModelPrice(ctx, actor, 1, 9, input("USD", effectiveAt.AddDate(0, 0, -1), "1"), meta)
+			return err
+		}},
+		{name: "move unreferenced version over rated history", overrides: true, wantErr: ErrConflict, run: func(service *PriceService) error {
+			_, err := service.UpdateModelPrice(ctx, actor, 1, 9, input("USD", effectiveAt.AddDate(0, 0, -1), "1"), meta)
+			return err
+		}},
+		{name: "delete referenced version", referenced: true, wantErr: ErrConflict, run: func(service *PriceService) error {
+			return service.DeleteModelPrice(ctx, actor, 1, 2, 9, meta)
+		}},
+		{name: "delete unreferenced version", run: func(service *PriceService) error {
+			return service.DeleteModelPrice(ctx, actor, 1, 2, 9, meta)
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			store := newStore(tt.referenced, tt.overrides)
+			service := &PriceService{store: store, ids: &priceIDs{next: 100}, now: func() time.Time { return effectiveAt }}
+			err := tt.run(service)
+			if tt.wantErr == nil && err != nil || tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
+				t.Fatalf("error=%v; want %v", err, tt.wantErr)
+			}
+			if tt.wantErr != nil && store.audits != 0 {
+				t.Fatalf("rejected change was audited: %d", store.audits)
+			}
+		})
 	}
 }

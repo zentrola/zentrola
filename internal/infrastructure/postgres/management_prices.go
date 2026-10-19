@@ -127,3 +127,30 @@ func (s *managementSession) DeleteSubscriptionPrice(ctx context.Context, credent
 func (s *managementSession) SubscriptionPriceReferenced(ctx context.Context, priceID int64) (bool, error) {
 	return s.q.ManageSubscriptionPriceReferenced(ctx, priceID)
 }
+
+func (s *managementSession) ModelPriceReferenced(ctx context.Context, priceID int64) (bool, error) {
+	return s.q.ManageModelPriceReferenced(ctx, priceID)
+}
+
+func (s *managementSession) ModelPriceOverridesRatedUsage(ctx context.Context, price mgmt.ModelPrice) (bool, error) {
+	return s.q.ManageModelPriceOverridesRatedUsage(ctx, dbgen.ManageModelPriceOverridesRatedUsageParams{
+		ProviderCredentialID: price.ProviderCredentialID, ProviderModelID: price.ProviderModelID,
+		EffectiveAt: priceTime(price.EffectiveAt), PriceID: price.ID,
+	})
+}
+
+// priceTriggerConflicts 是价格保护触发器（迁移 00047、00048）抛出的固定报错文本。
+// 只有这些报错代表"价格已被账单或核算引用 / 会覆盖已核算历史"的业务冲突；
+// 其他 23503、23514 仍按依赖异常处理，避免掩盖真实的数据完整性问题。
+var priceTriggerConflicts = map[string]string{
+	"referenced subscription price cannot be deleted":        "23503",
+	"referenced subscription price structure is immutable":   "23503",
+	"referenced model price cannot be deleted":               "23503",
+	"referenced model price structure is immutable":          "23503",
+	"model price version would override rated usage history": "23514",
+}
+
+func isPriceTriggerConflict(code, message string) bool {
+	expected, found := priceTriggerConflicts[message]
+	return found && expected == code
+}

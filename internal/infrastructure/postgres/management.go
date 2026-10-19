@@ -91,6 +91,9 @@ func managementError(err error) error {
 		if pgErr.Code == "23505" && pgErr.ConstraintName == "uk_provider_credential_subscription_account" {
 			return mgmt.ErrSubscriptionAccountExists
 		}
+		if isPriceTriggerConflict(pgErr.Code, pgErr.Message) {
+			return mgmt.ErrConflict
+		}
 		switch pgErr.Code {
 		case "23505", "40001", "40P01":
 			return mgmt.ErrConflict

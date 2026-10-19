@@ -76,6 +76,10 @@ type PriceWriteSession interface {
 	UpdateSubscriptionPrice(context.Context, SubscriptionPrice) (bool, error)
 	DeleteSubscriptionPrice(context.Context, int64, int64) (bool, error)
 	SubscriptionPriceReferenced(context.Context, int64) (bool, error)
+	// ModelPriceReferenced 判断模型价格版本是否已被用量核算引用。
+	ModelPriceReferenced(context.Context, int64) (bool, error)
+	// ModelPriceOverridesRatedUsage 判断价格版本按其生效时间放入历史后，是否会替换已核算调用的价格。
+	ModelPriceOverridesRatedUsage(context.Context, ModelPrice) (bool, error)
 	Audit(context.Context, Audit, appsec.RequestMeta) error
 }
 
@@ -242,6 +246,9 @@ func (s *PriceService) SaveModelPrice(ctx context.Context, actor admin.Identity,
 		saved = ModelPrice{ID: id, ProviderCredentialID: credentialID, ProviderModelID: input.ProviderModelID,
 			Currency: input.Currency, InputPrice: input.InputPrice, OutputPrice: input.OutputPrice,
 			CachedInputPrice: input.CachedInputPrice, EffectiveAt: input.EffectiveAt.UTC(), CreatedAt: at}
+		if err := rejectModelPriceHistoryOverride(ctx, writer, saved); err != nil {
+			return err
+		}
 		if err := writer.InsertModelPrice(ctx, saved, "admin:"+strconv.FormatInt(actor.ID, 10)); err != nil {
 			return err
 		}
@@ -291,12 +298,28 @@ func (s *PriceService) UpdateModelPrice(ctx context.Context, actor admin.Identit
 				return ErrConflict
 			}
 		}
+		effectiveChanged := !before.EffectiveAt.Equal(input.EffectiveAt)
+		if before.Currency != input.Currency || effectiveChanged {
+			// 已被核算引用的价格只允许纠正金额；结构变更与数据库触发器口径一致地视为业务冲突。
+			referenced, inspectErr := writer.ModelPriceReferenced(ctx, priceID)
+			if inspectErr != nil {
+				return inspectErr
+			}
+			if referenced {
+				return ErrConflict
+			}
+		}
 		saved = *before
 		saved.Currency = input.Currency
 		saved.InputPrice = input.InputPrice
 		saved.OutputPrice = input.OutputPrice
 		saved.CachedInputPrice = input.CachedInputPrice
 		saved.EffectiveAt = input.EffectiveAt.UTC()
+		if effectiveChanged {
+			if err := rejectModelPriceHistoryOverride(ctx, writer, saved); err != nil {
+				return err
+			}
+		}
 		updated, err := writer.UpdateModelPrice(ctx, saved)
 		if err != nil {
 			return err
@@ -332,6 +355,13 @@ func (s *PriceService) DeleteModelPrice(ctx context.Context, actor admin.Identit
 		before := findModelPrice(prices, credentialID, modelID, priceID)
 		if before == nil {
 			return appsec.ErrNotFound
+		}
+		referenced, err := writer.ModelPriceReferenced(ctx, priceID)
+		if err != nil {
+			return err
+		}
+		if referenced {
+			return ErrConflict
 		}
 		deleted, err := writer.DeleteModelPrice(ctx, credentialID, modelID, priceID)
 		if err != nil {
@@ -502,4 +532,16 @@ func (s *PriceService) DeleteSubscriptionPrice(ctx context.Context, actor admin.
 		return writer.Audit(ctx, Audit{Event: operation.ResourcePriceUpdate, Target: "RESOURCE", ID: credentialID,
 			Name: resource.Name, Before: *before, After: nil}, meta)
 	})
+}
+
+// rejectModelPriceHistoryOverride 与数据库触发器口径一致：价格版本不得覆盖已核算调用的价格。
+func rejectModelPriceHistoryOverride(ctx context.Context, writer PriceWriteSession, price ModelPrice) error {
+	overrides, err := writer.ModelPriceOverridesRatedUsage(ctx, price)
+	if err != nil {
+		return err
+	}
+	if overrides {
+		return ErrConflict
+	}
+	return nil
 }

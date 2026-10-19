@@ -68,3 +68,39 @@ SELECT EXISTS (
     WHERE source_type = 'SUBSCRIPTION_PRICE'
       AND source_id = sqlc.arg(price_id)::bigint
 );
+
+-- name: ManageModelPriceReferenced :one
+SELECT EXISTS (
+    SELECT 1
+    FROM usage_rating
+    WHERE model_price_id = sqlc.arg(price_id)::bigint
+);
+
+-- name: ManageModelPriceOverridesRatedUsage :one
+-- 与触发器 reject_model_price_history_override 口径一致：价格版本放在 effective_at 后，
+-- 是否会成为某条已核算调用的有效价格而替换其最新核算引用的价格。
+SELECT EXISTS (
+    SELECT 1
+    FROM usage_record usage
+    JOIN LATERAL (
+        SELECT rating.model_price_id
+        FROM usage_rating rating
+        WHERE rating.usage_record_id = usage.id
+        ORDER BY rating.revision DESC, rating.id DESC
+        LIMIT 1
+    ) latest ON TRUE
+    WHERE usage.provider_credential_id = sqlc.arg(provider_credential_id)::bigint
+      AND usage.provider_model_id = sqlc.arg(provider_model_id)::bigint
+      AND usage.started_at >= sqlc.arg(effective_at)::timestamptz
+      AND latest.model_price_id <> sqlc.arg(price_id)::bigint
+      AND NOT EXISTS (
+          SELECT 1
+          FROM provider_credential_model_price later
+          WHERE later.id <> sqlc.arg(price_id)::bigint
+            AND later.provider_credential_id = sqlc.arg(provider_credential_id)::bigint
+            AND later.provider_model_id = sqlc.arg(provider_model_id)::bigint
+            AND later.effective_at <= usage.started_at
+            AND (later.effective_at > sqlc.arg(effective_at)::timestamptz
+                OR (later.effective_at = sqlc.arg(effective_at)::timestamptz AND later.id > sqlc.arg(price_id)::bigint))
+      )
+);
