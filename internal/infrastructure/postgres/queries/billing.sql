@@ -115,6 +115,11 @@ INSERT INTO billing_document (
 )
 ON CONFLICT DO NOTHING;
 
+-- name: BillingLockSubscriptionCharges :exec
+-- 与 reject_overlapping_subscription_charge 触发器使用同一把事务级 advisory lock（键格式必须保持一致），
+-- 串行化同一凭据的订阅出账与订阅价格写入；锁在事务结束时释放。
+SELECT pg_advisory_xact_lock(hashtextextended('billing_subscription_charge:' || sqlc.arg(provider_credential_id)::bigint::text, 0));
+
 -- name: BillingChargeExists :one
 SELECT EXISTS (
     SELECT 1

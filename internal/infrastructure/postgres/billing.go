@@ -126,6 +126,13 @@ func (s *BillingStore) insertDocument(ctx context.Context, document app.Document
 	}
 	defer tx.Rollback(context.Background())
 	q := dbgen.New(tx)
+	if document.BillingType == "SUBSCRIPTION" && document.DocumentType == "CHARGE" {
+		// 先于插入获取重叠检查触发器使用的 advisory lock：来源校验触发器会对订阅价格加行锁，
+		// 价格写事务则先持有该 advisory lock 再修改价格行，两侧加锁顺序一致才不会死锁。
+		if err := q.BillingLockSubscriptionCharges(ctx, document.CredentialID); err != nil {
+			return false, err
+		}
+	}
 	if document.DocumentType == "ADJUSTMENT" {
 		unchanged, err := lockUnchangedOriginal(ctx, q, document, expectedCurrent, expectedTokens)
 		if err != nil || !unchanged {

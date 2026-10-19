@@ -81,6 +81,7 @@ type PriceWriteSession interface {
 	DeleteSubscriptionPrice(context.Context, int64, int64) (bool, error)
 	SubscriptionPriceReferenced(context.Context, int64) (bool, error)
 	// SubscriptionChargedUntil 返回凭据已出账订阅账期的最晚结束时间；尚未出账时为 nil。
+	// 实现必须与订阅出账串行化，并保持到写事务结束，使检查结果在提交前不被新账期推翻。
 	SubscriptionChargedUntil(context.Context, int64) (*time.Time, error)
 	// ModelPriceReferenced 判断模型价格版本是否已被用量核算引用。
 	ModelPriceReferenced(context.Context, int64) (bool, error)

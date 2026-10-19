@@ -938,6 +938,17 @@ func (q *Queries) BillingLockDocument(ctx context.Context, id int64) (int64, err
 	return id, err
 }
 
+const billingLockSubscriptionCharges = `-- name: BillingLockSubscriptionCharges :exec
+SELECT pg_advisory_xact_lock(hashtextextended('billing_subscription_charge:' || $1::bigint::text, 0))
+`
+
+// 与 reject_overlapping_subscription_charge 触发器使用同一把事务级 advisory lock（键格式必须保持一致），
+// 串行化同一凭据的订阅出账与订阅价格写入；锁在事务结束时释放。
+func (q *Queries) BillingLockSubscriptionCharges(ctx context.Context, providerCredentialID int64) error {
+	_, err := q.db.Exec(ctx, billingLockSubscriptionCharges, providerCredentialID)
+	return err
+}
+
 const billingOriginalUsage = `-- name: BillingOriginalUsage :many
 SELECT principal_id, usage_tokens AS tokens
 FROM billing_document_item

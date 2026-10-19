@@ -138,7 +138,13 @@ func (s *managementSession) SubscriptionPriceReferenced(ctx context.Context, pri
 	return s.q.ManageSubscriptionPriceReferenced(ctx, priceID)
 }
 
+// SubscriptionChargedUntil 先获取结算出账使用的同一把 advisory lock 再读取：进行中的出账事务提交后
+// 才读取已出账账期，且锁持有到价格写事务结束，期间结算无法写入新账期。加锁与读取必须是两条语句，
+// READ COMMITTED 下读取语句的快照在加锁之后获取，才能看到刚提交的账期。
 func (s *managementSession) SubscriptionChargedUntil(ctx context.Context, credentialID int64) (*time.Time, error) {
+	if err := s.q.BillingLockSubscriptionCharges(ctx, credentialID); err != nil {
+		return nil, err
+	}
 	value, err := s.q.ManageSubscriptionChargedUntil(ctx, credentialID)
 	if err != nil || !value.Valid {
 		return nil, err
