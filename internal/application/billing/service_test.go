@@ -384,3 +384,32 @@ func TestSafeErrorTextOmitsUnsanitizedDetails(t *testing.T) {
 		})
 	}
 }
+
+// 当前账期查询与出账共用同一套账期规则：每个已出账账期内的任意时刻都应推算出相同的起止时间与价格。
+func TestSubscriptionPeriodAtMatchesSettledPeriods(t *testing.T) {
+	start := time.Date(2026, 1, 31, 0, 0, 0, 0, time.UTC)
+	store := &billingStoreStub{prices: []SubscriptionPrice{
+		{ID: 1, CredentialID: 9, Currency: "CNY", PeriodAmount: "100", BillingPeriod: "MONTH",
+			EffectiveAt: start, CredentialEffectiveAt: start.Add(48 * time.Hour)},
+		{ID: 2, CredentialID: 9, Currency: "CNY", PeriodAmount: "120", BillingPeriod: "MONTH",
+			EffectiveAt: time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC), CredentialEffectiveAt: start.Add(48 * time.Hour)},
+	}}
+	service := New(store, &billingIDs{})
+	if _, err := service.SettleDueSubscriptions(context.Background(), time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.charges) < 5 {
+		t.Fatalf("charges=%d", len(store.charges))
+	}
+	group := groupSubscriptionPrices(store.prices)[0]
+	for _, charge := range store.charges {
+		for _, at := range []time.Time{charge.PeriodStart, charge.PeriodEnd.Add(-time.Second)} {
+			periodStart, periodEnd, price, err := subscriptionPeriodAt(group, at)
+			if err != nil || price == nil || !periodStart.Equal(charge.PeriodStart) || !periodEnd.Equal(charge.PeriodEnd) ||
+				price.ID != charge.SourceID {
+				t.Fatalf("at=%s period=%s/%s price=%+v err=%v; charged %s/%s source=%d", at, periodStart, periodEnd,
+					price, err, charge.PeriodStart, charge.PeriodEnd, charge.SourceID)
+			}
+		}
+	}
+}

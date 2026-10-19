@@ -226,60 +226,49 @@ func (s *Service) SettleDueSubscriptions(ctx context.Context, cutoff time.Time) 
 	groups := groupSubscriptionPrices(prices)
 	periodCount := 0
 	for _, group := range groups {
-		periodStart := subscriptionAnchor(group)
-		anchorDay := periodStart.Day()
-		for !periodStart.After(cutoff) {
-			if group[0].CredentialEndAt != nil && !periodStart.Before(group[0].CredentialEndAt.UTC()) {
-				break
-			}
-			history := pricesUntil(group, periodStart)
-			if len(history) == 0 {
-				break
-			}
-			price := &history[len(history)-1]
-			periodEnd, addErr := addBillingPeriod(periodStart, price.BillingPeriod, anchorDay)
-			if addErr != nil {
-				summary.recordFailure("subscription credential=%d price=%d: %v", price.CredentialID, price.ID, addErr)
-				break
-			}
+		// abort 记录需要中止整轮的全局错误；回调返回 false 只结束当前凭据。
+		var abort error
+		walkErr := walkSubscriptionPeriods(group, cutoff, 0, func(period subscriptionPeriod) bool {
+			price := period.price()
+			periodStart, periodEnd := period.Start, period.End
 			if periodEnd.After(cutoff) {
-				break
+				return false
 			}
 			key := newPeriodKey(price.CredentialID, periodStart, periodEnd)
 			if _, found := existing[key]; found {
 				summary.Skipped++
-				periodStart = periodEnd
-				continue
+				return true
 			}
 			periodCount++
 			if periodCount > maxPeriodsPerScan {
-				return summary, errors.New("billing settlement scan exceeded period limit")
+				abort = errors.New("billing settlement scan exceeded period limit")
+				return false
 			}
 			if overlap := overlappingCharge(charged[price.CredentialID], periodStart, periodEnd); overlap != nil {
 				// 价格或凭据生效时间被补录、修改后锚点可能漂移；重叠账期不能再次出账，只记录失败等待人工处理。
 				summary.recordFailure("subscription credential=%d period=%s/%s overlaps charged period %s/%s",
 					price.CredentialID, formatPeriodTime(periodStart), formatPeriodTime(periodEnd),
 					formatPeriodTime(overlap.PeriodStart), formatPeriodTime(overlap.PeriodEnd))
-				periodStart = periodEnd
-				continue
+				return true
 			}
-			created, chargeErr := s.settleSubscriptionPeriod(ctx, history, periodStart, periodEnd)
+			created, chargeErr := s.settleSubscriptionPeriod(ctx, period.History, periodStart, periodEnd)
 			if chargeErr != nil {
 				if ctx.Err() != nil {
-					return summary, ctx.Err()
+					abort = ctx.Err()
+					return false
 				}
 				if errors.Is(chargeErr, errBillingID) {
-					return summary, chargeErr
+					abort = chargeErr
+					return false
 				}
 				if errors.Is(chargeErr, ErrSubscriptionPricesChanged) {
 					// 本轮读取的价格已过期，后续账期同样基于过期价格推算；跳过该凭据，下一轮按新价格重新计算。
 					summary.Skipped++
-					break
+					return false
 				}
 				summary.recordFailure("subscription credential=%d period=%s/%s: %s", price.CredentialID,
 					formatPeriodTime(periodStart), formatPeriodTime(periodEnd), SafeErrorText(chargeErr))
-				periodStart = periodEnd
-				continue
+				return true
 			}
 			if created {
 				summary.Created++
@@ -289,7 +278,13 @@ func (s *Service) SettleDueSubscriptions(ctx context.Context, cutoff time.Time) 
 			existing[key] = struct{}{}
 			charged[price.CredentialID] = append(charged[price.CredentialID],
 				ChargePeriod{CredentialID: price.CredentialID, PeriodStart: periodStart, PeriodEnd: periodEnd})
-			periodStart = periodEnd
+			return true
+		})
+		if abort != nil {
+			return summary, abort
+		}
+		if walkErr != nil {
+			summary.recordFailure("subscription credential=%d %v", group[0].CredentialID, walkErr)
 		}
 	}
 
@@ -489,47 +484,68 @@ func pricesUntil(prices []SubscriptionPrice, at time.Time) []SubscriptionPrice {
 	return prices[:count:count]
 }
 
-func priceAt(prices []SubscriptionPrice, at time.Time) *SubscriptionPrice {
-	var result *SubscriptionPrice
-	for index := range prices {
-		if prices[index].EffectiveAt.After(at) {
-			break
-		}
-		result = &prices[index]
-	}
-	return result
+// subscriptionPeriod 是按出账规则推算出的一个订阅账期。History 为账期起点及之前生效的价格历史，
+// 最后一条即该账期计费采用的价格。
+type subscriptionPeriod struct {
+	Start, End time.Time
+	History    []SubscriptionPrice
 }
 
-// subscriptionPeriodAt 按与 SettleDueSubscriptions 相同的锚点和价格规则推算 at 所在的账期，
-// 返回账期起止时间及该账期计费采用的价格；at 不在任何可计费账期内时 price 为 nil。
-func subscriptionPeriodAt(group []SubscriptionPrice, at time.Time) (time.Time, time.Time, *SubscriptionPrice, error) {
+func (p subscriptionPeriod) price() *SubscriptionPrice { return &p.History[len(p.History)-1] }
+
+var errSubscriptionPeriodLimit = errors.New("subscription period scan exceeded period limit")
+
+// walkSubscriptionPeriods 从凭据锚点起按出账规则依次推算 group 的账期，对起点不晚于 until 的每个账期
+// 调用 visit；visit 返回 false、凭据结束或账期起点没有有效价格时停止。出账与当前账期查询共用这一规则，
+// 保证展示的账期与实际出账账期一致。maxPeriods 大于 0 时限制推算的账期数，超出返回 errSubscriptionPeriodLimit；
+// 出账传 0，由调用方只对需要新出账的账期计数，已出账的历史账期不受限。无法推算账期结束时间时返回带价格 ID 的错误。
+func walkSubscriptionPeriods(group []SubscriptionPrice, until time.Time, maxPeriods int, visit func(subscriptionPeriod) bool) error {
 	if len(group) == 0 {
-		return time.Time{}, time.Time{}, nil, nil
+		return nil
 	}
-	at = at.UTC()
+	until = until.UTC()
 	periodStart := subscriptionAnchor(group)
 	anchorDay := periodStart.Day()
-	for count := 0; !periodStart.After(at); count++ {
-		if count > maxPeriodsPerScan {
-			return time.Time{}, time.Time{}, nil, errors.New("subscription period scan exceeded period limit")
+	for count := 0; !periodStart.After(until); count++ {
+		if maxPeriods > 0 && count >= maxPeriods {
+			return errSubscriptionPeriodLimit
 		}
 		if group[0].CredentialEndAt != nil && !periodStart.Before(group[0].CredentialEndAt.UTC()) {
-			break
+			return nil
 		}
-		price := priceAt(group, periodStart)
-		if price == nil {
-			break
+		history := pricesUntil(group, periodStart)
+		if len(history) == 0 {
+			return nil
 		}
+		price := &history[len(history)-1]
 		periodEnd, err := addBillingPeriod(periodStart, price.BillingPeriod, anchorDay)
 		if err != nil {
-			return time.Time{}, time.Time{}, nil, err
+			return fmt.Errorf("price=%d: %w", price.ID, err)
 		}
-		if periodEnd.After(at) {
-			return periodStart, periodEnd, price, nil
+		if !visit(subscriptionPeriod{Start: periodStart, End: periodEnd, History: history}) {
+			return nil
 		}
 		periodStart = periodEnd
 	}
-	return time.Time{}, time.Time{}, nil, nil
+	return nil
+}
+
+// subscriptionPeriodAt 推算 at 所在的订阅账期，返回账期起止时间及该账期计费采用的价格；
+// at 不在任何可计费账期内时 price 为 nil。
+func subscriptionPeriodAt(group []SubscriptionPrice, at time.Time) (time.Time, time.Time, *SubscriptionPrice, error) {
+	at = at.UTC()
+	var current *subscriptionPeriod
+	err := walkSubscriptionPeriods(group, at, maxPeriodsPerScan+1, func(period subscriptionPeriod) bool {
+		if period.End.After(at) {
+			current = &period
+			return false
+		}
+		return true
+	})
+	if err != nil || current == nil {
+		return time.Time{}, time.Time{}, nil, err
+	}
+	return current.Start, current.End, current.price(), nil
 }
 
 // subscriptionAnchor 返回凭据首个账期的起点：最早价格生效时间与凭据生效时间中的较晚者。
