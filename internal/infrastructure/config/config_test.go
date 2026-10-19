@@ -390,7 +390,7 @@ func TestGatewayStreamIdleTimeoutConfiguration(t *testing.T) {
 		value *string
 		want  time.Duration
 	}{
-		{name: "default", want: 120 * time.Second},
+		{name: "default", want: 300 * time.Second},
 		{name: "configured", value: stringPointer("45s"), want: 45 * time.Second},
 		{name: "disabled", value: stringPointer("0"), want: 0},
 	}

@@ -313,7 +313,7 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 			MaxBodyBytes:                         int64(integer("GATEWAY_MAX_BODY_BYTES", "33554432", 128<<20)),
 			RequestTimeout:                       duration("GATEWAY_REQUEST_TIMEOUT", "15m"),
 			HeaderTimeout:                        duration("GATEWAY_HEADER_TIMEOUT", "120s"),
-			StreamIdleTimeout:                    durationAllowZero("GATEWAY_STREAM_IDLE_TIMEOUT", "120s"),
+			StreamIdleTimeout:                    durationAllowZero("GATEWAY_STREAM_IDLE_TIMEOUT", "300s"),
 			BodyReadTimeout:                      duration("GATEWAY_BODY_READ_TIMEOUT", "30s"),
 			WriteTimeout:                         duration("GATEWAY_WRITE_TIMEOUT", "30s"),
 			IdentityCacheTTL:                     duration("GATEWAY_IDENTITY_CACHE_TTL", "10m"),

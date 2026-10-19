@@ -16,9 +16,9 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - OpenAI 模型目录支持 Codex 订阅同步：没有可用 API Key 时，使用 Codex 订阅凭据读取 ChatGPT Codex 模型目录；跳过隐藏模型，记录是否支持图片输入，模型名称与 API Key 同步规则一致。同步时不刷新已过期的访问令牌，并返回 `SUBSCRIPTION_CREDENTIAL_EXPIRED`。
 - Claude 订阅手动刷新额度：凭据列表可发送一次最小请求（输出 1 个 Token，优先使用 Haiku 模型映射），只从响应头读取统一限额。会消耗极少量订阅额度，可能开启新的 5 小时窗口，不改变凭据运行状态；刷新记录为审计事件 `RESOURCE_QUOTA_REFRESH`。
 - 新增 `CLAUDE_CODE_VERSION`，统一设置所有 Claude 订阅请求声明的客户端版本（`User-Agent: claude-cli/<版本> (external, cli)`）；留空时使用内置默认版本，必须为 `x.y.z` 格式。Claude 订阅请求被上游拒绝时，后端日志会记录上游的 `error.type` 和截断后的 `error.message`。
-- `GATEWAY_STREAM_IDLE_TIMEOUT` (default `120s`, `0` disables it) stops an upstream response, including SSE, that sends no data for longer than the configured time; the request is recorded as `UPSTREAM_TIMEOUT`.
+- `GATEWAY_STREAM_IDLE_TIMEOUT` (default `300s`, `0` disables it) stops an upstream response, including SSE, that sends no data for longer than the configured time; the request is recorded as `UPSTREAM_TIMEOUT`.
 - Operation log APIs (`/api/v1/operation-logs` and `/api/v1/applications/{id}/operations`) accept `keyword`, `type`, and `result` filters. The Admin Web searches operation logs on the server and adds operation type and result filters.
-- 新增 `GATEWAY_STREAM_IDLE_TIMEOUT`（默认 `120s`，`0` 表示关闭）：上游响应（含 SSE）连续无数据超过该时长即中断，并记录为 `UPSTREAM_TIMEOUT`。
+- 新增 `GATEWAY_STREAM_IDLE_TIMEOUT`（默认 `300s`，`0` 表示关闭）：上游响应（含 SSE）连续无数据超过该时长即中断，并记录为 `UPSTREAM_TIMEOUT`。
 - 操作日志接口（`/api/v1/operation-logs` 与 `/api/v1/applications/{id}/operations`）支持 `keyword`、`type`、`result` 筛选；管理端改为服务端搜索操作日志，并新增操作类型与结果筛选。
 
 ### Changed / 变更
