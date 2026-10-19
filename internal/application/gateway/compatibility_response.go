@@ -2,13 +2,18 @@ package gateway
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
+	"math"
+	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
 
-const compatibilityResponseLimit = 32 << 20
+const (
+	compatibilityResponseLimit = 32 << 20
+	compatibilityErrorLimit    = 64 << 10
+)
 
 func transformJSON(reader io.Reader, writer io.Writer, transform func(map[string]any) (map[string]any, error)) error {
 	data, err := io.ReadAll(io.LimitReader(reader, compatibilityResponseLimit+1))
@@ -74,9 +79,7 @@ func openAIJSONToAnthropic(reader io.Reader, writer io.Writer) error {
 			"id": fallbackString(stringValue(source["id"]), "msg_compat"), "type": "message", "role": "assistant",
 			"model": source["model"], "content": content,
 			"stop_reason": openAIFinishToAnthropic(stringValue(choice["finish_reason"])), "stop_sequence": nil,
-			"usage": map[string]any{
-				"input_tokens": numberValue(usage, "prompt_tokens"), "output_tokens": numberValue(usage, "completion_tokens"),
-			},
+			"usage": newOpenAIUsageCounts(usage).anthropicUsage(),
 		}, nil
 	})
 }
@@ -91,12 +94,12 @@ func anthropicJSONToOpenAIChat(reader io.Reader, writer io.Writer) error {
 		if len(toolCalls) > 0 {
 			message["tool_calls"] = toolCalls
 		}
-		usage, _ := source["usage"].(map[string]any)
-		prompt, completion := numberValue(usage, "input_tokens"), numberValue(usage, "output_tokens")
+		var counts anthropicUsageCounts
+		counts.apply(source["usage"])
 		return map[string]any{
 			"id": openAIID(source["id"], "chatcmpl"), "object": "chat.completion", "created": time.Now().Unix(), "model": source["model"],
 			"choices": []any{map[string]any{"index": 0, "message": message, "finish_reason": anthropicStopToOpenAI(stringValue(source["stop_reason"]))}},
-			"usage":   map[string]any{"prompt_tokens": prompt, "completion_tokens": completion, "total_tokens": addNumbers(prompt, completion)},
+			"usage":   counts.chatUsage(),
 		}, nil
 	})
 }
@@ -124,12 +127,12 @@ func anthropicJSONToOpenAIResponses(reader io.Reader, writer io.Writer) error {
 		if len(textParts) > 0 {
 			output = append([]any{map[string]any{"type": "message", "id": openAIID(source["id"], "msg"), "role": "assistant", "status": "completed", "content": textParts}}, output...)
 		}
-		usage, _ := source["usage"].(map[string]any)
-		inputTokens, outputTokens := numberValue(usage, "input_tokens"), numberValue(usage, "output_tokens")
+		var counts anthropicUsageCounts
+		counts.apply(source["usage"])
 		return map[string]any{
 			"id": openAIID(source["id"], "resp"), "object": "response", "created_at": time.Now().Unix(),
 			"status": "completed", "model": source["model"], "output": output, "error": nil,
-			"usage": map[string]any{"input_tokens": inputTokens, "output_tokens": outputTokens, "total_tokens": addNumbers(inputTokens, outputTokens)},
+			"usage": counts.responsesUsage(),
 		}, nil
 	})
 }
@@ -210,20 +213,213 @@ func anthropicStopToOpenAI(reason string) any {
 	}
 }
 
-func numberValue(source map[string]any, key string) any {
-	if source != nil {
-		if value, ok := source[key]; ok {
-			return value
+// int64Value 将 decodeJSONObject（UseNumber）产生的数字转换为整数。
+func int64Value(value any) (int64, bool) {
+	switch number := value.(type) {
+	case json.Number:
+		if parsed, err := number.Int64(); err == nil {
+			return parsed, true
 		}
+		parsed, err := number.Float64()
+		if err != nil {
+			return 0, false
+		}
+		return int64Value(parsed)
+	case float64:
+		if number != math.Trunc(number) || number < math.MinInt64 || number >= math.MaxInt64 {
+			return 0, false
+		}
+		return int64(number), true
+	case int:
+		return int64(number), true
+	case int64:
+		return number, true
 	}
-	return json.Number("0")
+	return 0, false
 }
 
-func addNumbers(left, right any) json.Number {
-	var l, r int64
-	fmt.Sscan(fmt.Sprint(left), &l)
-	fmt.Sscan(fmt.Sprint(right), &r)
-	return json.Number(fmt.Sprint(l + r))
+// usageCount 读取非负 Token 计数；缺失或非法时返回 ok=false。
+func usageCount(source map[string]any, key string) (int64, bool) {
+	value, exists := source[key]
+	if !exists {
+		return 0, false
+	}
+	count, ok := int64Value(value)
+	if !ok || count < 0 {
+		return 0, false
+	}
+	return count, true
+}
+
+func addCounts(left, right int64) int64 {
+	if right > 0 && left > math.MaxInt64-right {
+		return math.MaxInt64
+	}
+	return left + right
+}
+
+// anthropicUsageCounts 保存 Anthropic 互不包含的三类输入计数。message_delta 的
+// 计数为累计值，出现的字段直接覆盖。
+type anthropicUsageCounts struct {
+	input, cacheCreation, cacheRead, output int64
+	cacheReadSeen                           bool
+}
+
+func (c *anthropicUsageCounts) apply(raw any) {
+	usage, ok := raw.(map[string]any)
+	if !ok {
+		return
+	}
+	if value, ok := usageCount(usage, "input_tokens"); ok {
+		c.input = value
+	}
+	if value, ok := usageCount(usage, "cache_creation_input_tokens"); ok {
+		c.cacheCreation = value
+	}
+	if value, ok := usageCount(usage, "cache_read_input_tokens"); ok {
+		c.cacheRead, c.cacheReadSeen = value, true
+	}
+	if value, ok := usageCount(usage, "output_tokens"); ok {
+		c.output = value
+	}
+}
+
+// prompt 按 OpenAI 语义返回总输入：包含缓存写入与缓存读取。
+func (c anthropicUsageCounts) prompt() int64 {
+	return addCounts(addCounts(c.input, c.cacheCreation), c.cacheRead)
+}
+
+func (c anthropicUsageCounts) chatUsage() map[string]any {
+	prompt := c.prompt()
+	usage := map[string]any{"prompt_tokens": prompt, "completion_tokens": c.output, "total_tokens": addCounts(prompt, c.output)}
+	if c.cacheReadSeen {
+		usage["prompt_tokens_details"] = map[string]any{"cached_tokens": c.cacheRead}
+	}
+	return usage
+}
+
+func (c anthropicUsageCounts) responsesUsage() map[string]any {
+	prompt := c.prompt()
+	usage := map[string]any{"input_tokens": prompt, "output_tokens": c.output, "total_tokens": addCounts(prompt, c.output)}
+	if c.cacheReadSeen {
+		usage["input_tokens_details"] = map[string]any{"cached_tokens": c.cacheRead}
+	}
+	return usage
+}
+
+// openAIUsageCounts 保存 OpenAI 语义的 usage：prompt 为总输入，cached 包含在其中。
+type openAIUsageCounts struct {
+	prompt, completion, cached int64
+	cachedSeen                 bool
+}
+
+func newOpenAIUsageCounts(usage map[string]any) openAIUsageCounts {
+	var counts openAIUsageCounts
+	counts.prompt, _ = usageCount(usage, "prompt_tokens")
+	counts.completion, _ = usageCount(usage, "completion_tokens")
+	if details, ok := usage["prompt_tokens_details"].(map[string]any); ok {
+		counts.cached, counts.cachedSeen = usageCount(details, "cached_tokens")
+	}
+	if !counts.cachedSeen {
+		counts.cached, counts.cachedSeen = usageCount(usage, "prompt_cache_hit_tokens")
+	}
+	counts.cached = min(counts.cached, counts.prompt)
+	return counts
+}
+
+// anthropicUsage 转换为 Anthropic 语义：input_tokens 不含缓存读取部分。
+func (c openAIUsageCounts) anthropicUsage() map[string]any {
+	usage := map[string]any{"input_tokens": c.prompt - c.cached, "output_tokens": c.completion}
+	if c.cachedSeen {
+		usage["cache_read_input_tokens"] = c.cached
+	}
+	return usage
+}
+
+// compatibilityErrorTransform 将上游错误响应统一包装为目标协议的标准错误体。
+// vLLM、nginx 等返回的非标准错误体不能被当作传输失败，否则会触发冷却与重试。
+func compatibilityErrorTransform(targetProtocol string, status int) func(io.Reader, io.Writer) error {
+	return func(reader io.Reader, writer io.Writer) error {
+		// 读取失败时仍用已读部分生成错误体，HTTP 状态码保持不变。
+		data, _ := io.ReadAll(io.LimitReader(reader, compatibilityErrorLimit))
+		return json.NewEncoder(writer).Encode(compatibilityErrorBody(targetProtocol, status, data))
+	}
+}
+
+func compatibilityErrorBody(targetProtocol string, status int, data []byte) map[string]any {
+	errorType, message := "", ""
+	if source, err := decodeJSONObject(data); err == nil {
+		errorType, message = upstreamErrorDetails(source)
+	}
+	if message == "" {
+		message = "Upstream request failed with HTTP " + strconv.Itoa(status) + "."
+	}
+	if targetProtocol == AnthropicProtocol {
+		return map[string]any{"type": "error", "error": map[string]any{
+			"type": anthropicErrorType(errorType, status), "message": message,
+		}}
+	}
+	if errorType == "" || errorType == "error" {
+		errorType = openAIErrorTypeForStatus(status)
+	}
+	return map[string]any{"error": map[string]any{"message": message, "type": errorType, "code": errorType}}
+}
+
+// upstreamErrorDetails 兼容 OpenAI、Anthropic、vLLM 与 FastAPI 风格的错误体。
+func upstreamErrorDetails(source map[string]any) (string, string) {
+	switch value := source["error"].(type) {
+	case map[string]any:
+		return fallbackString(stringValue(value["type"]), stringValue(value["code"])), stringValue(value["message"])
+	case string:
+		return stringValue(source["type"]), value
+	}
+	if message := stringValue(source["message"]); message != "" {
+		return stringValue(source["type"]), message
+	}
+	return "", stringValue(source["detail"])
+}
+
+func anthropicErrorType(upstreamType string, status int) string {
+	if mapped := openAIErrorToAnthropic(upstreamType, ""); mapped != "api_error" {
+		return mapped
+	}
+	switch status {
+	case http.StatusBadRequest, http.StatusUnprocessableEntity:
+		return "invalid_request_error"
+	case http.StatusUnauthorized:
+		return "authentication_error"
+	case http.StatusForbidden:
+		return "permission_error"
+	case http.StatusNotFound:
+		return "not_found_error"
+	case http.StatusRequestEntityTooLarge:
+		return "request_too_large"
+	case http.StatusTooManyRequests:
+		return "rate_limit_error"
+	case 529:
+		return "overloaded_error"
+	}
+	if status >= 400 && status < 500 {
+		return "invalid_request_error"
+	}
+	return "api_error"
+}
+
+func openAIErrorTypeForStatus(status int) string {
+	switch status {
+	case http.StatusUnauthorized:
+		return "authentication_error"
+	case http.StatusForbidden:
+		return "permission_error"
+	case http.StatusNotFound:
+		return "not_found_error"
+	case http.StatusTooManyRequests:
+		return "rate_limit_error"
+	}
+	if status >= 400 && status < 500 {
+		return "invalid_request_error"
+	}
+	return "api_error"
 }
 
 func openAIID(value any, prefix string) string {

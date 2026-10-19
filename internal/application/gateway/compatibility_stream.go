@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"strings"
 	"time"
 )
@@ -71,6 +72,8 @@ func writeSSEData(writer io.Writer, data string) error {
 type anthropicStreamState struct {
 	started      bool
 	stopped      bool
+	done         bool
+	failed       bool
 	id           string
 	model        any
 	nextBlock    int
@@ -78,13 +81,12 @@ type anthropicStreamState struct {
 	textOpen     bool
 	toolBlocks   map[int]int
 	openedBlocks []int
-	inputTokens  any
-	outputTokens any
+	usage        openAIUsageCounts
 	stopReason   any
 }
 
 func openAIStreamToAnthropic(reader io.Reader, writer io.Writer) error {
-	state := &anthropicStreamState{textBlock: -1, toolBlocks: map[int]int{}, inputTokens: json.Number("0"), outputTokens: json.Number("0")}
+	state := &anthropicStreamState{textBlock: -1, toolBlocks: map[int]int{}}
 	start := func(source map[string]any) error {
 		if state.started {
 			return nil
@@ -93,12 +95,14 @@ func openAIStreamToAnthropic(reader io.Reader, writer io.Writer) error {
 		state.id = fallbackString(stringValue(source["id"]), "msg_compat")
 		state.model = source["model"]
 		if usage, ok := source["usage"].(map[string]any); ok {
-			state.inputTokens = numberValue(usage, "prompt_tokens")
+			state.usage = newOpenAIUsageCounts(usage)
 		}
+		usage := state.usage.anthropicUsage()
+		usage["output_tokens"] = 0
 		return writeSSE(writer, "message_start", map[string]any{"type": "message_start", "message": map[string]any{
 			"id": state.id, "type": "message", "role": "assistant", "model": state.model,
 			"content": []any{}, "stop_reason": nil, "stop_sequence": nil,
-			"usage": map[string]any{"input_tokens": state.inputTokens, "output_tokens": json.Number("0")},
+			"usage": usage,
 		}})
 	}
 	finish := func() error {
@@ -117,7 +121,7 @@ func openAIStreamToAnthropic(reader io.Reader, writer io.Writer) error {
 		}
 		if err := writeSSE(writer, "message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{
 			"stop_reason": state.stopReason, "stop_sequence": nil,
-		}, "usage": map[string]any{"input_tokens": state.inputTokens, "output_tokens": state.outputTokens}}); err != nil {
+		}, "usage": state.usage.anthropicUsage()}); err != nil {
 			return err
 		}
 		state.stopped = true
@@ -125,6 +129,10 @@ func openAIStreamToAnthropic(reader io.Reader, writer io.Writer) error {
 	}
 	err := scanSSE(reader, func(event sseEvent) error {
 		if event.data == "[DONE]" {
+			state.done = true
+			if state.failed {
+				return nil
+			}
 			return finish()
 		}
 		source, err := decodeJSONObject([]byte(event.data))
@@ -132,6 +140,7 @@ func openAIStreamToAnthropic(reader io.Reader, writer io.Writer) error {
 			return ErrUpstream
 		}
 		if upstreamError, ok := source["error"].(map[string]any); ok {
+			state.failed = true
 			return writeSSE(writer, "error", map[string]any{"type": "error", "error": map[string]any{
 				"type":    openAIErrorToAnthropic(stringValue(upstreamError["type"]), stringValue(upstreamError["code"])),
 				"message": fallbackString(stringValue(upstreamError["message"]), "Upstream request failed."),
@@ -141,8 +150,7 @@ func openAIStreamToAnthropic(reader io.Reader, writer io.Writer) error {
 			return err
 		}
 		if usage, ok := source["usage"].(map[string]any); ok {
-			state.inputTokens = numberValue(usage, "prompt_tokens")
-			state.outputTokens = numberValue(usage, "completion_tokens")
+			state.usage = newOpenAIUsageCounts(usage)
 		}
 		choices := anySlice(source["choices"])
 		if len(choices) == 0 {
@@ -194,14 +202,24 @@ func openAIStreamToAnthropic(reader io.Reader, writer io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if state.failed || state.stopped {
+		// 上游错误已写出 Anthropic error 事件，不能再合成正常结束。
+		return nil
+	}
+	if !state.done && state.stopReason == nil {
+		// 上游在 [DONE] 与 finish_reason 之前提前结束：写出错误事件而不是伪造
+		// message_stop，避免客户端与计量把截断响应当作完整结果。
+		return writeSSE(writer, "error", map[string]any{"type": "error", "error": map[string]any{
+			"type": "api_error", "message": "The upstream model provider ended the stream before completion.",
+		}})
+	}
 	return finish()
 }
 
 type openAIStreamState struct {
 	id, model     string
 	created       int64
-	input         any
-	output        any
+	usage         anthropicUsageCounts
 	stopReason    any
 	toolCalls     map[int]map[string]any
 	toolArguments map[int]*strings.Builder
@@ -211,7 +229,7 @@ type openAIStreamState struct {
 
 func newOpenAIStreamState() *openAIStreamState {
 	return &openAIStreamState{
-		created: time.Now().Unix(), input: json.Number("0"), output: json.Number("0"),
+		created:   time.Now().Unix(),
 		toolCalls: map[int]map[string]any{}, toolArguments: map[int]*strings.Builder{}, textByBlock: map[int]*strings.Builder{},
 	}
 }
@@ -235,9 +253,7 @@ func anthropicStreamToOpenAIChat(reader io.Reader, writer io.Writer) error {
 		case "message_start":
 			message, _ := source["message"].(map[string]any)
 			state.id, state.model = openAIID(message["id"], "chatcmpl"), stringValue(message["model"])
-			if usage, ok := message["usage"].(map[string]any); ok {
-				state.input = numberValue(usage, "input_tokens")
-			}
+			state.usage.apply(message["usage"])
 			return writeOpenAIChatChunk(writer, state, map[string]any{"role": "assistant", "content": ""}, nil, nil)
 		case "content_block_start":
 			index := intNumber(source["index"])
@@ -263,13 +279,10 @@ func anthropicStreamToOpenAIChat(reader io.Reader, writer io.Writer) error {
 		case "message_delta":
 			delta, _ := source["delta"].(map[string]any)
 			state.stopReason = anthropicStopToOpenAI(stringValue(delta["stop_reason"]))
-			if usage, ok := source["usage"].(map[string]any); ok {
-				state.output = numberValue(usage, "output_tokens")
-			}
+			state.usage.apply(source["usage"])
 			return writeOpenAIChatChunk(writer, state, map[string]any{}, state.stopReason, nil)
 		case "message_stop":
-			usage := map[string]any{"prompt_tokens": state.input, "completion_tokens": state.output, "total_tokens": addNumbers(state.input, state.output)}
-			if err := writeOpenAIChatChunk(writer, state, map[string]any{}, nil, usage); err != nil {
+			if err := writeOpenAIChatChunk(writer, state, map[string]any{}, nil, state.usage.chatUsage()); err != nil {
 				return err
 			}
 			return writeSSEData(writer, "[DONE]")
@@ -313,9 +326,7 @@ func anthropicStreamToOpenAIResponses(reader io.Reader, writer io.Writer) error 
 		case "message_start":
 			message, _ := source["message"].(map[string]any)
 			responseID, state.model = openAIID(message["id"], "resp"), stringValue(message["model"])
-			if usage, ok := message["usage"].(map[string]any); ok {
-				state.input = numberValue(usage, "input_tokens")
-			}
+			state.usage.apply(message["usage"])
 			return emit("response.created", map[string]any{"response": responseEnvelope(responseID, state.model, "in_progress", nil, state)})
 		case "content_block_start":
 			index := intNumber(source["index"])
@@ -369,9 +380,7 @@ func anthropicStreamToOpenAIResponses(reader io.Reader, writer io.Writer) error 
 				return emit("response.output_item.done", map[string]any{"output_index": index, "item": responseTextItem(responseID, index, text.String(), "completed")})
 			}
 		case "message_delta":
-			if usage, ok := source["usage"].(map[string]any); ok {
-				state.output = numberValue(usage, "output_tokens")
-			}
+			state.usage.apply(source["usage"])
 		case "message_stop":
 			return emit("response.completed", map[string]any{"response": responseEnvelope(responseID, state.model, "completed", responseStreamOutput(responseID, state), state)})
 		}
@@ -426,14 +435,16 @@ func responseEnvelope(id, model, status string, output any, state *openAIStreamS
 	}
 	return map[string]any{
 		"id": id, "object": "response", "created_at": state.created, "status": status, "model": model, "output": output,
-		"usage": map[string]any{"input_tokens": state.input, "output_tokens": state.output, "total_tokens": addNumbers(state.input, state.output)},
+		"usage": state.usage.responsesUsage(),
 	}
 }
 
 func intNumber(value any) int {
-	var result int
-	fmt.Sscan(fmt.Sprint(value), &result)
-	return result
+	number, ok := int64Value(value)
+	if !ok || number < math.MinInt32 || number > math.MaxInt32 {
+		return 0
+	}
+	return int(number)
 }
 
 func mustJSON(value any) string {

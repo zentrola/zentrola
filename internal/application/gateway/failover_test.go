@@ -562,3 +562,28 @@ func TestForwardBlocksPermanentSubscriptionRefreshFailure(t *testing.T) {
 		t.Fatalf("calls=%v cooldowns=%v blocks=%+v", called, state.cooldowns, store.blocks)
 	}
 }
+
+type failingReadCloser struct{}
+
+func (failingReadCloser) Read([]byte) (int, error) { return 0, errors.New("connection reset") }
+func (failingReadCloser) Close() error             { return nil }
+
+func TestInspectResponseReadErrorKeepsClientErrorSemantics(t *testing.T) {
+	tests := []struct {
+		status int
+		retry  bool
+	}{
+		{status: http.StatusBadRequest},
+		{status: http.StatusRequestEntityTooLarge},
+		{status: http.StatusUnprocessableEntity},
+		{status: http.StatusTooManyRequests, retry: true},
+		{status: http.StatusNotFound, retry: true},
+		{status: http.StatusBadGateway, retry: true},
+	}
+	for _, test := range tests {
+		decision := inspectResponse(&Response{Status: test.status, Headers: map[string][]string{}, Body: failingReadCloser{}})
+		if decision.retry != test.retry || (!test.retry && decision.cooldown != 0) {
+			t.Fatalf("status=%d decision=%+v", test.status, decision)
+		}
+	}
+}

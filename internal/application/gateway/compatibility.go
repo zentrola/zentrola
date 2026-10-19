@@ -61,20 +61,27 @@ func convertGatewayResponse(response *Response, targetProtocol string) (*Respons
 	translateCompatibilityHeaders(headers, targetProtocol)
 	stream := strings.Contains(strings.ToLower(http.Header(headers).Get("Content-Type")), "text/event-stream")
 	var transform func(io.Reader, io.Writer) error
-	switch targetProtocol {
-	case AnthropicProtocol:
+	if response.Status >= 400 && (targetProtocol == AnthropicProtocol || targetProtocol == OpenAIProtocol || targetProtocol == OpenAIResponsesProtocol) {
+		// 错误响应保留原状态码并包装为目标协议的标准错误体，供 failover 按原生
+		// 路径的状态码语义判定是否冷却或重试。
+		stream = false
+		transform = compatibilityErrorTransform(targetProtocol, response.Status)
+	}
+	switch {
+	case transform != nil:
+	case targetProtocol == AnthropicProtocol:
 		if stream {
 			transform = openAIStreamToAnthropic
 		} else {
 			transform = openAIJSONToAnthropic
 		}
-	case OpenAIProtocol:
+	case targetProtocol == OpenAIProtocol:
 		if stream {
 			transform = anthropicStreamToOpenAIChat
 		} else {
 			transform = anthropicJSONToOpenAIChat
 		}
-	case OpenAIResponsesProtocol:
+	case targetProtocol == OpenAIResponsesProtocol:
 		if stream {
 			transform = anthropicStreamToOpenAIResponses
 		} else {

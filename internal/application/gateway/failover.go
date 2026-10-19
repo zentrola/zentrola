@@ -470,6 +470,11 @@ func inspectResponse(response *Response) responseDecision {
 	prefix, body, readErr := readResponsePrefix(response.Body, 64<<10, responseInspectionTimeout)
 	response.Body = body
 	if readErr != nil {
+		// 客户端请求错误与读取错误体是否成功无关：重试只会把同一个坏请求发给
+		// 其他候选资源并逐个冷却。
+		if clientRequestError(status) {
+			return responseDecision{}
+		}
 		return responseDecision{retry: true, cooldown: defaultRouteCooldown}
 	}
 	lower := strings.ToLower(string(prefix))
@@ -492,6 +497,16 @@ func inspectResponse(response *Response) responseDecision {
 		return responseDecision{retry: true, cooldown: retryAfter(response.Headers)}
 	}
 	return responseDecision{}
+}
+
+// clientRequestError 判断状态码是否属于不应冷却、不应切换资源的客户端请求错误。
+// 401/402/403/404/429 在 inspectResponse 中有各自的资源级语义，不在此列。
+func clientRequestError(status int) bool {
+	switch status {
+	case http.StatusUnauthorized, http.StatusPaymentRequired, http.StatusForbidden, http.StatusNotFound, http.StatusTooManyRequests:
+		return false
+	}
+	return status >= 400 && status < 500
 }
 
 func responseErrorType(response *Response) string {

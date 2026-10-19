@@ -76,6 +76,10 @@ func anthropicRequestToOpenAIChat(body []byte) ([]byte, error) {
 	}
 	target := map[string]any{"model": source["model"]}
 	copyFields(target, source, "temperature", "top_p", "stream")
+	if stream, _ := source["stream"].(bool); stream {
+		// OpenAI 端点仅在显式请求时返回流式 usage；缺少它会导致每次记 0 Token。
+		target["stream_options"] = map[string]any{"include_usage": true}
+	}
 	if value, ok := source["max_tokens"]; ok {
 		target["max_tokens"] = value
 	}
