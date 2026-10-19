@@ -289,3 +289,72 @@ func TestCompatibilityNumberConversion(t *testing.T) {
 		t.Fatal("intNumber conversion failed")
 	}
 }
+
+func TestCompatibilityRecordsAnthropicCacheCreation(t *testing.T) {
+	jsonBody := func(usage string) string {
+		return `{"type":"message","id":"msg_1","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":` + usage + `}`
+	}
+	streamBody := func(usage string) string {
+		return "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"m\",\"usage\":" + usage + "}}\n\n" +
+			"data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":350}}\n\n" +
+			"data: {\"type\":\"message_stop\"}\n\n"
+	}
+	withCache := `{"input_tokens":3,"cache_creation_input_tokens":1200,"cache_read_input_tokens":45000,"output_tokens":350}`
+	withoutCache := `{"input_tokens":3,"output_tokens":350}`
+	chat := Request{Protocol: OpenAIProtocol, Path: "/v1/chat/completions", Body: []byte(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`)}
+	responses := Request{Protocol: OpenAIResponsesProtocol, Path: "/v1/responses", Body: []byte(`{"model":"m","input":"hi"}`)}
+	cacheCreation := int64(1200)
+	tests := []struct {
+		name          string
+		request       Request
+		stream        bool
+		body          string
+		wantInput     int64
+		wantCacheRead int64
+		wantCreation  *int64
+	}{
+		{name: "chat JSON", request: chat, body: jsonBody(withCache), wantInput: 46203, wantCacheRead: 45000, wantCreation: &cacheCreation},
+		{name: "responses JSON", request: responses, body: jsonBody(withCache), wantInput: 46203, wantCacheRead: 45000, wantCreation: &cacheCreation},
+		{name: "chat stream", request: chat, stream: true, body: streamBody(withCache), wantInput: 46203, wantCacheRead: 45000, wantCreation: &cacheCreation},
+		{name: "responses stream", request: responses, stream: true, body: streamBody(withCache), wantInput: 46203, wantCacheRead: 45000, wantCreation: &cacheCreation},
+		{name: "chat JSON without cache creation", request: chat, body: jsonBody(withoutCache), wantInput: 3},
+		{name: "responses stream without cache creation", request: responses, stream: true, body: streamBody(withoutCache), wantInput: 3},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			contentType := "application/json"
+			if test.stream {
+				contentType = "text/event-stream"
+			}
+			response, data := openCompatibility(t, Route{EndpointProtocol: AnthropicEndpoint}, test.request,
+				compatibilityResponse(http.StatusOK, contentType, test.body))
+			observer := NewOpenAIUsageObserver(test.stream)
+			if test.request.Protocol == OpenAIResponsesProtocol {
+				observer = NewOpenAIResponsesUsageObserver(test.stream)
+			}
+			observer.UseCompatibilityUsage(response.CompatibilityUsage)
+			observer.Feed([]byte(data))
+			complete := observer.Complete()
+			input, _, cached := observer.Tokens(complete)
+			if !complete || input == nil || *input != test.wantInput {
+				t.Fatalf("complete=%v input=%v diagnostics=%+v body=%s", complete, input, observer.Diagnostics(), data)
+			}
+			if test.wantCacheRead > 0 && (cached == nil || *cached != test.wantCacheRead) {
+				t.Fatalf("cached=%v want %d", cached, test.wantCacheRead)
+			}
+			got := observer.CacheCreationTokens()
+			if (got == nil) != (test.wantCreation == nil) || got != nil && *got != *test.wantCreation {
+				t.Fatalf("cache creation=%v want %v", got, test.wantCreation)
+			}
+		})
+	}
+}
+
+func TestNativeOpenAIObserverHasNoCacheCreation(t *testing.T) {
+	observer := NewOpenAIUsageObserver(false)
+	observer.UseCompatibilityUsage(nil)
+	observer.Feed([]byte(`{"object":"chat.completion","usage":{"prompt_tokens":10,"completion_tokens":2}}`))
+	if !observer.Complete() || observer.CacheCreationTokens() != nil {
+		t.Fatalf("complete=%v cache creation=%v", observer.Complete(), observer.CacheCreationTokens())
+	}
+}

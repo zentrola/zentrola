@@ -221,3 +221,62 @@ func TestStreamIdleTimeoutRecordedAsUpstreamTimeout(t *testing.T) {
 		t.Fatalf("idle timeout trace = %+v", trace)
 	}
 }
+
+func TestOpenAIClientRecordsAnthropicCacheCreationThroughCompatibility(t *testing.T) {
+	anthropicUsage := `{"input_tokens":3,"cache_creation_input_tokens":1200,"cache_read_input_tokens":45000,"output_tokens":350}`
+	jsonBody := `{"type":"message","id":"msg_1","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":` + anthropicUsage + `}`
+	streamBody := "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"m\",\"usage\":" + anthropicUsage + "}}\n\n" +
+		"data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":350}}\n\n" +
+		"data: {\"type\":\"message_stop\"}\n\n"
+	tests := []struct {
+		name, path, requestBody, contentType, upstreamBody string
+	}{
+		{name: "chat JSON", path: "/v1/chat/completions", requestBody: `{"model":"client-model","messages":[{"role":"user","content":"hi"}]}`, contentType: "application/json", upstreamBody: jsonBody},
+		{name: "chat stream", path: "/v1/chat/completions", requestBody: `{"model":"client-model","stream":true,"messages":[{"role":"user","content":"hi"}]}`, contentType: "text/event-stream", upstreamBody: streamBody},
+		{name: "responses JSON", path: "/v1/responses", requestBody: `{"model":"client-model","input":"hi"}`, contentType: "application/json", upstreamBody: jsonBody},
+		{name: "responses stream", path: "/v1/responses", requestBody: `{"model":"client-model","stream":true,"input":"hi"}`, contentType: "text/event-stream", upstreamBody: streamBody},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var trace *usage.Event
+			anthropic := completionUpstream(func(_ context.Context, _ gw.Route, request gw.Request, _ []byte) (*gw.Response, error) {
+				if request.Protocol != gw.AnthropicProtocol {
+					t.Fatalf("request was not converted to Anthropic: %s", request.Protocol)
+				}
+				return &gw.Response{
+					Status:  http.StatusOK,
+					Headers: map[string][]string{"Content-Type": {test.contentType}},
+					Body:    io.NopCloser(strings.NewReader(test.upstreamBody)),
+				}, nil
+			})
+			compatible := gw.NewCompatibleUpstream(anthropic, nil)
+			upstream := completionUpstream(func(ctx context.Context, route gw.Route, request gw.Request, credential []byte) (*gw.Response, error) {
+				trace = request.Trace
+				route.EndpointProtocol = gw.AnthropicEndpoint
+				return compatible.Open(ctx, route, request, credential)
+			})
+			service := gw.New(completionStore{}, completionCipher{}, upstream)
+			handler := NewOpenAIGatewayHandler(service, GatewayOptions{
+				MaxBodyBytes: 1 << 20, RequestTimeout: time.Second, BodyReadTimeout: time.Second, WriteTimeout: time.Second,
+			}, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
+			request := httptest.NewRequest(http.MethodPost, test.path, strings.NewReader(test.requestBody))
+			request.Header.Set("Content-Type", "application/json")
+			request = request.WithContext(context.WithValue(request.Context(), principalIdentityKey{}, appsec.PrincipalIdentity{ID: 1, AccessKeyID: 2}))
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+
+			if recorder.Code != http.StatusOK || trace == nil || trace.Status != usage.Success || trace.Attempt == nil {
+				t.Fatalf("status=%d trace=%+v body=%s", recorder.Code, trace, recorder.Body.String())
+			}
+			attempt := trace.Attempt
+			// 总输入口径保持不变：input 包含缓存写入与缓存读取。
+			if attempt.InputTokens == nil || *attempt.InputTokens != 46203 || attempt.CachedInputTokens == nil ||
+				*attempt.CachedInputTokens != 45000 || attempt.OutputTokens == nil || *attempt.OutputTokens != 350 {
+				t.Fatalf("usage mismatch: %+v", attempt)
+			}
+			if attempt.CacheCreationInputTokens == nil || *attempt.CacheCreationInputTokens != 1200 {
+				t.Fatalf("cache creation tokens not recorded: %v", attempt.CacheCreationInputTokens)
+			}
+		})
+	}
+}

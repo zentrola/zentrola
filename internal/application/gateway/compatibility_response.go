@@ -84,7 +84,7 @@ func openAIJSONToAnthropic(reader io.Reader, writer io.Writer) error {
 	})
 }
 
-func anthropicJSONToOpenAIChat(reader io.Reader, writer io.Writer) error {
+func anthropicJSONToOpenAIChat(reader io.Reader, writer io.Writer, sink *CompatibilityUsage) error {
 	return transformJSON(reader, writer, func(source map[string]any) (map[string]any, error) {
 		if stringValue(source["type"]) == "error" {
 			return anthropicErrorToOpenAI(source), nil
@@ -96,6 +96,7 @@ func anthropicJSONToOpenAIChat(reader io.Reader, writer io.Writer) error {
 		}
 		var counts anthropicUsageCounts
 		counts.apply(source["usage"])
+		sink.record(counts)
 		return map[string]any{
 			"id": openAIID(source["id"], "chatcmpl"), "object": "chat.completion", "created": time.Now().Unix(), "model": source["model"],
 			"choices": []any{map[string]any{"index": 0, "message": message, "finish_reason": anthropicStopToOpenAI(stringValue(source["stop_reason"]))}},
@@ -104,7 +105,7 @@ func anthropicJSONToOpenAIChat(reader io.Reader, writer io.Writer) error {
 	})
 }
 
-func anthropicJSONToOpenAIResponses(reader io.Reader, writer io.Writer) error {
+func anthropicJSONToOpenAIResponses(reader io.Reader, writer io.Writer, sink *CompatibilityUsage) error {
 	return transformJSON(reader, writer, func(source map[string]any) (map[string]any, error) {
 		if stringValue(source["type"]) == "error" {
 			return anthropicErrorToOpenAI(source), nil
@@ -129,6 +130,7 @@ func anthropicJSONToOpenAIResponses(reader io.Reader, writer io.Writer) error {
 		}
 		var counts anthropicUsageCounts
 		counts.apply(source["usage"])
+		sink.record(counts)
 		return map[string]any{
 			"id": openAIID(source["id"], "resp"), "object": "response", "created_at": time.Now().Unix(),
 			"status": "completed", "model": source["model"], "output": output, "error": nil,
@@ -262,7 +264,7 @@ func addCounts(left, right int64) int64 {
 // 计数为累计值，出现的字段直接覆盖。
 type anthropicUsageCounts struct {
 	input, cacheCreation, cacheRead, output int64
-	cacheReadSeen                           bool
+	cacheCreationSeen, cacheReadSeen        bool
 }
 
 func (c *anthropicUsageCounts) apply(raw any) {
@@ -274,7 +276,7 @@ func (c *anthropicUsageCounts) apply(raw any) {
 		c.input = value
 	}
 	if value, ok := usageCount(usage, "cache_creation_input_tokens"); ok {
-		c.cacheCreation = value
+		c.cacheCreation, c.cacheCreationSeen = value, true
 	}
 	if value, ok := usageCount(usage, "cache_read_input_tokens"); ok {
 		c.cacheRead, c.cacheReadSeen = value, true

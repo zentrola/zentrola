@@ -32,9 +32,11 @@ type UsageObserver struct {
 	// cacheCreation / cached 分别保存 cache_creation / cache_read，产出时再归一。
 	input, output, cached *int64
 	cacheCreation         *int64
-	eventCount            int64
-	lastEvent             string
-	json                  metadataJSON
+	// compatibility 仅用于 OpenAI 协议：经兼容转换的 Anthropic 上游缓存写入数。
+	compatibility *CompatibilityUsage
+	eventCount    int64
+	lastEvent     string
+	json          metadataJSON
 }
 
 // sseLineMode 描述当前 SSE 行的处理方式。超过单事件上限后每行只判定一次，
@@ -657,16 +659,33 @@ func (o *UsageObserver) Tokens(complete bool) (*int64, *int64, *int64) {
 	return input, o.output, o.cached
 }
 
+// UseCompatibilityUsage 为 OpenAI 协议 observer 关联兼容转换层记录的 Anthropic 原始用量。
+// 客户端走 OpenAI 协议但路由到 Anthropic 端点时，缓存写入数只能由此取得。
+func (o *UsageObserver) UseCompatibilityUsage(usage *CompatibilityUsage) {
+	if o != nil && o.openai {
+		o.compatibility = usage
+	}
+}
+
 // CacheCreationTokens 返回 Anthropic 的缓存写入 Token 数，它已包含在 Tokens 产出的总输入中。
-// 仅在总输入可用时返回；OpenAI 协议不区分缓存写入，始终为 nil。
+// 仅在总输入可用时返回；原生 OpenAI 协议不区分缓存写入，此时为 nil，经兼容转换的
+// Anthropic 上游则取转换前的原始计数。
 func (o *UsageObserver) CacheCreationTokens() *int64 {
-	if o == nil || o.openai || o.cacheCreation == nil {
+	if o == nil {
 		return nil
 	}
-	if input, _, _ := o.Tokens(false); input == nil {
+	cacheCreation := o.cacheCreation
+	if o.openai {
+		cacheCreation = o.compatibility.CacheCreationTokens()
+	}
+	if cacheCreation == nil {
 		return nil
 	}
-	value := *o.cacheCreation
+	input, _, _ := o.Tokens(false)
+	if input == nil || *cacheCreation > *input {
+		return nil
+	}
+	value := *cacheCreation
 	return &value
 }
 

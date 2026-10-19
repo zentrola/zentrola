@@ -234,7 +234,7 @@ func newOpenAIStreamState() *openAIStreamState {
 	}
 }
 
-func anthropicStreamToOpenAIChat(reader io.Reader, writer io.Writer) error {
+func anthropicStreamToOpenAIChat(reader io.Reader, writer io.Writer, sink *CompatibilityUsage) error {
 	state := newOpenAIStreamState()
 	return scanSSE(reader, func(event sseEvent) error {
 		if event.data == "" {
@@ -254,6 +254,7 @@ func anthropicStreamToOpenAIChat(reader io.Reader, writer io.Writer) error {
 			message, _ := source["message"].(map[string]any)
 			state.id, state.model = openAIID(message["id"], "chatcmpl"), stringValue(message["model"])
 			state.usage.apply(message["usage"])
+			sink.record(state.usage)
 			return writeOpenAIChatChunk(writer, state, map[string]any{"role": "assistant", "content": ""}, nil, nil)
 		case "content_block_start":
 			index := intNumber(source["index"])
@@ -280,6 +281,7 @@ func anthropicStreamToOpenAIChat(reader io.Reader, writer io.Writer) error {
 			delta, _ := source["delta"].(map[string]any)
 			state.stopReason = anthropicStopToOpenAI(stringValue(delta["stop_reason"]))
 			state.usage.apply(source["usage"])
+			sink.record(state.usage)
 			return writeOpenAIChatChunk(writer, state, map[string]any{}, state.stopReason, nil)
 		case "message_stop":
 			if err := writeOpenAIChatChunk(writer, state, map[string]any{}, nil, state.usage.chatUsage()); err != nil {
@@ -301,7 +303,7 @@ func writeOpenAIChatChunk(writer io.Writer, state *openAIStreamState, delta map[
 	return writeSSEData(writer, mustJSON(chunk))
 }
 
-func anthropicStreamToOpenAIResponses(reader io.Reader, writer io.Writer) error {
+func anthropicStreamToOpenAIResponses(reader io.Reader, writer io.Writer, sink *CompatibilityUsage) error {
 	state := newOpenAIStreamState()
 	responseID := "resp_compat"
 	return scanSSE(reader, func(event sseEvent) error {
@@ -327,6 +329,7 @@ func anthropicStreamToOpenAIResponses(reader io.Reader, writer io.Writer) error 
 			message, _ := source["message"].(map[string]any)
 			responseID, state.model = openAIID(message["id"], "resp"), stringValue(message["model"])
 			state.usage.apply(message["usage"])
+			sink.record(state.usage)
 			return emit("response.created", map[string]any{"response": responseEnvelope(responseID, state.model, "in_progress", nil, state)})
 		case "content_block_start":
 			index := intNumber(source["index"])
@@ -381,6 +384,7 @@ func anthropicStreamToOpenAIResponses(reader io.Reader, writer io.Writer) error 
 			}
 		case "message_delta":
 			state.usage.apply(source["usage"])
+			sink.record(state.usage)
 		case "message_stop":
 			return emit("response.completed", map[string]any{"response": responseEnvelope(responseID, state.model, "completed", responseStreamOutput(responseID, state), state)})
 		}

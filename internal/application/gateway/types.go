@@ -246,8 +246,11 @@ type Response struct {
 	// OmitUsageChunk 表示 include_usage 由网关代客户端开启，转发时应剥离上游
 	// 额外返回的 usage chunk（choices 为空数组），保持对客户端透明。
 	OmitUsageChunk bool
-	ErrorType      string
-	route          *Route
+	// CompatibilityUsage 仅在 Anthropic 上游响应被转换为 OpenAI 协议时存在，
+	// 携带转换后 usage 无法表达的缓存写入 Token 数。
+	CompatibilityUsage *CompatibilityUsage
+	ErrorType          string
+	route              *Route
 }
 
 type RouteSelection struct {

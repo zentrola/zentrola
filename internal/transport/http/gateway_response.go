@@ -96,6 +96,8 @@ func (p *gatewayResponsePump) configureObserver() (bool, string, string, bool) {
 	case gw.AnthropicProtocol:
 		*p.observer = gw.NewUsageObserver(responseStream)
 	}
+	// 经兼容转换的 Anthropic 上游：转换后的 OpenAI usage 不含缓存写入，需由转换层补齐。
+	(*p.observer).UseCompatibilityUsage(p.upstream.CompatibilityUsage)
 	return responseStream, contentType, mediaType, streamInferred
 }
 
