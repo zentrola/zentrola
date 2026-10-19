@@ -74,19 +74,19 @@ func (w *Worker) settle(parent context.Context) {
 	}
 	defer release()
 	cutoff := time.Now().UTC().Add(-w.grace)
-	subscriptionSummary, err := w.service.SettleDueSubscriptions(ctx, cutoff)
-	if err != nil {
-		if parent.Err() == nil {
-			w.logger.Error("subscription billing settlement failed", "error_code", "SUBSCRIPTION_BILLING_FAILED")
-		}
+	// 订阅与 API Key 结算互不依赖：任一方全局失败只记录日志，另一方仍继续结算。
+	subscriptionSummary, subscriptionErr := w.service.SettleDueSubscriptions(ctx, cutoff)
+	if subscriptionErr != nil && parent.Err() == nil {
+		w.logger.Error("subscription billing settlement failed", "error_code", "SUBSCRIPTION_BILLING_FAILED",
+			"error", SafeErrorText(subscriptionErr))
+	}
+	if parent.Err() != nil {
 		return
 	}
-	apiKeySummary, err := w.service.SettleDueAPIKeys(ctx, cutoff)
-	if err != nil {
-		if parent.Err() == nil {
-			w.logger.Error("api key billing settlement failed", "error_code", "API_KEY_BILLING_FAILED")
-		}
-		return
+	apiKeySummary, apiKeyErr := w.service.SettleDueAPIKeys(ctx, cutoff)
+	if apiKeyErr != nil && parent.Err() == nil {
+		w.logger.Error("api key billing settlement failed", "error_code", "API_KEY_BILLING_FAILED",
+			"error", SafeErrorText(apiKeyErr))
 	}
 	summary := Summary{
 		Created:  subscriptionSummary.Created + apiKeySummary.Created,
@@ -94,11 +94,21 @@ func (w *Worker) settle(parent context.Context) {
 		Skipped:  subscriptionSummary.Skipped + apiKeySummary.Skipped,
 		Failed:   subscriptionSummary.Failed + apiKeySummary.Failed,
 	}
-	if summary.Created > 0 || summary.Adjusted > 0 || summary.Failed > 0 {
+	samples := append(append([]string(nil), subscriptionSummary.FailureSamples...), apiKeySummary.FailureSamples...)
+	if len(samples) > maxFailureSamples {
+		samples = samples[:maxFailureSamples]
+	}
+	switch {
+	case summary.Failed > 0:
+		w.logger.Warn("billing settlement completed with failures",
+			"error_code", "BILLING_SETTLEMENT_PARTIAL_FAILURE",
+			"created", summary.Created, "adjusted", summary.Adjusted, "skipped", summary.Skipped,
+			"failed", summary.Failed, "failure_samples", samples, "duration_ms", time.Since(startedAt).Milliseconds())
+	case summary.Created > 0 || summary.Adjusted > 0:
 		w.logger.Info("billing settlement completed",
 			"created", summary.Created, "adjusted", summary.Adjusted, "skipped", summary.Skipped,
-			"failed", summary.Failed, "duration_ms", time.Since(startedAt).Milliseconds())
-	} else {
+			"failed", 0, "duration_ms", time.Since(startedAt).Milliseconds())
+	default:
 		w.logger.Debug("billing settlement completed",
 			"created", 0, "adjusted", 0, "skipped", summary.Skipped, "failed", 0,
 			"duration_ms", time.Since(startedAt).Milliseconds())

@@ -2,6 +2,8 @@ package billing
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,6 +28,8 @@ type billingStoreStub struct {
 	adjustments      []Document
 	statistics       Statistics
 	ratingCandidates []UsageRatingCandidate
+	chargeErrors     map[int64]error
+	apiKeyErrors     map[APIKeyPeriod]error
 	ratings          []UsageRating
 	apiKeyPeriods    []APIKeyPeriod
 	apiKeyUsage      map[APIKeyPeriod][]domain.RatedShare
@@ -47,6 +51,9 @@ func (s *billingStoreStub) SubscriptionUsage(_ context.Context, credentialID int
 	return s.usage[credentialID], nil
 }
 func (s *billingStoreStub) CreateCharge(_ context.Context, document Document) (bool, error) {
+	if err := s.chargeErrors[document.CredentialID]; err != nil {
+		return false, err
+	}
 	s.charges = append(s.charges, document)
 	return true, nil
 }
@@ -89,6 +96,9 @@ func (s *billingStoreStub) APIKeyPeriods(context.Context, time.Time) ([]APIKeyPe
 	return s.apiKeyPeriods, nil
 }
 func (s *billingStoreStub) APIKeyUsage(_ context.Context, period APIKeyPeriod) ([]domain.RatedShare, []int64, error) {
+	if err := s.apiKeyErrors[period]; err != nil {
+		return nil, nil, err
+	}
 	return s.apiKeyUsage[period], s.apiKeyRatingIDs[period], nil
 }
 func (s *billingStoreStub) APIKeyCurrent(_ context.Context, period APIKeyPeriod) (APIKeyCurrent, error) {
@@ -221,5 +231,82 @@ func TestStatisticsValidatesUTCWindowAndType(t *testing.T) {
 		BillingType: "UNKNOWN", From: from, To: from.AddDate(0, 1, 0), Limit: 50,
 	}); err == nil {
 		t.Fatal("invalid billing type accepted")
+	}
+}
+
+func TestSettleContinuesAfterSinglePeriodFailure(t *testing.T) {
+	start := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	store := &billingStoreStub{
+		prices: []SubscriptionPrice{
+			{ID: 1, CredentialID: 8, Currency: "CNY", PeriodAmount: "100", BillingPeriod: "MONTH", EffectiveAt: start, CredentialEffectiveAt: start},
+			{ID: 2, CredentialID: 9, Currency: "CNY", PeriodAmount: "200", BillingPeriod: "MONTH", EffectiveAt: start, CredentialEffectiveAt: start},
+		},
+		chargeErrors: map[int64]error{8: &StoreError{
+			Operation: "create_document", SQLState: "23514", Message: "subscription charge amount does not match source",
+			Err: errors.New("raw driver error with secret"),
+		}},
+		corrections: []Correction{{OriginalDocumentID: 70, Currency: "CNY", TargetCurrency: "USD"}},
+	}
+	service := New(store, &billingIDs{})
+	summary, err := service.SettleDueSubscriptions(context.Background(), end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Created != 1 || summary.Failed != 2 || len(store.charges) != 1 || store.charges[0].CredentialID != 9 {
+		t.Fatalf("summary=%+v charges=%+v", summary, store.charges)
+	}
+	joined := strings.Join(summary.FailureSamples, "\n")
+	if !strings.Contains(joined, "sqlstate=23514") || !strings.Contains(joined, "does not match source") ||
+		strings.Contains(joined, "secret") || !strings.Contains(joined, "currency changed") {
+		t.Fatalf("failure samples=%v", summary.FailureSamples)
+	}
+}
+
+func TestSettleStopsOnCanceledContext(t *testing.T) {
+	start := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	store := &billingStoreStub{
+		prices: []SubscriptionPrice{
+			{ID: 1, CredentialID: 8, Currency: "CNY", PeriodAmount: "100", BillingPeriod: "MONTH", EffectiveAt: start, CredentialEffectiveAt: start},
+		},
+		chargeErrors: map[int64]error{8: context.Canceled},
+	}
+	service := New(store, &billingIDs{})
+	if _, err := service.SettleDueSubscriptions(ctx, time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)); !errors.Is(err, context.Canceled) {
+		t.Fatalf("error=%v; want context canceled", err)
+	}
+}
+
+type sqlStateError struct{ code string }
+
+func (e sqlStateError) Error() string    { return "password=secret " + e.code }
+func (e sqlStateError) SQLState() string { return e.code }
+
+func TestSafeErrorTextOmitsUnsanitizedDetails(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		err     error
+		want    string
+		exclude string
+	}{
+		{name: "nil", err: nil, want: ""},
+		{name: "store error with database fields", err: &StoreError{Operation: "create_usage_rating", SQLState: "23514",
+			Constraint: "usage_rating_total_cost_check", Message: "usage rating price snapshot is not current", Err: sqlStateError{"23514"}},
+			want: `billing store create_usage_rating failed: sqlstate=23514 constraint=usage_rating_total_cost_check message="usage rating price snapshot is not current"`},
+		{name: "store error without database fields", err: &StoreError{Operation: "api_key_usage", Err: errors.New("dial tcp: password=secret")},
+			want: "billing store api_key_usage failed: cause_type=*errors.errorString", exclude: "secret"},
+		{name: "store error deadline", err: &StoreError{Operation: "charge_periods", Err: context.DeadlineExceeded},
+			want: "billing store charge_periods failed: deadline exceeded"},
+		{name: "raw database error", err: sqlStateError{"40001"}, want: "database error: sqlstate=40001", exclude: "secret"},
+		{name: "domain error", err: errors.New("invalid billing amount"), want: "invalid billing amount"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := SafeErrorText(tt.err)
+			if got != tt.want || tt.exclude != "" && strings.Contains(got, tt.exclude) {
+				t.Fatalf("SafeErrorText()=%q; want %q", got, tt.want)
+			}
+		})
 	}
 }

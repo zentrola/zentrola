@@ -4,7 +4,9 @@ package billing
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
+	"strconv"
 	"time"
 
 	appsec "github.com/zentrola/zentrola/internal/application/security"
@@ -14,6 +16,9 @@ import (
 )
 
 const maxPeriodsPerScan = 10000
+
+// errBillingID 表示无法生成计费记录 ID；属于全局依赖故障，出现时中止本轮而不是逐条计入失败。
+var errBillingID = errors.New("cannot generate billing record ID")
 
 type SubscriptionPrice struct {
 	ID, CredentialID                      int64
@@ -85,8 +90,75 @@ type Statistics struct {
 	Total  int64            `json:"total"`
 }
 
+// Summary 汇总一次结算扫描。单个账期或调整失败只计入 Failed 并继续处理其他账期；
+// FailureSamples 保留前几条已脱敏的失败描述，供任务日志定位问题。
 type Summary struct {
 	Created, Adjusted, Skipped, Failed int
+	FailureSamples                     []string
+}
+
+// maxFailureSamples 限制单轮保留的失败描述数量，避免同一批坏数据刷屏。
+const maxFailureSamples = 5
+
+func (s *Summary) recordFailure(format string, args ...any) {
+	s.Failed++
+	if len(s.FailureSamples) < maxFailureSamples {
+		s.FailureSamples = append(s.FailureSamples, fmt.Sprintf(format, args...))
+	}
+}
+
+// StoreError 是存储适配器返回的已脱敏错误：只保留操作名、SQLSTATE、约束名和数据库报错文本，
+// 不包含 SQL 参数、连接信息或凭据，可以安全写入日志。
+type StoreError struct {
+	Operation  string
+	SQLState   string
+	Constraint string
+	Message    string
+	Err        error
+}
+
+func (e *StoreError) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	text := "billing store " + e.Operation + " failed"
+	if e.SQLState != "" {
+		text += ": sqlstate=" + e.SQLState
+		if e.Constraint != "" {
+			text += " constraint=" + e.Constraint
+		}
+		if e.Message != "" {
+			text += " message=" + strconv.Quote(e.Message)
+		}
+		return text
+	}
+	switch {
+	case errors.Is(e.Err, context.Canceled):
+		return text + ": context canceled"
+	case errors.Is(e.Err, context.DeadlineExceeded):
+		return text + ": deadline exceeded"
+	default:
+		return text + fmt.Sprintf(": cause_type=%T", e.Err)
+	}
+}
+
+func (e *StoreError) Unwrap() error { return e.Err }
+
+// SafeErrorText 返回可写入日志的错误描述。存储错误只输出脱敏字段；未经存储适配器包装的
+// 数据库错误只输出 SQLSTATE；其余错误来自计费领域与应用层的固定文本。
+func SafeErrorText(err error) string {
+	if err == nil {
+		return ""
+	}
+	var storeErr *StoreError
+	if errors.As(err, &storeErr) {
+		return storeErr.Error()
+	}
+	var sqlErr interface{ SQLState() string }
+	if errors.As(err, &sqlErr) {
+		return "database error: sqlstate=" + sqlErr.SQLState()
+	}
+	return err.Error()
 }
 
 type Store interface {
@@ -119,6 +191,9 @@ func New(store Store, ids shared.IDGenerator) *Service {
 	return &Service{store: store, ids: ids, now: func() time.Time { return time.Now().UTC() }}
 }
 
+// SettleDueSubscriptions 为已到期的个人订阅账期生成账单，并为价格金额纠错生成调整单。
+// 单个账期失败只计入 Failed 后继续；读取价格或已出账账期失败、
+// 上下文取消、ID 生成失败等全局错误才中止本轮。
 func (s *Service) SettleDueSubscriptions(ctx context.Context, cutoff time.Time) (Summary, error) {
 	var summary Summary
 	if s == nil || s.store == nil || s.ids == nil || cutoff.IsZero() {
@@ -156,7 +231,8 @@ func (s *Service) SettleDueSubscriptions(ctx context.Context, cutoff time.Time) 
 			}
 			periodEnd, addErr := addBillingPeriod(periodStart, price.BillingPeriod, anchorDay)
 			if addErr != nil {
-				return summary, addErr
+				summary.recordFailure("subscription credential=%d price=%d: %v", price.CredentialID, price.ID, addErr)
+				break
 			}
 			if periodEnd.After(cutoff) {
 				break
@@ -171,22 +247,18 @@ func (s *Service) SettleDueSubscriptions(ctx context.Context, cutoff time.Time) 
 			if periodCount > maxPeriodsPerScan {
 				return summary, errors.New("billing settlement scan exceeded period limit")
 			}
-			usage, usageErr := s.store.SubscriptionUsage(ctx, price.CredentialID, periodStart, periodEnd)
-			if usageErr != nil {
-				return summary, usageErr
-			}
-			totalTokens, allocations, allocationErr := domain.Allocate(price.PeriodAmount, usage)
-			if allocationErr != nil {
-				return summary, allocationErr
-			}
-			document, documentErr := s.newDocument(ctx, "CHARGE", price.CredentialID, price.ID, 0,
-				periodStart, periodEnd, totalTokens, price.PeriodAmount, price.Currency, allocations, true)
-			if documentErr != nil {
-				return summary, documentErr
-			}
-			created, createErr := s.store.CreateCharge(ctx, document)
-			if createErr != nil {
-				return summary, createErr
+			created, chargeErr := s.settleSubscriptionPeriod(ctx, price, periodStart, periodEnd)
+			if chargeErr != nil {
+				if ctx.Err() != nil {
+					return summary, ctx.Err()
+				}
+				if errors.Is(chargeErr, errBillingID) {
+					return summary, chargeErr
+				}
+				summary.recordFailure("subscription credential=%d period=%s/%s: %s", price.CredentialID,
+					formatPeriodTime(periodStart), formatPeriodTime(periodEnd), SafeErrorText(chargeErr))
+				periodStart = periodEnd
+				continue
 			}
 			if created {
 				summary.Created++
@@ -204,41 +276,91 @@ func (s *Service) SettleDueSubscriptions(ctx context.Context, cutoff time.Time) 
 	}
 	for _, correction := range corrections {
 		if correction.Currency != correction.TargetCurrency {
-			summary.Failed++
+			summary.recordFailure("subscription document=%d: currency changed from %s to %s",
+				correction.OriginalDocumentID, correction.Currency, correction.TargetCurrency)
 			continue
 		}
-		delta, deltaErr := domain.Subtract(correction.TargetAmount, correction.CurrentAmount)
-		if deltaErr != nil {
-			return summary, deltaErr
-		}
-		if delta == "0" {
+		outcome, adjustErr := s.adjustSubscriptionDocument(ctx, correction)
+		if adjustErr != nil {
+			if ctx.Err() != nil {
+				return summary, ctx.Err()
+			}
+			if errors.Is(adjustErr, errBillingID) {
+				return summary, adjustErr
+			}
+			summary.recordFailure("subscription document=%d adjustment: %s",
+				correction.OriginalDocumentID, SafeErrorText(adjustErr))
 			continue
 		}
-		usage, usageErr := s.store.OriginalUsage(ctx, correction.OriginalDocumentID)
-		if usageErr != nil {
-			return summary, usageErr
-		}
-		_, allocations, allocationErr := domain.Allocate(delta, usage)
-		if allocationErr != nil {
-			return summary, allocationErr
-		}
-		document, documentErr := s.newDocument(ctx, "ADJUSTMENT", correction.CredentialID,
-			correction.SourcePriceID, correction.OriginalDocumentID, correction.PeriodStart,
-			correction.PeriodEnd, 0, delta, correction.Currency, allocations, false)
-		if documentErr != nil {
-			return summary, documentErr
-		}
-		created, createErr := s.store.CreateAdjustment(ctx, correction.CurrentAmount, document)
-		if createErr != nil {
-			return summary, createErr
-		}
-		if created {
+		switch outcome {
+		case adjustmentCreated:
 			summary.Adjusted++
-		} else {
+		case adjustmentSkipped:
 			summary.Skipped++
 		}
 	}
 	return summary, nil
+}
+
+func (s *Service) settleSubscriptionPeriod(ctx context.Context, price *SubscriptionPrice, periodStart, periodEnd time.Time) (bool, error) {
+	usage, err := s.store.SubscriptionUsage(ctx, price.CredentialID, periodStart, periodEnd)
+	if err != nil {
+		return false, err
+	}
+	totalTokens, allocations, err := domain.Allocate(price.PeriodAmount, usage)
+	if err != nil {
+		return false, err
+	}
+	document, err := s.newDocument(ctx, "CHARGE", price.CredentialID, price.ID, 0,
+		periodStart, periodEnd, totalTokens, price.PeriodAmount, price.Currency, allocations, true)
+	if err != nil {
+		return false, err
+	}
+	return s.store.CreateCharge(ctx, document)
+}
+
+type adjustmentOutcome int
+
+const (
+	adjustmentNone adjustmentOutcome = iota
+	adjustmentCreated
+	adjustmentSkipped
+)
+
+func (s *Service) adjustSubscriptionDocument(ctx context.Context, correction Correction) (adjustmentOutcome, error) {
+	delta, err := domain.Subtract(correction.TargetAmount, correction.CurrentAmount)
+	if err != nil {
+		return adjustmentNone, err
+	}
+	if delta == "0" {
+		return adjustmentNone, nil
+	}
+	usage, err := s.store.OriginalUsage(ctx, correction.OriginalDocumentID)
+	if err != nil {
+		return adjustmentNone, err
+	}
+	_, allocations, err := domain.Allocate(delta, usage)
+	if err != nil {
+		return adjustmentNone, err
+	}
+	document, err := s.newDocument(ctx, "ADJUSTMENT", correction.CredentialID,
+		correction.SourcePriceID, correction.OriginalDocumentID, correction.PeriodStart,
+		correction.PeriodEnd, 0, delta, correction.Currency, allocations, false)
+	if err != nil {
+		return adjustmentNone, err
+	}
+	created, err := s.store.CreateAdjustment(ctx, correction.CurrentAmount, document)
+	if err != nil {
+		return adjustmentNone, err
+	}
+	if created {
+		return adjustmentCreated, nil
+	}
+	return adjustmentSkipped, nil
+}
+
+func formatPeriodTime(value time.Time) string {
+	return value.UTC().Format(time.RFC3339)
 }
 
 func (s *Service) Statistics(ctx context.Context, actor admin.Identity, filter StatisticsFilter) (Statistics, error) {
@@ -263,7 +385,7 @@ func (s *Service) newDocument(ctx context.Context, documentType string, credenti
 ) (Document, error) {
 	documentID, err := s.ids.NextID(ctx)
 	if err != nil || documentID <= 0 {
-		return Document{}, errors.New("cannot generate billing document ID")
+		return Document{}, errBillingID
 	}
 	document := Document{
 		ID: documentID, CredentialID: credentialID, SourceID: sourceID, OriginalDocumentID: originalID,
@@ -274,7 +396,7 @@ func (s *Service) newDocument(ctx context.Context, documentType string, credenti
 	for _, allocation := range allocations {
 		itemID, idErr := s.ids.NextID(ctx)
 		if idErr != nil || itemID <= 0 {
-			return Document{}, errors.New("cannot generate billing document item ID")
+			return Document{}, errBillingID
 		}
 		usageTokens := int64(0)
 		if keepUsage {

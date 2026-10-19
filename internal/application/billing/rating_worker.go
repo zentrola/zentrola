@@ -73,16 +73,24 @@ func (w *RatingWorker) rate(parent context.Context) {
 	}
 	defer release()
 	summary, err := w.service.RatePendingAPIKeyUsage(ctx, w.pageSize)
-	if err != nil {
-		if parent.Err() == nil {
-			w.logger.Error("api key usage rating failed", "error_code", "API_KEY_RATING_FAILED")
-		}
+	if err != nil && parent.Err() == nil {
+		// 全局错误前已完成的核算仍然有效，因此同时输出本轮汇总。
+		w.logger.Error("api key usage rating failed", "error_code", "API_KEY_RATING_FAILED",
+			"error", SafeErrorText(err), "created", summary.Created, "failed", summary.Failed,
+			"failure_samples", summary.FailureSamples)
 		return
 	}
-	if summary.Created > 0 {
+	switch {
+	case err != nil:
+		return
+	case summary.Failed > 0:
+		w.logger.Warn("api key usage rating completed with failures", "error_code", "API_KEY_RATING_PARTIAL_FAILURE",
+			"created", summary.Created, "skipped", summary.Skipped, "failed", summary.Failed,
+			"failure_samples", summary.FailureSamples, "duration_ms", time.Since(startedAt).Milliseconds())
+	case summary.Created > 0:
 		w.logger.Info("api key usage rating completed", "created", summary.Created,
 			"skipped", summary.Skipped, "duration_ms", time.Since(startedAt).Milliseconds())
-	} else {
+	default:
 		w.logger.Debug("api key usage rating completed", "created", 0,
 			"skipped", summary.Skipped, "duration_ms", time.Since(startedAt).Milliseconds())
 	}

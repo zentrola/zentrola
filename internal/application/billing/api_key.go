@@ -3,6 +3,7 @@ package billing
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"time"
 
@@ -54,10 +55,21 @@ type APIKeyCurrent struct {
 	Items              []APIKeyCurrentItem
 }
 
+// RatingSummary 汇总一次核算扫描；单条记录失败计入 Failed 并在本轮内跳过，下一轮会重新尝试。
 type RatingSummary struct {
-	Created, Skipped int
+	Created, Skipped, Failed int
+	FailureSamples           []string
 }
 
+func (s *RatingSummary) recordFailure(format string, args ...any) {
+	s.Failed++
+	if len(s.FailureSamples) < maxFailureSamples {
+		s.FailureSamples = append(s.FailureSamples, fmt.Sprintf(format, args...))
+	}
+}
+
+// RatePendingAPIKeyUsage 按用量 ID 递增翻页核算待核算的调用，受 maxRatingsPerRun 上限约束；
+// 单条记录核算失败只计入失败并继续。
 func (s *Service) RatePendingAPIKeyUsage(ctx context.Context, pageSize int32) (RatingSummary, error) {
 	var summary RatingSummary
 	if s == nil || s.store == nil || s.ids == nil {
@@ -83,39 +95,23 @@ func (s *Service) RatePendingAPIKeyUsage(ctx context.Context, pageSize int32) (R
 				return summary, errors.New("usage rating candidates are not ordered")
 			}
 			after = candidate.UsageRecordID
-			cost, err := domain.RateAPIKeyUsage(
-				candidate.InputTokens, candidate.CachedInputTokens, candidate.OutputTokens,
-				candidate.InputPrice, candidate.CachedInputPrice, candidate.OutputPrice,
-			)
+			created, err := s.rateCandidate(ctx, candidate)
+			processed++
 			if err != nil {
-				return summary, err
-			}
-			id, err := s.ids.NextID(ctx)
-			if err != nil || id <= 0 {
-				return summary, errors.New("cannot generate usage rating ID")
-			}
-			rating := UsageRating{
-				ID: id, UsageRecordID: candidate.UsageRecordID, Revision: candidate.LatestRevision + 1,
-				SupersedesRatingID: candidate.LatestRatingID, PrincipalID: candidate.PrincipalID,
-				CredentialID: candidate.CredentialID, ProviderModelID: candidate.ProviderModelID,
-				ModelPriceID: candidate.ModelPriceID, UsageStartedAt: candidate.UsageStartedAt.UTC(),
-				CreatedAt: s.now().UTC(), InputTokens: candidate.InputTokens,
-				CachedInputTokens: candidate.CachedInputTokens, OutputTokens: candidate.OutputTokens,
-				InputPrice: candidate.InputPrice, CachedInputPrice: candidate.CachedInputPrice,
-				OutputPrice: candidate.OutputPrice, InputCost: cost.Input,
-				CachedInputCost: cost.CachedInput, OutputCost: cost.Output, TotalCost: cost.Total,
-				Currency: candidate.Currency,
-			}
-			created, err := s.store.CreateUsageRating(ctx, rating)
-			if err != nil {
-				return summary, err
+				if ctx.Err() != nil {
+					return summary, ctx.Err()
+				}
+				if errors.Is(err, errBillingID) {
+					return summary, err
+				}
+				summary.recordFailure("usage rating usage=%d: %s", candidate.UsageRecordID, SafeErrorText(err))
+				continue
 			}
 			if created {
 				summary.Created++
 			} else {
 				summary.Skipped++
 			}
-			processed++
 		}
 		if len(candidates) < int(pageSize) {
 			return summary, nil
@@ -124,6 +120,34 @@ func (s *Service) RatePendingAPIKeyUsage(ctx context.Context, pageSize int32) (R
 	return summary, errors.New("usage rating run exceeded record limit")
 }
 
+func (s *Service) rateCandidate(ctx context.Context, candidate UsageRatingCandidate) (bool, error) {
+	cost, err := domain.RateAPIKeyUsage(
+		candidate.InputTokens, candidate.CachedInputTokens, candidate.OutputTokens,
+		candidate.InputPrice, candidate.CachedInputPrice, candidate.OutputPrice,
+	)
+	if err != nil {
+		return false, err
+	}
+	id, err := s.ids.NextID(ctx)
+	if err != nil || id <= 0 {
+		return false, errBillingID
+	}
+	rating := UsageRating{
+		ID: id, UsageRecordID: candidate.UsageRecordID, Revision: candidate.LatestRevision + 1,
+		SupersedesRatingID: candidate.LatestRatingID, PrincipalID: candidate.PrincipalID,
+		CredentialID: candidate.CredentialID, ProviderModelID: candidate.ProviderModelID,
+		ModelPriceID: candidate.ModelPriceID, UsageStartedAt: candidate.UsageStartedAt.UTC(),
+		CreatedAt: s.now().UTC(), InputTokens: candidate.InputTokens,
+		CachedInputTokens: candidate.CachedInputTokens, OutputTokens: candidate.OutputTokens,
+		InputPrice: candidate.InputPrice, CachedInputPrice: candidate.CachedInputPrice,
+		OutputPrice: candidate.OutputPrice, InputCost: cost.Input,
+		CachedInputCost: cost.CachedInput, OutputCost: cost.Output, TotalCost: cost.Total,
+		Currency: candidate.Currency,
+	}
+	return s.store.CreateUsageRating(ctx, rating)
+}
+
+// SettleDueAPIKeys 结算到期的 API Key 自然月账期；单个账期失败计入 Failed 后继续。
 func (s *Service) SettleDueAPIKeys(ctx context.Context, cutoff time.Time) (Summary, error) {
 	var summary Summary
 	if s == nil || s.store == nil || s.ids == nil || cutoff.IsZero() {
@@ -137,90 +161,111 @@ func (s *Service) SettleDueAPIKeys(ctx context.Context, cutoff time.Time) (Summa
 		return summary, errors.New("api key billing settlement scan exceeded period limit")
 	}
 	for _, period := range periods {
-		shares, ratingIDs, err := s.store.APIKeyUsage(ctx, period)
+		outcome, err := s.settleAPIKeyPeriod(ctx, period)
 		if err != nil {
-			return summary, err
-		}
-		targetTokens, targetAmount, allocations, err := domain.RoundRatedCosts(shares)
-		if err != nil {
-			return summary, err
-		}
-		current, err := s.store.APIKeyCurrent(ctx, period)
-		if err != nil {
-			return summary, err
-		}
-		if !current.Found {
-			document, err := s.newAPIKeyDocument(ctx, "CHARGE", period, 0, targetTokens, targetAmount, allocations)
-			if err != nil {
+			if ctx.Err() != nil {
+				return summary, ctx.Err()
+			}
+			if errors.Is(err, errBillingID) {
 				return summary, err
 			}
-			created, err := s.store.CreateAPIKeyDocument(ctx, "", 0, document, ratingIDs)
-			if err != nil {
-				return summary, err
-			}
-			if created {
-				summary.Created++
-			} else {
-				summary.Skipped++
-			}
+			summary.recordFailure("api key credential=%d period=%s/%s currency=%s: %s", period.CredentialID,
+				formatPeriodTime(period.PeriodStart), formatPeriodTime(period.PeriodEnd), period.Currency, SafeErrorText(err))
 			continue
 		}
-		deltaAmount, err := domain.Subtract(targetAmount, current.TotalAmount)
-		if err != nil {
-			return summary, err
-		}
-		deltaTokens := targetTokens - current.TotalTokens
-		if deltaTokens < 0 {
-			return summary, errors.New("api key settled token total exceeds rated usage")
-		}
-		currentItems := make(map[int64]APIKeyCurrentItem, len(current.Items))
-		for _, item := range current.Items {
-			currentItems[item.PrincipalID] = item
-		}
-		deltaAllocations := make([]domain.Allocation, 0, len(allocations))
-		for _, allocation := range allocations {
-			currentItem, found := currentItems[allocation.PrincipalID]
-			if !found {
-				currentItem.Amount = "0"
-			}
-			itemDelta, err := domain.Subtract(allocation.Amount, currentItem.Amount)
-			if err != nil {
-				return summary, err
-			}
-			itemTokens := allocation.Tokens - currentItem.Tokens
-			if itemTokens < 0 {
-				return summary, errors.New("api key principal settled token total exceeds rated usage")
-			}
-			if itemDelta != "0" || itemTokens != 0 {
-				deltaAllocations = append(deltaAllocations, domain.Allocation{
-					PrincipalID: allocation.PrincipalID, Tokens: itemTokens, Amount: itemDelta,
-				})
-			}
-			delete(currentItems, allocation.PrincipalID)
-		}
-		if len(currentItems) != 0 {
-			return summary, errors.New("api key settled principal is absent from rated usage")
-		}
-		if deltaAmount == "0" && deltaTokens == 0 && len(deltaAllocations) == 0 {
-			summary.Skipped++
-			continue
-		}
-		document, err := s.newAPIKeyDocument(ctx, "ADJUSTMENT", period, current.OriginalDocumentID,
-			deltaTokens, deltaAmount, deltaAllocations)
-		if err != nil {
-			return summary, err
-		}
-		created, err := s.store.CreateAPIKeyDocument(ctx, current.TotalAmount, current.TotalTokens, document, ratingIDs)
-		if err != nil {
-			return summary, err
-		}
-		if created {
+		switch outcome {
+		case apiKeyCharged:
+			summary.Created++
+		case apiKeyAdjusted:
 			summary.Adjusted++
-		} else {
+		default:
 			summary.Skipped++
 		}
 	}
 	return summary, nil
+}
+
+type apiKeyOutcome int
+
+const (
+	apiKeySkipped apiKeyOutcome = iota
+	apiKeyCharged
+	apiKeyAdjusted
+)
+
+func (s *Service) settleAPIKeyPeriod(ctx context.Context, period APIKeyPeriod) (apiKeyOutcome, error) {
+	shares, ratingIDs, err := s.store.APIKeyUsage(ctx, period)
+	if err != nil {
+		return apiKeySkipped, err
+	}
+	targetTokens, targetAmount, allocations, err := domain.RoundRatedCosts(shares)
+	if err != nil {
+		return apiKeySkipped, err
+	}
+	current, err := s.store.APIKeyCurrent(ctx, period)
+	if err != nil {
+		return apiKeySkipped, err
+	}
+	if !current.Found {
+		document, err := s.newAPIKeyDocument(ctx, "CHARGE", period, 0, targetTokens, targetAmount, allocations)
+		if err != nil {
+			return apiKeySkipped, err
+		}
+		created, err := s.store.CreateAPIKeyDocument(ctx, "", 0, document, ratingIDs)
+		if err != nil || !created {
+			return apiKeySkipped, err
+		}
+		return apiKeyCharged, nil
+	}
+	deltaAmount, err := domain.Subtract(targetAmount, current.TotalAmount)
+	if err != nil {
+		return apiKeySkipped, err
+	}
+	deltaTokens := targetTokens - current.TotalTokens
+	if deltaTokens < 0 {
+		return apiKeySkipped, errors.New("api key settled token total exceeds rated usage")
+	}
+	currentItems := make(map[int64]APIKeyCurrentItem, len(current.Items))
+	for _, item := range current.Items {
+		currentItems[item.PrincipalID] = item
+	}
+	deltaAllocations := make([]domain.Allocation, 0, len(allocations))
+	for _, allocation := range allocations {
+		currentItem, found := currentItems[allocation.PrincipalID]
+		if !found {
+			currentItem.Amount = "0"
+		}
+		itemDelta, err := domain.Subtract(allocation.Amount, currentItem.Amount)
+		if err != nil {
+			return apiKeySkipped, err
+		}
+		itemTokens := allocation.Tokens - currentItem.Tokens
+		if itemTokens < 0 {
+			return apiKeySkipped, errors.New("api key principal settled token total exceeds rated usage")
+		}
+		if itemDelta != "0" || itemTokens != 0 {
+			deltaAllocations = append(deltaAllocations, domain.Allocation{
+				PrincipalID: allocation.PrincipalID, Tokens: itemTokens, Amount: itemDelta,
+			})
+		}
+		delete(currentItems, allocation.PrincipalID)
+	}
+	if len(currentItems) != 0 {
+		return apiKeySkipped, errors.New("api key settled principal is absent from rated usage")
+	}
+	if deltaAmount == "0" && deltaTokens == 0 && len(deltaAllocations) == 0 {
+		return apiKeySkipped, nil
+	}
+	document, err := s.newAPIKeyDocument(ctx, "ADJUSTMENT", period, current.OriginalDocumentID,
+		deltaTokens, deltaAmount, deltaAllocations)
+	if err != nil {
+		return apiKeySkipped, err
+	}
+	created, err := s.store.CreateAPIKeyDocument(ctx, current.TotalAmount, current.TotalTokens, document, ratingIDs)
+	if err != nil || !created {
+		return apiKeySkipped, err
+	}
+	return apiKeyAdjusted, nil
 }
 
 func (s *Service) newAPIKeyDocument(ctx context.Context, documentType string, period APIKeyPeriod,
@@ -228,7 +273,7 @@ func (s *Service) newAPIKeyDocument(ctx context.Context, documentType string, pe
 ) (Document, error) {
 	documentID, err := s.ids.NextID(ctx)
 	if err != nil || documentID <= 0 {
-		return Document{}, errors.New("cannot generate billing document ID")
+		return Document{}, errBillingID
 	}
 	sort.Slice(allocations, func(i, j int) bool { return allocations[i].PrincipalID < allocations[j].PrincipalID })
 	document := Document{
@@ -241,7 +286,7 @@ func (s *Service) newAPIKeyDocument(ctx context.Context, documentType string, pe
 	for _, allocation := range allocations {
 		itemID, err := s.ids.NextID(ctx)
 		if err != nil || itemID <= 0 {
-			return Document{}, errors.New("cannot generate billing document item ID")
+			return Document{}, errBillingID
 		}
 		document.Items = append(document.Items, DocumentItem{
 			ID: itemID, PrincipalID: allocation.PrincipalID, UsageTokens: allocation.Tokens,

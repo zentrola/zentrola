@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	app "github.com/zentrola/zentrola/internal/application/billing"
 	appsec "github.com/zentrola/zentrola/internal/application/security"
@@ -26,7 +27,7 @@ func NewBillingStore(pool *pgxpool.Pool) *BillingStore {
 func (s *BillingStore) SubscriptionPrices(ctx context.Context) ([]app.SubscriptionPrice, error) {
 	rows, err := s.q.BillingSubscriptionPrices(ctx)
 	if err != nil {
-		return nil, err
+		return nil, billingStoreError("subscription_prices", err)
 	}
 	result := make([]app.SubscriptionPrice, 0, len(rows))
 	for _, row := range rows {
@@ -47,7 +48,7 @@ func (s *BillingStore) SubscriptionPrices(ctx context.Context) ([]app.Subscripti
 func (s *BillingStore) ChargePeriods(ctx context.Context) ([]app.ChargePeriod, error) {
 	rows, err := s.q.BillingChargePeriods(ctx)
 	if err != nil {
-		return nil, err
+		return nil, billingStoreError("charge_periods", err)
 	}
 	result := make([]app.ChargePeriod, 0, len(rows))
 	for _, row := range rows {
@@ -64,7 +65,7 @@ func (s *BillingStore) SubscriptionUsage(ctx context.Context, credentialID int64
 		ProviderCredentialID: credentialID, PeriodStart: priceTime(start), PeriodEnd: priceTime(end),
 	})
 	if err != nil {
-		return nil, err
+		return nil, billingStoreError("subscription_usage", err)
 	}
 	result := make([]domain.UsageShare, 0, len(rows))
 	for _, row := range rows {
@@ -80,7 +81,7 @@ func (s *BillingStore) CreateCharge(ctx context.Context, document app.Document) 
 func (s *BillingStore) SubscriptionCorrections(ctx context.Context) ([]app.Correction, error) {
 	rows, err := s.q.BillingSubscriptionCorrections(ctx)
 	if err != nil {
-		return nil, err
+		return nil, billingStoreError("subscription_corrections", err)
 	}
 	result := make([]app.Correction, 0, len(rows))
 	for _, row := range rows {
@@ -100,7 +101,7 @@ func (s *BillingStore) SubscriptionCorrections(ctx context.Context) ([]app.Corre
 func (s *BillingStore) OriginalUsage(ctx context.Context, documentID int64) ([]domain.UsageShare, error) {
 	rows, err := s.q.BillingOriginalUsage(ctx, documentID)
 	if err != nil {
-		return nil, err
+		return nil, billingStoreError("original_usage", err)
 	}
 	result := make([]domain.UsageShare, 0, len(rows))
 	for _, row := range rows {
@@ -114,6 +115,11 @@ func (s *BillingStore) CreateAdjustment(ctx context.Context, expectedCurrent str
 }
 
 func (s *BillingStore) createDocument(ctx context.Context, document app.Document, expectedCurrent string, expectedTokens int64, ratingIDs []int64) (bool, error) {
+	created, err := s.insertDocument(ctx, document, expectedCurrent, expectedTokens, ratingIDs)
+	return created, billingStoreError("create_document", err)
+}
+
+func (s *BillingStore) insertDocument(ctx context.Context, document app.Document, expectedCurrent string, expectedTokens int64, ratingIDs []int64) (bool, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return false, err
@@ -212,7 +218,7 @@ func (s *BillingStore) createDocument(ctx context.Context, document app.Document
 func (s *BillingStore) UsageRatingCandidates(ctx context.Context, after int64, limit int32) ([]app.UsageRatingCandidate, error) {
 	rows, err := s.q.BillingUsageRatingCandidates(ctx, dbgen.BillingUsageRatingCandidatesParams{AfterID: after, PageLimit: limit})
 	if err != nil {
-		return nil, err
+		return nil, billingStoreError("usage_rating_candidates", err)
 	}
 	result := make([]app.UsageRatingCandidate, 0, len(rows))
 	for _, row := range rows {
@@ -247,13 +253,13 @@ func (s *BillingStore) CreateUsageRating(ctx context.Context, rating app.UsageRa
 		InputCost: inputCost, CachedInputCost: cachedCost, OutputCost: outputCost,
 		TotalCost: totalCost, Currency: rating.Currency, CreatedAt: priceTime(rating.CreatedAt),
 	})
-	return inserted > 0, err
+	return inserted > 0, billingStoreError("create_usage_rating", err)
 }
 
 func (s *BillingStore) APIKeyPeriods(ctx context.Context, cutoff time.Time) ([]app.APIKeyPeriod, error) {
 	rows, err := s.q.BillingAPIKeyPeriods(ctx, priceTime(cutoff))
 	if err != nil {
-		return nil, err
+		return nil, billingStoreError("api_key_periods", err)
 	}
 	result := make([]app.APIKeyPeriod, 0, len(rows))
 	for _, row := range rows {
@@ -271,7 +277,7 @@ func (s *BillingStore) APIKeyUsage(ctx context.Context, period app.APIKeyPeriod)
 		PeriodEnd: priceTime(period.PeriodEnd), Currency: period.Currency,
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, billingStoreError("api_key_usage", err)
 	}
 	shares := make([]domain.RatedShare, 0, len(rows))
 	ratingIDs := make([]int64, 0, len(rows))
@@ -283,6 +289,11 @@ func (s *BillingStore) APIKeyUsage(ctx context.Context, period app.APIKeyPeriod)
 }
 
 func (s *BillingStore) APIKeyCurrent(ctx context.Context, period app.APIKeyPeriod) (app.APIKeyCurrent, error) {
+	current, err := s.apiKeyCurrent(ctx, period)
+	return current, billingStoreError("api_key_current", err)
+}
+
+func (s *BillingStore) apiKeyCurrent(ctx context.Context, period app.APIKeyPeriod) (app.APIKeyCurrent, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return app.APIKeyCurrent{}, err
@@ -479,4 +490,22 @@ func billingDocumentSummary(id int64, billingType, documentType, status string, 
 		PeriodStart: periodStart.UTC(), PeriodEnd: periodEnd.UTC(), TotalTokens: totalTokens,
 		TotalAmount: totalAmount, Currency: currency, CreatedAt: createdAt.UTC(),
 	}
+}
+
+// billingStoreError 把数据库错误转换为可安全记录的 StoreError：只保留 SQLSTATE、约束名和
+// PostgreSQL 报错文本（计费表不含凭据，触发器报错为固定文本），不保留 Detail、SQL 参数或连接信息。
+func billingStoreError(operation string, err error) error {
+	if err == nil {
+		return nil
+	}
+	var storeErr *app.StoreError
+	if errors.As(err, &storeErr) {
+		return err
+	}
+	result := &app.StoreError{Operation: operation, Err: err}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		result.SQLState, result.Constraint, result.Message = pgErr.Code, pgErr.ConstraintName, pgErr.Message
+	}
+	return result
 }

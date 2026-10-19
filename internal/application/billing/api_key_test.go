@@ -2,6 +2,8 @@ package billing
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -146,5 +148,36 @@ func TestSettleDueAPIKeyAddsLatePrincipal(t *testing.T) {
 	if document.TotalTokens != 20 || document.TotalAmount != "0.2" || len(document.Items) != 1 ||
 		document.Items[0].PrincipalID != 2 || document.Items[0].UsageTokens != 20 || document.Items[0].Amount != "0.2" {
 		t.Fatalf("unexpected late principal adjustment: %+v", document)
+	}
+}
+
+func TestSettleDueAPIKeyContinuesAfterPeriodFailure(t *testing.T) {
+	failed := APIKeyPeriod{
+		CredentialID: 30, Currency: "CNY",
+		PeriodStart: time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC),
+		PeriodEnd:   time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC),
+	}
+	settled := APIKeyPeriod{
+		CredentialID: 30, Currency: "CNY",
+		PeriodStart: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC),
+		PeriodEnd:   time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC),
+	}
+	store := &billingStoreStub{
+		apiKeyPeriods: []APIKeyPeriod{failed, settled},
+		apiKeyUsage:   map[APIKeyPeriod][]domain.RatedShare{settled: {{PrincipalID: 1, Tokens: 10, Amount: "1"}}},
+		apiKeyCurrent: map[APIKeyPeriod]APIKeyCurrent{},
+		apiKeyErrors:  map[APIKeyPeriod]error{failed: errors.New("api key settled token total exceeds rated usage")},
+	}
+	service := New(store, &billingIDs{})
+	summary, err := service.SettleDueAPIKeys(context.Background(), settled.PeriodEnd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Created != 1 || summary.Failed != 1 || len(store.apiKeyDocuments) != 1 ||
+		!store.apiKeyDocuments[0].PeriodStart.Equal(settled.PeriodStart) {
+		t.Fatalf("summary=%+v documents=%+v", summary, store.apiKeyDocuments)
+	}
+	if len(summary.FailureSamples) != 1 || !strings.Contains(summary.FailureSamples[0], "period=2026-08-01T00:00:00Z") {
+		t.Fatalf("failure samples=%v", summary.FailureSamples)
 	}
 }
