@@ -463,10 +463,7 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 	}()
 	select {
 	case err := <-serveResult:
-		if !errors.Is(err, http.ErrServerClosed) {
-			return errors.New("HTTP server failed")
-		}
-		return nil
+		return serveFailure(logger, err)
 	case <-ctx.Done():
 		stop()
 		logger.Info("shutdown started")
@@ -506,4 +503,14 @@ func healthcheck(addr string, output io.Writer) error {
 		return fmt.Errorf("health check returned %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// serveFailure 把 Serve 的返回值转换为启动结果：正常关闭返回 nil；其他错误先记录原始错误便于排查，
+// 再向调用方返回固定文本。
+func serveFailure(logger *slog.Logger, err error) error {
+	if err == nil || errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+	logger.Error("HTTP server failed", "error_code", "HTTP_SERVER_FAILED", "error", err.Error())
+	return errors.New("HTTP server failed")
 }
