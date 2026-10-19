@@ -126,20 +126,24 @@ func (q *Queries) BillingAPIKeyCurrentItems(ctx context.Context, arg BillingAPIK
 }
 
 const billingAPIKeyPeriods = `-- name: BillingAPIKeyPeriods :many
-WITH current_rating AS (
-    SELECT DISTINCT ON (usage_record_id)
-           provider_credential_id, usage_started_at, currency
-    FROM usage_rating
-    ORDER BY usage_record_id, revision DESC, id DESC
-)
-SELECT provider_credential_id,
-       date_trunc('month', usage_started_at, 'UTC')::timestamptz AS period_start,
-       (date_trunc('month', usage_started_at, 'UTC') + interval '1 month')::timestamptz AS period_end,
-       currency
-FROM current_rating
-WHERE date_trunc('month', usage_started_at, 'UTC') + interval '1 month' <= $1::timestamptz
-GROUP BY provider_credential_id, period_start, period_end, currency
-ORDER BY period_start, provider_credential_id, currency
+SELECT DISTINCT rating.provider_credential_id,
+       date_trunc('month', rating.usage_started_at, 'UTC')::timestamptz AS period_start,
+       (date_trunc('month', rating.usage_started_at, 'UTC') + interval '1 month')::timestamptz AS period_end,
+       rating.currency
+FROM usage_rating rating
+WHERE rating.usage_started_at < $1::timestamptz
+  AND date_trunc('month', rating.usage_started_at, 'UTC') + interval '1 month' <= $1::timestamptz
+  AND NOT EXISTS (
+      SELECT 1
+      FROM billing_document_usage_rating link
+      WHERE link.usage_rating_id = rating.id
+  )
+  AND NOT EXISTS (
+      SELECT 1
+      FROM usage_rating successor
+      WHERE successor.supersedes_rating_id = rating.id
+  )
+ORDER BY period_start, rating.provider_credential_id, rating.currency
 `
 
 type BillingAPIKeyPeriodsRow struct {
@@ -149,6 +153,8 @@ type BillingAPIKeyPeriodsRow struct {
 	Currency             string
 }
 
+// 只返回仍有未结算核算的到期账期：最新 revision 尚未被任何单据确认（晚到用量或价格纠错）。
+// 已被后续 revision 替代的核算即使未确认也不再参与结算。
 func (q *Queries) BillingAPIKeyPeriods(ctx context.Context, cutoff pgtype.Timestamptz) ([]BillingAPIKeyPeriodsRow, error) {
 	rows, err := q.db.Query(ctx, billingAPIKeyPeriods, cutoff)
 	if err != nil {
@@ -175,11 +181,17 @@ func (q *Queries) BillingAPIKeyPeriods(ctx context.Context, cutoff pgtype.Timest
 }
 
 const billingAPIKeyUsage = `-- name: BillingAPIKeyUsage :many
-WITH current_rating AS (
+WITH period_rating AS (
+    SELECT rating.id, rating.usage_record_id, rating.revision, rating.principal_id,
+           rating.input_tokens, rating.output_tokens, rating.total_cost, rating.currency
+    FROM usage_rating rating
+    WHERE rating.provider_credential_id = $2::bigint
+      AND rating.usage_started_at >= $3::timestamptz
+      AND rating.usage_started_at < $4::timestamptz
+), current_rating AS (
     SELECT DISTINCT ON (usage_record_id)
-           id, principal_id, provider_credential_id, usage_started_at,
-           input_tokens, output_tokens, total_cost, currency
-    FROM usage_rating
+           id, principal_id, input_tokens, output_tokens, total_cost, currency
+    FROM period_rating
     ORDER BY usage_record_id, revision DESC, id DESC
 )
 SELECT id AS usage_rating_id,
@@ -187,18 +199,15 @@ SELECT id AS usage_rating_id,
        (input_tokens + output_tokens)::bigint AS tokens,
        total_cost
 FROM current_rating
-WHERE provider_credential_id = $1::bigint
-  AND usage_started_at >= $2::timestamptz
-  AND usage_started_at < $3::timestamptz
-  AND currency = $4::text
+WHERE currency = $1::text
 ORDER BY principal_id, id
 `
 
 type BillingAPIKeyUsageParams struct {
+	Currency             string
 	ProviderCredentialID int64
 	PeriodStart          pgtype.Timestamptz
 	PeriodEnd            pgtype.Timestamptz
-	Currency             string
 }
 
 type BillingAPIKeyUsageRow struct {
@@ -208,12 +217,14 @@ type BillingAPIKeyUsageRow struct {
 	TotalCost     pgtype.Numeric
 }
 
+// 凭据与调用开始时间在同一用量的各 revision 间不变（由核算触发器保证），先按结算索引筛出
+// 该账期的核算再取最新 revision；币种在取最新 revision 之后过滤，避免误用旧 revision。
 func (q *Queries) BillingAPIKeyUsage(ctx context.Context, arg BillingAPIKeyUsageParams) ([]BillingAPIKeyUsageRow, error) {
 	rows, err := q.db.Query(ctx, billingAPIKeyUsage,
+		arg.Currency,
 		arg.ProviderCredentialID,
 		arg.PeriodStart,
 		arg.PeriodEnd,
-		arg.Currency,
 	)
 	if err != nil {
 		return nil, err
@@ -364,11 +375,10 @@ WHERE input_tokens IS NOT NULL
   AND output_tokens IS NOT NULL
   AND cached_input_tokens <= input_tokens
   AND effective_price_id IS NOT NULL
-  AND model_price_id = effective_price_id
-  AND rating_currency = effective_currency
-  AND rating_input_price = effective_input_price
-  AND rating_cached_input_price = effective_cached_input_price
-  AND rating_output_price = effective_output_price
+  AND billing_rating_matches_price(
+      model_price_id, rating_currency, rating_input_price, rating_cached_input_price, rating_output_price,
+      effective_price_id, effective_currency, effective_input_price, effective_cached_input_price, effective_output_price
+  )
 GROUP BY principal_id, principal_name, principal_type, rating_currency
 ORDER BY tokens DESC, principal_id, rating_currency
 `
@@ -982,6 +992,123 @@ func (q *Queries) BillingPrincipalIdentities(ctx context.Context, principalIds [
 	return items, nil
 }
 
+const billingRepricedUsageCandidates = `-- name: BillingRepricedUsageCandidates :many
+WITH stale AS (
+    SELECT rating.id, rating.usage_record_id, rating.revision, rating.model_price_id
+    FROM provider_credential_model_price price
+    JOIN provider_credential credential
+      ON credential.id = price.provider_credential_id
+     AND credential.auth_type = 'API_KEY'
+    JOIN usage_rating rating
+      ON rating.model_price_id = price.id
+     AND (rating.input_price, rating.cached_input_price, rating.output_price)
+         < (price.input_price, price.cached_input_price, price.output_price)
+    UNION ALL
+    SELECT rating.id, rating.usage_record_id, rating.revision, rating.model_price_id
+    FROM provider_credential_model_price price
+    JOIN provider_credential credential
+      ON credential.id = price.provider_credential_id
+     AND credential.auth_type = 'API_KEY'
+    JOIN usage_rating rating
+      ON rating.model_price_id = price.id
+     AND (rating.input_price, rating.cached_input_price, rating.output_price)
+         > (price.input_price, price.cached_input_price, price.output_price)
+)
+SELECT usage.id AS usage_record_id,
+       usage.principal_id,
+       usage.provider_credential_id,
+       usage.provider_model_id,
+       usage.started_at AS usage_started_at,
+       usage.input_tokens::bigint AS input_tokens,
+       usage.cached_input_tokens::bigint AS cached_input_tokens,
+       usage.output_tokens::bigint AS output_tokens,
+       price.id AS model_price_id,
+       price.currency,
+       price.input_price,
+       price.cached_input_price,
+       price.output_price,
+       stale.id AS latest_rating_id,
+       stale.revision AS latest_revision
+FROM stale
+JOIN usage_record usage ON usage.id = stale.usage_record_id
+JOIN provider_credential_model_price price ON price.id = stale.model_price_id
+WHERE usage.id > $1::bigint
+  AND usage.status = 'SUCCESS'
+  AND usage.input_tokens IS NOT NULL
+  AND usage.cached_input_tokens IS NOT NULL
+  AND usage.output_tokens IS NOT NULL
+  AND usage.cached_input_tokens <= usage.input_tokens
+  AND NOT EXISTS (
+      SELECT 1
+      FROM usage_rating successor
+      WHERE successor.supersedes_rating_id = stale.id
+  )
+ORDER BY usage.id
+LIMIT $2::int
+`
+
+type BillingRepricedUsageCandidatesParams struct {
+	AfterID   int64
+	PageLimit int32
+}
+
+type BillingRepricedUsageCandidatesRow struct {
+	UsageRecordID        int64
+	PrincipalID          int64
+	ProviderCredentialID int64
+	ProviderModelID      int64
+	UsageStartedAt       pgtype.Timestamptz
+	InputTokens          int64
+	CachedInputTokens    int64
+	OutputTokens         int64
+	ModelPriceID         int64
+	Currency             string
+	InputPrice           pgtype.Numeric
+	CachedInputPrice     pgtype.Numeric
+	OutputPrice          pgtype.Numeric
+	LatestRatingID       int64
+	LatestRevision       int32
+}
+
+// 价格金额纠错后需要追加 revision 的调用。触发器禁止新价格覆盖已核算历史、禁止修改或删除
+// 被引用价格的结构，因此最新核算引用的价格版本始终是调用时的有效价格，只需查找价格快照与该
+// 价格当前金额不一致的最新核算；两个范围分支分别走价格快照索引，跳过快照一致的记录。
+func (q *Queries) BillingRepricedUsageCandidates(ctx context.Context, arg BillingRepricedUsageCandidatesParams) ([]BillingRepricedUsageCandidatesRow, error) {
+	rows, err := q.db.Query(ctx, billingRepricedUsageCandidates, arg.AfterID, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []BillingRepricedUsageCandidatesRow{}
+	for rows.Next() {
+		var i BillingRepricedUsageCandidatesRow
+		if err := rows.Scan(
+			&i.UsageRecordID,
+			&i.PrincipalID,
+			&i.ProviderCredentialID,
+			&i.ProviderModelID,
+			&i.UsageStartedAt,
+			&i.InputTokens,
+			&i.CachedInputTokens,
+			&i.OutputTokens,
+			&i.ModelPriceID,
+			&i.Currency,
+			&i.InputPrice,
+			&i.CachedInputPrice,
+			&i.OutputPrice,
+			&i.LatestRatingID,
+			&i.LatestRevision,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const billingStatisticsPrincipals = `-- name: BillingStatisticsPrincipals :many
 SELECT item.principal_id,
        principal.name AS principal_name,
@@ -1058,11 +1185,6 @@ func (q *Queries) BillingStatisticsPrincipals(ctx context.Context, arg BillingSt
 }
 
 const billingStatisticsTotals = `-- name: BillingStatisticsTotals :many
-WITH item_total AS (
-    SELECT billing_document_id, SUM(amount) AS amount
-    FROM billing_document_item
-    GROUP BY billing_document_id
-)
 SELECT document.currency,
        document.billing_type,
        SUM(document.total_amount)::numeric AS total_amount,
@@ -1070,7 +1192,11 @@ SELECT document.currency,
        SUM(document.total_amount - COALESCE(item_total.amount, 0::numeric))::numeric AS unallocated_amount,
        SUM(document.total_tokens)::bigint AS total_tokens
 FROM billing_document document
-LEFT JOIN item_total ON item_total.billing_document_id = document.id
+LEFT JOIN LATERAL (
+    SELECT SUM(item.amount) AS amount
+    FROM billing_document_item item
+    WHERE item.billing_document_id = document.id
+) item_total ON TRUE
 WHERE document.status = 'CONFIRMED'
   AND document.period_start >= $1::timestamptz
   AND document.period_start < $2::timestamptz
@@ -1094,6 +1220,7 @@ type BillingStatisticsTotalsRow struct {
 	TotalTokens       int64
 }
 
+// 先按账期筛选单据，再逐单据聚合明细金额，避免对整张明细表分组。
 func (q *Queries) BillingStatisticsTotals(ctx context.Context, arg BillingStatisticsTotalsParams) ([]BillingStatisticsTotalsRow, error) {
 	rows, err := q.db.Query(ctx, billingStatisticsTotals, arg.FromTime, arg.ToTime, arg.BillingType)
 	if err != nil {
@@ -1312,13 +1439,11 @@ WITH candidates AS (
                  OR usage.cached_input_tokens > usage.input_tokens
                    THEN 'INCOMPLETE_TOKENS'
                WHEN price.id IS NULL THEN 'MISSING_PRICE'
-               WHEN latest.id IS NULL
-                 OR latest.model_price_id <> price.id
-                 OR latest.currency <> price.currency
-                 OR latest.input_price <> price.input_price
-                 OR latest.cached_input_price <> price.cached_input_price
-                 OR latest.output_price <> price.output_price
-                   THEN 'PENDING_RATING'
+               WHEN NOT billing_rating_matches_price(
+                   latest.model_price_id, latest.currency, latest.input_price,
+                   latest.cached_input_price, latest.output_price,
+                   price.id, price.currency, price.input_price, price.cached_input_price, price.output_price
+               ) THEN 'PENDING_RATING'
                ELSE NULL
            END::text AS reason
     FROM usage_record usage
@@ -1425,6 +1550,119 @@ func (q *Queries) BillingUnratedUsage(ctx context.Context, arg BillingUnratedUsa
 	return items, nil
 }
 
+const billingUnratedUsageCandidates = `-- name: BillingUnratedUsageCandidates :many
+WITH pending AS MATERIALIZED (
+    SELECT usage.id
+    FROM usage_record usage
+    JOIN provider_credential credential
+      ON credential.id = usage.provider_credential_id
+     AND credential.auth_type = 'API_KEY'
+    WHERE usage.id > $1::bigint
+      AND usage.status = 'SUCCESS'
+      AND usage.input_tokens IS NOT NULL
+      AND usage.cached_input_tokens IS NOT NULL
+      AND usage.output_tokens IS NOT NULL
+      AND usage.cached_input_tokens <= usage.input_tokens
+      AND NOT EXISTS (
+          SELECT 1
+          FROM usage_rating rating
+          WHERE rating.usage_record_id = usage.id
+      )
+      AND EXISTS (
+          SELECT 1
+          FROM provider_credential_model_price candidate
+          WHERE candidate.provider_credential_id = usage.provider_credential_id
+            AND candidate.provider_model_id = usage.provider_model_id
+            AND candidate.effective_at <= usage.started_at
+      )
+    ORDER BY usage.id
+    LIMIT $2::int
+)
+SELECT usage.id AS usage_record_id,
+       usage.principal_id,
+       usage.provider_credential_id,
+       usage.provider_model_id,
+       usage.started_at AS usage_started_at,
+       usage.input_tokens::bigint AS input_tokens,
+       usage.cached_input_tokens::bigint AS cached_input_tokens,
+       usage.output_tokens::bigint AS output_tokens,
+       price.id AS model_price_id,
+       price.currency,
+       price.input_price,
+       price.cached_input_price,
+       price.output_price
+FROM pending
+JOIN usage_record usage ON usage.id = pending.id
+JOIN LATERAL (
+    SELECT candidate.id, candidate.provider_credential_id, candidate.provider_model_id, candidate.currency, candidate.input_price, candidate.output_price, candidate.cached_input_price, candidate.effective_at, candidate.created_by, candidate.created_at
+    FROM provider_credential_model_price candidate
+    WHERE candidate.provider_credential_id = usage.provider_credential_id
+      AND candidate.provider_model_id = usage.provider_model_id
+      AND candidate.effective_at <= usage.started_at
+    ORDER BY candidate.effective_at DESC, candidate.id DESC
+    LIMIT 1
+) price ON TRUE
+ORDER BY usage.id
+`
+
+type BillingUnratedUsageCandidatesParams struct {
+	AfterID   int64
+	PageLimit int32
+}
+
+type BillingUnratedUsageCandidatesRow struct {
+	UsageRecordID        int64
+	PrincipalID          int64
+	ProviderCredentialID int64
+	ProviderModelID      int64
+	UsageStartedAt       pgtype.Timestamptz
+	InputTokens          int64
+	CachedInputTokens    int64
+	OutputTokens         int64
+	ModelPriceID         int64
+	Currency             string
+	InputPrice           pgtype.Numeric
+	CachedInputPrice     pgtype.Numeric
+	OutputPrice          pgtype.Numeric
+}
+
+// 从未核算的可计费调用：先在物化 CTE 中按用量 ID 顺序走可计费部分索引，以反连接排除已有核算的
+// 记录并确认调用时已有有效价格，只取一页 ID；再回表读取这页记录并查找价格，避免每轮对全部
+// 历史用量回表和执行最新核算查找。
+func (q *Queries) BillingUnratedUsageCandidates(ctx context.Context, arg BillingUnratedUsageCandidatesParams) ([]BillingUnratedUsageCandidatesRow, error) {
+	rows, err := q.db.Query(ctx, billingUnratedUsageCandidates, arg.AfterID, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []BillingUnratedUsageCandidatesRow{}
+	for rows.Next() {
+		var i BillingUnratedUsageCandidatesRow
+		if err := rows.Scan(
+			&i.UsageRecordID,
+			&i.PrincipalID,
+			&i.ProviderCredentialID,
+			&i.ProviderModelID,
+			&i.UsageStartedAt,
+			&i.InputTokens,
+			&i.CachedInputTokens,
+			&i.OutputTokens,
+			&i.ModelPriceID,
+			&i.Currency,
+			&i.InputPrice,
+			&i.CachedInputPrice,
+			&i.OutputPrice,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const billingUsageCost = `-- name: BillingUsageCost :one
 WITH raw AS (
     SELECT usage.id,
@@ -1519,11 +1757,11 @@ SELECT id,
            WHEN input_tokens IS NULL OR cached_input_tokens IS NULL OR output_tokens IS NULL
              OR cached_input_tokens > input_tokens THEN 'INCOMPLETE_TOKENS'
            WHEN effective_price_id IS NULL THEN 'MISSING_PRICE'
-           WHEN rating_id IS NULL OR model_price_id <> effective_price_id
-             OR rating_currency <> effective_currency
-             OR rating_input_price <> effective_input_price
-             OR rating_cached_input_price <> effective_cached_input_price
-             OR rating_output_price <> effective_output_price THEN 'PENDING_RATING'
+           WHEN NOT billing_rating_matches_price(
+               model_price_id, rating_currency, rating_input_price, rating_cached_input_price, rating_output_price,
+               effective_price_id, effective_currency, effective_input_price,
+               effective_cached_input_price, effective_output_price
+           ) THEN 'PENDING_RATING'
            ELSE 'RATED'
        END::text AS rating_status,
        COALESCE(rating_id, 0)::bigint AS rating_id,
@@ -1745,11 +1983,11 @@ WITH raw AS (
                WHEN input_tokens IS NULL OR cached_input_tokens IS NULL OR output_tokens IS NULL
                  OR cached_input_tokens > input_tokens THEN 'INCOMPLETE_TOKENS'
                WHEN effective_price_id IS NULL THEN 'MISSING_PRICE'
-               WHEN rating_id IS NULL OR model_price_id <> effective_price_id
-                 OR rating_currency <> effective_currency
-                 OR rating_input_price <> effective_input_price
-                 OR rating_cached_input_price <> effective_cached_input_price
-                 OR rating_output_price <> effective_output_price THEN 'PENDING_RATING'
+               WHEN NOT billing_rating_matches_price(
+                   model_price_id, rating_currency, rating_input_price, rating_cached_input_price, rating_output_price,
+                   effective_price_id, effective_currency, effective_input_price,
+                   effective_cached_input_price, effective_output_price
+               ) THEN 'PENDING_RATING'
                ELSE 'RATED'
            END::text AS rating_status,
            CASE WHEN billing_type = 'SUBSCRIPTION' THEN subscription_currency ELSE effective_currency END AS currency
@@ -1896,11 +2134,11 @@ WITH raw AS (
                WHEN input_tokens IS NULL OR cached_input_tokens IS NULL OR output_tokens IS NULL
                  OR cached_input_tokens > input_tokens THEN 'INCOMPLETE_TOKENS'
                WHEN effective_price_id IS NULL THEN 'MISSING_PRICE'
-               WHEN rating_id IS NULL OR model_price_id <> effective_price_id
-                 OR rating_currency <> effective_currency
-                 OR rating_input_price <> effective_input_price
-                 OR rating_cached_input_price <> effective_cached_input_price
-                 OR rating_output_price <> effective_output_price THEN 'PENDING_RATING'
+               WHEN NOT billing_rating_matches_price(
+                   model_price_id, rating_currency, rating_input_price, rating_cached_input_price, rating_output_price,
+                   effective_price_id, effective_currency, effective_input_price,
+                   effective_cached_input_price, effective_output_price
+               ) THEN 'PENDING_RATING'
                ELSE 'RATED'
            END::text AS rating_status,
            CASE WHEN billing_type = 'SUBSCRIPTION' THEN subscription_currency ELSE effective_currency END AS currency
@@ -2062,11 +2300,11 @@ WITH raw AS (
                WHEN input_tokens IS NULL OR cached_input_tokens IS NULL OR output_tokens IS NULL
                  OR cached_input_tokens > input_tokens THEN 'INCOMPLETE_TOKENS'
                WHEN effective_price_id IS NULL THEN 'MISSING_PRICE'
-               WHEN rating_id IS NULL OR model_price_id <> effective_price_id
-                 OR rating_currency <> effective_currency
-                 OR rating_input_price <> effective_input_price
-                 OR rating_cached_input_price <> effective_cached_input_price
-                 OR rating_output_price <> effective_output_price THEN 'PENDING_RATING'
+               WHEN NOT billing_rating_matches_price(
+                   model_price_id, rating_currency, rating_input_price, rating_cached_input_price, rating_output_price,
+                   effective_price_id, effective_currency, effective_input_price,
+                   effective_cached_input_price, effective_output_price
+               ) THEN 'PENDING_RATING'
                ELSE 'RATED'
            END::text AS rating_status,
            CASE WHEN billing_type = 'SUBSCRIPTION' THEN subscription_currency ELSE effective_currency END AS currency
@@ -2234,119 +2472,6 @@ func (q *Queries) BillingUsageCosts(ctx context.Context, arg BillingUsageCostsPa
 			&i.TotalCost,
 			&i.RatedAt,
 			&i.TotalCount,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const billingUsageRatingCandidates = `-- name: BillingUsageRatingCandidates :many
-SELECT usage.id AS usage_record_id,
-       usage.principal_id,
-       usage.provider_credential_id,
-       usage.provider_model_id,
-       usage.started_at AS usage_started_at,
-       usage.input_tokens::bigint AS input_tokens,
-       usage.cached_input_tokens::bigint AS cached_input_tokens,
-       usage.output_tokens::bigint AS output_tokens,
-       price.id AS model_price_id,
-       price.currency,
-       price.input_price,
-       price.cached_input_price,
-       price.output_price,
-       COALESCE(latest.id, 0)::bigint AS latest_rating_id,
-       COALESCE(latest.revision, 0)::int AS latest_revision
-FROM usage_record usage
-JOIN provider_credential credential
-  ON credential.id = usage.provider_credential_id
- AND credential.auth_type = 'API_KEY'
-JOIN LATERAL (
-    SELECT candidate.id, candidate.provider_credential_id, candidate.provider_model_id, candidate.currency, candidate.input_price, candidate.output_price, candidate.cached_input_price, candidate.effective_at, candidate.created_by, candidate.created_at
-    FROM provider_credential_model_price candidate
-    WHERE candidate.provider_credential_id = usage.provider_credential_id
-      AND candidate.provider_model_id = usage.provider_model_id
-      AND candidate.effective_at <= usage.started_at
-    ORDER BY candidate.effective_at DESC, candidate.id DESC
-    LIMIT 1
-) price ON TRUE
-LEFT JOIN LATERAL (
-    SELECT rating.id, rating.usage_record_id, rating.revision, rating.supersedes_rating_id, rating.principal_id, rating.provider_credential_id, rating.provider_model_id, rating.model_price_id, rating.usage_started_at, rating.input_tokens, rating.cached_input_tokens, rating.output_tokens, rating.input_price, rating.cached_input_price, rating.output_price, rating.input_cost, rating.cached_input_cost, rating.output_cost, rating.total_cost, rating.currency, rating.created_at
-    FROM usage_rating rating
-    WHERE rating.usage_record_id = usage.id
-    ORDER BY rating.revision DESC, rating.id DESC
-    LIMIT 1
-) latest ON TRUE
-WHERE usage.id > $1::bigint
-  AND usage.status = 'SUCCESS'
-  AND usage.input_tokens IS NOT NULL
-  AND usage.cached_input_tokens IS NOT NULL
-  AND usage.output_tokens IS NOT NULL
-  AND usage.cached_input_tokens <= usage.input_tokens
-  AND (
-      latest.id IS NULL
-      OR latest.model_price_id <> price.id
-      OR latest.currency <> price.currency
-      OR latest.input_price <> price.input_price
-      OR latest.cached_input_price <> price.cached_input_price
-      OR latest.output_price <> price.output_price
-  )
-ORDER BY usage.id
-LIMIT $2::int
-`
-
-type BillingUsageRatingCandidatesParams struct {
-	AfterID   int64
-	PageLimit int32
-}
-
-type BillingUsageRatingCandidatesRow struct {
-	UsageRecordID        int64
-	PrincipalID          int64
-	ProviderCredentialID int64
-	ProviderModelID      int64
-	UsageStartedAt       pgtype.Timestamptz
-	InputTokens          int64
-	CachedInputTokens    int64
-	OutputTokens         int64
-	ModelPriceID         int64
-	Currency             string
-	InputPrice           pgtype.Numeric
-	CachedInputPrice     pgtype.Numeric
-	OutputPrice          pgtype.Numeric
-	LatestRatingID       int64
-	LatestRevision       int32
-}
-
-func (q *Queries) BillingUsageRatingCandidates(ctx context.Context, arg BillingUsageRatingCandidatesParams) ([]BillingUsageRatingCandidatesRow, error) {
-	rows, err := q.db.Query(ctx, billingUsageRatingCandidates, arg.AfterID, arg.PageLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []BillingUsageRatingCandidatesRow{}
-	for rows.Next() {
-		var i BillingUsageRatingCandidatesRow
-		if err := rows.Scan(
-			&i.UsageRecordID,
-			&i.PrincipalID,
-			&i.ProviderCredentialID,
-			&i.ProviderModelID,
-			&i.UsageStartedAt,
-			&i.InputTokens,
-			&i.CachedInputTokens,
-			&i.OutputTokens,
-			&i.ModelPriceID,
-			&i.Currency,
-			&i.InputPrice,
-			&i.CachedInputPrice,
-			&i.OutputPrice,
-			&i.LatestRatingID,
-			&i.LatestRevision,
 		); err != nil {
 			return nil, err
 		}

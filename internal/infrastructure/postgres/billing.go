@@ -215,24 +215,46 @@ func (s *BillingStore) insertDocument(ctx context.Context, document app.Document
 	return true, nil
 }
 
-func (s *BillingStore) UsageRatingCandidates(ctx context.Context, after int64, limit int32) ([]app.UsageRatingCandidate, error) {
-	rows, err := s.q.BillingUsageRatingCandidates(ctx, dbgen.BillingUsageRatingCandidatesParams{AfterID: after, PageLimit: limit})
-	if err != nil {
-		return nil, billingStoreError("usage_rating_candidates", err)
+func (s *BillingStore) UsageRatingCandidates(ctx context.Context, scan app.RatingScan, after int64, limit int32) ([]app.UsageRatingCandidate, error) {
+	switch scan {
+	case app.RatingScanUnrated:
+		rows, err := s.q.BillingUnratedUsageCandidates(ctx, dbgen.BillingUnratedUsageCandidatesParams{AfterID: after, PageLimit: limit})
+		if err != nil {
+			return nil, billingStoreError("unrated_usage_candidates", err)
+		}
+		result := make([]app.UsageRatingCandidate, 0, len(rows))
+		for _, row := range rows {
+			result = append(result, app.UsageRatingCandidate{
+				UsageRecordID: row.UsageRecordID, PrincipalID: row.PrincipalID,
+				CredentialID: row.ProviderCredentialID, ProviderModelID: row.ProviderModelID,
+				ModelPriceID: row.ModelPriceID, UsageStartedAt: row.UsageStartedAt.Time.UTC(),
+				InputTokens: row.InputTokens, CachedInputTokens: row.CachedInputTokens, OutputTokens: row.OutputTokens,
+				InputPrice: priceNumber(row.InputPrice), CachedInputPrice: priceNumber(row.CachedInputPrice),
+				OutputPrice: priceNumber(row.OutputPrice), Currency: row.Currency,
+			})
+		}
+		return result, nil
+	case app.RatingScanRepriced:
+		rows, err := s.q.BillingRepricedUsageCandidates(ctx, dbgen.BillingRepricedUsageCandidatesParams{AfterID: after, PageLimit: limit})
+		if err != nil {
+			return nil, billingStoreError("repriced_usage_candidates", err)
+		}
+		result := make([]app.UsageRatingCandidate, 0, len(rows))
+		for _, row := range rows {
+			result = append(result, app.UsageRatingCandidate{
+				UsageRecordID: row.UsageRecordID, PrincipalID: row.PrincipalID,
+				CredentialID: row.ProviderCredentialID, ProviderModelID: row.ProviderModelID,
+				ModelPriceID: row.ModelPriceID, LatestRatingID: row.LatestRatingID,
+				LatestRevision: row.LatestRevision, UsageStartedAt: row.UsageStartedAt.Time.UTC(),
+				InputTokens: row.InputTokens, CachedInputTokens: row.CachedInputTokens, OutputTokens: row.OutputTokens,
+				InputPrice: priceNumber(row.InputPrice), CachedInputPrice: priceNumber(row.CachedInputPrice),
+				OutputPrice: priceNumber(row.OutputPrice), Currency: row.Currency,
+			})
+		}
+		return result, nil
+	default:
+		return nil, appsec.ErrInvalidArgument
 	}
-	result := make([]app.UsageRatingCandidate, 0, len(rows))
-	for _, row := range rows {
-		result = append(result, app.UsageRatingCandidate{
-			UsageRecordID: row.UsageRecordID, PrincipalID: row.PrincipalID,
-			CredentialID: row.ProviderCredentialID, ProviderModelID: row.ProviderModelID,
-			ModelPriceID: row.ModelPriceID, LatestRatingID: row.LatestRatingID,
-			LatestRevision: row.LatestRevision, UsageStartedAt: row.UsageStartedAt.Time.UTC(),
-			InputTokens: row.InputTokens, CachedInputTokens: row.CachedInputTokens, OutputTokens: row.OutputTokens,
-			InputPrice: priceNumber(row.InputPrice), CachedInputPrice: priceNumber(row.CachedInputPrice),
-			OutputPrice: priceNumber(row.OutputPrice), Currency: row.Currency,
-		})
-	}
-	return result, nil
 }
 
 func (s *BillingStore) CreateUsageRating(ctx context.Context, rating app.UsageRating) (bool, error) {

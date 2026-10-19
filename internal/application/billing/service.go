@@ -169,7 +169,7 @@ type Store interface {
 	SubscriptionCorrections(context.Context) ([]Correction, error)
 	OriginalUsage(context.Context, int64) ([]domain.UsageShare, error)
 	CreateAdjustment(context.Context, string, Document) (bool, error)
-	UsageRatingCandidates(context.Context, int64, int32) ([]UsageRatingCandidate, error)
+	UsageRatingCandidates(context.Context, RatingScan, int64, int32) ([]UsageRatingCandidate, error)
 	CreateUsageRating(context.Context, UsageRating) (bool, error)
 	APIKeyPeriods(context.Context, time.Time) ([]APIKeyPeriod, error)
 	APIKeyUsage(context.Context, APIKeyPeriod) ([]domain.RatedShare, []int64, error)

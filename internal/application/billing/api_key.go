@@ -55,6 +55,16 @@ type APIKeyCurrent struct {
 	Items              []APIKeyCurrentItem
 }
 
+// RatingScan 区分核算候选的两类来源，分别由针对性的索引查询定位。
+type RatingScan string
+
+const (
+	// RatingScanUnrated 查找从未核算、且调用时已有有效价格的可计费调用。
+	RatingScanUnrated RatingScan = "UNRATED"
+	// RatingScanRepriced 查找最新核算的价格快照与所引用价格当前金额不一致、需要追加 revision 的调用。
+	RatingScanRepriced RatingScan = "REPRICED"
+)
+
 // RatingSummary 汇总一次核算扫描；单条记录失败计入 Failed 并在本轮内跳过，下一轮会重新尝试。
 type RatingSummary struct {
 	Created, Skipped, Failed int
@@ -68,8 +78,8 @@ func (s *RatingSummary) recordFailure(format string, args ...any) {
 	}
 }
 
-// RatePendingAPIKeyUsage 按用量 ID 递增翻页核算待核算的调用，受 maxRatingsPerRun 上限约束；
-// 单条记录核算失败只计入失败并继续。
+// RatePendingAPIKeyUsage 先核算从未核算的调用，再为价格金额纠错后的调用追加 revision。
+// 两类扫描各自按用量 ID 递增翻页并共享 maxRatingsPerRun 上限；单条记录核算失败只计入失败并继续。
 func (s *Service) RatePendingAPIKeyUsage(ctx context.Context, pageSize int32) (RatingSummary, error) {
 	var summary RatingSummary
 	if s == nil || s.store == nil || s.ids == nil {
@@ -81,30 +91,40 @@ func (s *Service) RatePendingAPIKeyUsage(ctx context.Context, pageSize int32) (R
 	if pageSize > 5000 {
 		return summary, appsec.ErrInvalidArgument
 	}
-	var after int64
-	for processed := 0; processed < maxRatingsPerRun; {
-		candidates, err := s.store.UsageRatingCandidates(ctx, after, pageSize)
-		if err != nil {
+	processed := 0
+	for _, scan := range []RatingScan{RatingScanUnrated, RatingScanRepriced} {
+		if err := s.rateScan(ctx, scan, pageSize, &processed, &summary); err != nil {
 			return summary, err
 		}
-		if len(candidates) == 0 {
-			return summary, nil
+	}
+	return summary, nil
+}
+
+func (s *Service) rateScan(ctx context.Context, scan RatingScan, pageSize int32, processed *int, summary *RatingSummary) error {
+	var after int64
+	for {
+		if *processed >= maxRatingsPerRun {
+			return errors.New("usage rating run exceeded record limit")
+		}
+		candidates, err := s.store.UsageRatingCandidates(ctx, scan, after, pageSize)
+		if err != nil {
+			return err
 		}
 		for _, candidate := range candidates {
 			if candidate.UsageRecordID <= after {
-				return summary, errors.New("usage rating candidates are not ordered")
+				return errors.New("usage rating candidates are not ordered")
 			}
 			after = candidate.UsageRecordID
 			created, err := s.rateCandidate(ctx, candidate)
-			processed++
+			*processed++
 			if err != nil {
 				if ctx.Err() != nil {
-					return summary, ctx.Err()
+					return ctx.Err()
 				}
 				if errors.Is(err, errBillingID) {
-					return summary, err
+					return err
 				}
-				summary.recordFailure("usage rating usage=%d: %s", candidate.UsageRecordID, SafeErrorText(err))
+				summary.recordFailure("usage rating scan=%s usage=%d: %s", scan, candidate.UsageRecordID, SafeErrorText(err))
 				continue
 			}
 			if created {
@@ -114,10 +134,9 @@ func (s *Service) RatePendingAPIKeyUsage(ctx context.Context, pageSize int32) (R
 			}
 		}
 		if len(candidates) < int(pageSize) {
-			return summary, nil
+			return nil
 		}
 	}
-	return summary, errors.New("usage rating run exceeded record limit")
 }
 
 func (s *Service) rateCandidate(ctx context.Context, candidate UsageRatingCandidate) (bool, error) {
@@ -147,7 +166,7 @@ func (s *Service) rateCandidate(ctx context.Context, candidate UsageRatingCandid
 	return s.store.CreateUsageRating(ctx, rating)
 }
 
-// SettleDueAPIKeys 结算到期的 API Key 自然月账期；单个账期失败计入 Failed 后继续。
+// SettleDueAPIKeys 结算仍有未确认核算的到期 API Key 自然月账期；单个账期失败计入 Failed 后继续。
 func (s *Service) SettleDueAPIKeys(ctx context.Context, cutoff time.Time) (Summary, error) {
 	var summary Summary
 	if s == nil || s.store == nil || s.ids == nil || cutoff.IsZero() {

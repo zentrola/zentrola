@@ -28,6 +28,9 @@ type billingStoreStub struct {
 	adjustments      []Document
 	statistics       Statistics
 	ratingCandidates []UsageRatingCandidate
+	repricedRatings  []UsageRatingCandidate
+	ratingScans      []RatingScan
+	ratingErrors     map[int64]error
 	chargeErrors     map[int64]error
 	apiKeyErrors     map[APIKeyPeriod]error
 	ratings          []UsageRating
@@ -79,9 +82,14 @@ func (s *billingStoreStub) BillingDocument(context.Context, int64) (DocumentDeta
 func (s *billingStoreStub) UnratedUsage(context.Context, UnratedUsageFilter) (UnratedUsagePage, error) {
 	return s.unrated, nil
 }
-func (s *billingStoreStub) UsageRatingCandidates(_ context.Context, after int64, limit int32) ([]UsageRatingCandidate, error) {
+func (s *billingStoreStub) UsageRatingCandidates(_ context.Context, scan RatingScan, after int64, limit int32) ([]UsageRatingCandidate, error) {
+	s.ratingScans = append(s.ratingScans, scan)
+	source := s.ratingCandidates
+	if scan == RatingScanRepriced {
+		source = s.repricedRatings
+	}
 	result := make([]UsageRatingCandidate, 0, limit)
-	for _, candidate := range s.ratingCandidates {
+	for _, candidate := range source {
 		if candidate.UsageRecordID > after && len(result) < int(limit) {
 			result = append(result, candidate)
 		}
@@ -89,6 +97,9 @@ func (s *billingStoreStub) UsageRatingCandidates(_ context.Context, after int64,
 	return result, nil
 }
 func (s *billingStoreStub) CreateUsageRating(_ context.Context, rating UsageRating) (bool, error) {
+	if err := s.ratingErrors[rating.UsageRecordID]; err != nil {
+		return false, err
+	}
 	s.ratings = append(s.ratings, rating)
 	return true, nil
 }

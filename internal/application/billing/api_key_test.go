@@ -151,6 +151,53 @@ func TestSettleDueAPIKeyAddsLatePrincipal(t *testing.T) {
 	}
 }
 
+func TestRatePendingAPIKeyUsageScansUnratedThenRepricedAndIsolatesFailures(t *testing.T) {
+	startedAt := time.Date(2026, 9, 15, 1, 2, 3, 0, time.UTC)
+	candidate := func(id int64, revision int32) UsageRatingCandidate {
+		latest := int64(0)
+		if revision > 0 {
+			latest = id + 1000
+		}
+		return UsageRatingCandidate{
+			UsageRecordID: id, PrincipalID: 20, CredentialID: 30, ProviderModelID: 40, ModelPriceID: 50,
+			LatestRatingID: latest, LatestRevision: revision, UsageStartedAt: startedAt,
+			InputTokens: 5, InputPrice: "5", CachedInputPrice: "1", OutputPrice: "10", Currency: "CNY",
+		}
+	}
+	store := &billingStoreStub{
+		ratingCandidates: []UsageRatingCandidate{candidate(10, 0), candidate(11, 0), candidate(12, 0)},
+		repricedRatings:  []UsageRatingCandidate{candidate(5, 1), candidate(13, 2)},
+		ratingErrors: map[int64]error{11: &StoreError{
+			Operation: "create_usage_rating", SQLState: "23514", Message: "usage rating price snapshot is not current",
+		}},
+	}
+	service := New(store, &billingIDs{next: 100})
+	summary, err := service.RatePendingAPIKeyUsage(context.Background(), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Created != 4 || summary.Failed != 1 || len(store.ratings) != 4 {
+		t.Fatalf("summary=%+v ratings=%+v", summary, store.ratings)
+	}
+	gotIDs := make([]int64, 0, len(store.ratings))
+	for _, rating := range store.ratings {
+		gotIDs = append(gotIDs, rating.UsageRecordID)
+	}
+	if want := []int64{10, 12, 5, 13}; !equalInt64s(gotIDs, want) {
+		t.Fatalf("rated usage=%v; want %v", gotIDs, want)
+	}
+	if store.ratings[2].Revision != 2 || store.ratings[2].SupersedesRatingID != 1005 || store.ratings[3].Revision != 3 {
+		t.Fatalf("repriced revisions=%+v", store.ratings[2:])
+	}
+	if len(summary.FailureSamples) != 1 || !strings.Contains(summary.FailureSamples[0], "usage=11") ||
+		!strings.Contains(summary.FailureSamples[0], "sqlstate=23514") {
+		t.Fatalf("failure samples=%v", summary.FailureSamples)
+	}
+	if store.ratingScans[0] != RatingScanUnrated || store.ratingScans[len(store.ratingScans)-1] != RatingScanRepriced {
+		t.Fatalf("scan order=%v", store.ratingScans)
+	}
+}
+
 func TestSettleDueAPIKeyContinuesAfterPeriodFailure(t *testing.T) {
 	failed := APIKeyPeriod{
 		CredentialID: 30, Currency: "CNY",
@@ -180,4 +227,16 @@ func TestSettleDueAPIKeyContinuesAfterPeriodFailure(t *testing.T) {
 	if len(summary.FailureSamples) != 1 || !strings.Contains(summary.FailureSamples[0], "period=2026-08-01T00:00:00Z") {
 		t.Fatalf("failure samples=%v", summary.FailureSamples)
 	}
+}
+
+func equalInt64s(left, right []int64) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
