@@ -412,6 +412,20 @@ func (s *ResourceService) ConsumeResourceResetCredit(ctx context.Context, actor 
 	}
 	consumed, err := consumer.ConsumeResetCredit(ctx, plain, proxy, idempotencyKey, creditID)
 	if err != nil {
+		// 兑换失败前 app-server 可能已轮换 refresh token，旧 token 随即失效：仍须条件保存新凭据。
+		if sealed, inspection, ok := s.sealRotatedCredential(actor, resource.Resource, adapter, err); ok {
+			auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+			defer cancel()
+			readSealed := resource.Sealed
+			_ = s.store.WriteResource(auditCtx, actor, func(w ResourceSession) error {
+				current, err := w.Resource(auditCtx, id)
+				if err != nil {
+					return err
+				}
+				return persistRotatedCredential(auditCtx, w, current, readSealed, sealed,
+					inspection.CredentialRefreshedAt, inspection.CredentialExpiresAt, businessTime(s.now))
+			})
+		}
 		return ResetCreditConsumeResult{}, appsec.ErrUnavailable
 	}
 	defer clear(consumed.Probe.Credential)

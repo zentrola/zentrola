@@ -44,6 +44,7 @@ func (claudeSubscriptionAdapterStub) SupportsProvider(provider Provider) bool {
 type resetCreditAdapterStub struct {
 	subscriptionAdapterStub
 	consume   ResetCreditConsume
+	err       error
 	onConsume func(string, string, *catalog.OutboundProxy)
 }
 
@@ -68,7 +69,7 @@ func (s resetCreditAdapterStub) ConsumeResetCredit(_ context.Context, _ []byte, 
 	if s.onConsume != nil {
 		s.onConsume(idempotencyKey, creditID, proxy)
 	}
-	return s.consume, nil
+	return s.consume, s.err
 }
 
 func TestMissingManagementDependenciesFailClosed(t *testing.T) {
