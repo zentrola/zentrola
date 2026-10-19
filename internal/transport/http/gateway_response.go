@@ -36,11 +36,13 @@ type gatewayResponsePump struct {
 	downstreamOpen         bool
 	upstreamBytes          int64
 	firstByteObserved      bool
+	usageFilter            *gw.ChatUsageChunkFilter
 }
 
 func (p *gatewayResponsePump) run() {
 	defer p.controller.SetWriteDeadline(time.Time{})
 	responseStream, contentType, mediaType, streamInferred := p.configureObserver()
+	p.configureUsageFilter(responseStream)
 	if p.retainCompletion {
 		p.handler.logOpenAIResponsesDiagnostic(p.request.Context(), slog.LevelInfo, "upstream_opened", *p.observer,
 			"upstream_status", p.upstream.Status,
@@ -97,6 +99,17 @@ func (p *gatewayResponsePump) configureObserver() (bool, string, string, bool) {
 	return responseStream, contentType, mediaType, streamInferred
 }
 
+// configureUsageFilter 在 include_usage 由网关代为开启时剥离上游追加的 usage chunk。
+// observer 仍读取原始字节，计量不受剥离影响。
+func (p *gatewayResponsePump) configureUsageFilter(responseStream bool) {
+	encoding := http.Header(p.upstream.Headers).Get("Content-Encoding")
+	if !p.upstream.OmitUsageChunk || !responseStream || p.upstream.Status < 200 || p.upstream.Status >= 300 ||
+		(encoding != "" && encoding != "identity") {
+		return
+	}
+	p.usageFilter = gw.NewChatUsageChunkFilter()
+}
+
 func (p *gatewayResponsePump) openDownstream(responseStream bool) {
 	copyUpstreamHeaders(p.writer.Header(), p.upstream.Headers)
 	if responseStream && p.writer.Header().Get("Content-Type") == "" {
@@ -120,6 +133,9 @@ func (p *gatewayResponsePump) copyBody() {
 			return
 		}
 		if readErr != nil {
+			if readErr == io.EOF {
+				p.flushUsageFilter()
+			}
 			p.finish(readErr)
 			return
 		}
@@ -141,17 +157,17 @@ func (p *gatewayResponsePump) consume(chunk []byte) bool {
 		return true
 	}
 	if p.downstreamOpen {
-		_ = p.controller.SetWriteDeadline(time.Now().Add(p.handler.cfg.WriteTimeout))
-		if _, err := p.writer.Write(chunk); err != nil {
-			p.clientWriteFailed("client_write_failed")
-		} else if err := p.controller.Flush(); err != nil {
-			p.clientWriteFailed("client_flush_failed")
+		output := chunk
+		if p.usageFilter != nil {
+			output = p.usageFilter.Filter(chunk)
 		}
+		p.writeDownstream(output)
 		if !p.downstreamOpen && (!p.retainCompletion || observer == nil) {
 			return true
 		}
 	}
 	if p.trace != nil && observer != nil && observer.Complete() {
+		p.flushUsageFilter()
 		p.trace.Status = usage.Success
 		p.trace.ErrorType = ""
 		addUsageTokenFields(p.request.Context(), p.trace, observer)
@@ -164,7 +180,33 @@ func (p *gatewayResponsePump) consume(chunk []byte) bool {
 		}
 		return true
 	}
+	if p.trace != nil && observer != nil && p.protocol == gw.OpenAIProtocol && observer.Ended() {
+		// 已收到 [DONE] 但缺少 usage（上游忽略 include_usage）：按不完整记录，
+		// 不再等待上游关闭连接。
+		p.flushUsageFilter()
+		p.interrupted(observer.ErrorCode())
+		addUsageTokenFields(p.request.Context(), p.trace, observer)
+		return true
+	}
 	return false
+}
+
+func (p *gatewayResponsePump) writeDownstream(output []byte) {
+	if !p.downstreamOpen || len(output) == 0 {
+		return
+	}
+	_ = p.controller.SetWriteDeadline(time.Now().Add(p.handler.cfg.WriteTimeout))
+	if _, err := p.writer.Write(output); err != nil {
+		p.clientWriteFailed("client_write_failed")
+	} else if err := p.controller.Flush(); err != nil {
+		p.clientWriteFailed("client_flush_failed")
+	}
+}
+
+func (p *gatewayResponsePump) flushUsageFilter() {
+	if p.usageFilter != nil {
+		p.writeDownstream(p.usageFilter.Flush())
+	}
 }
 
 func (p *gatewayResponsePump) clientWriteFailed(reason string) {

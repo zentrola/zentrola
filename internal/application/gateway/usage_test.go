@@ -195,3 +195,14 @@ func TestUsageAnthropicCacheRegressionAndOverflowAreUnreliable(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenAIChatStreamWithoutUsageIsIncomplete(t *testing.T) {
+	body := "data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n" +
+		"data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: [DONE]\n\n"
+	o := NewOpenAIUsageObserver(true)
+	o.Feed([]byte(body))
+	if o.Complete() || o.ErrorCode() != "UPSTREAM_RESPONSE_INCOMPLETE" {
+		t.Fatalf("stream without usage completed: complete=%v code=%s", o.Complete(), o.ErrorCode())
+	}
+}

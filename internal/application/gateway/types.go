@@ -236,8 +236,11 @@ type Response struct {
 	Headers         map[string][]string
 	Body            io.ReadCloser
 	RequestedStream bool
-	ErrorType       string
-	route           *Route
+	// OmitUsageChunk 表示 include_usage 由网关代客户端开启，转发时应剥离上游
+	// 额外返回的 usage chunk（choices 为空数组），保持对客户端透明。
+	OmitUsageChunk bool
+	ErrorType      string
+	route          *Route
 }
 
 type RouteSelection struct {
@@ -376,6 +379,7 @@ func (s *Service) Forward(ctx context.Context, identity appsec.PrincipalIdentity
 	response, err := s.forwardCandidates(ctx, identity, request, parsed, routes)
 	if response != nil {
 		response.RequestedStream = parsed.Stream
+		response.OmitUsageChunk = parsed.injectsStreamUsage(request.Protocol)
 	}
 	return response, err
 }

@@ -52,3 +52,51 @@ func TestRemoveUnsupportedToolTypesPreservesOtherJSON(t *testing.T) {
 		t.Fatal("unmatched tool filtering changed request")
 	}
 }
+
+func TestUpstreamBodyForcesChatStreamUsage(t *testing.T) {
+	tests := []struct {
+		name, protocol, body, model, want string
+		includeUsage, reuse               bool
+	}{
+		{name: "insert", protocol: OpenAIProtocol, model: "alias",
+			body: ` {"model":"alias","stream":true,"messages":[]}`,
+			want: ` {"stream_options":{"include_usage":true},"model":"alias","stream":true,"messages":[]}`},
+		{name: "insert with model rewrite", protocol: OpenAIProtocol, model: "upstream",
+			body: `{"model":"alias","stream":true,"messages":[]}`,
+			want: `{"stream_options":{"include_usage":true},"model":"upstream","stream":true,"messages":[]}`},
+		{name: "null options", protocol: OpenAIProtocol, model: "upstream",
+			body: `{"stream":true,"stream_options":null,"model":"alias"}`,
+			want: `{"stream":true,"stream_options":{"include_usage":true},"model":"upstream"}`},
+		{name: "merge other options", protocol: OpenAIProtocol, model: "alias",
+			body: `{"model":"alias","stream":true,"stream_options":{"continuous_usage_stats":true,"include_usage":false}}`,
+			want: `{"model":"alias","stream":true,"stream_options":{"continuous_usage_stats":true,"include_usage":true}}`},
+		{name: "client requested usage", protocol: OpenAIProtocol, model: "alias", includeUsage: true, reuse: true,
+			body: `{"model":"alias","stream":true,"stream_options":{"include_usage":true}}`,
+			want: `{"model":"alias","stream":true,"stream_options":{"include_usage":true}}`},
+		{name: "non stream", protocol: OpenAIProtocol, model: "alias", reuse: true,
+			body: `{"model":"alias","stream":false}`, want: `{"model":"alias","stream":false}`},
+		{name: "responses untouched", protocol: OpenAIResponsesProtocol, model: "alias", reuse: true,
+			body: `{"model":"alias","stream":true}`, want: `{"model":"alias","stream":true}`},
+		{name: "anthropic untouched", protocol: AnthropicProtocol, model: "upstream",
+			body: `{"model":"alias","stream":true}`, want: `{"model":"upstream","stream":true}`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			body := []byte(test.body)
+			parsed, err := ParseOpenAI(body)
+			if err != nil || parsed.IncludeUsage != test.includeUsage {
+				t.Fatalf("parse err=%v includeUsage=%v", err, parsed.IncludeUsage)
+			}
+			got := parsed.upstreamBody(body, test.protocol, test.model)
+			if string(got) != test.want {
+				t.Fatalf("got %s want %s", got, test.want)
+			}
+			if test.reuse && &got[0] != &body[0] {
+				t.Fatal("unchanged body was copied")
+			}
+			if _, err := ParseOpenAI(got); err != nil {
+				t.Fatalf("rewritten body is invalid: %v", err)
+			}
+		})
+	}
+}

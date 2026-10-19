@@ -123,7 +123,7 @@ func (s *Service) forwardCandidates(ctx context.Context, identity appsec.Princip
 				continue
 			}
 		}
-		request.Body = parsed.Rewrite(originalBody, route.UpstreamModel)
+		request.Body = parsed.upstreamBody(originalBody, request.Protocol, route.UpstreamModel)
 		attempt := s.startAttempt(request.Trace, route)
 		response, openErr := s.upstream.Open(ctx, route, request, credential)
 		clear(credential)

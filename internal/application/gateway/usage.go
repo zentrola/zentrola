@@ -22,6 +22,7 @@ type UsageObserver struct {
 	drop                          bool
 	start, stop, failed, badUsage bool
 	protocolInvalid               bool
+	usageSeen                     bool
 	blocks                        map[int]bool
 	nextBlock                     int
 	// input 保存上游原始输入计数。Anthropic 的 input_tokens 不含缓存，
@@ -309,6 +310,7 @@ func (o *UsageObserver) event(raw []byte) {
 			}
 			o.start = true
 			if len(chunk.Usage) > 0 && string(chunk.Usage) != "null" {
+				o.usageSeen = true
 				o.update(chunk.Usage)
 			}
 		}
@@ -503,10 +505,23 @@ func (o *UsageObserver) update(raw []byte) {
 }
 func (o *UsageObserver) Complete() bool {
 	if o.stream {
-		return o.start && o.stop && !o.failed
+		complete := o.start && o.stop && !o.failed
+		// Chat Completions 流式响应只在 usage chunk 中返回计量。收到 [DONE] 但缺少
+		// usage 时按不完整处理，避免以 SUCCESS 记录 0 Token 而绕过配额与计费。
+		if o.openai && !o.responses {
+			complete = complete && o.usageSeen
+		}
+		return complete
 	}
 	return o.start && o.json.complete && !o.json.invalid && !o.failed
 }
+
+// Ended 表示流式响应已收到终止事件（[DONE]、message_stop 或 response.completed）。
+// 终止后即使计量不完整也不会再有有效数据，调用方无需等待上游关闭连接。
+func (o *UsageObserver) Ended() bool {
+	return o != nil && o.stream && o.stop
+}
+
 func (o *UsageObserver) ErrorCode() string {
 	if o.protocolInvalid {
 		return "UPSTREAM_INVALID_RESPONSE"
