@@ -73,9 +73,10 @@ func (s *managementSession) HasUsableApplicationKey(ctx context.Context, id int6
 	})
 }
 
-func (s *managementSession) ApplicationOperations(ctx context.Context, id int64, page mgmt.Page) ([]mgmt.Operation, error) {
+func (s *managementSession) ApplicationOperations(ctx context.Context, id int64, page mgmt.Page, filter mgmt.OperationFilter) ([]mgmt.Operation, error) {
 	rows, err := s.q.ManageApplicationOperations(ctx, dbgen.ManageApplicationOperationsParams{ApplicationID: &id,
-		AfterID: page.After, PageLimit: managementPageLimit(page)})
+		AfterID: page.After, OperationType: filter.Type, Result: filter.Result,
+		KeywordPattern: likeContainsPattern(filter.Keyword), PageLimit: managementPageLimit(page)})
 	if err != nil {
 		return nil, err
 	}
@@ -89,8 +90,11 @@ func (s *managementSession) ApplicationOperations(ctx context.Context, id int64,
 	return result, nil
 }
 
-func (s *managementSession) CountApplicationOperations(ctx context.Context, id int64) (int64, error) {
-	return s.q.CountManageApplicationOperations(ctx, &id)
+func (s *managementSession) CountApplicationOperations(ctx context.Context, id int64, filter mgmt.OperationFilter) (int64, error) {
+	return s.q.CountManageApplicationOperations(ctx, dbgen.CountManageApplicationOperationsParams{
+		ApplicationID: &id, OperationType: filter.Type, Result: filter.Result,
+		KeywordPattern: likeContainsPattern(filter.Keyword),
+	})
 }
 
 func (s *managementSession) CreateApplication(ctx context.Context, value mgmt.Application) error {

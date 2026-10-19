@@ -13,13 +13,35 @@ import (
 
 const countManageApplicationOperations = `-- name: CountManageApplicationOperations :one
 SELECT COUNT(*)::bigint FROM operation_log
-WHERE (target_type='APPLICATION' AND target_id=$1)
+WHERE ((target_type='APPLICATION' AND target_id=$1)
    OR (target_type='ACCESS_KEY' AND after_data->>'principalId'=$1::text)
-   OR (target_type='GROUP' AND after_data->>'applicationId'=$1::text)
+   OR (target_type='GROUP' AND after_data->>'applicationId'=$1::text))
+  AND ($2::text = '' OR operation_type = $2::text)
+  AND ($3::text = '' OR result = $3::text)
+  AND ($4::text = ''
+    OR operator_name ILIKE $4::text ESCAPE '\'
+    OR operation_type ILIKE $4::text ESCAPE '\'
+    OR target_type ILIKE $4::text ESCAPE '\'
+    OR target_name ILIKE $4::text ESCAPE '\'
+    OR target_id::text ILIKE $4::text ESCAPE '\'
+    OR request_id ILIKE $4::text ESCAPE '\'
+    OR result ILIKE $4::text ESCAPE '\')
 `
 
-func (q *Queries) CountManageApplicationOperations(ctx context.Context, applicationID *int64) (int64, error) {
-	row := q.db.QueryRow(ctx, countManageApplicationOperations, applicationID)
+type CountManageApplicationOperationsParams struct {
+	ApplicationID  *int64
+	OperationType  string
+	Result         string
+	KeywordPattern string
+}
+
+func (q *Queries) CountManageApplicationOperations(ctx context.Context, arg CountManageApplicationOperationsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countManageApplicationOperations,
+		arg.ApplicationID,
+		arg.OperationType,
+		arg.Result,
+		arg.KeywordPattern,
+	)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -171,10 +193,27 @@ func (q *Queries) CountManageModels(ctx context.Context, status string) (int64, 
 
 const countManageOperations = `-- name: CountManageOperations :one
 SELECT COUNT(*)::bigint FROM operation_log
+WHERE TRUE
+  AND ($1::text = '' OR operation_type = $1::text)
+  AND ($2::text = '' OR result = $2::text)
+  AND ($3::text = ''
+    OR operator_name ILIKE $3::text ESCAPE '\'
+    OR operation_type ILIKE $3::text ESCAPE '\'
+    OR target_type ILIKE $3::text ESCAPE '\'
+    OR target_name ILIKE $3::text ESCAPE '\'
+    OR target_id::text ILIKE $3::text ESCAPE '\'
+    OR request_id ILIKE $3::text ESCAPE '\'
+    OR result ILIKE $3::text ESCAPE '\')
 `
 
-func (q *Queries) CountManageOperations(ctx context.Context) (int64, error) {
-	row := q.db.QueryRow(ctx, countManageOperations)
+type CountManageOperationsParams struct {
+	OperationType  string
+	Result         string
+	KeywordPattern string
+}
+
+func (q *Queries) CountManageOperations(ctx context.Context, arg CountManageOperationsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countManageOperations, arg.OperationType, arg.Result, arg.KeywordPattern)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -313,13 +352,26 @@ WHERE (id<$1 OR $1=0)
   AND ((target_type='APPLICATION' AND target_id=$2)
     OR (target_type='ACCESS_KEY' AND after_data->>'principalId'=$2::text)
     OR (target_type='GROUP' AND after_data->>'applicationId'=$2::text))
-ORDER BY id DESC LIMIT $3
+  AND ($3::text = '' OR operation_type = $3::text)
+  AND ($4::text = '' OR result = $4::text)
+  AND ($5::text = ''
+    OR operator_name ILIKE $5::text ESCAPE '\'
+    OR operation_type ILIKE $5::text ESCAPE '\'
+    OR target_type ILIKE $5::text ESCAPE '\'
+    OR target_name ILIKE $5::text ESCAPE '\'
+    OR target_id::text ILIKE $5::text ESCAPE '\'
+    OR request_id ILIKE $5::text ESCAPE '\'
+    OR result ILIKE $5::text ESCAPE '\')
+ORDER BY id DESC LIMIT $6
 `
 
 type ManageApplicationOperationsParams struct {
-	AfterID       int64
-	ApplicationID *int64
-	PageLimit     int32
+	AfterID        int64
+	ApplicationID  *int64
+	OperationType  string
+	Result         string
+	KeywordPattern string
+	PageLimit      int32
 }
 
 type ManageApplicationOperationsRow struct {
@@ -338,7 +390,14 @@ type ManageApplicationOperationsRow struct {
 }
 
 func (q *Queries) ManageApplicationOperations(ctx context.Context, arg ManageApplicationOperationsParams) ([]ManageApplicationOperationsRow, error) {
-	rows, err := q.db.Query(ctx, manageApplicationOperations, arg.AfterID, arg.ApplicationID, arg.PageLimit)
+	rows, err := q.db.Query(ctx, manageApplicationOperations,
+		arg.AfterID,
+		arg.ApplicationID,
+		arg.OperationType,
+		arg.Result,
+		arg.KeywordPattern,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1832,12 +1891,27 @@ func (q *Queries) ManageModels(ctx context.Context, arg ManageModelsParams) ([]M
 
 const manageOperations = `-- name: ManageOperations :many
 SELECT id,operator_name,operation_type,target_type,target_id,target_name,request_id,result,error_code,before_data,after_data,created_at
-FROM operation_log WHERE (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2
+FROM operation_log
+WHERE (id<$1 OR $1=0)
+  AND ($2::text = '' OR operation_type = $2::text)
+  AND ($3::text = '' OR result = $3::text)
+  AND ($4::text = ''
+    OR operator_name ILIKE $4::text ESCAPE '\'
+    OR operation_type ILIKE $4::text ESCAPE '\'
+    OR target_type ILIKE $4::text ESCAPE '\'
+    OR target_name ILIKE $4::text ESCAPE '\'
+    OR target_id::text ILIKE $4::text ESCAPE '\'
+    OR request_id ILIKE $4::text ESCAPE '\'
+    OR result ILIKE $4::text ESCAPE '\')
+ORDER BY id DESC LIMIT $5
 `
 
 type ManageOperationsParams struct {
-	ID    int64
-	Limit int32
+	AfterID        int64
+	OperationType  string
+	Result         string
+	KeywordPattern string
+	PageLimit      int32
 }
 
 type ManageOperationsRow struct {
@@ -1855,8 +1929,15 @@ type ManageOperationsRow struct {
 	CreatedAt     pgtype.Timestamptz
 }
 
+// keyword_pattern 由应用层转义 LIKE 通配符并包裹 %，空串表示不按关键字过滤。
 func (q *Queries) ManageOperations(ctx context.Context, arg ManageOperationsParams) ([]ManageOperationsRow, error) {
-	rows, err := q.db.Query(ctx, manageOperations, arg.ID, arg.Limit)
+	rows, err := q.db.Query(ctx, manageOperations,
+		arg.AfterID,
+		arg.OperationType,
+		arg.Result,
+		arg.KeywordPattern,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

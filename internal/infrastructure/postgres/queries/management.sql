@@ -356,8 +356,21 @@ SELECT EXISTS(SELECT 1 FROM principal_access_key
 WHERE principal_id=sqlc.arg(principal_id) AND is_deleted=false AND status='ACTIVE' AND revoked_at IS NULL
   AND (expires_at IS NULL OR expires_at>sqlc.arg(now)::timestamptz));
 -- name: ManageOperations :many
+-- keyword_pattern 由应用层转义 LIKE 通配符并包裹 %，空串表示不按关键字过滤。
 SELECT id,operator_name,operation_type,target_type,target_id,target_name,request_id,result,error_code,before_data,after_data,created_at
-FROM operation_log WHERE (id<$1 OR $1=0) ORDER BY id DESC LIMIT $2;
+FROM operation_log
+WHERE (id<sqlc.arg(after_id) OR sqlc.arg(after_id)=0)
+  AND (sqlc.arg(operation_type)::text = '' OR operation_type = sqlc.arg(operation_type)::text)
+  AND (sqlc.arg(result)::text = '' OR result = sqlc.arg(result)::text)
+  AND (sqlc.arg(keyword_pattern)::text = ''
+    OR operator_name ILIKE sqlc.arg(keyword_pattern)::text ESCAPE '\'
+    OR operation_type ILIKE sqlc.arg(keyword_pattern)::text ESCAPE '\'
+    OR target_type ILIKE sqlc.arg(keyword_pattern)::text ESCAPE '\'
+    OR target_name ILIKE sqlc.arg(keyword_pattern)::text ESCAPE '\'
+    OR target_id::text ILIKE sqlc.arg(keyword_pattern)::text ESCAPE '\'
+    OR request_id ILIKE sqlc.arg(keyword_pattern)::text ESCAPE '\'
+    OR result ILIKE sqlc.arg(keyword_pattern)::text ESCAPE '\')
+ORDER BY id DESC LIMIT sqlc.arg(page_limit);
 -- name: ManageApplicationOperations :many
 SELECT id,operator_name,operation_type,target_type,target_id,target_name,request_id,result,error_code,before_data,after_data,created_at
 FROM operation_log
@@ -365,6 +378,16 @@ WHERE (id<sqlc.arg(after_id) OR sqlc.arg(after_id)=0)
   AND ((target_type='APPLICATION' AND target_id=sqlc.arg(application_id))
     OR (target_type='ACCESS_KEY' AND after_data->>'principalId'=sqlc.arg(application_id)::text)
     OR (target_type='GROUP' AND after_data->>'applicationId'=sqlc.arg(application_id)::text))
+  AND (sqlc.arg(operation_type)::text = '' OR operation_type = sqlc.arg(operation_type)::text)
+  AND (sqlc.arg(result)::text = '' OR result = sqlc.arg(result)::text)
+  AND (sqlc.arg(keyword_pattern)::text = ''
+    OR operator_name ILIKE sqlc.arg(keyword_pattern)::text ESCAPE '\'
+    OR operation_type ILIKE sqlc.arg(keyword_pattern)::text ESCAPE '\'
+    OR target_type ILIKE sqlc.arg(keyword_pattern)::text ESCAPE '\'
+    OR target_name ILIKE sqlc.arg(keyword_pattern)::text ESCAPE '\'
+    OR target_id::text ILIKE sqlc.arg(keyword_pattern)::text ESCAPE '\'
+    OR request_id ILIKE sqlc.arg(keyword_pattern)::text ESCAPE '\'
+    OR result ILIKE sqlc.arg(keyword_pattern)::text ESCAPE '\')
 ORDER BY id DESC LIMIT sqlc.arg(page_limit);
 
 -- 分页总数不受 after cursor 影响；过滤口径必须与对应列表查询保持一致。
@@ -410,12 +433,33 @@ WHERE principal_id=$1 AND is_deleted=false
        (status='ACTIVE' AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>sqlc.arg(at)::timestamptz)));
 
 -- name: CountManageOperations :one
-SELECT COUNT(*)::bigint FROM operation_log;
+SELECT COUNT(*)::bigint FROM operation_log
+WHERE TRUE
+  AND (sqlc.arg(operation_type)::text = '' OR operation_type = sqlc.arg(operation_type)::text)
+  AND (sqlc.arg(result)::text = '' OR result = sqlc.arg(result)::text)
+  AND (sqlc.arg(keyword_pattern)::text = ''
+    OR operator_name ILIKE sqlc.arg(keyword_pattern)::text ESCAPE '\'
+    OR operation_type ILIKE sqlc.arg(keyword_pattern)::text ESCAPE '\'
+    OR target_type ILIKE sqlc.arg(keyword_pattern)::text ESCAPE '\'
+    OR target_name ILIKE sqlc.arg(keyword_pattern)::text ESCAPE '\'
+    OR target_id::text ILIKE sqlc.arg(keyword_pattern)::text ESCAPE '\'
+    OR request_id ILIKE sqlc.arg(keyword_pattern)::text ESCAPE '\'
+    OR result ILIKE sqlc.arg(keyword_pattern)::text ESCAPE '\');
 -- name: CountManageApplicationOperations :one
 SELECT COUNT(*)::bigint FROM operation_log
-WHERE (target_type='APPLICATION' AND target_id=sqlc.arg(application_id))
+WHERE ((target_type='APPLICATION' AND target_id=sqlc.arg(application_id))
    OR (target_type='ACCESS_KEY' AND after_data->>'principalId'=sqlc.arg(application_id)::text)
-   OR (target_type='GROUP' AND after_data->>'applicationId'=sqlc.arg(application_id)::text);
+   OR (target_type='GROUP' AND after_data->>'applicationId'=sqlc.arg(application_id)::text))
+  AND (sqlc.arg(operation_type)::text = '' OR operation_type = sqlc.arg(operation_type)::text)
+  AND (sqlc.arg(result)::text = '' OR result = sqlc.arg(result)::text)
+  AND (sqlc.arg(keyword_pattern)::text = ''
+    OR operator_name ILIKE sqlc.arg(keyword_pattern)::text ESCAPE '\'
+    OR operation_type ILIKE sqlc.arg(keyword_pattern)::text ESCAPE '\'
+    OR target_type ILIKE sqlc.arg(keyword_pattern)::text ESCAPE '\'
+    OR target_name ILIKE sqlc.arg(keyword_pattern)::text ESCAPE '\'
+    OR target_id::text ILIKE sqlc.arg(keyword_pattern)::text ESCAPE '\'
+    OR request_id ILIKE sqlc.arg(keyword_pattern)::text ESCAPE '\'
+    OR result ILIKE sqlc.arg(keyword_pattern)::text ESCAPE '\');
 
 -- name: CountManageGroupMembers :one
 SELECT COUNT(*)::bigint

@@ -29,10 +29,12 @@ func (queryReaderStub) Resources(context.Context, Page) ([]Resource, error) {
 	return []Resource{{ID: 5, Name: "资源"}}, nil
 }
 func (queryReaderStub) CountResources(context.Context) (int64, error) { return 1, nil }
-func (queryReaderStub) Operations(context.Context, Page) ([]Operation, error) {
+func (queryReaderStub) Operations(context.Context, Page, OperationFilter) ([]Operation, error) {
 	return []Operation{{ID: 6}}, nil
 }
-func (queryReaderStub) CountOperations(context.Context) (int64, error) { return 1, nil }
+func (queryReaderStub) CountOperations(context.Context, OperationFilter) (int64, error) {
+	return 1, nil
+}
 func (queryReaderStub) GroupMembers(context.Context, int64, Page) ([]Member, error) {
 	return []Member{{ID: 1}}, nil
 }
@@ -86,7 +88,7 @@ func TestQueryServiceReadsAllManagementViews(t *testing.T) {
 		{name: "models", run: func() error { _, err := service.Models(ctx, actor, page, "ACTIVE"); return err }},
 		{name: "providers", run: func() error { _, err := service.Providers(ctx, actor, page, "CUSTOM"); return err }},
 		{name: "resources", run: func() error { _, err := service.Resources(ctx, actor, page); return err }},
-		{name: "operations", run: func() error { _, err := service.Operations(ctx, actor, page); return err }},
+		{name: "operations", run: func() error { _, err := service.Operations(ctx, actor, page, OperationFilter{}); return err }},
 		{name: "group members", run: func() error { _, err := service.GroupMembers(ctx, actor, 2, page); return err }},
 		{name: "member groups", run: func() error { _, err := service.MemberGroups(ctx, actor, 1, page); return err }},
 		{name: "group models", run: func() error { _, err := service.GroupModels(ctx, actor, 2, page); return err }},

@@ -94,11 +94,13 @@ func (s *QueryService) Resources(ctx context.Context, a admin.Identity, p Page) 
 	}
 	return readPage(ctx, s, a, func(r Reader) ([]Resource, error) { return r.Resources(ctx, p) }, func(r Reader) (int64, error) { return r.CountResources(ctx) })
 }
-func (s *QueryService) Operations(ctx context.Context, a admin.Identity, p Page) (PageData[Operation], error) {
-	if !validPage(p) {
+
+// Operations 按 ID 倒序分页查询操作日志；filter 的零值表示不过滤，非零值须先经 NewOperationFilter 校验。
+func (s *QueryService) Operations(ctx context.Context, a admin.Identity, p Page, filter OperationFilter) (PageData[Operation], error) {
+	if !validPage(p) || !filter.valid() {
 		return PageData[Operation]{}, appsec.ErrInvalidArgument
 	}
-	return readPage(ctx, s, a, func(r Reader) ([]Operation, error) { return r.Operations(ctx, p) }, func(r Reader) (int64, error) { return r.CountOperations(ctx) })
+	return readPage(ctx, s, a, func(r Reader) ([]Operation, error) { return r.Operations(ctx, p, filter) }, func(r Reader) (int64, error) { return r.CountOperations(ctx, filter) })
 }
 func (s *QueryService) GroupMembers(ctx context.Context, a admin.Identity, id int64, p Page) (PageData[Member], error) {
 	if id <= 0 || !validPage(p) {

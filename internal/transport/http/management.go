@@ -389,11 +389,14 @@ func (s *SecurityHandlers) mountManagementQueryRoutes(r chi.Router) {
 	}, func(v mgmt.Resource) int64 { return v.ID }))
 	// @Summary 操作日志
 	// @Tags 操作日志
-	// @Description 按 ID 倒序分页，最新操作在前；将 nextCursor 作为下一次请求的 after，继续查询更小的 ID。
+	// @Description 按 ID 倒序分页，最新操作在前；将 nextCursor 作为下一次请求的 after，继续查询更小的 ID。过滤条件同时作用于列表和 total，翻页时须保持不变。
 	// @Produce json
 	// @Security AdminBearer
 	// @Param after query string false "上一页 nextCursor，默认从头查询"
 	// @Param limit query int false "每页数量" minimum(1) maximum(100) default(50)
+	// @Param keyword query string false "关键字：去除首尾空白后最多 100 个字符；不区分大小写包含匹配操作人、操作类型、目标类型、目标名称、目标 ID、请求 ID 和结果" maxlength(100)
+	// @Param type query string false "操作类型，精确匹配，例如 RESOURCE_PRICE_UPDATE"
+	// @Param result query string false "操作结果" Enums(SUCCESS,FAILED)
 	// @Success 200 {object} response{data=PageResponse[mgmt.Operation]}
 	// @Header all {string} X-Request-ID "请求追踪 ID"
 	// @Failure 400 {object} response
@@ -402,8 +405,12 @@ func (s *SecurityHandlers) mountManagementQueryRoutes(r chi.Router) {
 	// @Failure 404 {object} response
 	// @Router /api/v1/operation-logs [get]
 	r.Get("/operation-logs", listEndpoint(func(req *http.Request, p mgmt.Page) (mgmt.PageData[mgmt.Operation], error) {
-		return m.Operations(req.Context(), adminFrom(req), p)
-	}, func(v mgmt.Operation) int64 { return v.ID }))
+		filter, err := operationLogFilter(req)
+		if err != nil {
+			return mgmt.PageData[mgmt.Operation]{}, err
+		}
+		return m.Operations(req.Context(), adminFrom(req), p, filter)
+	}, func(v mgmt.Operation) int64 { return v.ID }, operationLogFilterQueryNames...))
 	// @Summary 成员 Access Key 列表
 	// @Tags 访问密钥
 	// @Description 按 ID 倒序分页，最新签发的密钥在前；limit=1 获取最新一条，将 nextCursor 作为 after 查询更早的密钥。仅返回脱敏密钥，不返回完整密钥。
@@ -1395,4 +1402,24 @@ func (s *SecurityHandlers) mountManagementCommandRoutes(r chi.Router) {
 	// @Router /api/v1/groups/{id}/models/{modelId} [delete]
 	r.Delete("/groups/{id}/models/{modelId}", relationEndpoint(m.SetGroupModel, "modelId", false))
 
+}
+
+// operationLogFilterQueryNames 是操作日志列表接受的可选过滤参数。
+var operationLogFilterQueryNames = []string{"keyword", "type", "result"}
+
+// operationLogFilter 读取操作日志过滤参数；关键字超长或结果取值非法时返回 INVALID_ARGUMENT。
+func operationLogFilter(req *http.Request) (mgmt.OperationFilter, error) {
+	keyword, err := optionalQueryValue(req, "keyword")
+	if err != nil {
+		return mgmt.OperationFilter{}, err
+	}
+	operationType, err := optionalQueryValue(req, "type")
+	if err != nil {
+		return mgmt.OperationFilter{}, err
+	}
+	result, err := optionalQueryValue(req, "result")
+	if err != nil {
+		return mgmt.OperationFilter{}, err
+	}
+	return mgmt.NewOperationFilter(keyword, operationType, result)
 }

@@ -1054,6 +1054,7 @@
                         "AdminBearer": []
                     }
                 ],
+                "description": "按 ID 倒序分页；过滤参数与操作日志列表一致，同时作用于列表和 total。",
                 "produces": [
                     "application/json"
                 ],
@@ -1068,6 +1069,44 @@
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "上一页 nextCursor，默认从头查询",
+                        "name": "after",
+                        "in": "query"
+                    },
+                    {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer",
+                        "default": 50,
+                        "description": "每页数量",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "maxLength": 100,
+                        "type": "string",
+                        "description": "关键字：去除首尾空白后最多 100 个字符；不区分大小写包含匹配操作人、操作类型、目标类型、目标名称、目标 ID、请求 ID 和结果",
+                        "name": "keyword",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "操作类型，精确匹配",
+                        "name": "type",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "SUCCESS",
+                            "FAILED"
+                        ],
+                        "type": "string",
+                        "description": "操作结果",
+                        "name": "result",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -5782,7 +5821,7 @@
                         "AdminBearer": []
                     }
                 ],
-                "description": "按 ID 倒序分页，最新操作在前；将 nextCursor 作为下一次请求的 after，继续查询更小的 ID。",
+                "description": "按 ID 倒序分页，最新操作在前；将 nextCursor 作为下一次请求的 after，继续查询更小的 ID。过滤条件同时作用于列表和 total，翻页时须保持不变。",
                 "produces": [
                     "application/json"
                 ],
@@ -5804,6 +5843,29 @@
                         "default": 50,
                         "description": "每页数量",
                         "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "maxLength": 100,
+                        "type": "string",
+                        "description": "关键字：去除首尾空白后最多 100 个字符；不区分大小写包含匹配操作人、操作类型、目标类型、目标名称、目标 ID、请求 ID 和结果",
+                        "name": "keyword",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "操作类型，精确匹配，例如 RESOURCE_PRICE_UPDATE",
+                        "name": "type",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "SUCCESS",
+                            "FAILED"
+                        ],
+                        "type": "string",
+                        "description": "操作结果",
+                        "name": "result",
                         "in": "query"
                     }
                 ],

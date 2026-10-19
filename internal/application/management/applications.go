@@ -20,8 +20,8 @@ type ApplicationReader interface {
 	ApplicationKeys(context.Context, int64, Page, bool) ([]Key, error)
 	CountApplicationKeys(context.Context, int64, bool) (int64, error)
 	HasUsableApplicationKey(context.Context, int64, time.Time) (bool, error)
-	ApplicationOperations(context.Context, int64, Page) ([]Operation, error)
-	CountApplicationOperations(context.Context, int64) (int64, error)
+	ApplicationOperations(context.Context, int64, Page, OperationFilter) ([]Operation, error)
+	CountApplicationOperations(context.Context, int64, OperationFilter) (int64, error)
 	Group(context.Context, int64) (Group, error)
 }
 
@@ -144,18 +144,19 @@ func (s *ApplicationService) Keys(ctx context.Context, actor admin.Identity, id 
 	return result, err
 }
 
-func (s *ApplicationService) Operations(ctx context.Context, actor admin.Identity, id int64, page Page) (PageData[Operation], error) {
-	if id <= 0 || !validPage(page) {
+// Operations 查询与应用相关的操作日志；filter 的零值表示不过滤，非零值须先经 NewOperationFilter 校验。
+func (s *ApplicationService) Operations(ctx context.Context, actor admin.Identity, id int64, page Page, filter OperationFilter) (PageData[Operation], error) {
+	if id <= 0 || !validPage(page) || !filter.valid() {
 		return PageData[Operation]{}, appsec.ErrInvalidArgument
 	}
 	var result PageData[Operation]
 	err := s.store.ReadApplication(ctx, actor, func(r ApplicationReader) error {
 		var err error
-		result.Items, err = r.ApplicationOperations(ctx, id, page)
+		result.Items, err = r.ApplicationOperations(ctx, id, page, filter)
 		if err != nil {
 			return err
 		}
-		result.Total, err = r.CountApplicationOperations(ctx, id)
+		result.Total, err = r.CountApplicationOperations(ctx, id, filter)
 		return err
 	})
 	return result, err

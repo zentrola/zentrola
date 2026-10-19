@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -116,5 +117,62 @@ func TestPriceGuardsRejectChangesAffectingBilledHistory(t *testing.T) {
 	})
 	if !errors.Is(err, mgmt.ErrConflict) {
 		t.Fatalf("trigger rejection error=%v; want conflict", err)
+	}
+}
+
+func TestOperationLogFiltersAndCountsMatch(t *testing.T) {
+	ctx, pool, _ := integrationDatabase(t)
+	createdAt := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := pool.Exec(ctx, `INSERT INTO admin_user (id,username,password_hash,display_name,status,created_by,updated_by,created_at,updated_at)
+        VALUES (72,'log-admin','test-hash','Log Admin','ACTIVE','system','system',$1,$1)`, createdAt); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO operation_log (
+        id,operator_type,operator_id,operator_name,module,operation_type,target_type,target_id,target_name,
+        request_id,result,error_code,created_at
+    ) VALUES
+        (91001,'ADMIN',72,'Log Admin','RESOURCE','RESOURCE_CREATE','RESOURCE',501,'Key 100%_off','req-alpha','SUCCESS',NULL,$1),
+        (91002,'ADMIN',72,'Log Admin','RESOURCE','RESOURCE_CREATE','RESOURCE',502,'Key 100 off','req-beta','FAILED','CONFLICT',$1),
+        (91003,'SYSTEM',NULL,'system','RESOURCE','RESOURCE_STATUS_CHANGE','RESOURCE',503,'Other\path','REQ-GAMMA','SUCCESS',NULL,$1)`,
+		createdAt); err != nil {
+		t.Fatal(err)
+	}
+	store := NewManagementStore(pool, idgen.New(pool))
+	service := mgmt.New(store, idgen.New(pool), nil, nil)
+	actor := admin.Identity{ID: 72, DisplayName: "Log Admin"}
+	for _, tt := range []struct {
+		name                  string
+		keyword, kind, result string
+		page                  mgmt.Page
+		want                  []int64
+		wantTotal             int64
+	}{
+		{name: "all", page: mgmt.Page{Limit: 10}, want: []int64{91003, 91002, 91001}, wantTotal: 3},
+		{name: "percent is literal", keyword: "100%", page: mgmt.Page{Limit: 10}, want: []int64{91001}, wantTotal: 1},
+		{name: "underscore is literal", keyword: "%_", page: mgmt.Page{Limit: 10}, want: []int64{91001}, wantTotal: 1},
+		{name: "backslash is literal", keyword: `r\p`, page: mgmt.Page{Limit: 10}, want: []int64{91003}, wantTotal: 1},
+		{name: "case insensitive request id", keyword: "req-gamma", page: mgmt.Page{Limit: 10}, want: []int64{91003}, wantTotal: 1},
+		{name: "target id text", keyword: "502", page: mgmt.Page{Limit: 10}, want: []int64{91002}, wantTotal: 1},
+		{name: "result keyword", keyword: "failed", page: mgmt.Page{Limit: 10}, want: []int64{91002}, wantTotal: 1},
+		{name: "type and result", kind: "RESOURCE_CREATE", result: "SUCCESS", page: mgmt.Page{Limit: 10}, want: []int64{91001}, wantTotal: 1},
+		{name: "cursor keeps filter", kind: "RESOURCE_CREATE", page: mgmt.Page{After: 91002, Limit: 10}, want: []int64{91001}, wantTotal: 2},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			filter, err := mgmt.NewOperationFilter(tt.keyword, tt.kind, tt.result)
+			if err != nil {
+				t.Fatal(err)
+			}
+			page, err := service.Operations(ctx, actor, tt.page, filter)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := make([]int64, 0, len(page.Items))
+			for _, item := range page.Items {
+				got = append(got, item.ID)
+			}
+			if !slices.Equal(got, tt.want) || page.Total != tt.wantTotal {
+				t.Fatalf("items=%v total=%d; want %v total=%d", got, page.Total, tt.want, tt.wantTotal)
+			}
+		})
 	}
 }

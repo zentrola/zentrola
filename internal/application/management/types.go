@@ -408,8 +408,8 @@ type ResourceReader interface {
 }
 
 type OperationReader interface {
-	Operations(context.Context, Page) ([]Operation, error)
-	CountOperations(context.Context) (int64, error)
+	Operations(context.Context, Page, OperationFilter) ([]Operation, error)
+	CountOperations(context.Context, OperationFilter) (int64, error)
 }
 
 // Reader 组合管理用例所需的窄读端口。具体用例应优先依赖上面的最小接口，

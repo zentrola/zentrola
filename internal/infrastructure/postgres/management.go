@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -259,8 +260,11 @@ func (s *managementSession) Resources(ctx context.Context, p mgmt.Page) ([]mgmt.
 	}
 	return result, nil
 }
-func (s *managementSession) Operations(ctx context.Context, p mgmt.Page) ([]mgmt.Operation, error) {
-	rows, err := s.q.ManageOperations(ctx, dbgen.ManageOperationsParams{ID: p.After, Limit: managementPageLimit(p)})
+func (s *managementSession) Operations(ctx context.Context, p mgmt.Page, filter mgmt.OperationFilter) ([]mgmt.Operation, error) {
+	rows, err := s.q.ManageOperations(ctx, dbgen.ManageOperationsParams{
+		AfterID: p.After, OperationType: filter.Type, Result: filter.Result,
+		KeywordPattern: likeContainsPattern(filter.Keyword), PageLimit: managementPageLimit(p),
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -336,8 +340,20 @@ func (s *managementSession) CountProviders(ctx context.Context, providerType str
 func (s *managementSession) CountResources(ctx context.Context) (int64, error) {
 	return s.q.CountManageResources(ctx)
 }
-func (s *managementSession) CountOperations(ctx context.Context) (int64, error) {
-	return s.q.CountManageOperations(ctx)
+func (s *managementSession) CountOperations(ctx context.Context, filter mgmt.OperationFilter) (int64, error) {
+	return s.q.CountManageOperations(ctx, dbgen.CountManageOperationsParams{
+		OperationType: filter.Type, Result: filter.Result, KeywordPattern: likeContainsPattern(filter.Keyword),
+	})
+}
+
+// likeContainsPattern 把关键字转为 ILIKE ... ESCAPE '\' 的包含匹配模式，转义 %、_ 与 \；
+// 空关键字返回空串，表示不按关键字过滤。
+func likeContainsPattern(keyword string) string {
+	if keyword == "" {
+		return ""
+	}
+	escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(keyword)
+	return "%" + escaped + "%"
 }
 func (s *managementSession) CountGroupMembers(ctx context.Context, id int64) (int64, error) {
 	return s.q.CountManageGroupMembers(ctx, id)

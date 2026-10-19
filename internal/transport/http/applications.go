@@ -80,9 +80,15 @@ func (s *SecurityHandlers) mountApplicationRoutes(r chi.Router) {
 	}, func(value mgmt.Key) int64 { return value.ID }, "expiry"))
 	// @Summary 应用操作记录
 	// @Tags 应用管理
+	// @Description 按 ID 倒序分页；过滤参数与操作日志列表一致，同时作用于列表和 total。
 	// @Produce json
 	// @Security AdminBearer
 	// @Param id path string true "应用 ID"
+	// @Param after query string false "上一页 nextCursor，默认从头查询"
+	// @Param limit query int false "每页数量" minimum(1) maximum(100) default(50)
+	// @Param keyword query string false "关键字：去除首尾空白后最多 100 个字符；不区分大小写包含匹配操作人、操作类型、目标类型、目标名称、目标 ID、请求 ID 和结果" maxlength(100)
+	// @Param type query string false "操作类型，精确匹配"
+	// @Param result query string false "操作结果" Enums(SUCCESS,FAILED)
 	// @Success 200 {object} response{data=PageResponse[mgmt.Operation]}
 	// @Failure 400,401,503 {object} response
 	// @Router /api/v1/applications/{id}/operations [get]
@@ -91,8 +97,12 @@ func (s *SecurityHandlers) mountApplicationRoutes(r chi.Router) {
 		if err != nil {
 			return mgmt.PageData[mgmt.Operation]{}, err
 		}
-		return a.Operations(req.Context(), adminFrom(req), id, page)
-	}, func(value mgmt.Operation) int64 { return value.ID }))
+		filter, err := operationLogFilter(req)
+		if err != nil {
+			return mgmt.PageData[mgmt.Operation]{}, err
+		}
+		return a.Operations(req.Context(), adminFrom(req), id, page, filter)
+	}, func(value mgmt.Operation) int64 { return value.ID }, operationLogFilterQueryNames...))
 	// @Summary 创建应用
 	// @Tags 应用管理
 	// @Description 新应用默认停用；可同时加入已启用的分组。
