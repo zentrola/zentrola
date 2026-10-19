@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net"
 	"sort"
@@ -142,7 +143,7 @@ func New(config Config) *Cache {
 }
 
 func (c *Cache) Ping(ctx context.Context) error {
-	return c.record(c.client.Ping(ctx).Err())
+	return c.recordFor(ctx, c.client.Ping(ctx).Err())
 }
 
 func (c *Cache) Close() error {
@@ -255,7 +256,7 @@ func (c *Cache) RecordActiveRoute(ctx context.Context, route gw.Route) error {
 	}
 	_, err = recordActiveRouteScript.Run(ctx, c.client, []string{c.generationKey()},
 		seed, c.activeModelKey(active.ModelCode), encoded, ttlMillis).Result()
-	_ = c.record(err)
+	_ = c.recordFor(ctx, err)
 	if err != nil {
 		c.logger.WarnContext(ctx, "active gateway route cache write failed",
 			"cache_type", "active_model", "error_code", "REDIS_UNAVAILABLE")
@@ -276,12 +277,12 @@ func (c *Cache) ActiveModels(ctx context.Context) ([]gw.ActiveModel, error) {
 			return []gw.ActiveModel{}, nil
 		}
 		if err != nil {
-			_ = c.record(err)
+			_ = c.recordFor(ctx, err)
 			return nil, gw.ErrUnavailable
 		}
 		models, err := c.activeModelsForGeneration(ctx, generation)
 		if err != nil {
-			_ = c.record(err)
+			_ = c.recordFor(ctx, err)
 			return nil, gw.ErrUnavailable
 		}
 		current, err := c.client.Get(ctx, c.generationKey()).Result()
@@ -290,7 +291,7 @@ func (c *Cache) ActiveModels(ctx context.Context) ([]gw.ActiveModel, error) {
 			return models, nil
 		}
 		if err != nil && err != redis.Nil {
-			_ = c.record(err)
+			_ = c.recordFor(ctx, err)
 			return nil, gw.ErrUnavailable
 		}
 	}
@@ -380,8 +381,13 @@ func (c *Cache) get(ctx context.Context, key string, target any, cacheType strin
 	}
 	result, err := getScript.Run(ctx, c.client, []string{c.generationKey()}, key, seed).Slice()
 	if err != nil || len(result) != 2 {
-		c.invalidationPending.Store(true)
-		_ = c.record(err)
+		// 读失败不会产生陈旧缓存，不置失效标记；调用方上下文结束也不计入熔断。
+		if err != nil && callerContextDone(ctx, err) {
+			return "", false
+		}
+		if err != nil {
+			_ = c.record(err)
+		}
 		c.logger.WarnContext(ctx, "gateway cache read failed; loading from database",
 			"cache_type", cacheType, "cache_result", "error", "error_code", "REDIS_UNAVAILABLE")
 		return "", false
@@ -415,7 +421,11 @@ func (c *Cache) set(ctx context.Context, key, generation string, value any, ttl 
 	if ttlMillis <= 0 {
 		return false
 	}
-	result, err := setScript.Run(ctx, c.client, []string{c.generationKey()},
+	// 回填缓存与客户端是否仍在等待无关：脱离请求取消并使用短超时，避免客户端
+	// 断开被误判为 Redis 故障并触发全量失效。
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+	defer cancel()
+	result, err := setScript.Run(writeCtx, c.client, []string{c.generationKey()},
 		generation, key, encoded, ttlMillis).Int()
 	_ = c.record(err)
 	if err != nil {
@@ -514,6 +524,18 @@ func newGeneration() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(value[:]), nil
+}
+
+// recordFor 区分调用方上下文结束与 Redis 故障，前者不触发熔断。
+func (c *Cache) recordFor(ctx context.Context, err error) error {
+	if err != nil && callerContextDone(ctx, err) {
+		return err
+	}
+	return c.record(err)
+}
+
+func callerContextDone(ctx context.Context, err error) bool {
+	return ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 func (c *Cache) record(err error) error {

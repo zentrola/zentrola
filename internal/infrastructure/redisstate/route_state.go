@@ -74,7 +74,7 @@ func New(host string, port, database int, password string) *State {
 }
 
 func (s *State) Ping(ctx context.Context) error {
-	return s.record(s.client.Ping(ctx).Err())
+	return s.recordFor(ctx, s.client.Ping(ctx).Err())
 }
 
 func (s *State) Close() error {
@@ -89,7 +89,7 @@ func (s *State) Acquire(ctx context.Context, route gateway.Route) (bool, error) 
 	result, err := acquireScript.Run(ctx, s.client,
 		[]string{cooldownKey(route.ResourceID), probeKey(route.ResourceID)},
 		now, probeLease.Milliseconds()).Int64()
-	return result == 1, s.record(err)
+	return result == 1, s.recordFor(ctx, err)
 }
 
 func (s *State) Cooldown(ctx context.Context, route gateway.Route, duration time.Duration) error {
@@ -111,14 +111,14 @@ func (s *State) Cooldown(ctx context.Context, route gateway.Route, duration time
 	_, err := cooldownScript.Run(ctx, s.client,
 		[]string{cooldownKey(route.ResourceID), probeKey(route.ResourceID)},
 		retryAt, duration.Milliseconds(), (duration + probeMarkerRetention).Milliseconds()).Int64()
-	return s.record(err)
+	return s.recordFor(ctx, err)
 }
 
 func (s *State) Healthy(ctx context.Context, route gateway.Route) error {
 	if s.redisUnavailable() {
 		return nil
 	}
-	return s.record(s.client.Del(ctx, cooldownKey(route.ResourceID), probeKey(route.ResourceID)).Err())
+	return s.recordFor(ctx, s.client.Del(ctx, cooldownKey(route.ResourceID), probeKey(route.ResourceID)).Err())
 }
 
 // AcquireSubscriptionRefreshScheduler takes a short-lived lease used only
@@ -167,7 +167,7 @@ func (s *State) acquireLock(ctx context.Context, key string, ttl time.Duration) 
 		if errors.Is(err, redis.Nil) {
 			return nil, false, nil
 		}
-		s.record(err)
+		_ = s.recordFor(ctx, err)
 		return nil, false, err
 	}
 	if result != "OK" {
@@ -182,6 +182,19 @@ func (s *State) acquireLock(ctx context.Context, key string, ttl time.Duration) 
 
 func (s *State) redisUnavailable() bool {
 	return time.Now().UnixMilli() < s.unavailableUntil.Load()
+}
+
+// recordFor 区分调用方上下文结束与 Redis 故障。客户端断开或请求超时导致的错误
+// 不触发熔断，也不改变既有的可用性判定，避免单个请求取消让所有路由状态失效。
+func (s *State) recordFor(ctx context.Context, err error) error {
+	if err != nil && callerContextDone(ctx, err) {
+		return err
+	}
+	return s.record(err)
+}
+
+func callerContextDone(ctx context.Context, err error) bool {
+	return ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 func (s *State) record(err error) error {

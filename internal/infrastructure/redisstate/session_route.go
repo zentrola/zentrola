@@ -39,7 +39,7 @@ func (s *State) Get(ctx context.Context, key string) (int64, error) {
 	if errors.Is(err, redis.Nil) {
 		return 0, nil
 	}
-	return resourceID, s.record(err)
+	return resourceID, s.recordFor(ctx, err)
 }
 
 // Assign atomically creates a session binding or returns the existing resource.
@@ -50,7 +50,7 @@ func (s *State) Assign(ctx context.Context, key string, preferredResourceID int6
 	assigned, err := assignSessionRouteScript.Run(ctx, s.client,
 		[]string{sessionRouteRedisKey(key)}, strconv.FormatInt(preferredResourceID, 10),
 		strconv.FormatInt(int64(sessionRouteTTL/time.Second), 10)).Int64()
-	return assigned, s.record(err)
+	return assigned, s.recordFor(ctx, err)
 }
 
 // Move updates a binding only if it still points to the route that failed.
@@ -61,5 +61,5 @@ func (s *State) Move(ctx context.Context, key string, fromResourceID, toResource
 	moved, err := moveSessionRouteScript.Run(ctx, s.client,
 		[]string{sessionRouteRedisKey(key)}, strconv.FormatInt(fromResourceID, 10),
 		strconv.FormatInt(toResourceID, 10), strconv.FormatInt(int64(sessionRouteTTL/time.Second), 10)).Int64()
-	return moved == 1, s.record(err)
+	return moved == 1, s.recordFor(ctx, err)
 }
