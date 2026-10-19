@@ -1111,6 +1111,7 @@ export const i18n = createI18n({
         after: '修改后',
         logContent: '日志内容',
         noSnapshot: '该操作未记录数据快照。',
+        changeLine: '{change}：{text}',
         changes: {
           added: '新增',
           removed: '删除',

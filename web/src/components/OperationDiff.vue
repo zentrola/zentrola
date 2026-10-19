@@ -121,7 +121,9 @@ const beforeTitle = computed(() =>
 const afterTitle = computed(() => t(hasBefore.value ? 'operations.after' : 'operations.logContent'))
 
 function lineLabel(line: JsonLine) {
-  return line.kind ? `${t(`operations.changes.${line.kind}`)}：${line.text}` : undefined
+  return line.kind
+    ? t('operations.changeLine', { change: t(`operations.changes.${line.kind}`), text: line.text })
+    : undefined
 }
 </script>
 

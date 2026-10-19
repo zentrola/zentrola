@@ -321,6 +321,15 @@ export function compactCount(value: number | null) {
   ).format(scaled)
   return `${formatted}${units[unitIndex]}`
 }
+const listFormatters = new Map<string, Intl.ListFormat>()
+// 按界面语言连接多个名称，例如中文使用顿号、英文使用逗号与 and。
+export function listFormat(values: string[]) {
+  return formatter(
+    listFormatters,
+    activeLocale.value,
+    () => new Intl.ListFormat(activeLocale.value, { style: 'long', type: 'conjunction' }),
+  ).format(values)
+}
 export function validText(value: string, bytes: number, required = true) {
   return (
     (!required && value === '') ||

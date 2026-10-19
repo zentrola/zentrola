@@ -1121,6 +1121,7 @@ export default {
     after: 'After',
     logContent: 'Log content',
     noSnapshot: 'No data snapshot was recorded for this operation.',
+    changeLine: '{change}: {text}',
     changes: {
       added: 'Added',
       removed: 'Removed',
@@ -1239,6 +1240,7 @@ export default {
       'Codex App Server could not start. Check the Codex executable configuration ({executable}) and restart the backend.',
     SUBSCRIPTION_UNAVAILABLE:
       'The personal subscription quota could not be read. Check the network or proxy.',
+    SUBSCRIPTION_CHECK_BUSY: 'Another personal subscription is being checked. Try again later.',
     SUBSCRIPTION_REFRESH_FAILED:
       'The personal subscription could not be refreshed. Try again later or import auth.json again.',
     SUBSCRIPTION_CREDENTIAL_EXPIRED:

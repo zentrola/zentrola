@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { all, api, errorText, gatewayBaseUrl } from '../api'
-import { compactCount, count } from '../composables'
+import { compactCount, count, listFormat } from '../composables'
 import { activeLocale, t } from '../i18n'
 import { useProviderRuntime } from '../providerRuntime'
 import { showErrorToast, showSuccessToast } from '../toast'
@@ -102,7 +102,7 @@ const providerHealthAlertDetail = computed(() =>
   providerHealthIssues.value.length === 1
     ? providerHealthIssues.value[0]?.reason || ''
     : t('home.providerHealthAffected', {
-        names: providerHealthIssues.value.map((issue) => issue.provider.name).join('、'),
+        names: listFormat(providerHealthIssues.value.map((issue) => issue.provider.name)),
       }),
 )
 const setupUrl = computed(() => (setupProtocol.value === 'anthropic' ? claudeUrl : codexUrl))
