@@ -256,7 +256,7 @@ func (s *syncState) Audit(_ context.Context, audit Audit, _ appsec.RequestMeta) 
 	return nil
 }
 
-func TestSyncResourceModelsCreatesMissingEntriesAndRefreshesExistingNames(t *testing.T) {
+func TestSyncResourceModelsCreatesMissingEntriesAndKeepsExistingNames(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	state := &syncState{
 		resource: ResourceRecord{Resource: Resource{ID: 10, ProviderID: 20, Name: "Official key", AuthType: AuthTypeAPIKey, UpdatedAt: now}},
@@ -290,7 +290,7 @@ func TestSyncResourceModelsCreatesMissingEntriesAndRefreshesExistingNames(t *tes
 		discoverer.source.Endpoints[0] != state.provider.Endpoints[0] {
 		t.Fatalf("discovery source = %+v, want provider code and endpoints from %+v", discoverer.source, state.provider)
 	}
-	if len(state.models) != 3 || state.models[0].Name != "Upstream name" || state.models[0].Status != "ACTIVE" || state.models[0].Remark != "保留说明" || len(state.models[0].InputModalities) != 2 || len(state.models[0].OutputModalities) != 1 || state.models[1].Name != "New Model" || state.models[1].Status != "ACTIVE" || state.models[2].Name != "Deepseek v4 flash vision exp" || state.models[2].Status != "ACTIVE" {
+	if len(state.models) != 3 || state.models[0].Name != "管理员名称" || state.models[0].Status != "ACTIVE" || state.models[0].Remark != "保留说明" || len(state.models[0].InputModalities) != 2 || len(state.models[0].OutputModalities) != 1 || state.models[1].Name != "New Model" || state.models[1].Status != "ACTIVE" || state.models[2].Name != "Deepseek v4 flash vision exp" || state.models[2].Status != "ACTIVE" {
 		t.Fatalf("existing model metadata was not selectively updated or synchronized models were not enabled: %+v", state.models)
 	}
 	for _, model := range state.models {
@@ -434,6 +434,34 @@ func TestSyncResourceModelsBackfillsPublisherWhenOfficialNameIsUnchanged(t *test
 	model := state.models[0]
 	if model.PublisherProviderID == nil || *model.PublisherProviderID != state.provider.ID || model.PublisherProviderName == nil || *model.PublisherProviderName != state.provider.Name {
 		t.Fatalf("publisher was not backfilled: %+v", model)
+	}
+}
+
+func TestSyncResourceModelsKeepsExistingPublisherFromOtherProvider(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	otherProviderID, otherProviderName := int64(99), "Other"
+	state := &syncState{
+		resource: ResourceRecord{Resource: Resource{ID: 10, ProviderID: 20, Name: "Official key", UpdatedAt: now}},
+		provider: Provider{ID: 20, Code: catalog.DeepSeekOfficialCode, Name: "DeepSeek"},
+		models: []Model{{
+			ID: 30, Code: "shared-model", Name: "管理员名称", Status: "ACTIVE",
+			PublisherProviderID: &otherProviderID, PublisherProviderName: &otherProviderName,
+		}},
+		mappings: []ProviderMapping{{ID: 40, ProviderID: 20, ModelID: 30, Priority: 100}},
+	}
+	discoverer := &syncDiscoverer{
+		models: []DiscoveredModel{{Code: "shared-model", Name: "Upstream Name"}},
+		result: ConnectionResult{OK: true, Code: "OK", HTTPStatus: 200},
+	}
+	service := New(syncStore{state}, &syncIDs{}, syncCipher{}, nil, WithModelDiscoverer(discoverer))
+
+	result, err := service.SyncResourceModels(context.Background(), admin.Identity{ID: 1}, 10, appsec.RequestMeta{})
+	if err != nil || result.Updated != 0 || result.Created != 0 || result.Mapped != 0 {
+		t.Fatalf("unexpected sync result: %+v err=%v", result, err)
+	}
+	model := state.models[0]
+	if model.Name != "管理员名称" || model.PublisherProviderID == nil || *model.PublisherProviderID != otherProviderID {
+		t.Fatalf("existing model metadata was overwritten: %+v", model)
 	}
 }
 

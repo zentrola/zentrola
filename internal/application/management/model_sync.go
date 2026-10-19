@@ -224,8 +224,9 @@ func (s *ProviderService) persistDiscoveredModels(ctx context.Context, actor adm
 				}
 				modelsByCode[model.Code] = model
 				result.Created++
-			} else if model.Name != name || model.PublisherProviderID == nil || *model.PublisherProviderID != provider.ID {
-				model.Name = name
+			} else if model.PublisherProviderID == nil {
+				// 已有模型的显示名可能由管理员维护，同一模型也可能由多个服务商同步；
+				// 只补齐缺失的发布方，不覆盖显示名或已有发布方，避免在服务商间来回切换。
 				model.PublisherProviderID = &publisherProviderID
 				model.PublisherProviderName = &publisherProviderName
 				model.UpdatedAt = now
