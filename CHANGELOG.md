@@ -18,8 +18,10 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - 新增 `CLAUDE_CODE_VERSION`，统一设置所有 Claude 订阅请求声明的客户端版本（`User-Agent: claude-cli/<版本> (external, cli)`）；留空时使用内置默认版本，必须为 `x.y.z` 格式。Claude 订阅请求被上游拒绝时，后端日志会记录上游的 `error.type` 和截断后的 `error.message`。
 - `GATEWAY_STREAM_IDLE_TIMEOUT` (default `300s`, `0` disables it) stops an upstream response, including SSE, that sends no data for longer than the configured time; the request is recorded as `UPSTREAM_TIMEOUT`.
 - Operation log APIs (`/api/v1/operation-logs` and `/api/v1/applications/{id}/operations`) accept `keyword`, `type`, and `result` filters. The Admin Web searches operation logs on the server and adds operation type and result filters.
+- Separate cache write pricing for API Key credentials: model prices accept an optional cache write price per million tokens, usage records store cache write tokens (`cache_creation_input_tokens`), and cost details show cache write tokens, price, and cost. When no cache write price is configured, cache writes are rated at the input price.
 - 新增 `GATEWAY_STREAM_IDLE_TIMEOUT`（默认 `300s`，`0` 表示关闭）：上游响应（含 SSE）连续无数据超过该时长即中断，并记录为 `UPSTREAM_TIMEOUT`。
 - 操作日志接口（`/api/v1/operation-logs` 与 `/api/v1/applications/{id}/operations`）支持 `keyword`、`type`、`result` 筛选；管理端改为服务端搜索操作日志，并新增操作类型与结果筛选。
+- API Key 凭据支持缓存写入单独计价：模型价格可选填缓存写入每百万 Token 单价，用量记录保存缓存写入 Token（`cache_creation_input_tokens`），成本详情展示缓存写入 Token、单价与成本；未配置缓存写入单价时按输入单价核算。
 
 ### Changed / 变更
 
@@ -31,7 +33,7 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - 网关转发 Claude 订阅请求时也会同步额度：额度状态或重置时间不变时，每个凭据最多每 5 分钟写入一次；额度耗尽后网关在重置前不再路由到该凭据。
 - 服务商级模型同步会跳过运行状态为 `BLOCKED` 的凭据，避免失效的 API Key 导致正常的订阅凭据始终用不上；全部凭据都被封禁时，仍按 API Key 优先、再按优先级的顺序选择，以返回上游的真实错误。
 - Claude 订阅请求统一使用 `CLAUDE_CODE_VERSION` 声明的版本，不再透传客户端的 `User-Agent`。
-- Anthropic usage is recorded with OpenAI semantics: input tokens now include cache writes and cache reads, and cached input tokens are cache reads. Monthly Token quotas therefore count cached prompts, and cache writes are rated at the input price.
+- Anthropic usage is recorded with OpenAI semantics: input tokens now include cache writes and cache reads, and cached input tokens are cache reads. Monthly Token quotas therefore count cached prompts. Cache writes are rated at the cache write price, or at the input price when none is configured.
 - Streaming OpenAI Chat requests always ask the upstream for usage (`stream_options.include_usage`). If the client did not request it, the extra usage chunk is removed from the response; a stream that ends without usage is recorded as `FAILED` with `UPSTREAM_RESPONSE_INCOMPLETE`.
 - Subscription prices whose effective time is earlier than the end of an already billed period can no longer be added, moved, or deleted; amount-only changes are still allowed and settled through adjustments. Model price changes rejected by billing history return `409 CONFLICT` instead of `503`.
 - Model sync no longer overwrites the display name or publisher of an existing model.
@@ -39,7 +41,7 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - Codex app-server processes only inherit an allowlist of environment variables, and app-server errors no longer block a subscription permanently.
 - Proxy connections are reused per proxy configuration, and per-request proxy logs are written at Debug level. Upstream credentials may be up to 16 KiB.
 - The Admin Web shows a UTC marker next to date ranges, shows price effective dates in UTC, and uses the same provider health rules on the home page and the provider page.
-- Anthropic 用量改按 OpenAI 口径记录：输入 Token 包含缓存写入与缓存读取，缓存输入 Token 为缓存读取。月度 Token 配额因此会计入缓存提示，缓存写入暂按输入单价核算。
+- Anthropic 用量改按 OpenAI 口径记录：输入 Token 包含缓存写入与缓存读取，缓存输入 Token 为缓存读取。月度 Token 配额因此会计入缓存提示；缓存写入按缓存写入单价核算，未配置时按输入单价核算。
 - OpenAI Chat 流式请求统一向上游请求用量（`stream_options.include_usage`）；客户端未请求时会从响应中剥离额外的用量分片。流结束仍没有用量时记为 `FAILED`（`UPSTREAM_RESPONSE_INCOMPLETE`）。
 - 生效时间早于已出账账期结束时间的订阅价格不能再新增、移动或删除；只改金额仍然允许，通过调整单结算。被计费历史拒绝的模型价格变更返回 `409 CONFLICT`，不再返回 `503`。
 - 模型同步不再覆盖已有模型的显示名称和发布方。
