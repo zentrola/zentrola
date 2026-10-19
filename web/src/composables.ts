@@ -1,5 +1,5 @@
 import { computed, ref, onBeforeUnmount, watch, type Ref } from 'vue'
-import { all, api, errorText } from './api'
+import { all, api, errorText, isAbortError } from './api'
 import type { Page } from './types'
 import { activeLocale, t } from './i18n'
 import { showErrorToast } from './toast'
@@ -15,28 +15,40 @@ export function useListSearch<T>(
     allItems = ref<T[] | null>(null) as Ref<T[] | null>,
     searching = ref(false)
   let revision = 0
+  let controller: AbortController | null = null
   const source = computed(() => allItems.value ?? items.value)
   const visible = computed(() =>
     source.value.filter((item) => text(item).toLocaleLowerCase().includes(query.value)),
   )
+  // 作废当前全量读取：递增版本号并中止仍在逐页拉取的循环。
+  function cancel() {
+    revision++
+    controller?.abort()
+    controller = null
+  }
   async function loadAll() {
     if (!path) return
-    const current = ++revision
+    cancel()
+    const current = revision
+    const signal = (controller = new AbortController()).signal
     allItems.value = []
     searching.value = true
     try {
-      const result = await all<T>(path())
+      const result = await all<T>(path(), { signal })
       if (current === revision) allItems.value = result
     } catch (error) {
-      if (current === revision) showErrorToast(errorText(error))
+      if (current === revision && !isAbortError(error)) showErrorToast(errorText(error))
     } finally {
-      if (current === revision) searching.value = false
+      if (current === revision) {
+        searching.value = false
+        controller = null
+      }
     }
   }
   async function search(forceAll = false) {
     query.value = keyword.value.trim().toLocaleLowerCase()
     if (!path || (!query.value && !forceAll)) {
-      revision++
+      cancel()
       allItems.value = null
       searching.value = false
       return
@@ -44,7 +56,7 @@ export function useListSearch<T>(
     await loadAll()
   }
   function reset() {
-    revision++
+    cancel()
     keyword.value = ''
     query.value = ''
     allItems.value = null
@@ -53,7 +65,7 @@ export function useListSearch<T>(
   watch([items, sourceLoading], ([, loading]) => {
     if (allItems.value && !searching.value && !loading) void loadAll()
   })
-  onBeforeUnmount(() => revision++)
+  onBeforeUnmount(cancel)
   return {
     keyword,
     query,
@@ -76,10 +88,18 @@ export function useCollection<T>(path: () => string) {
   let pageStarts: Array<string | null> = [null]
   let failedRequest: { after: string | null; targetPage: number; reset: boolean } | null = null
   let revision = 0
-  onBeforeUnmount(() => revision++)
+  let controller: AbortController | null = null
+  // 新请求总是作废并中止旧请求，避免旧筛选条件的响应覆盖最新结果。
+  function cancel() {
+    revision++
+    controller?.abort()
+    controller = null
+  }
+  onBeforeUnmount(cancel)
   async function fetchPage(after: string | null, targetPage: number, reset: boolean) {
-    if (loading.value) return
-    const current = ++revision
+    cancel()
+    const current = revision
+    const signal = (controller = new AbortController()).signal
     loading.value = true
     error.value = ''
     failedRequest = { after, targetPage, reset }
@@ -95,7 +115,12 @@ export function useCollection<T>(path: () => string) {
       route.searchParams.set('limit', String(pageSize.value))
       if (after) route.searchParams.set('after', after)
       else route.searchParams.delete('after')
-      const result = await api<Page<T>>(`${route.pathname}?${route.searchParams}`)
+      const result = await api<Page<T>>(
+        `${route.pathname}?${route.searchParams}`,
+        'GET',
+        undefined,
+        { signal },
+      )
       if (current !== revision) return
       pageStarts[targetPage - 1] = after
       pageStarts.length = targetPage
@@ -105,9 +130,12 @@ export function useCollection<T>(path: () => string) {
       total.value = result.total
       failedRequest = null
     } catch (e) {
-      if (current === revision) error.value = errorText(e)
+      if (current === revision && !isAbortError(e)) error.value = errorText(e)
     } finally {
-      if (current === revision) loading.value = false
+      if (current === revision) {
+        loading.value = false
+        controller = null
+      }
     }
   }
   async function load(more = false) {

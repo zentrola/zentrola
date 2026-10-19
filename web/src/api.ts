@@ -175,6 +175,32 @@ function errorDetails(data: unknown) {
     field: typeof details.field === 'string' ? details.field : '',
   }
 }
+export type RequestOptions = {
+  // 调用方取消请求时传入；取消后抛出 ABORTED，调用方应按版本号忽略结果。
+  signal?: AbortSignal
+  timeoutMs?: number
+}
+const defaultTimeoutMs = 25000
+
+export function isAbortError(error: unknown) {
+  return error instanceof ApiError && error.code === 'ABORTED'
+}
+
+function followSignal(controller: AbortController, signal?: AbortSignal) {
+  if (!signal) return () => {}
+  const abort = () => controller.abort('aborted')
+  if (signal.aborted) abort()
+  else signal.addEventListener('abort', abort, { once: true })
+  return () => signal.removeEventListener('abort', abort)
+}
+
+function requestFailure(controller: AbortController) {
+  const reason = controller.signal.reason
+  return new ApiError(
+    reason === 'timeout' ? 'TIMEOUT' : reason === 'aborted' ? 'ABORTED' : 'NETWORK',
+  )
+}
+
 export function errorText(error: unknown) {
   const code = error instanceof ApiError ? error.code : 'UNKNOWN'
   const key = i18n.global.te(`errors.${code}`) ? `errors.${code}` : 'errors.UNKNOWN'
@@ -183,11 +209,20 @@ export function errorText(error: unknown) {
   })
   return text
 }
-export async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+export async function api<T>(
+  path: string,
+  method = 'GET',
+  body?: unknown,
+  options: RequestOptions = {},
+): Promise<T> {
   const controller = new AbortController()
   pending.add(controller)
   const epoch = generation
-  const timeout = setTimeout(() => controller.abort('timeout'), 25000)
+  const unfollow = followSignal(controller, options.signal)
+  const timeout = setTimeout(
+    () => controller.abort('timeout'),
+    options.timeoutMs ?? defaultTimeoutMs,
+  )
   try {
     const response = await fetch(`${apiBaseUrl}/api/v1${path}`, {
       method,
@@ -203,6 +238,7 @@ export async function api<T>(path: string, method = 'GET', body?: unknown): Prom
     })
     const data = await readEnvelope(response)
     if (epoch !== generation) throw new ApiError('UNAUTHENTICATED')
+    if (controller.signal.aborted) throw requestFailure(controller)
     if (response.status === 204 && response.ok) return undefined as T
     if (!data || !response.ok || data.code !== 'OK') {
       if (response.status === 401 && token.value) clearSession(true)
@@ -218,18 +254,23 @@ export async function api<T>(path: string, method = 'GET', body?: unknown): Prom
   } catch (error) {
     if (epoch !== generation) throw new ApiError('UNAUTHENTICATED')
     if (error instanceof ApiError) throw error
-    throw new ApiError(controller.signal.reason === 'timeout' ? 'TIMEOUT' : 'NETWORK')
+    throw requestFailure(controller)
   } finally {
     clearTimeout(timeout)
+    unfollow()
     pending.delete(controller)
   }
 }
 
-export async function download(path: string): Promise<Blob> {
+export async function download(path: string, options: RequestOptions = {}): Promise<Blob> {
   const controller = new AbortController()
   pending.add(controller)
   const epoch = generation
-  const timeout = setTimeout(() => controller.abort('timeout'), 25000)
+  const unfollow = followSignal(controller, options.signal)
+  const timeout = setTimeout(
+    () => controller.abort('timeout'),
+    options.timeoutMs ?? defaultTimeoutMs,
+  )
   try {
     const response = await fetch(`${apiBaseUrl}/api/v1${path}`, {
       signal: controller.signal,
@@ -257,9 +298,10 @@ export async function download(path: string): Promise<Blob> {
   } catch (error) {
     if (epoch !== generation) throw new ApiError('UNAUTHENTICATED')
     if (error instanceof ApiError) throw error
-    throw new ApiError(controller.signal.reason === 'timeout' ? 'TIMEOUT' : 'NETWORK')
+    throw requestFailure(controller)
   } finally {
     clearTimeout(timeout)
+    unfollow()
     pending.delete(controller)
   }
 }
@@ -301,16 +343,31 @@ export async function logout() {
     clearSession()
   }
 }
-export async function all<T>(path: string): Promise<T[]> {
+export type AllOptions = {
+  signal?: AbortSignal
+  // 逐页读取的最大页数，防止异常游标或超大列表无限拉取。
+  maxPages?: number
+}
+const allPageSize = 100
+const defaultMaxPages = 100
+
+export async function all<T>(path: string, options: AllOptions = {}): Promise<T[]> {
+  const maxPages = options.maxPages ?? defaultMaxPages
   const items: T[] = []
   const cursors = new Set<string>()
   let after: string | null = null
+  let pages = 0
   do {
+    if (options.signal?.aborted) throw new ApiError('ABORTED')
+    if (pages >= maxPages) throw new ApiError('LIST_TOO_LARGE')
     const url = new URL(path, 'http://zentrola.local')
-    url.searchParams.set('limit', '100')
+    url.searchParams.set('limit', String(allPageSize))
     if (after) url.searchParams.set('after', after)
     else url.searchParams.delete('after')
-    const page: Page<T> = await api(`${url.pathname}?${url.searchParams}`)
+    const page: Page<T> = await api(`${url.pathname}?${url.searchParams}`, 'GET', undefined, {
+      signal: options.signal,
+    })
+    pages++
     items.push(...page.items)
     if (page.nextCursor && cursors.has(page.nextCursor)) throw new ApiError('UNKNOWN')
     if (page.nextCursor) cursors.add(page.nextCursor)

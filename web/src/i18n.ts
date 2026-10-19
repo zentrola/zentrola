@@ -1196,6 +1196,7 @@ export const i18n = createI18n({
         NETWORK: '无法连接服务，请检查后端是否已启动。写操作请刷新确认结果后再试。',
         TIMEOUT: '请求超时，请刷新确认结果后再试。',
         UNKNOWN: '操作失败，请稍后重试。',
+        LIST_TOO_LARGE: '数据量过大，请缩小筛选范围后重试。',
         UPSTREAM_AUTH_FAILED: '上游认证失败，请检查凭证。',
         UPSTREAM_BILLING_BLOCKED: '上游余额不足、计费异常或订阅已过期。',
         UPSTREAM_ACCOUNT_SUSPENDED: '上游账号已被暂停或停用。',

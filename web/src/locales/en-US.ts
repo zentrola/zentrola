@@ -1212,6 +1212,7 @@ export default {
       'Cannot reach the service. Check that the backend is running, then refresh before retrying a write.',
     TIMEOUT: 'The request timed out. Refresh to confirm the result before retrying.',
     UNKNOWN: 'The action failed. Try again later.',
+    LIST_TOO_LARGE: 'Too many records to load. Narrow the filters and try again.',
     UPSTREAM_AUTH_FAILED: 'Upstream authentication failed. Check the credential.',
     UPSTREAM_BILLING_BLOCKED:
       'The upstream balance is insufficient, billing is unavailable, or the subscription expired.',

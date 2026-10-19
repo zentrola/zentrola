@@ -59,7 +59,7 @@ function refreshExpiredKeys() {
 onMounted(() => {
   void load()
 })
-watch(items, scheduleExpiryUpdate, { deep: true })
+watch(items, scheduleExpiryUpdate)
 onUnmounted(() => clearTimeout(timer))
 function canRevoke(key: AccessKey) {
   return (
