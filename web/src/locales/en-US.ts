@@ -724,9 +724,11 @@ export default {
     runtimeAbnormal: 'Abnormal',
     runtimeReasons: {
       UNCONFIGURED: 'No provider credential configured',
+      MISSING_MODEL: 'No available model configured',
       CREDENTIAL_DISABLED: 'Provider credential disabled',
       UNKNOWN: 'No credential is currently available',
     },
+    runtimeLabel: '{status}: {hint}',
     openCredentialsFromRuntime: 'View credentials for {name}. Current runtime status: {status}',
     configureModelsFromRuntime: 'Configure model mappings for {name} before enabling it',
     proxyAccess: 'Proxy access',

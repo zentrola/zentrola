@@ -737,9 +737,11 @@ export const i18n = createI18n({
         runtimeAbnormal: '异常',
         runtimeReasons: {
           UNCONFIGURED: '尚未配置服务商凭证',
+          MISSING_MODEL: '尚未配置可用模型',
           CREDENTIAL_DISABLED: '服务商凭证已停用',
           UNKNOWN: '暂无可用凭证',
         },
+        runtimeLabel: '{status}：{hint}',
         openCredentialsFromRuntime: '查看 {name} 的凭证，当前运行状态：{status}',
         configureModelsFromRuntime: '为 {name} 配置模型映射后即可启用',
         proxyAccess: '代理访问',

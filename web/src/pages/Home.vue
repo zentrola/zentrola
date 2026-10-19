@@ -2,7 +2,8 @@
 import { computed, onMounted, ref } from 'vue'
 import { all, api, errorText, gatewayBaseUrl } from '../api'
 import { compactCount, count } from '../composables'
-import { activeLocale, i18n, t } from '../i18n'
+import { activeLocale, t } from '../i18n'
+import { useProviderRuntime } from '../providerRuntime'
 import { showErrorToast, showSuccessToast } from '../toast'
 import type { ActiveModel, Dashboard, Provider, Resource } from '../types'
 import Icon from '../components/Icon.vue'
@@ -52,36 +53,12 @@ const maxProviderCalls = computed(() =>
 const enabledHealthProviders = computed(() =>
   healthProviders.value.filter((provider) => provider.status === 'ACTIVE'),
 )
-const healthResourcesByProvider = computed(() => {
-  const grouped = new Map<string, Resource[]>()
-  for (const resource of healthResources.value) {
-    const group = grouped.get(resource.providerId)
-    if (group) group.push(resource)
-    else grouped.set(resource.providerId, [resource])
-  }
-  return grouped
-})
+// 与服务商页“运行状态：异常”筛选使用同一判定规则，保证提醒数量与跳转后的列表一致。
+const { runtimeFor, abnormal } = useProviderRuntime(enabledHealthProviders, healthResources)
 const providerHealthIssues = computed(() =>
-  enabledHealthProviders.value.flatMap((provider) => {
-    const configured = healthResourcesByProvider.value.get(provider.id) ?? []
-    if (!configured.length)
-      return [{ provider, reason: t('providers.runtimeReasons.UNCONFIGURED') }]
-
-    if (configured.some((resource) => resource.runtimeStatus !== 'BLOCKED')) return []
-
-    const blocked = [...configured]
-      .filter((resource) => resource.runtimeStatus === 'BLOCKED')
-      .sort((left, right) => (right.lastErrorAt || '').localeCompare(left.lastErrorAt || ''))[0]
-    if (!blocked) return [{ provider, reason: t('providers.runtimeReasons.UNKNOWN') }]
-    const key = `resources.blockReasons.${blocked.blockedReason || 'UNKNOWN_PERMANENT'}`
-    const reason = t(i18n.global.te(key) ? key : 'resources.blockReasons.UNKNOWN_PERMANENT')
-    return [
-      {
-        provider,
-        reason: blocked.lastHttpStatus ? `${reason} · HTTP ${blocked.lastHttpStatus}` : reason,
-      },
-    ]
-  }),
+  enabledHealthProviders.value
+    .filter(abnormal)
+    .map((provider) => ({ provider, reason: runtimeFor(provider).reason })),
 )
 const availableProviderCount = computed(
   () => enabledHealthProviders.value.length - providerHealthIssues.value.length,
