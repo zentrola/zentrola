@@ -3,6 +3,7 @@ package anthropic
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -175,5 +176,149 @@ func TestGatewayClientTimeoutAndRedirect(t *testing.T) {
 	_, err = client.Open(context.Background(), gw.Route{BaseURL: "https://api.anthropic.com"}, gw.Request{Path: "/v1/messages/count_tokens", Body: []byte(`{}`)}, []byte("key"))
 	if !errors.Is(err, gw.ErrTimeout) || hits.Load() != 2 {
 		t.Fatal("response header timeout not enforced")
+	}
+}
+
+func TestGatewayClientClaudeCodeIdentity(t *testing.T) {
+	prompt := anthropicclaude.ClaudeCodeSystemPrompt
+	identity := `{"type":"text","text":"` + prompt + `"}`
+	subscription := gw.Route{BaseURL: "https://api.anthropic.com", AuthType: "SUBSCRIPTION", AuthAdapter: anthropicclaude.AdapterCode}
+	subscriptionCredential := []byte(`{"kind":"claude_code_setup_token","access_token":"sk-ant-oat01-test"}`)
+	tests := []struct {
+		name       string
+		route      gw.Route
+		credential []byte
+		path       string
+		body       string
+		want       string
+	}{
+		{
+			name: "system missing", route: subscription, credential: subscriptionCredential, path: "/v1/messages",
+			body: `{"model":"claude-sonnet-4-5","messages":[]}`,
+			want: `{"system":[` + identity + `],"model":"claude-sonnet-4-5","messages":[]}`,
+		},
+		{
+			name: "empty body object", route: subscription, credential: subscriptionCredential, path: "/v1/messages",
+			body: `{}`,
+			want: `{"system":[` + identity + `]}`,
+		},
+		{
+			name: "system null", route: subscription, credential: subscriptionCredential, path: "/v1/messages",
+			body: `{"model":"m","system":null}`,
+			want: `{"model":"m","system":[` + identity + `]}`,
+		},
+		{
+			name: "system string", route: subscription, credential: subscriptionCredential, path: "/v1/messages",
+			body: `{"model":"m","system":"Be brief.","max_tokens":1.0}`,
+			want: `{"model":"m","system":[` + identity + `,{"type":"text","text":"Be brief."}],"max_tokens":1.0}`,
+		},
+		{
+			name: "system empty string", route: subscription, credential: subscriptionCredential, path: "/v1/messages",
+			body: `{"model":"m","system":""}`,
+			want: `{"model":"m","system":[` + identity + `]}`,
+		},
+		{
+			name: "system blocks keep cache_control", route: subscription, credential: subscriptionCredential, path: "/v1/messages",
+			body: `{"model":"m","system": [ {"type":"text","text":"Rules","cache_control":{"type":"ephemeral","ttl":"1h"}} ]}`,
+			want: `{"model":"m","system": [` + identity + `, {"type":"text","text":"Rules","cache_control":{"type":"ephemeral","ttl":"1h"}} ]}`,
+		},
+		{
+			name: "system empty blocks", route: subscription, credential: subscriptionCredential, path: "/v1/messages",
+			body: `{"model":"m","system":[]}`,
+			want: `{"model":"m","system":[` + identity + `]}`,
+		},
+		{
+			name: "Claude Code string unchanged", route: subscription, credential: subscriptionCredential, path: "/v1/messages",
+			body: `{"model":"m","system":"` + prompt + `\n\nMore."}`,
+			want: `{"model":"m","system":"` + prompt + `\n\nMore."}`,
+		},
+		{
+			name: "Claude Code blocks unchanged", route: subscription, credential: subscriptionCredential, path: "/v1/messages",
+			body: `{"model":"m","system":[{"type":"text","text":"` + prompt + `","cache_control":{"type":"ephemeral"}},{"type":"text","text":"Rules"}]}`,
+			want: `{"model":"m","system":[{"type":"text","text":"` + prompt + `","cache_control":{"type":"ephemeral"}},{"type":"text","text":"Rules"}]}`,
+		},
+		{
+			name: "count_tokens", route: subscription, credential: subscriptionCredential, path: "/v1/messages/count_tokens",
+			body: `{"model":"m","system":"Be brief."}`,
+			want: `{"model":"m","system":[` + identity + `,{"type":"text","text":"Be brief."}]}`,
+		},
+		{
+			name: "API key route unchanged", route: gw.Route{BaseURL: "https://api.anthropic.com"}, credential: []byte("provider-only-key"), path: "/v1/messages",
+			body: `{"model":"m","system":"Be brief."}`,
+			want: `{"model":"m","system":"Be brief."}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := NewGatewayClient(time.Second)
+			var body []byte
+			var headers http.Header
+			client.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				body, _ = io.ReadAll(r.Body)
+				headers = r.Header.Clone()
+				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+			})
+			response, err := client.Open(context.Background(), tt.route, gw.Request{
+				Path: tt.path, Body: []byte(tt.body),
+				ProtocolHeaders: map[string][]string{"Anthropic-Beta": {"interleaved-thinking-2025-05-14," + anthropicclaude.ClaudeCodeBeta}},
+			}, tt.credential)
+			if err != nil {
+				t.Fatal(err)
+			}
+			response.Body.Close()
+			if string(body) != tt.want {
+				t.Fatalf("body = %s\nwant  %s", body, tt.want)
+			}
+			if !json.Valid(body) {
+				t.Fatalf("invalid JSON body: %s", body)
+			}
+			beta := headers.Get("anthropic-beta")
+			if tt.route.AuthType != "SUBSCRIPTION" {
+				if headers.Get("X-App") != "" || strings.HasPrefix(headers.Get("User-Agent"), "claude-cli/") || strings.Contains(beta, anthropicclaude.OAuthBeta) {
+					t.Fatalf("API key route received Claude Code identity: %v", headers)
+				}
+				return
+			}
+			want := "interleaved-thinking-2025-05-14," + anthropicclaude.ClaudeCodeBeta + "," + anthropicclaude.OAuthBeta
+			if beta != want {
+				t.Fatalf("anthropic-beta = %q, want %q", beta, want)
+			}
+			if headers.Get("User-Agent") != anthropicclaude.ClaudeCodeUserAgent || headers.Get("X-App") != "cli" {
+				t.Fatalf("missing Claude Code client headers: %v", headers)
+			}
+		})
+	}
+}
+
+func TestGatewayClientClaudeCodeIdentityAddsBeta(t *testing.T) {
+	client := NewGatewayClient(time.Second)
+	var beta string
+	client.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		beta = r.Header.Get("anthropic-beta")
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{}`))}, nil
+	})
+	response, err := client.Open(context.Background(), gw.Route{
+		BaseURL: "https://api.anthropic.com", AuthType: "SUBSCRIPTION", AuthAdapter: anthropicclaude.AdapterCode,
+	}, gw.Request{Path: "/v1/messages", Body: []byte(`{"model":"m"}`)}, []byte("sk-ant-oat01-test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if beta != anthropicclaude.ClaudeCodeBeta+","+anthropicclaude.OAuthBeta {
+		t.Fatalf("anthropic-beta = %q", beta)
+	}
+}
+
+func TestGatewayClientRejectsDuplicateSystem(t *testing.T) {
+	client := NewGatewayClient(time.Second)
+	client.client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+		t.Fatal("invalid request reached transport")
+		return nil, nil
+	})
+	_, err := client.Open(context.Background(), gw.Route{
+		BaseURL: "https://api.anthropic.com", AuthType: "SUBSCRIPTION", AuthAdapter: anthropicclaude.AdapterCode,
+	}, gw.Request{Path: "/v1/messages", Body: []byte(`{"system":"a","system":"b"}`)}, []byte("sk-ant-oat01-test"))
+	if !errors.Is(err, gw.ErrInvalid) {
+		t.Fatalf("err = %v, want ErrInvalid", err)
 	}
 }
