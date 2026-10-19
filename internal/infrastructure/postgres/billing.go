@@ -127,27 +127,9 @@ func (s *BillingStore) insertDocument(ctx context.Context, document app.Document
 	defer tx.Rollback(context.Background())
 	q := dbgen.New(tx)
 	if document.DocumentType == "ADJUSTMENT" {
-		if _, err := q.BillingLockDocument(ctx, document.OriginalDocumentID); err != nil {
+		unchanged, err := lockUnchangedOriginal(ctx, q, document, expectedCurrent, expectedTokens)
+		if err != nil || !unchanged {
 			return false, err
-		}
-		current, err := q.BillingDocumentNetAmount(ctx, document.OriginalDocumentID)
-		if err != nil {
-			return false, err
-		}
-		if priceNumber(current) != expectedCurrent {
-			return false, nil
-		}
-		if document.BillingType == "API_KEY" {
-			currentDocument, currentErr := q.BillingAPIKeyCurrentDocument(ctx, dbgen.BillingAPIKeyCurrentDocumentParams{
-				ProviderCredentialID: document.CredentialID, PeriodStart: priceTime(document.PeriodStart),
-				PeriodEnd: priceTime(document.PeriodEnd), Currency: document.Currency,
-			})
-			if currentErr != nil {
-				return false, currentErr
-			}
-			if currentDocument.OriginalDocumentID != document.OriginalDocumentID || currentDocument.TotalTokens != expectedTokens {
-				return false, nil
-			}
 		}
 	}
 	var originalID *int64
@@ -205,6 +187,68 @@ func (s *BillingStore) insertDocument(ctx context.Context, document app.Document
 	for _, ratingID := range ratingIDs {
 		if err := q.BillingInsertDocumentUsageRating(ctx, dbgen.BillingInsertDocumentUsageRatingParams{
 			BillingDocumentID: document.ID, UsageRatingID: ratingID, CreatedAt: priceTime(document.CreatedAt),
+		}); err != nil {
+			return false, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// lockUnchangedOriginal 锁定 document 引用的原始单据，并确认其当前净额（API Key 账期还包括
+// 当前原始单据与累计 Token）仍为调用方结算时读取的值；被并发结算改变时返回 false。
+func lockUnchangedOriginal(ctx context.Context, q *dbgen.Queries, document app.Document, expectedCurrent string, expectedTokens int64) (bool, error) {
+	if _, err := q.BillingLockDocument(ctx, document.OriginalDocumentID); err != nil {
+		return false, err
+	}
+	current, err := q.BillingDocumentNetAmount(ctx, document.OriginalDocumentID)
+	if err != nil {
+		return false, err
+	}
+	if priceNumber(current) != expectedCurrent {
+		return false, nil
+	}
+	if document.BillingType != "API_KEY" {
+		return true, nil
+	}
+	currentDocument, err := q.BillingAPIKeyCurrentDocument(ctx, dbgen.BillingAPIKeyCurrentDocumentParams{
+		ProviderCredentialID: document.CredentialID, PeriodStart: priceTime(document.PeriodStart),
+		PeriodEnd: priceTime(document.PeriodEnd), Currency: document.Currency,
+	})
+	if err != nil {
+		return false, err
+	}
+	return currentDocument.OriginalDocumentID == document.OriginalDocumentID && currentDocument.TotalTokens == expectedTokens, nil
+}
+
+// ConfirmAPIKeyRatings 在与调整单相同的期望金额/Token 校验下，把零差额的最新核算关联到原始单据；
+// 已被关联的核算保持不变，原始单据被并发调整时不写入并返回 false。
+func (s *BillingStore) ConfirmAPIKeyRatings(ctx context.Context, confirmation app.APIKeyConfirmation) (bool, error) {
+	confirmed, err := s.confirmAPIKeyRatings(ctx, confirmation)
+	return confirmed, billingStoreError("confirm_api_key_ratings", err)
+}
+
+func (s *BillingStore) confirmAPIKeyRatings(ctx context.Context, confirmation app.APIKeyConfirmation) (bool, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(context.Background())
+	q := dbgen.New(tx)
+	period := confirmation.Period
+	unchanged, err := lockUnchangedOriginal(ctx, q, app.Document{
+		BillingType: "API_KEY", CredentialID: period.CredentialID, OriginalDocumentID: confirmation.OriginalDocumentID,
+		PeriodStart: period.PeriodStart, PeriodEnd: period.PeriodEnd, Currency: period.Currency,
+	}, confirmation.ExpectedAmount, confirmation.ExpectedTokens)
+	if err != nil || !unchanged {
+		return false, err
+	}
+	for _, ratingID := range confirmation.RatingIDs {
+		if err := q.BillingInsertDocumentUsageRating(ctx, dbgen.BillingInsertDocumentUsageRatingParams{
+			BillingDocumentID: confirmation.OriginalDocumentID, UsageRatingID: ratingID,
+			CreatedAt: priceTime(confirmation.CreatedAt),
 		}); err != nil {
 			return false, err
 		}

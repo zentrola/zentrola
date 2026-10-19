@@ -175,6 +175,7 @@ type Store interface {
 	APIKeyUsage(context.Context, APIKeyPeriod) ([]domain.RatedShare, []int64, error)
 	APIKeyCurrent(context.Context, APIKeyPeriod) (APIKeyCurrent, error)
 	CreateAPIKeyDocument(context.Context, string, int64, Document, []int64) (bool, error)
+	ConfirmAPIKeyRatings(context.Context, APIKeyConfirmation) (bool, error)
 	Statistics(context.Context, admin.Identity, StatisticsFilter) (Statistics, error)
 	BillingDocuments(context.Context, DocumentFilter) (DocumentPage, error)
 	BillingDocument(context.Context, int64) (DocumentDetail, error)

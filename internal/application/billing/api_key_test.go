@@ -131,6 +131,69 @@ func TestSettleDueAPIKeyCreatesPriceCorrectionAdjustmentWithoutTokens(t *testing
 	}
 }
 
+func TestSettleDueAPIKeyConfirmsZeroDeltaRevisions(t *testing.T) {
+	period := APIKeyPeriod{
+		CredentialID: 30, Currency: "CNY",
+		PeriodStart: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC),
+		PeriodEnd:   time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC),
+	}
+	settledAt := period.PeriodEnd.Add(time.Hour)
+	tests := []struct {
+		name      string
+		ratingIDs []int64
+		want      []APIKeyConfirmation
+	}{
+		{
+			name:      "links unchanged revisions to the original charge",
+			ratingIDs: []int64{201, 202},
+			want: []APIKeyConfirmation{{
+				Period: period, OriginalDocumentID: 99, ExpectedAmount: "1", ExpectedTokens: 120,
+				RatingIDs: []int64{201, 202}, CreatedAt: settledAt,
+			}},
+		},
+		{name: "nothing to confirm without ratings"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store := &billingStoreStub{
+				apiKeyPeriods: []APIKeyPeriod{period},
+				apiKeyUsage: map[APIKeyPeriod][]domain.RatedShare{period: {
+					{PrincipalID: 1, Tokens: 100, Amount: "0.8"},
+					{PrincipalID: 2, Tokens: 20, Amount: "0.2"},
+				}},
+				apiKeyRatingIDs: map[APIKeyPeriod][]int64{period: test.ratingIDs},
+				apiKeyCurrent: map[APIKeyPeriod]APIKeyCurrent{period: {
+					Found: true, OriginalDocumentID: 99, TotalTokens: 120, TotalAmount: "1",
+					Items: []APIKeyCurrentItem{
+						{PrincipalID: 1, Tokens: 100, Amount: "0.8"},
+						{PrincipalID: 2, Tokens: 20, Amount: "0.2"},
+					},
+				}},
+			}
+			service := New(store, &billingIDs{})
+			service.now = func() time.Time { return settledAt }
+			summary, err := service.SettleDueAPIKeys(context.Background(), period.PeriodEnd)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if summary.Skipped != 1 || summary.Adjusted != 0 || len(store.apiKeyDocuments) != 0 {
+				t.Fatalf("summary=%+v documents=%+v", summary, store.apiKeyDocuments)
+			}
+			if len(store.apiKeyConfirmations) != len(test.want) {
+				t.Fatalf("confirmations=%+v; want %+v", store.apiKeyConfirmations, test.want)
+			}
+			for index, want := range test.want {
+				got := store.apiKeyConfirmations[index]
+				if got.Period != want.Period || got.OriginalDocumentID != want.OriginalDocumentID ||
+					got.ExpectedAmount != want.ExpectedAmount || got.ExpectedTokens != want.ExpectedTokens ||
+					!equalInt64s(got.RatingIDs, want.RatingIDs) || !got.CreatedAt.Equal(want.CreatedAt) {
+					t.Fatalf("confirmation=%+v; want %+v", got, want)
+				}
+			}
+		})
+	}
+}
+
 func TestSettleDueAPIKeyAddsLateUsageTokens(t *testing.T) {
 	period := APIKeyPeriod{
 		CredentialID: 30, Currency: "CNY",

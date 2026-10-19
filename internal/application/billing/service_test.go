@@ -19,29 +19,30 @@ func (g *billingIDs) NextID(context.Context) (int64, error) {
 }
 
 type billingStoreStub struct {
-	prices           []SubscriptionPrice
-	periods          []ChargePeriod
-	usage            map[int64][]domain.UsageShare
-	charges          []Document
-	corrections      []Correction
-	original         map[int64][]domain.UsageShare
-	adjustments      []Document
-	statistics       Statistics
-	ratingCandidates []UsageRatingCandidate
-	repricedRatings  []UsageRatingCandidate
-	ratingScans      []RatingScan
-	ratingErrors     map[int64]error
-	chargeErrors     map[int64]error
-	apiKeyErrors     map[APIKeyPeriod]error
-	ratings          []UsageRating
-	apiKeyPeriods    []APIKeyPeriod
-	apiKeyUsage      map[APIKeyPeriod][]domain.RatedShare
-	apiKeyRatingIDs  map[APIKeyPeriod][]int64
-	apiKeyCurrent    map[APIKeyPeriod]APIKeyCurrent
-	apiKeyDocuments  []Document
-	documents        DocumentPage
-	document         DocumentDetail
-	unrated          UnratedUsagePage
+	prices              []SubscriptionPrice
+	periods             []ChargePeriod
+	usage               map[int64][]domain.UsageShare
+	charges             []Document
+	corrections         []Correction
+	original            map[int64][]domain.UsageShare
+	adjustments         []Document
+	statistics          Statistics
+	ratingCandidates    []UsageRatingCandidate
+	repricedRatings     []UsageRatingCandidate
+	ratingScans         []RatingScan
+	ratingErrors        map[int64]error
+	chargeErrors        map[int64]error
+	apiKeyErrors        map[APIKeyPeriod]error
+	ratings             []UsageRating
+	apiKeyPeriods       []APIKeyPeriod
+	apiKeyUsage         map[APIKeyPeriod][]domain.RatedShare
+	apiKeyRatingIDs     map[APIKeyPeriod][]int64
+	apiKeyCurrent       map[APIKeyPeriod]APIKeyCurrent
+	apiKeyDocuments     []Document
+	apiKeyConfirmations []APIKeyConfirmation
+	documents           DocumentPage
+	document            DocumentDetail
+	unrated             UnratedUsagePage
 }
 
 func (s *billingStoreStub) SubscriptionPrices(context.Context) ([]SubscriptionPrice, error) {
@@ -117,6 +118,10 @@ func (s *billingStoreStub) APIKeyCurrent(_ context.Context, period APIKeyPeriod)
 }
 func (s *billingStoreStub) CreateAPIKeyDocument(_ context.Context, _ string, _ int64, document Document, _ []int64) (bool, error) {
 	s.apiKeyDocuments = append(s.apiKeyDocuments, document)
+	return true, nil
+}
+func (s *billingStoreStub) ConfirmAPIKeyRatings(_ context.Context, confirmation APIKeyConfirmation) (bool, error) {
+	s.apiKeyConfirmations = append(s.apiKeyConfirmations, confirmation)
 	return true, nil
 }
 

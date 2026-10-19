@@ -50,6 +50,17 @@ type APIKeyCurrentItem struct {
 	Amount      string
 }
 
+// APIKeyConfirmation 把成本与 Token 均未变化的最新核算关联到账期的原始单据。仅当原始单据的
+// 当前净额与 Token 仍为 ExpectedAmount 与 ExpectedTokens 时写入，否则留待下一轮重新结算。
+type APIKeyConfirmation struct {
+	Period             APIKeyPeriod
+	OriginalDocumentID int64
+	ExpectedAmount     string
+	ExpectedTokens     int64
+	RatingIDs          []int64
+	CreatedAt          time.Time
+}
+
 type APIKeyCurrent struct {
 	Found              bool
 	OriginalDocumentID int64
@@ -277,7 +288,17 @@ func (s *Service) settleAPIKeyPeriod(ctx context.Context, period APIKeyPeriod) (
 		return apiKeySkipped, errors.New("api key settled principal is absent from rated usage")
 	}
 	if deltaAmount == "0" && deltaTokens == 0 && len(deltaAllocations) == 0 {
-		return apiKeySkipped, nil
+		// 成本不变的重算 revision（如补填缓存写入单价）无需调整单，但仍须由当前单据确认，
+		// 否则账期会因最新 revision 未关联单据而在每轮结算中被重新列出。
+		if len(ratingIDs) == 0 {
+			return apiKeySkipped, nil
+		}
+		_, err := s.store.ConfirmAPIKeyRatings(ctx, APIKeyConfirmation{
+			Period: period, OriginalDocumentID: current.OriginalDocumentID,
+			ExpectedAmount: current.TotalAmount, ExpectedTokens: current.TotalTokens,
+			RatingIDs: ratingIDs, CreatedAt: s.now().UTC(),
+		})
+		return apiKeySkipped, err
 	}
 	document, err := s.newAPIKeyDocument(ctx, "ADJUSTMENT", period, current.OriginalDocumentID,
 		deltaTokens, deltaAmount, deltaAllocations)

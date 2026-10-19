@@ -202,3 +202,99 @@ func TestSubscriptionChargeOverlapIsRejected(t *testing.T) {
 		t.Fatalf("overlapping charge error=%v", err)
 	}
 }
+
+// 补填缓存写入单价会让引用该价格的核算追加 revision，但用量没有缓存写入时成本不变。
+// 零差额的 revision 也必须被当前单据确认，否则账期会在每轮结算中被重新列出、永不收敛。
+func TestAPIKeyZeroDeltaRevisionIsConfirmedBySettlement(t *testing.T) {
+	ctx, pool, _ := integrationDatabase(t)
+	periodStart := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	periodEnd := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	for _, statement := range []string{
+		`INSERT INTO principal (id,principal_type,name,status,created_by,updated_by,created_at,updated_at)
+         VALUES (1401,'MEMBER','Zero Delta Alpha','ACTIVE','system','system',$1,$1),
+                (1402,'MEMBER','Zero Delta Beta','ACTIVE','system','system',$1,$1)`,
+		`INSERT INTO model (id,model_code,display_name,input_modalities,output_modalities,status,created_by,updated_by,created_at,updated_at)
+         VALUES (2401,'zero-delta-model','Zero Delta Model','["TEXT"]','["TEXT"]','ACTIVE','system','system',$1,$1)`,
+		`INSERT INTO provider (id,provider_code,provider_name,provider_type,status,created_by,updated_by,created_at,updated_at)
+         VALUES (3401,'zero-delta-provider','Zero Delta Provider','OFFICIAL','ACTIVE','system','system',$1,$1)`,
+		`INSERT INTO provider_model (id,provider_id,model_id,upstream_model_code,priority,created_by,updated_by,created_at,updated_at)
+         VALUES (4401,3401,2401,'zero-delta-upstream',100,'system','system',$1,$1)`,
+		`INSERT INTO provider_credential (
+             id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,
+             auth_type,auth_adapter,created_by,updated_by,created_at,updated_at
+         ) VALUES (5401,3401,'Zero Delta Key',decode(repeat('37',32),'hex'),decode(repeat('37',12),'hex'),1,
+             'API_KEY','TEST','system','system',$1,$1)`,
+		`INSERT INTO provider_credential_model_price (
+             id,provider_credential_id,provider_model_id,currency,input_price,output_price,cached_input_price,
+             effective_at,created_by,created_at
+         ) VALUES (6401,5401,4401,'CNY',5,10,1,$1,'system',$1)`,
+	} {
+		if _, err := pool.Exec(ctx, statement, periodStart); err != nil {
+			t.Fatal(err)
+		}
+	}
+	usageAt := periodStart.Add(time.Hour)
+	if _, err := pool.Exec(ctx, `INSERT INTO usage_record (
+        id,request_id,attempt_no,principal_id,provider_id,provider_model_id,provider_credential_id,model_id,
+        usage_scene,client_protocol,input_tokens,output_tokens,cached_input_tokens,
+        started_at,completed_at,latency_ms,status,created_at
+    ) VALUES
+        (7401,'zero-delta-1',1,1401,3401,4401,5401,2401,'MODEL_GATEWAY','OPENAI_RESPONSES',10,5,0,$1,$1,0,'SUCCESS',$1),
+        (7402,'zero-delta-2',1,1402,3401,4401,5401,2401,'MODEL_GATEWAY','OPENAI_RESPONSES',20,5,10,$1,$1,0,'SUCCESS',$1)`,
+		usageAt); err != nil {
+		t.Fatal(err)
+	}
+
+	store := NewBillingStore(pool)
+	service := app.New(store, idgen.New(pool))
+	periodCount := func() int {
+		t.Helper()
+		periods, err := store.APIKeyPeriods(ctx, periodEnd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(periods)
+	}
+	if summary, err := service.RatePendingAPIKeyUsage(ctx, 100); err != nil || summary.Created != 2 {
+		t.Fatalf("rating summary=%+v err=%v", summary, err)
+	}
+	if summary, err := service.SettleDueAPIKeys(ctx, periodEnd); err != nil || summary.Created != 1 {
+		t.Fatalf("settlement=%+v err=%v", summary, err)
+	}
+	if count := periodCount(); count != 0 {
+		t.Fatalf("settled period is still scanned: %d", count)
+	}
+
+	if _, err := pool.Exec(ctx, `UPDATE provider_credential_model_price SET cache_creation_input_price=6.25 WHERE id=6401`); err != nil {
+		t.Fatal(err)
+	}
+	if summary, err := service.RatePendingAPIKeyUsage(ctx, 100); err != nil || summary.Created != 2 {
+		t.Fatalf("zero delta rerating summary=%+v err=%v", summary, err)
+	}
+	if count := periodCount(); count != 1 {
+		t.Fatalf("zero delta revisions did not reopen the period: %d", count)
+	}
+	for round := 1; round <= 2; round++ {
+		summary, err := service.SettleDueAPIKeys(ctx, periodEnd)
+		if err != nil || summary.Created != 0 || summary.Adjusted != 0 || summary.Failed != 0 {
+			t.Fatalf("round %d zero delta settlement=%+v err=%v", round, summary, err)
+		}
+		if count := periodCount(); count != 0 {
+			t.Fatalf("round %d: zero delta period is still scanned: %d", round, count)
+		}
+	}
+	var documents, linked, unlinked int
+	if err := pool.QueryRow(ctx, `SELECT
+            (SELECT count(*) FROM billing_document WHERE provider_credential_id=5401),
+            (SELECT count(*) FROM billing_document_usage_rating link
+                JOIN billing_document document ON document.id=link.billing_document_id
+                WHERE document.provider_credential_id=5401 AND document.document_type='CHARGE'),
+            (SELECT count(*) FROM usage_rating rating WHERE rating.provider_credential_id=5401
+                AND NOT EXISTS (SELECT 1 FROM billing_document_usage_rating link WHERE link.usage_rating_id=rating.id))`).
+		Scan(&documents, &linked, &unlinked); err != nil {
+		t.Fatal(err)
+	}
+	if documents != 1 || linked != 4 || unlinked != 0 {
+		t.Fatalf("documents=%d charge links=%d unlinked ratings=%d; want 1, 4 and 0", documents, linked, unlinked)
+	}
+}
