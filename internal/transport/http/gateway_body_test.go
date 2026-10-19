@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/iotest"
 )
 
 func TestReadRequestBodyPreallocatesWithinLimit(t *testing.T) {
@@ -17,6 +18,8 @@ func TestReadRequestBodyPreallocatesWithinLimit(t *testing.T) {
 		limit         int64
 		wantErr       error
 		tooLarge      bool
+		// dataWithEOF 让最后一次 Read 同时返回数据与 io.EOF，net/http 的请求体可能如此返回。
+		dataWithEOF bool
 	}{
 		{name: "exact length", body: `{"model":"m"}`, contentLength: 13, limit: 64},
 		{name: "unknown length", body: `{"model":"m"}`, contentLength: -1, limit: 64},
@@ -24,11 +27,17 @@ func TestReadRequestBodyPreallocatesWithinLimit(t *testing.T) {
 		{name: "declared above limit", body: `{"model":"m"}`, contentLength: 1 << 30, limit: 64},
 		{name: "body exceeds limit", body: strings.Repeat("x", 80), contentLength: 32, limit: 64, tooLarge: true},
 		{name: "short body", body: `{"m`, contentLength: 13, limit: 64, wantErr: io.ErrUnexpectedEOF},
+		{name: "exact length with eof", body: `{"model":"m"}`, contentLength: 13, limit: 64, dataWithEOF: true},
+		{name: "short body with eof", body: `{"m`, contentLength: 13, limit: 64, dataWithEOF: true, wantErr: io.ErrUnexpectedEOF},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			recorder := httptest.NewRecorder()
-			reader := http.MaxBytesReader(recorder, io.NopCloser(strings.NewReader(test.body)), test.limit)
+			var source io.Reader = strings.NewReader(test.body)
+			if test.dataWithEOF {
+				source = iotest.DataErrReader(source)
+			}
+			reader := http.MaxBytesReader(recorder, io.NopCloser(source), test.limit)
 			got, err := readRequestBody(reader, test.contentLength, test.limit)
 			var maxBytes *http.MaxBytesError
 			switch {

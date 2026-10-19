@@ -222,10 +222,11 @@ func readRequestBody(reader io.Reader, contentLength, limit int64) ([]byte, erro
 		n, err := reader.Read(body[len(body):min(int64(cap(body)), contentLength)])
 		body = body[:len(body)+n]
 		if err != nil {
-			// 与 io.ReadFull 一致：未读到任何数据时视为空请求体，读到部分数据后结束视为截断。
+			// 与 io.ReadFull 一致：未读到任何数据时视为空请求体，读到部分数据后结束视为截断；
+			// 最后一次 Read 可能同时返回剩余数据与 io.EOF，读满声明长度时不算截断。
 			if errors.Is(err, io.EOF) {
 				err = nil
-				if len(body) > 0 {
+				if len(body) > 0 && int64(len(body)) < contentLength {
 					err = io.ErrUnexpectedEOF
 				}
 			}
