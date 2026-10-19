@@ -2489,10 +2489,9 @@ test('操作日志详情展示原始 JSON、差异高亮和追踪信息', async 
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
   await signIn(page, 'home')
   await page.getByRole('link', { name: '操作日志', exact: true }).click()
-  await expect(page.getByRole('searchbox', { name: '请输入操作人名称' })).toHaveAttribute(
-    'placeholder',
-    '请输入操作人名称',
-  )
+  await expect(
+    page.getByRole('searchbox', { name: '请输入操作人、对象或请求 ID' }),
+  ).toHaveAttribute('placeholder', '请输入操作人、对象或请求 ID')
 
   const operationRow = page.getByRole('row').filter({ hasText: '服务商状态变更' })
   await expect(operationRow.locator('td').nth(3)).toContainText('服务商')

@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { useCollection, useListSearch, date } from '../composables'
-import { i18n, t } from '../i18n'
+import { useCollection, date } from '../composables'
+import { codeText, t } from '../i18n'
+import enUS from '../locales/en-US'
 import type { Operation } from '../types'
 import Icon from '../components/Icon.vue'
 import Status from '../components/Status.vue'
@@ -12,36 +13,58 @@ import ListFooter from '../components/ListFooter.vue'
 import ListSearch from '../components/ListSearch.vue'
 import OperationDiff from '../components/OperationDiff.vue'
 import TableScroll from '../components/TableScroll.vue'
+
+type OperationFilters = { keyword: string; type: string; result: string }
+// 关键词最长 100 字符，与后端校验保持一致。
+const keywordMaxLength = 100
+const operationTypes = Object.keys(enUS.operations.types)
+const operationResults = ['SUCCESS', 'FAILED'] as const
+const emptyFilters = (): OperationFilters => ({ keyword: '', type: '', result: '' })
 const route = useRoute()
-const operationPath = () =>
-  typeof route.query.applicationId === 'string' && /^\d+$/.test(route.query.applicationId)
-    ? `/applications/${route.query.applicationId}/operations`
-    : '/operation-logs'
+const keyword = ref(''),
+  typeFilter = ref(''),
+  resultFilter = ref(''),
+  applied = ref<OperationFilters>(emptyFilters())
+const filtered = computed(() =>
+  Boolean(applied.value.keyword || applied.value.type || applied.value.result),
+)
+// 筛选交给服务端执行，列表仍按游标分页，避免把整张审计表拉到浏览器。
+const operationPath = () => {
+  const base =
+    typeof route.query.applicationId === 'string' && /^\d+$/.test(route.query.applicationId)
+      ? `/applications/${route.query.applicationId}/operations`
+      : '/operation-logs'
+  const params = new URLSearchParams()
+  if (applied.value.keyword) params.set('keyword', applied.value.keyword)
+  if (applied.value.type) params.set('type', applied.value.type)
+  if (applied.value.result) params.set('result', applied.value.result)
+  const query = params.toString()
+  return query ? `${base}?${query}` : base
+}
 const { items, cursor, page, pageSize, total, loading, error, load, previous, retry, setPageSize } =
   useCollection<Operation>(operationPath)
 const selected = ref<Operation | null>(null)
-function operationLabel(value: string) {
-  const key = `operations.types.${value}`
-  return i18n.global.te(key) ? t(key) : value
-}
-function targetLabel(value: string) {
-  const key = `operations.targets.${value}`
-  return i18n.global.te(key) ? t(key) : value
-}
-function errorLabel(value: string) {
-  const key = `errors.${value}`
-  return i18n.global.te(key) ? t(key) : value
-}
+const operationLabel = (value: string) => codeText('operations.types', value)
+const targetLabel = (value: string) => codeText('operations.targets', value)
+const errorLabel = (value: string) => codeText('errors', value)
 function showSnapshot(row: Operation) {
   return row.type !== 'LOGIN_SUCCESS' && row.type !== 'LOGIN_FAILED'
 }
-const { keyword, query, visible, search, reset, searching, searchingAll } = useListSearch(
-  items,
-  (row) =>
-    `${row.operatorName} ${row.type} ${operationLabel(row.type)} ${row.targetType} ${targetLabel(row.targetType)} ${row.targetName || ''} ${row.targetId} ${row.requestId || ''} ${row.result} ${t(`state.${row.result}`)}`,
-  operationPath,
-  loading,
-)
+function search() {
+  applied.value = {
+    keyword: keyword.value.trim().slice(0, keywordMaxLength),
+    type: typeFilter.value,
+    result: resultFilter.value,
+  }
+  void load()
+}
+function reset() {
+  keyword.value = ''
+  typeFilter.value = ''
+  resultFilter.value = ''
+  applied.value = emptyFilters()
+  void load()
+}
 onMounted(() => load())
 watch(
   () => route.query.applicationId,
@@ -57,11 +80,33 @@ watch(
   <section class="panel">
     <ListSearch
       v-model="keyword"
-      :loading="loading || searching"
+      :loading="loading"
+      :maxlength="keywordMaxLength"
       :placeholder="t('operations.searchPlaceholder')"
       @search="search"
       @reset="reset"
-    />
+    >
+      <template #filters>
+        <label class="operation-filter">
+          <span>{{ t('operations.type') }}</span>
+          <select v-model="typeFilter" :aria-label="t('operations.type')" :disabled="loading">
+            <option value="">{{ t('common.all') }}</option>
+            <option v-for="value in operationTypes" :key="value" :value="value">
+              {{ operationLabel(value) }}
+            </option>
+          </select>
+        </label>
+        <label class="operation-filter">
+          <span>{{ t('operations.result') }}</span>
+          <select v-model="resultFilter" :aria-label="t('operations.result')" :disabled="loading">
+            <option value="">{{ t('common.all') }}</option>
+            <option v-for="value in operationResults" :key="value" :value="value">
+              {{ t(`state.${value}`) }}
+            </option>
+          </select>
+        </label>
+      </template>
+    </ListSearch>
     <p v-if="error" class="alert error" role="alert">
       {{ error }}<button class="text-button" @click="retry">{{ t('common.retry') }}</button>
     </p>
@@ -86,7 +131,7 @@ watch(
           </tr>
         </thead>
         <tbody>
-          <tr v-for="row in visible" :key="row.id">
+          <tr v-for="row in items" :key="row.id">
             <td class="table-time">{{ date(row.createdAt) }}</td>
             <td>{{ row.operatorName }}</td>
             <td>{{ operationLabel(row.type) }}</td>
@@ -108,20 +153,21 @@ watch(
         </tbody>
       </table>
     </TableScroll>
-    <div v-if="!visible.length" class="empty-state">
+    <div v-if="!items.length" class="empty-state">
       <Icon name="operations" :size="32" />
-      <p>{{ t(loading ? 'common.loading' : query ? 'common.noResults' : 'operations.empty') }}</p>
+      <p>
+        {{ t(loading ? 'common.loading' : filtered ? 'common.noResults' : 'operations.empty') }}
+      </p>
       <button
         v-if="!loading"
         type="button"
         class="button primary empty-state-action"
-        @click="query ? reset() : load()"
+        @click="filtered ? reset() : load()"
       >
-        <Icon name="refresh" :size="16" />{{ t(query ? 'common.reset' : 'common.retry') }}
+        <Icon name="refresh" :size="16" />{{ t(filtered ? 'common.reset' : 'common.retry') }}
       </button>
     </div>
     <ListFooter
-      v-if="!searchingAll"
       :cursor="cursor"
       :page="page"
       :page-size="pageSize"
@@ -166,6 +212,33 @@ watch(
 </template>
 
 <style scoped>
+.operation-filter {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.operation-filter select {
+  width: 160px;
+  padding-top: 9px;
+  padding-bottom: 9px;
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  font-size: 12px;
+}
+@media (max-width: 760px) {
+  .operation-filter {
+    width: 100%;
+  }
+  .operation-filter select {
+    flex: 1;
+    width: auto;
+  }
+}
 .operations-table {
   min-width: 860px;
   table-layout: fixed;

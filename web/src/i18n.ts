@@ -1095,7 +1095,7 @@ export const i18n = createI18n({
         applicationFilter: '正在查看该应用的操作记录。',
         showAll: '查看全部',
         operator: '操作人',
-        searchPlaceholder: '请输入操作人名称',
+        searchPlaceholder: '请输入操作人、对象或请求 ID',
         type: '操作类型',
         target: '对象',
         result: '结果',

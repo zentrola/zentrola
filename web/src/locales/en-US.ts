@@ -1104,7 +1104,7 @@ export default {
     applicationFilter: 'Showing operation records for this application.',
     showAll: 'Show all',
     operator: 'Operator',
-    searchPlaceholder: 'Enter operator name',
+    searchPlaceholder: 'Enter operator, target, or request ID',
     type: 'Operation',
     target: 'Target',
     result: 'Result',

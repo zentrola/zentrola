@@ -3,7 +3,7 @@ import { useId } from 'vue'
 import { t } from '../i18n'
 
 const keyword = defineModel<string>({ required: true })
-defineProps<{ loading?: boolean; placeholder?: string; label?: string }>()
+defineProps<{ loading?: boolean; placeholder?: string; label?: string; maxlength?: number }>()
 defineEmits<{ search: []; reset: [] }>()
 const inputID = useId()
 </script>
@@ -16,6 +16,7 @@ const inputID = useId()
         :id="label ? inputID : undefined"
         v-model="keyword"
         type="search"
+        :maxlength="maxlength"
         :aria-label="label || placeholder || t('common.search')"
         :placeholder="placeholder || t('common.search')"
         :disabled="loading"
