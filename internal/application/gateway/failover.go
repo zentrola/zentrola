@@ -252,8 +252,9 @@ func (s *Service) refreshCredential(ctx context.Context, route Route, credential
 			if err != nil || acquired {
 				return credential, false, errSubscriptionRefreshBusy
 			}
-			// 已过期时等待持锁者完成，随后按正常流程重新加载最新凭据。
-			release, err = s.waitSubscriptionRefreshResource(refreshCtx, route.ResourceID)
+			// 已过期时等待持锁者完成，随后按正常流程重新加载最新凭据。等待本身不涉及轮换，
+			// 跟随调用方取消；只有拿到锁之后的刷新才与请求生命周期解耦。
+			release, err = s.waitSubscriptionRefreshResource(ctx, refreshCtx, route.ResourceID)
 			if err != nil {
 				return credential, false, errSubscriptionRefreshBusy
 			}
@@ -364,10 +365,16 @@ func subscriptionCredentialUsable(refresh SubscriptionRefresher, route Route, cr
 	return expiresAt != nil && expiresAt.After(now.Add(subscriptionCredentialMinValidity))
 }
 
-// waitSubscriptionRefreshResource 在有限时间内轮询刷新锁，直到获得锁或超时。
-func (s *Service) waitSubscriptionRefreshResource(ctx context.Context, resourceID int64) (func(), error) {
+// waitSubscriptionRefreshResource 在有限时间内轮询刷新锁，直到获得锁、超时或调用方取消。
+// 等待同时不超过 refreshCtx 的截止时间，避免等锁耗尽刷新超时。
+func (s *Service) waitSubscriptionRefreshResource(ctx, refreshCtx context.Context, resourceID int64) (func(), error) {
 	waitCtx, cancel := context.WithTimeout(ctx, subscriptionRefreshLockWait)
 	defer cancel()
+	if deadline, ok := refreshCtx.Deadline(); ok {
+		var cancelDeadline context.CancelFunc
+		waitCtx, cancelDeadline = context.WithDeadline(waitCtx, deadline)
+		defer cancelDeadline()
+	}
 	ticker := time.NewTicker(subscriptionRefreshLockPoll)
 	defer ticker.Stop()
 	for {

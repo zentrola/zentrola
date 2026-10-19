@@ -148,3 +148,25 @@ func TestForwardDoesNotCooldownSubscriptionOnRefreshLockContention(t *testing.T)
 		t.Fatalf("selected=%v cooldowns=%v", selected, state.cooldowns)
 	}
 }
+
+func TestRefreshLockWaitStopsWhenCallerCancels(t *testing.T) {
+	store := &subscriptionRefreshStore{credentials: map[int64]SubscriptionCredential{
+		1: subscriptionCredential(1, "expired-token"),
+	}}
+	coordinator := &busySubscriptionCoordinator{busyCalls: -1}
+	// 刷新超时与请求解耦，但等待其他持锁者不应在调用方断开后继续轮询。
+	service := New(store, subscriptionRefreshCipher{}, nil,
+		WithSubscriptionRefresher(&expiringSubscriptionRefresher{}), WithSubscriptionRefreshCoordinator(coordinator),
+		WithCredentialRefreshTimeout(time.Minute))
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	route := Route{ProviderID: 10, ResourceID: 1, AuthType: "SUBSCRIPTION", AuthAdapter: "OPENAI_CODEX"}
+	started := time.Now()
+	_, _, err := service.refreshCredential(ctx, route, []byte("expired-token"))
+	if !errors.Is(err, errSubscriptionRefreshBusy) {
+		t.Fatalf("err=%v, want refresh busy", err)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("lock wait ignored caller cancellation: %s", elapsed)
+	}
+}
