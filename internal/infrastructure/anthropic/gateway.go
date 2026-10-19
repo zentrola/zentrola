@@ -82,7 +82,7 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 	}
 	// 根据服务商能力自动过滤不支持的功能
 	capabilities := catalog.GetProviderCapabilities(baseURL)
-	if !capabilities.SupportsAdvisor {
+	if !capabilities.SupportsAdvisor && requestUsesAdvisor(input) {
 		adapted, removedTools, removedBeta, err := adaptDeepSeekRequest(input)
 		if err != nil {
 			return nil, err

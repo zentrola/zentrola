@@ -181,3 +181,42 @@ func TestDeepSeekRejectsUntrustedURLs(t *testing.T) {
 		}
 	}
 }
+
+func TestRequestUsesAdvisor(t *testing.T) {
+	tests := []struct {
+		name  string
+		input gw.Request
+		want  bool
+	}{
+		{"plain request", gw.Request{Body: []byte(`{"model":"m","tools":[{"name":"read"}]}`), Beta: "other-beta"}, false},
+		{"advisor tool", gw.Request{Body: []byte(`{"tools":[{"type":"advisor_20260301"}]}`)}, true},
+		{"advisor beta field", gw.Request{Body: []byte(`{}`), Beta: "other,advisor-tool-2026-03-01"}, true},
+		{"advisor beta header", gw.Request{Body: []byte(`{}`), ProtocolHeaders: map[string][]string{"Anthropic-Beta": {"advisor-tool-2026-03-01"}}}, true},
+		{"unrelated header", gw.Request{Body: []byte(`{}`), ProtocolHeaders: map[string][]string{"Anthropic-Version": {"advisor-tool-2026-03-01"}}}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := requestUsesAdvisor(tt.input); got != tt.want {
+				t.Fatalf("requestUsesAdvisor=%v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestUnknownProviderForwardsRequestWithoutAdvisorUnchanged(t *testing.T) {
+	// 未声明 advisor 的请求不经重新解析，按原始字节转发。
+	body := []byte(`{"model":"some-model",  "future":9007199254740993,"messages":[{"role":"user","content":"test"}]}`)
+	client := NewGatewayClient(time.Second)
+	client.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		data, _ := io.ReadAll(r.Body)
+		if !bytes.Equal(data, body) {
+			t.Fatalf("request body changed: %s", data)
+		}
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"type":"message"}`))}, nil
+	})
+	resp, err := client.Open(context.Background(), gw.Route{BaseURL: "https://api.unknown-provider.com/v1"}, gw.Request{Path: "/v1/messages", Body: body}, []byte("test-key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+}

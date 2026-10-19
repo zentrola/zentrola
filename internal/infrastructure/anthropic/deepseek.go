@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 
@@ -71,6 +72,26 @@ func deepSeekAnthropicProbeBody(model string) []byte {
 		Thinking: deepSeekProbeThinking{Type: "disabled"},
 	})
 	return body
+}
+
+// requestUsesAdvisor 用字节与字符串匹配快速判断请求是否可能声明了 advisor 工具或 beta，
+// 未命中时跳过完整解析与重写请求体。按 JSON 转义写出的工具类型不会命中，此时请求原样转发，
+// 由上游返回协议错误。
+func requestUsesAdvisor(input gw.Request) bool {
+	if bytes.Contains(input.Body, []byte(deepSeekAdvisorTool)) || strings.Contains(input.Beta, deepSeekAdvisorBeta) {
+		return true
+	}
+	for name, values := range input.ProtocolHeaders {
+		if !strings.EqualFold(name, "anthropic-beta") {
+			continue
+		}
+		for _, value := range values {
+			if strings.Contains(value, deepSeekAdvisorBeta) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func adaptDeepSeekRequest(input gw.Request) (gw.Request, int, bool, error) {
