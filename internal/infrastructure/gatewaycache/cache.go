@@ -19,6 +19,7 @@ import (
 	redis "github.com/redis/go-redis/v9"
 	gw "github.com/zentrola/zentrola/internal/application/gateway"
 	appsec "github.com/zentrola/zentrola/internal/application/security"
+	"github.com/zentrola/zentrola/internal/infrastructure/redisbreaker"
 )
 
 const (
@@ -29,7 +30,6 @@ const (
 const (
 	defaultIdentityTTL = 10 * time.Minute
 	defaultRouteTTL    = time.Minute
-	retryRedis         = 5 * time.Second
 	retryInvalidation  = time.Second
 )
 
@@ -82,7 +82,7 @@ type Cache struct {
 	generationNamespace   string
 	logger                *slog.Logger
 	identityTTL, routeTTL time.Duration
-	unavailableUntil      atomic.Int64
+	breaker               redisbreaker.Breaker
 	invalidationPending   atomic.Bool
 	stop                  context.CancelFunc
 	workers               sync.WaitGroup
@@ -381,7 +381,7 @@ func (c *Cache) get(ctx context.Context, key string, target any, cacheType strin
 	result, err := getScript.Run(ctx, c.client, []string{c.generationKey()}, key, seed).Slice()
 	if err != nil || len(result) != 2 {
 		// 读失败不会产生陈旧缓存，不置失效标记；调用方上下文结束也不计入熔断。
-		if err != nil && callerContextDone(ctx) {
+		if err != nil && redisbreaker.CallerContextDone(ctx) {
 			return "", false
 		}
 		if err != nil {
@@ -437,7 +437,7 @@ func (c *Cache) set(ctx context.Context, key, generation string, value any, ttl 
 }
 
 func (c *Cache) available(ctx context.Context) bool {
-	if c.now().UnixMilli() < c.unavailableUntil.Load() {
+	if c.redisUnavailable() {
 		return false
 	}
 	if !c.invalidationPending.Load() {
@@ -470,7 +470,7 @@ func (c *Cache) retryInvalidations(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if !c.invalidationPending.Load() || c.now().UnixMilli() < c.unavailableUntil.Load() {
+			if !c.invalidationPending.Load() || c.redisUnavailable() {
 				continue
 			}
 			cacheCtx, cancel := context.WithTimeout(ctx, time.Second)
@@ -527,23 +527,14 @@ func newGeneration() (string, error) {
 
 // recordFor 区分调用方上下文结束与 Redis 故障，前者不触发熔断。
 func (c *Cache) recordFor(ctx context.Context, err error) error {
-	if err != nil && callerContextDone(ctx) {
-		return err
-	}
-	return c.record(err)
-}
-
-// callerContextDone 只依据调用方上下文判断请求是否已结束。net 拨号超时等 Redis 侧错误
-// 同样满足 errors.Is(err, context.DeadlineExceeded)，不能据错误本身判定，否则熔断永远不会触发。
-func callerContextDone(ctx context.Context) bool {
-	return ctx.Err() != nil
+	return c.breaker.RecordFor(ctx, c.now(), err)
 }
 
 func (c *Cache) record(err error) error {
-	if err != nil {
-		c.unavailableUntil.Store(c.now().Add(retryRedis).UnixMilli())
-		return err
-	}
-	c.unavailableUntil.Store(0)
-	return nil
+	return c.breaker.Record(c.now(), err)
+}
+
+// redisUnavailable 报告熔断是否生效，生效期间跳过 Redis 访问。
+func (c *Cache) redisUnavailable() bool {
+	return c.breaker.Open(c.now())
 }

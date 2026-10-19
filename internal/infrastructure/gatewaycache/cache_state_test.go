@@ -33,7 +33,7 @@ func TestCacheReadFailuresDoNotScheduleInvalidation(t *testing.T) {
 			if _, _, ok := cache.GetRoutes(test.ctx, key); ok {
 				t.Fatal("unreachable cache returned a hit")
 			}
-			unavailable := time.Now().UnixMilli() < cache.unavailableUntil.Load()
+			unavailable := cache.redisUnavailable()
 			if cache.invalidationPending.Load() || unavailable != test.unavailable {
 				t.Fatalf("pending=%v unavailable=%v", cache.invalidationPending.Load(), unavailable)
 			}
@@ -65,7 +65,7 @@ func TestCacheDialTimeoutTripsBreaker(t *testing.T) {
 			_ = cache.client.Close()
 			cache.client = dialTimeoutClient()
 			test.call(context.Background(), cache)
-			if time.Now().UnixMilli() >= cache.unavailableUntil.Load() {
+			if !cache.redisUnavailable() {
 				t.Fatal("dial timeout did not trip Redis breaker")
 			}
 		})

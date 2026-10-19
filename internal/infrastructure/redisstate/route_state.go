@@ -9,17 +9,16 @@ import (
 	"errors"
 	"net"
 	"strconv"
-	"sync/atomic"
 	"time"
 
 	redis "github.com/redis/go-redis/v9"
 	"github.com/zentrola/zentrola/internal/application/gateway"
+	"github.com/zentrola/zentrola/internal/infrastructure/redisbreaker"
 )
 
 const (
 	probeLease                   = 5 * time.Second
 	probeMarkerRetention         = 24 * time.Hour
-	retryRedis                   = 5 * time.Second
 	subscriptionSchedulerLockTTL = 20 * time.Second
 	subscriptionResourceLockTTL  = 60 * time.Second
 )
@@ -57,8 +56,8 @@ return 1
 `)
 
 type State struct {
-	client           *redis.Client
-	unavailableUntil atomic.Int64
+	client  *redis.Client
+	breaker redisbreaker.Breaker
 }
 
 func New(host string, port, database int, password string) *State {
@@ -181,31 +180,17 @@ func (s *State) acquireLock(ctx context.Context, key string, ttl time.Duration) 
 }
 
 func (s *State) redisUnavailable() bool {
-	return time.Now().UnixMilli() < s.unavailableUntil.Load()
+	return s.breaker.Open(time.Now())
 }
 
 // recordFor 区分调用方上下文结束与 Redis 故障。客户端断开或请求超时导致的错误
 // 不触发熔断，也不改变既有的可用性判定，避免单个请求取消让所有路由状态失效。
 func (s *State) recordFor(ctx context.Context, err error) error {
-	if err != nil && callerContextDone(ctx) {
-		return err
-	}
-	return s.record(err)
-}
-
-// callerContextDone 只依据调用方上下文判断请求是否已结束。net 拨号超时等 Redis 侧错误
-// 同样满足 errors.Is(err, context.DeadlineExceeded)，不能据错误本身判定，否则熔断永远不会触发。
-func callerContextDone(ctx context.Context) bool {
-	return ctx.Err() != nil
+	return s.breaker.RecordFor(ctx, time.Now(), err)
 }
 
 func (s *State) record(err error) error {
-	if err != nil {
-		s.unavailableUntil.Store(time.Now().Add(retryRedis).UnixMilli())
-		return err
-	}
-	s.unavailableUntil.Store(0)
-	return nil
+	return s.breaker.Record(time.Now(), err)
 }
 
 func cooldownKey(resourceID int64) string {
