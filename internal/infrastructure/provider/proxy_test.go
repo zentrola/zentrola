@@ -47,7 +47,7 @@ func TestClientWithProxyIsolatedTransport(t *testing.T) {
 	if err := json.Unmarshal(logs.Bytes(), &entry); err != nil {
 		t.Fatalf("decode proxy log: %v", err)
 	}
-	if entry["msg"] != "provider outbound request using proxy" || entry["proxy"] != true ||
+	if entry["msg"] != "provider proxy transport created" || entry["proxy"] != true ||
 		entry["proxy_url"] != "http://******:******@proxy.example.com:8080" || entry["proxy_auth"] != true ||
 		entry["proxy_redacted"] != true || entry["operation"] != "test" ||
 		entry["provider_id"] != float64(12) || entry["protocol"] != "OPENAI" {
@@ -296,7 +296,7 @@ func TestProductionProxyLogMasksHeaderValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	logProxyRequest(context.Background(), proxyURL, map[string]string{"X-Proxy-Token": "proxy-secret"}, ProxyRequestLog{Logger: logger})
+	logProxyRequest(context.Background(), slog.LevelInfo, proxyURL, map[string]string{"X-Proxy-Token": "proxy-secret"}, ProxyRequestLog{Logger: logger})
 
 	output := logs.String()
 	for _, expected := range []string{

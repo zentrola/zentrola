@@ -4,10 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -45,27 +43,22 @@ func (c *GatewayClient) UseClaudeCodeVersion(version string) {
 }
 
 func NewGatewayClient(headerTimeout time.Duration, loggers ...*slog.Logger) *GatewayClient {
-	newClient := func(networkScope string) *http.Client {
-		transport := http.DefaultTransport.(*http.Transport).Clone()
-		transport.Proxy = nil
-		transport.DisableCompression = true
-		transport.DialContext = provider.EndpointDialContext(&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}, networkScope)
-		transport.TLSHandshakeTimeout = 10 * time.Second
-		transport.ResponseHeaderTimeout = headerTimeout
-		return &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	}
+	clients := provider.NewUpstreamClients(provider.UpstreamClientOptions{
+		DialTimeout: 10 * time.Second, TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: headerTimeout,
+		DisableCompression: true,
+	})
 	logger := slog.Default()
 	if len(loggers) > 0 && loggers[0] != nil {
 		logger = loggers[0]
 	}
 	return &GatewayClient{
-		client: newClient(catalog.NetworkScopePublic), privateClient: newClient(catalog.NetworkScopePrivate), logger: logger,
+		client: clients.Public, privateClient: clients.Private, logger: logger,
 		claudeCodeUserAgent: anthropicclaude.ClaudeCodeUserAgent(""),
 	}
 }
+
 func (c *GatewayClient) CloseIdleConnections() {
-	c.client.CloseIdleConnections()
-	c.privateClient.CloseIdleConnections()
+	provider.UpstreamClients{Public: c.client, Private: c.privateClient}.CloseIdleConnections()
 }
 func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Request, credential []byte) (*gw.Response, error) {
 	baseURL, allowed := provider.BaseURLForScope(route.BaseURL, route.NetworkScope)
@@ -114,15 +107,8 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 			return nil, err
 		}
 		input.Body = body
-	} else {
-		if len(credential) == 0 || len(credential) > 4096 {
-			return nil, gw.ErrCredential
-		}
-		for _, ch := range credential {
-			if ch < 33 || ch > 126 {
-				return nil, gw.ErrCredential
-			}
-		}
+	} else if !provider.ValidCredential(credential) {
+		return nil, gw.ErrCredential
 	}
 	url := baseURL + input.Path
 	if input.BetaQuery {
@@ -179,62 +165,24 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 	if err != nil {
 		return nil, gw.ErrProxy
 	}
+	logFields := provider.UpstreamRequestLog{RequestID: input.RequestID, ProviderID: route.ProviderID, ResourceID: route.ResourceID, Protocol: input.Protocol}
 	instrumented, sentHeaders := provider.TracedClient(client)
 	resp, err := instrumented.Do(req)
 	if err != nil {
 		requestHeaders := provider.HeadersForLog(req.Header)
-		sentHeaders.Delete("x-api-key")
-		sentHeaders.Delete("Authorization")
+		sentHeaders.Delete(gatewaySensitiveHeaders...)
 		cleanup()
-		if errors.Is(ctx.Err(), context.Canceled) {
-			return nil, gw.ErrCancelled
+		failure := gatewayTransportFailure(provider.TransportErrorCode(ctx, err, route.Proxy != nil))
+		if failure == gw.ErrCancelled {
+			return nil, failure
 		}
-		failure := gw.ErrUpstream
-		// 网络请求经过服务商代理时，传输层故障无法归因于上游响应；将其
-		// 明确标记为代理服务器故障，避免用户误以为服务商本身不可用。
-		if route.Proxy != nil {
-			failure = gw.ErrProxyServer
-			if errors.Is(err, provider.ErrProxyAuthentication) {
-				failure = gw.ErrProxyAuth
-			}
-		}
-		var netErr net.Error
-		if route.Proxy == nil && (errors.Is(ctx.Err(), context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout())) {
-			failure = gw.ErrTimeout
-		}
-		diagnostic := provider.DiagnoseNetworkError(err)
-		c.logger.WarnContext(ctx, "provider upstream request failed",
-			"error_code", failure.Code,
-			"request_id", input.RequestID,
-			"provider_id", route.ProviderID,
-			"resource_id", route.ResourceID,
-			"protocol", input.Protocol,
-			"failure_kind", diagnostic.Kind,
-			"network_op", diagnostic.Operation,
-			"network", diagnostic.Network,
-			"upstream_error_type", diagnostic.ErrorType,
-			"upstream_error", diagnostic.Detail,
-			"upstream_headers", requestHeaders,
-			"redacted", diagnostic.Redacted,
-		)
+		provider.LogTransportFailure(ctx, c.logger, failure.Code, err, requestHeaders, logFields)
 		return nil, failure
 	}
-	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
-		location, redacted := provider.RedirectLocationForLog(resp.Header.Get("Location"))
+	if provider.IsRedirect(resp.StatusCode) {
 		requestHeaders := provider.HeadersForLog(req.Header)
-		sentHeaders.Delete("x-api-key")
-		sentHeaders.Delete("Authorization")
-		c.logger.WarnContext(ctx, "provider upstream redirect rejected",
-			"error_code", "UPSTREAM_REDIRECT_REJECTED",
-			"request_id", input.RequestID,
-			"provider_id", route.ProviderID,
-			"resource_id", route.ResourceID,
-			"protocol", input.Protocol,
-			"upstream_status", resp.StatusCode,
-			"redirect_location", location,
-			"upstream_headers", requestHeaders,
-			"redacted", redacted,
-		)
+		sentHeaders.Delete(gatewaySensitiveHeaders...)
+		provider.LogRedirectRejected(ctx, c.logger, resp.StatusCode, resp.Header.Get("Location"), requestHeaders, logFields)
 		resp.Body.Close()
 		cleanup()
 		return nil, gw.ErrUpstream
@@ -250,6 +198,25 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 		}}
 	}
 	return &gw.Response{Status: resp.StatusCode, Headers: resp.Header, Body: &gatewayBody{ReadCloser: body, sentHeaders: sentHeaders, cleanup: cleanup}}, nil
+}
+
+// gatewaySensitiveHeaders 是响应结束后需从已发送请求中清除的凭据 Header。
+var gatewaySensitiveHeaders = []string{"x-api-key", "Authorization"}
+
+// gatewayTransportFailure 把传输错误分类码映射为网关失败类型。
+func gatewayTransportFailure(code string) *gw.Failure {
+	switch code {
+	case provider.TransportCancelled:
+		return gw.ErrCancelled
+	case provider.TransportProxyAuth:
+		return gw.ErrProxyAuth
+	case provider.TransportProxyServer:
+		return gw.ErrProxyServer
+	case provider.TransportTimeout:
+		return gw.ErrTimeout
+	default:
+		return gw.ErrUpstream
+	}
 }
 
 // rejectedSubscriptionBody 在不额外读取上游的前提下，保存调用方读过的错误响应前缀，关闭时交给 log 记录。
@@ -299,8 +266,7 @@ type gatewayBody struct {
 func (b *gatewayBody) Close() error {
 	b.once.Do(func() {
 		b.err = b.ReadCloser.Close()
-		b.sentHeaders.Delete("x-api-key")
-		b.sentHeaders.Delete("Authorization")
+		b.sentHeaders.Delete(gatewaySensitiveHeaders...)
 		if b.cleanup != nil {
 			b.cleanup()
 		}

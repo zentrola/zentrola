@@ -5,10 +5,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -28,24 +26,19 @@ type GatewayClient struct {
 }
 
 func NewGatewayClient(headerTimeout time.Duration, loggers ...*slog.Logger) *GatewayClient {
-	newClient := func(networkScope string) *http.Client {
-		t := http.DefaultTransport.(*http.Transport).Clone()
-		t.Proxy = nil
-		t.DisableCompression = true
-		t.DialContext = provider.EndpointDialContext(&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}, networkScope)
-		t.TLSHandshakeTimeout = 10 * time.Second
-		t.ResponseHeaderTimeout = headerTimeout
-		return &http.Client{Transport: t, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	}
+	clients := provider.NewUpstreamClients(provider.UpstreamClientOptions{
+		DialTimeout: 10 * time.Second, TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: headerTimeout,
+		DisableCompression: true,
+	})
 	logger := slog.Default()
 	if len(loggers) > 0 && loggers[0] != nil {
 		logger = loggers[0]
 	}
-	return &GatewayClient{client: newClient(catalog.NetworkScopePublic), privateClient: newClient(catalog.NetworkScopePrivate), logger: logger}
+	return &GatewayClient{client: clients.Public, privateClient: clients.Private, logger: logger}
 }
+
 func (c *GatewayClient) CloseIdleConnections() {
-	c.client.CloseIdleConnections()
-	c.privateClient.CloseIdleConnections()
+	provider.UpstreamClients{Public: c.client, Private: c.privateClient}.CloseIdleConnections()
 }
 func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Request, credential []byte) (*gw.Response, error) {
 	base := route.BaseURL
@@ -77,13 +70,8 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 		(input.Path != "/v1/chat/completions" && input.Path != "/v1/responses" && input.Path != "/v1/images/generations") || input.BetaQuery {
 		return nil, gw.ErrInvalid
 	}
-	if requestCredential == "" || len(requestCredential) > 16<<10 {
+	if !provider.ValidCredential(requestCredential) {
 		return nil, gw.ErrCredential
-	}
-	for _, b := range []byte(requestCredential) {
-		if b < 33 || b > 126 {
-			return nil, gw.ErrCredential
-		}
 	}
 	if route.AuthType != "SUBSCRIPTION" && input.Protocol == gw.OpenAIResponsesProtocol {
 		upstreamPath = "/responses"
@@ -117,67 +105,48 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 	if err != nil {
 		return nil, gw.ErrProxy
 	}
+	logFields := provider.UpstreamRequestLog{RequestID: input.RequestID, ProviderID: route.ProviderID, ResourceID: route.ResourceID, Protocol: input.Protocol}
 	instrumented, sentHeaders := provider.TracedClient(client)
 	resp, err := instrumented.Do(req)
 	if err != nil {
 		requestHeaders := provider.HeadersForLog(req.Header)
-		sentHeaders.Delete("Authorization")
-		sentHeaders.Delete("ChatGPT-Account-Id")
+		sentHeaders.Delete(gatewaySensitiveHeaders...)
 		cleanup()
-		if errors.Is(ctx.Err(), context.Canceled) {
-			return nil, gw.ErrCancelled
+		failure := gatewayTransportFailure(provider.TransportErrorCode(ctx, err, route.Proxy != nil))
+		if failure == gw.ErrCancelled {
+			return nil, failure
 		}
-		failure := gw.ErrUpstream
-		// 网络请求经过服务商代理时，传输层故障无法归因于上游响应；将其
-		// 明确标记为代理服务器故障，避免用户误以为服务商本身不可用。
-		if route.Proxy != nil {
-			failure = gw.ErrProxyServer
-			if errors.Is(err, provider.ErrProxyAuthentication) {
-				failure = gw.ErrProxyAuth
-			}
-		}
-		var ne net.Error
-		if route.Proxy == nil && (errors.Is(ctx.Err(), context.DeadlineExceeded) || (errors.As(err, &ne) && ne.Timeout())) {
-			failure = gw.ErrTimeout
-		}
-		diagnostic := provider.DiagnoseNetworkError(err)
-		c.logger.WarnContext(ctx, "provider upstream request failed",
-			"error_code", failure.Code,
-			"request_id", input.RequestID,
-			"provider_id", route.ProviderID,
-			"resource_id", route.ResourceID,
-			"protocol", input.Protocol,
-			"failure_kind", diagnostic.Kind,
-			"network_op", diagnostic.Operation,
-			"network", diagnostic.Network,
-			"upstream_error_type", diagnostic.ErrorType,
-			"upstream_error", diagnostic.Detail,
-			"upstream_headers", requestHeaders,
-			"redacted", diagnostic.Redacted,
-		)
+		provider.LogTransportFailure(ctx, c.logger, failure.Code, err, requestHeaders, logFields)
 		return nil, failure
 	}
-	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
-		location, redacted := provider.RedirectLocationForLog(resp.Header.Get("Location"))
+	if provider.IsRedirect(resp.StatusCode) {
 		requestHeaders := provider.HeadersForLog(req.Header)
-		sentHeaders.Delete("Authorization")
-		sentHeaders.Delete("ChatGPT-Account-Id")
-		c.logger.WarnContext(ctx, "provider upstream redirect rejected",
-			"error_code", "UPSTREAM_REDIRECT_REJECTED",
-			"request_id", input.RequestID,
-			"provider_id", route.ProviderID,
-			"resource_id", route.ResourceID,
-			"protocol", input.Protocol,
-			"upstream_status", resp.StatusCode,
-			"redirect_location", location,
-			"upstream_headers", requestHeaders,
-			"redacted", redacted,
-		)
+		sentHeaders.Delete(gatewaySensitiveHeaders...)
+		provider.LogRedirectRejected(ctx, c.logger, resp.StatusCode, resp.Header.Get("Location"), requestHeaders, logFields)
 		resp.Body.Close()
 		cleanup()
 		return nil, gw.ErrUpstream
 	}
 	return &gw.Response{Status: resp.StatusCode, Headers: resp.Header, Body: &responseBody{ReadCloser: resp.Body, sentHeaders: sentHeaders, cleanup: cleanup}}, nil
+}
+
+// gatewaySensitiveHeaders 是响应结束后需从已发送请求中清除的凭据 Header。
+var gatewaySensitiveHeaders = []string{"Authorization", "ChatGPT-Account-Id"}
+
+// gatewayTransportFailure 把传输错误分类码映射为网关失败类型。
+func gatewayTransportFailure(code string) *gw.Failure {
+	switch code {
+	case provider.TransportCancelled:
+		return gw.ErrCancelled
+	case provider.TransportProxyAuth:
+		return gw.ErrProxyAuth
+	case provider.TransportProxyServer:
+		return gw.ErrProxyServer
+	case provider.TransportTimeout:
+		return gw.ErrTimeout
+	default:
+		return gw.ErrUpstream
+	}
 }
 
 // codexSubscriptionResponsesBody 收紧 ChatGPT Codex 订阅端点的请求形态。
@@ -248,8 +217,7 @@ type responseBody struct {
 func (b *responseBody) Close() error {
 	b.once.Do(func() {
 		b.err = b.ReadCloser.Close()
-		b.sentHeaders.Delete("Authorization")
-		b.sentHeaders.Delete("ChatGPT-Account-Id")
+		b.sentHeaders.Delete(gatewaySensitiveHeaders...)
 		if b.cleanup != nil {
 			b.cleanup()
 		}

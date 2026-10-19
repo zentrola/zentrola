@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"sort"
 	"time"
@@ -64,26 +63,15 @@ type Discoverer struct {
 }
 
 func NewDiscoverer(logger *slog.Logger) *Discoverer {
-	newClient := func(networkScope string) *http.Client {
-		transport := http.DefaultTransport.(*http.Transport).Clone()
-		transport.Proxy = nil
-		transport.DialContext = provider.EndpointDialContext(&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}, networkScope)
-		transport.TLSHandshakeTimeout = 5 * time.Second
-		transport.ResponseHeaderTimeout = 10 * time.Second
-		return &http.Client{
-			Transport: transport,
-			Timeout:   15 * time.Second,
-			CheckRedirect: func(*http.Request, []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		}
-	}
+	clients := provider.NewUpstreamClients(provider.UpstreamClientOptions{
+		DialTimeout: 5 * time.Second, TLSHandshakeTimeout: 5 * time.Second, ResponseHeaderTimeout: 10 * time.Second, Timeout: 15 * time.Second,
+	})
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &Discoverer{
-		client:        newClient(catalog.NetworkScopePublic),
-		privateClient: newClient(catalog.NetworkScopePrivate),
+		client:        clients.Public,
+		privateClient: clients.Private,
 		logger:        logger,
 		adapters: map[string]adapter{
 			catalog.AnthropicOfficialCode: anthropicAdapter{},
@@ -145,7 +133,7 @@ func (d *Discoverer) Discover(ctx context.Context, source mgmt.ModelDiscoverySou
 		defer clear(token.Token)
 		credential, accountID = token.Token, token.AccountID
 	}
-	if !validCredential(credential) {
+	if !provider.ValidCredential(credential) {
 		result.Code = "CREDENTIAL_INVALID"
 		return
 	}
@@ -159,7 +147,7 @@ func (d *Discoverer) Discover(ctx context.Context, source mgmt.ModelDiscoverySou
 			result.Code = "UPSTREAM_URL_REJECTED"
 			return nil, result
 		}
-		if requestSpec.AccountIDHeader != "" && !validCredential([]byte(accountID)) {
+		if requestSpec.AccountIDHeader != "" && !provider.ValidCredential([]byte(accountID)) {
 			result.Code = "CREDENTIAL_INVALID"
 			return nil, result
 		}
@@ -204,7 +192,7 @@ func (d *Discoverer) Discover(ctx context.Context, source mgmt.ModelDiscoverySou
 		}
 		if requestErr != nil {
 			cleanup()
-			result.Code = connectionErrorCode(ctx, requestErr, proxy)
+			result.Code = provider.TransportErrorCode(ctx, requestErr, proxy != nil)
 			return nil, result
 		}
 		result.HTTPStatus = resp.StatusCode
@@ -224,7 +212,7 @@ func (d *Discoverer) Discover(ctx context.Context, source mgmt.ModelDiscoverySou
 			return nil, result
 		}
 		if readErr != nil {
-			result.Code = connectionErrorCode(ctx, readErr, proxy)
+			result.Code = provider.TransportErrorCode(ctx, readErr, proxy != nil)
 			return nil, result
 		}
 		if len(data) > maxCatalogResponseBytes {
@@ -264,18 +252,6 @@ func (d *Discoverer) Discover(ctx context.Context, source mgmt.ModelDiscoverySou
 	return nil, result
 }
 
-func validCredential(credential []byte) bool {
-	if len(credential) == 0 || len(credential) > 4096 {
-		return false
-	}
-	for _, ch := range credential {
-		if ch < 33 || ch > 126 {
-			return false
-		}
-	}
-	return true
-}
-
 func connectionStatusCode(status int) string {
 	switch status {
 	case http.StatusUnauthorized, http.StatusForbidden:
@@ -285,21 +261,4 @@ func connectionStatusCode(status int) string {
 	default:
 		return "UPSTREAM_UNAVAILABLE"
 	}
-}
-
-func connectionErrorCode(ctx context.Context, err error, proxy *catalog.OutboundProxy) string {
-	if errors.Is(ctx.Err(), context.Canceled) {
-		return "REQUEST_CANCELLED"
-	}
-	if errors.Is(err, provider.ErrProxyAuthentication) {
-		return "PROXY_AUTH_REJECTED"
-	}
-	if proxy != nil {
-		return "PROXY_SERVER_UNAVAILABLE"
-	}
-	var netErr net.Error
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
-		return "UPSTREAM_TIMEOUT"
-	}
-	return "UPSTREAM_UNAVAILABLE"
 }

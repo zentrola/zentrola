@@ -11,6 +11,7 @@ import (
 
 	mgmt "github.com/zentrola/zentrola/internal/application/management"
 	"github.com/zentrola/zentrola/internal/domain/catalog"
+	"github.com/zentrola/zentrola/internal/infrastructure/provider"
 )
 
 const (
@@ -87,18 +88,6 @@ func (a *Adapter) SupportsProvider(provider mgmt.Provider) bool {
 	return provider.Code == catalog.AnthropicOfficialCode
 }
 
-func validToken(token string) bool {
-	if len(token) == 0 || len(token) > 4096 {
-		return false
-	}
-	for _, value := range []byte(token) {
-		if value < 33 || value > 126 {
-			return false
-		}
-	}
-	return true
-}
-
 func parseCredential(raw []byte) (storedCredential, error) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || len(trimmed) > 64<<10 {
@@ -106,13 +95,13 @@ func parseCredential(raw []byte) (storedCredential, error) {
 	}
 	if trimmed[0] != '{' {
 		token := string(trimmed)
-		if !validToken(token) {
+		if !provider.ValidCredential(token) {
 			return storedCredential{}, errInvalidCredential
 		}
 		return storedCredential{Kind: credentialKind, AccessToken: token}, nil
 	}
 	var credential storedCredential
-	if json.Unmarshal(trimmed, &credential) != nil || credential.Kind != credentialKind || !validToken(credential.AccessToken) {
+	if json.Unmarshal(trimmed, &credential) != nil || credential.Kind != credentialKind || !provider.ValidCredential(credential.AccessToken) {
 		return storedCredential{}, errInvalidCredential
 	}
 	return credential, nil

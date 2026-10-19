@@ -28,8 +28,12 @@ func (c *SentHeaders) RoundTrip(request *http.Request) (*http.Response, error) {
 	return c.base.RoundTrip(request)
 }
 
-func (c *SentHeaders) Delete(name string) {
-	if c != nil && c.headers != nil {
+// Delete 从已发送的请求 Header 中删除指定名称，用于清除短期驻留的凭据。
+func (c *SentHeaders) Delete(names ...string) {
+	if c == nil || c.headers == nil {
+		return
+	}
+	for _, name := range names {
 		c.headers.Del(name)
 	}
 }

@@ -5,10 +5,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -74,22 +72,17 @@ type ConnectionTester struct {
 }
 
 func NewConnectionTester(loggers ...*slog.Logger) *ConnectionTester {
-	newClient := func(networkScope string) *http.Client {
-		transport := http.DefaultTransport.(*http.Transport).Clone()
-		transport.Proxy = nil
-		transport.DialContext = provider.EndpointDialContext(&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}, networkScope)
-		transport.TLSHandshakeTimeout = 5 * time.Second
-		transport.ResponseHeaderTimeout = 10 * time.Second
-		return &http.Client{Transport: transport, Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	}
+	clients := provider.NewUpstreamClients(provider.UpstreamClientOptions{
+		DialTimeout: 5 * time.Second, TLSHandshakeTimeout: 5 * time.Second, ResponseHeaderTimeout: 10 * time.Second, Timeout: 15 * time.Second,
+	})
 	standardAdapter := standardConnectionProbeAdapter{}
 	logger := slog.Default()
 	if len(loggers) > 0 && loggers[0] != nil {
 		logger = loggers[0]
 	}
 	return &ConnectionTester{
-		client:              newClient(catalog.NetworkScopePublic),
-		privateClient:       newClient(catalog.NetworkScopePrivate),
+		client:              clients.Public,
+		privateClient:       clients.Private,
 		standardAdapter:     standardAdapter,
 		logger:              logger,
 		claudeCodeUserAgent: anthropicclaude.ClaudeCodeUserAgent(""),
@@ -125,7 +118,7 @@ func (t *ConnectionTester) Test(ctx context.Context, target mgmt.ConnectionTarge
 		result.Code = "UPSTREAM_URL_REJECTED"
 		return
 	}
-	if (target.AuthType != mgmt.AuthTypeSubscription && !validProbeCredential(credential)) ||
+	if (target.AuthType != mgmt.AuthTypeSubscription && !provider.ValidCredential(credential)) ||
 		(target.AuthType == mgmt.AuthTypeSubscription && (len(credential) == 0 || len(credential) > 64<<10)) {
 		result.Code = "CREDENTIAL_INVALID"
 		return
@@ -244,7 +237,7 @@ func (t *ConnectionTester) Test(ctx context.Context, target mgmt.ConnectionTarge
 	defer cleanup()
 	resp, err := client.Do(req)
 	if err != nil {
-		result.Code = connectionErrorCode(ctx, err, proxy)
+		result.Code = provider.TransportErrorCode(ctx, err, proxy != nil)
 		return
 	}
 	defer resp.Body.Close()
@@ -262,7 +255,7 @@ func (t *ConnectionTester) Test(ctx context.Context, target mgmt.ConnectionTarge
 	}
 	data, readErr := io.ReadAll(io.LimitReader(resp.Body, (64<<10)+1))
 	if readErr != nil {
-		result.Code = connectionErrorCode(ctx, readErr, proxy)
+		result.Code = provider.TransportErrorCode(ctx, readErr, proxy != nil)
 		return
 	}
 	if len(data) > 64<<10 {
@@ -286,18 +279,6 @@ func (t *ConnectionTester) Test(ctx context.Context, target mgmt.ConnectionTarge
 		result.ObservedQuotas = anthropicclaude.AvailableQuotas(time.Now())
 	}
 	return
-}
-
-func validProbeCredential(credential []byte) bool {
-	if len(credential) == 0 || len(credential) > 4096 {
-		return false
-	}
-	for _, ch := range credential {
-		if ch < 33 || ch > 126 {
-			return false
-		}
-	}
-	return true
 }
 
 type inferenceProbeFormat uint8
@@ -454,23 +435,6 @@ func containsProbeText(value string, candidates ...string) bool {
 		}
 	}
 	return false
-}
-
-func connectionErrorCode(ctx context.Context, err error, proxy *catalog.OutboundProxy) string {
-	if errors.Is(ctx.Err(), context.Canceled) {
-		return "REQUEST_CANCELLED"
-	}
-	if errors.Is(err, provider.ErrProxyAuthentication) {
-		return "PROXY_AUTH_REJECTED"
-	}
-	if proxy != nil {
-		return "PROXY_SERVER_UNAVAILABLE"
-	}
-	var netErr net.Error
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
-		return "UPSTREAM_TIMEOUT"
-	}
-	return "UPSTREAM_UNAVAILABLE"
 }
 
 // logClaudeSubscriptionRejection 记录 Claude 订阅请求被上游拒绝时的错误类型与消息，便于区分凭据问题、

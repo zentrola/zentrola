@@ -126,11 +126,7 @@ func proxyLogHeaders(headers map[string]string) map[string]string {
 	return result
 }
 
-func logProxyRequest(ctx context.Context, proxyURL *url.URL, headers map[string]string, details ProxyRequestLog) {
-	logger := details.Logger
-	if logger == nil {
-		logger = slog.Default()
-	}
+func proxyLogAttributes(proxyURL *url.URL, headers map[string]string, details ProxyRequestLog) []any {
 	attributes := []any{
 		"proxy", true,
 		"proxy_url", proxyLogURL(proxyURL),
@@ -153,17 +149,33 @@ func logProxyRequest(ctx context.Context, proxyURL *url.URL, headers map[string]
 	if details.Protocol != "" {
 		attributes = append(attributes, "protocol", details.Protocol)
 	}
-	logger.InfoContext(ctx, "provider outbound request using proxy", attributes...)
+	return attributes
 }
 
-// ClientWithProxy 为单次代理调用克隆 Transport，避免不同服务商之间串用代理配置。
-// 返回的 cleanup 必须在响应体关闭时调用。
+func proxyLogger(details ProxyRequestLog) *slog.Logger {
+	if details.Logger == nil {
+		return slog.Default()
+	}
+	return details.Logger
+}
+
+// logProxyRequest 以 level 记录一次使用代理的出站请求；代理凭据与请求头值均已脱敏。
+func logProxyRequest(ctx context.Context, level slog.Level, proxyURL *url.URL, headers map[string]string, details ProxyRequestLog) {
+	proxyLogger(details).Log(ctx, level, "provider outbound request using proxy", proxyLogAttributes(proxyURL, headers, details)...)
+}
+
+// ClientWithProxy 返回使用服务商代理的 Client。相同代理配置复用同一个 Transport 以保持连接复用，
+// 不同服务商的代理配置互不共享。返回的 cleanup 保留为兼容调用约定，可在响应体关闭时调用。
 func ClientWithProxy(ctx context.Context, base *http.Client, proxy *catalog.OutboundProxy, details ProxyRequestLog) (*http.Client, func(), error) {
 	return ClientWithProxyForScope(ctx, base, proxy, catalog.NetworkScopePublic, details)
 }
 
 // ClientWithProxyForScope 为使用代理的请求保留 Endpoint 网络范围约束。代理负责
 // 解析域名，因此这里只校验 URL 中的字面量 IP；域名目标由代理端网络策略约束。
+//
+// Transport 按（基础 Transport、网络范围、代理 URL 与代理请求头）缓存并复用，避免每个请求
+// 重新握手 TLS 并使 HTTP/2 失效；缓存有容量上限并淘汰长期闲置的配置，配置变更后旧 Transport
+// 会被回收。返回的 cleanup 保留为兼容调用约定，不再关闭空闲连接。
 func ClientWithProxyForScope(ctx context.Context, base *http.Client, proxy *catalog.OutboundProxy, networkScope string, details ProxyRequestLog) (*http.Client, func(), error) {
 	networkScope = normalizedNetworkScope(networkScope)
 	if !catalog.ValidNetworkScope(networkScope) {
@@ -180,6 +192,21 @@ func ClientWithProxyForScope(ctx context.Context, base *http.Client, proxy *cata
 	if !ok {
 		return nil, nil, errors.New("unsupported base transport")
 	}
+	key := proxyTransportKey{base: baseTransport, networkScope: networkScope, digest: proxyDigest(proxyURL, proxy.Headers)}
+	transport, created := proxyTransports.get(key, func() (http.RoundTripper, *http.Transport) {
+		return newProxyTransport(baseTransport, proxyURL, proxy.Headers, networkScope)
+	})
+	if created {
+		proxyLogger(details).InfoContext(ctx, "provider proxy transport created", proxyLogAttributes(proxyURL, proxy.Headers, details)...)
+	}
+	logProxyRequest(ctx, slog.LevelDebug, proxyURL, proxy.Headers, details)
+	client := *base
+	client.Transport = transport
+	return &client, func() {}, nil
+}
+
+// newProxyTransport 基于基础 Transport 克隆出使用指定代理的 Transport，并按网络范围包装目标校验。
+func newProxyTransport(baseTransport *http.Transport, proxyURL *url.URL, headers map[string]string, networkScope string) (http.RoundTripper, *http.Transport) {
 	transport := baseTransport.Clone()
 	transport.Proxy = http.ProxyURL(proxyURL)
 	previousConnectResponse := transport.OnProxyConnectResponse
@@ -194,19 +221,18 @@ func ClientWithProxyForScope(ctx context.Context, base *http.Client, proxy *cata
 	}
 	// 代理地址是管理员显式配置的网络出口，允许使用内网代理；字面量目标
 	// 仍按 Endpoint 网络范围校验，域名目标交由代理端解析。
-	transport.DialContext = (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext
-	transport.ProxyConnectHeader = make(http.Header, len(proxy.Headers))
-	for key, value := range proxy.Headers {
+	transport.DialContext = (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: upstreamKeepAlive}).DialContext
+	if transport.IdleConnTimeout <= 0 {
+		transport.IdleConnTimeout = upstreamIdleConnTimeout
+	}
+	transport.ProxyConnectHeader = make(http.Header, len(headers))
+	for key, value := range headers {
 		transport.ProxyConnectHeader.Set(key, value)
 	}
-	client := *base
 	if networkScope == catalog.NetworkScopePublic {
-		client.Transport = &publicTargetTransport{transport: transport, proxyScheme: proxyURL.Scheme}
-	} else {
-		client.Transport = &scopedTargetTransport{transport: transport, networkScope: networkScope, proxyScheme: proxyURL.Scheme}
+		return &publicTargetTransport{transport: transport, proxyScheme: proxyURL.Scheme}, transport
 	}
-	logProxyRequest(ctx, proxyURL, proxy.Headers, details)
-	return &client, transport.CloseIdleConnections, nil
+	return &scopedTargetTransport{transport: transport, networkScope: networkScope, proxyScheme: proxyURL.Scheme}, transport
 }
 
 // EnvironmentWithProxy 为不能注入 http.Client 的子进程设置服务商专属代理。
@@ -233,6 +259,6 @@ func EnvironmentWithProxy(ctx context.Context, environment []string, proxy *cata
 	if catalog.SOCKSProxyScheme(proxyURL.Scheme) {
 		result = append(result, "ALL_PROXY="+proxyURL.String())
 	}
-	logProxyRequest(ctx, proxyURL, proxy.Headers, details)
+	logProxyRequest(ctx, slog.LevelInfo, proxyURL, proxy.Headers, details)
 	return result, nil
 }
