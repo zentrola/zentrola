@@ -92,9 +92,17 @@ func (s *RatingSummary) recordFailure(format string, args ...any) {
 	}
 }
 
-// RatePendingAPIKeyUsage 先核算从未核算的调用，再为价格金额纠错后的调用追加 revision。
-// 两类扫描各自按用量 ID 递增翻页并共享 maxRatingsPerRun 上限；单条记录核算失败只计入失败并继续。
+// errRatingRunLimit 表示本轮核算达到 maxRatingsPerRun 后仍有候选；剩余候选由下一轮继续处理。
+var errRatingRunLimit = errors.New("usage rating run exceeded record limit")
+
+// RatePendingAPIKeyUsage 为价格金额纠错后的调用追加 revision，并核算从未核算的调用。两类扫描各自按
+// 用量 ID 递增翻页；纠错重算最多使用一半预算，剩余预算全部用于未核算调用，任一类积压都不会让另一类
+// 整轮得不到处理。单条记录核算失败只计入失败并继续。
 func (s *Service) RatePendingAPIKeyUsage(ctx context.Context, pageSize int32) (RatingSummary, error) {
+	return s.ratePendingAPIKeyUsage(ctx, pageSize, maxRatingsPerRun)
+}
+
+func (s *Service) ratePendingAPIKeyUsage(ctx context.Context, pageSize int32, limit int) (RatingSummary, error) {
 	var summary RatingSummary
 	if s == nil || s.store == nil || s.ids == nil {
 		return summary, appsec.ErrUnavailable
@@ -105,38 +113,56 @@ func (s *Service) RatePendingAPIKeyUsage(ctx context.Context, pageSize int32) (R
 	if pageSize > 5000 {
 		return summary, appsec.ErrInvalidArgument
 	}
-	processed := 0
-	for _, scan := range []RatingScan{RatingScanUnrated, RatingScanRepriced} {
-		if err := s.rateScan(ctx, scan, pageSize, &processed, &summary); err != nil {
-			return summary, err
-		}
+	// 两类扫描的候选互不重叠：重算只针对已有核算的调用，未核算扫描只针对没有核算的调用。
+	repriced, repricedMore, err := s.rateScan(ctx, RatingScanRepriced, pageSize, limit/2, &summary)
+	if err != nil {
+		return summary, err
+	}
+	_, unratedMore, err := s.rateScan(ctx, RatingScanUnrated, pageSize, limit-repriced, &summary)
+	if err != nil {
+		return summary, err
+	}
+	if repricedMore || unratedMore {
+		return summary, errRatingRunLimit
 	}
 	return summary, nil
 }
 
-func (s *Service) rateScan(ctx context.Context, scan RatingScan, pageSize int32, processed *int, summary *RatingSummary) error {
+// rateScan 按用量 ID 顺序最多核算 budget 条候选，返回已处理条数，以及达到预算后是否仍有候选。
+// 每页多取一条用于判断预算之外是否还有候选，恰好处理完全部候选时不会误报超限。
+func (s *Service) rateScan(ctx context.Context, scan RatingScan, pageSize int32, budget int, summary *RatingSummary) (int, bool, error) {
 	var after int64
+	processed := 0
 	for {
-		if *processed >= maxRatingsPerRun {
-			return errors.New("usage rating run exceeded record limit")
+		remaining := budget - processed
+		if remaining <= 0 {
+			// 只有初始预算为 0 时才会走到这里：预算在扫描中途用尽时，最后一页已多取一条并在下方判定。
+			return processed, false, nil
 		}
-		candidates, err := s.store.UsageRatingCandidates(ctx, scan, after, pageSize)
+		limit := pageSize
+		if int64(remaining) <= int64(pageSize) {
+			limit = int32(remaining) + 1
+		}
+		candidates, err := s.store.UsageRatingCandidates(ctx, scan, after, limit)
 		if err != nil {
-			return err
+			return processed, false, err
 		}
-		for _, candidate := range candidates {
+		for index, candidate := range candidates {
+			if index == remaining {
+				return processed, true, nil
+			}
 			if candidate.UsageRecordID <= after {
-				return errors.New("usage rating candidates are not ordered")
+				return processed, false, errors.New("usage rating candidates are not ordered")
 			}
 			after = candidate.UsageRecordID
 			created, err := s.rateCandidate(ctx, candidate)
-			*processed++
+			processed++
 			if err != nil {
 				if ctx.Err() != nil {
-					return ctx.Err()
+					return processed, false, ctx.Err()
 				}
 				if errors.Is(err, errBillingID) {
-					return err
+					return processed, false, err
 				}
 				summary.recordFailure("usage rating scan=%s usage=%d: %s", scan, candidate.UsageRecordID, SafeErrorText(err))
 				continue
@@ -147,8 +173,8 @@ func (s *Service) rateScan(ctx context.Context, scan RatingScan, pageSize int32,
 				summary.Skipped++
 			}
 		}
-		if len(candidates) < int(pageSize) {
-			return nil
+		if len(candidates) < int(limit) {
+			return processed, false, nil
 		}
 	}
 }

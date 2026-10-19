@@ -249,7 +249,7 @@ func TestSettleDueAPIKeyAddsLatePrincipal(t *testing.T) {
 	}
 }
 
-func TestRatePendingAPIKeyUsageScansUnratedThenRepricedAndIsolatesFailures(t *testing.T) {
+func TestRatePendingAPIKeyUsageScansRepricedThenUnratedAndIsolatesFailures(t *testing.T) {
 	startedAt := time.Date(2026, 9, 15, 1, 2, 3, 0, time.UTC)
 	candidate := func(id int64, revision int32) UsageRatingCandidate {
 		latest := int64(0)
@@ -281,17 +281,17 @@ func TestRatePendingAPIKeyUsageScansUnratedThenRepricedAndIsolatesFailures(t *te
 	for _, rating := range store.ratings {
 		gotIDs = append(gotIDs, rating.UsageRecordID)
 	}
-	if want := []int64{10, 12, 5, 13}; !equalInt64s(gotIDs, want) {
+	if want := []int64{5, 13, 10, 12}; !equalInt64s(gotIDs, want) {
 		t.Fatalf("rated usage=%v; want %v", gotIDs, want)
 	}
-	if store.ratings[2].Revision != 2 || store.ratings[2].SupersedesRatingID != 1005 || store.ratings[3].Revision != 3 {
-		t.Fatalf("repriced revisions=%+v", store.ratings[2:])
+	if store.ratings[0].Revision != 2 || store.ratings[0].SupersedesRatingID != 1005 || store.ratings[1].Revision != 3 {
+		t.Fatalf("repriced revisions=%+v", store.ratings[:2])
 	}
 	if len(summary.FailureSamples) != 1 || !strings.Contains(summary.FailureSamples[0], "usage=11") ||
 		!strings.Contains(summary.FailureSamples[0], "sqlstate=23514") {
 		t.Fatalf("failure samples=%v", summary.FailureSamples)
 	}
-	if store.ratingScans[0] != RatingScanUnrated || store.ratingScans[len(store.ratingScans)-1] != RatingScanRepriced {
+	if store.ratingScans[0] != RatingScanRepriced || store.ratingScans[len(store.ratingScans)-1] != RatingScanUnrated {
 		t.Fatalf("scan order=%v", store.ratingScans)
 	}
 }
@@ -337,4 +337,59 @@ func equalInt64s(left, right []int64) bool {
 		}
 	}
 	return true
+}
+
+func TestRatePendingAPIKeyUsageSharesBudgetBetweenScans(t *testing.T) {
+	candidates := func(from, count int64, revision int32) []UsageRatingCandidate {
+		result := make([]UsageRatingCandidate, 0, count)
+		for id := from; id < from+count; id++ {
+			latest := int64(0)
+			if revision > 0 {
+				latest = id + 1000
+			}
+			result = append(result, UsageRatingCandidate{
+				UsageRecordID: id, PrincipalID: 20, CredentialID: 30, ProviderModelID: 40, ModelPriceID: 50,
+				LatestRatingID: latest, LatestRevision: revision, InputTokens: 5,
+				InputPrice: "5", CachedInputPrice: "1", OutputPrice: "10", Currency: "CNY",
+			})
+		}
+		return result
+	}
+	tests := []struct {
+		name                   string
+		repriced, unrated      int64
+		wantRepriced, wantRate int
+		wantLimit              bool
+	}{
+		// 预算恰好用尽且没有剩余候选时不能误报超限。
+		{name: "exactly fills budget", repriced: 0, unrated: 10, wantRate: 10},
+		{name: "unused repriced budget goes to unrated", repriced: 2, unrated: 8, wantRepriced: 2, wantRate: 8},
+		// 未核算调用积压时，纠错重算仍能得到一半预算。
+		{name: "unrated backlog does not starve repriced", repriced: 20, unrated: 20, wantRepriced: 5, wantRate: 5, wantLimit: true},
+		{name: "unrated backlog beyond budget", repriced: 0, unrated: 11, wantRate: 10, wantLimit: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &billingStoreStub{
+				repricedRatings:  candidates(1, tt.repriced, 1),
+				ratingCandidates: candidates(1000, tt.unrated, 0),
+			}
+			service := New(store, &billingIDs{next: 100})
+			summary, err := service.ratePendingAPIKeyUsage(context.Background(), 3, 10)
+			if errors.Is(err, errRatingRunLimit) != tt.wantLimit || (err != nil && !tt.wantLimit) {
+				t.Fatalf("err=%v wantLimit=%v", err, tt.wantLimit)
+			}
+			repriced, unrated := 0, 0
+			for _, rating := range store.ratings {
+				if rating.Revision > 1 {
+					repriced++
+				} else {
+					unrated++
+				}
+			}
+			if repriced != tt.wantRepriced || unrated != tt.wantRate || summary.Created != repriced+unrated {
+				t.Fatalf("repriced=%d unrated=%d summary=%+v", repriced, unrated, summary)
+			}
+		})
+	}
 }
