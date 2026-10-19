@@ -27,7 +27,7 @@ func (t *processTree) configure(command *exec.Cmd) {
 	command.SysProcAttr.Setpgid = true
 }
 
-// attach 在进程启动后调用；Unix 的进程组在启动时已经建立。
+// attach 在进程启动后调用；Unix 的进程组在启动时已经建立，进程无需恢复，始终返回 nil。
 func (t *processTree) attach() error { return nil }
 
 // kill 终止整个进程组；进程组不可用时退回终止 app-server 本身。

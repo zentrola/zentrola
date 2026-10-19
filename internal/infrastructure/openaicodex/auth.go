@@ -592,8 +592,15 @@ func startClient(ctx context.Context, executable, directory string, proxy *catal
 		}
 		return nil, fmt.Errorf("%w: cannot start process", errAppServerUnavailable)
 	}
-	// 加入进程树失败时仍可终止直接子进程，不阻止会话继续。
-	_ = tree.attach()
+	// Windows 下进程以挂起状态启动，加入进程树后才恢复运行；无法恢复的进程不可用，必须终止。
+	// 加入进程树本身失败时仍可终止直接子进程，不阻止会话继续。
+	if err := tree.attach(); err != nil {
+		stdin.Close()
+		_ = tree.kill()
+		_ = command.Wait()
+		tree.release()
+		return nil, fmt.Errorf("%w: cannot resume process", errAppServerUnavailable)
+	}
 	client := &rpcClient{
 		command: command, stdin: stdin, lines: make(chan []byte), done: make(chan struct{}), stderr: stderr, tree: tree,
 	}
