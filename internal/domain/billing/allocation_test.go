@@ -52,3 +52,32 @@ func TestAddAmountsPreservesFixedPrecision(t *testing.T) {
 		t.Fatalf("got=%q err=%v", got, err)
 	}
 }
+
+func TestProrateUsesFixedPointRounding(t *testing.T) {
+	for _, tt := range []struct {
+		name               string
+		amount             string
+		numerator, divisor int64
+		want               string
+		wantErr            bool
+	}{
+		{name: "whole period", amount: "1000", numerator: 30, divisor: 30, want: "1000"},
+		{name: "half period", amount: "1000", numerator: 1, divisor: 2, want: "500"},
+		{name: "rounds half up", amount: "0.00000001", numerator: 1, divisor: 2, want: "0.00000001"},
+		{name: "rounds down", amount: "0.00000001", numerator: 1, divisor: 3, want: "0"},
+		{name: "repeating fraction", amount: "365", numerator: 31, divisor: 365, want: "31"},
+		{name: "third", amount: "100", numerator: 1, divisor: 3, want: "33.33333333"},
+		{name: "negative amount", amount: "-100", numerator: 2, divisor: 3, want: "-66.66666667"},
+		{name: "zero overlap", amount: "100", numerator: 0, divisor: 3, want: "0"},
+		{name: "ratio above one", amount: "100", numerator: 4, divisor: 3, wantErr: true},
+		{name: "zero divisor", amount: "100", numerator: 0, divisor: 0, wantErr: true},
+		{name: "invalid amount", amount: "1.123456789", numerator: 1, divisor: 2, wantErr: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Prorate(tt.amount, tt.numerator, tt.divisor)
+			if (err != nil) != tt.wantErr || got != tt.want {
+				t.Fatalf("Prorate()=%q err=%v; want %q wantErr=%v", got, err, tt.want, tt.wantErr)
+			}
+		})
+	}
+}

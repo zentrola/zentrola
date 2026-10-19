@@ -164,6 +164,62 @@ func TestCurrentAttributionKeepsSubscriptionUnallocatedWithoutUsage(t *testing.T
 	}
 }
 
+func TestCurrentAttributionProratesSubscriptionByPeriodOverlap(t *testing.T) {
+	now := time.Date(2026, 10, 7, 8, 0, 0, 0, time.UTC)
+	monthStart := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	yearStart := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, tt := range []struct {
+		name      string
+		price     SubscriptionPrice
+		from, to  time.Time
+		wantTotal string
+	}{
+		{
+			name: "annual subscription in one month window",
+			price: SubscriptionPrice{ID: 1, CredentialID: 10, Currency: "USD", PeriodAmount: "365",
+				BillingPeriod: "YEAR", EffectiveAt: yearStart, CredentialEffectiveAt: yearStart},
+			from: monthStart, to: monthStart.AddDate(0, 1, 0), wantTotal: "31",
+		},
+		{
+			name: "monthly subscription in one day window",
+			price: SubscriptionPrice{ID: 1, CredentialID: 10, Currency: "CNY", PeriodAmount: "310",
+				BillingPeriod: "MONTH", EffectiveAt: monthStart, CredentialEffectiveAt: monthStart},
+			from: time.Date(2026, 10, 7, 0, 0, 0, 0, time.UTC), to: time.Date(2026, 10, 8, 0, 0, 0, 0, time.UTC), wantTotal: "10",
+		},
+		{
+			name: "window wider than current period",
+			price: SubscriptionPrice{ID: 1, CredentialID: 10, Currency: "CNY", PeriodAmount: "100",
+				BillingPeriod: "MONTH", EffectiveAt: time.Date(2026, 9, 15, 0, 0, 0, 0, time.UTC),
+				CredentialEffectiveAt: time.Date(2026, 9, 15, 0, 0, 0, 0, time.UTC)},
+			from: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), to: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC), wantTotal: "100",
+		},
+		{
+			name: "anchored period partially overlaps window",
+			price: SubscriptionPrice{ID: 1, CredentialID: 10, Currency: "CNY", PeriodAmount: "30",
+				BillingPeriod: "MONTH", EffectiveAt: time.Date(2026, 9, 21, 0, 0, 0, 0, time.UTC),
+				CredentialEffectiveAt: time.Date(2026, 9, 21, 0, 0, 0, 0, time.UTC)},
+			from: monthStart, to: monthStart.AddDate(0, 1, 0), wantTotal: "20",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &usageCostStoreStub{
+				prices:     []SubscriptionPrice{tt.price},
+				usage:      map[int64][]domain.UsageShare{10: {{PrincipalID: 101, Tokens: 10}}},
+				identities: []PrincipalIdentity{{ID: 101, Name: "Alpha", Type: "MEMBER"}},
+			}
+			service := NewUsageCostQuery(store)
+			service.now = func() time.Time { return now }
+			result, err := service.CurrentAttribution(context.Background(), admin.Identity{ID: 1}, CurrentAttributionFilter{
+				From: tt.from, To: tt.to, Limit: 100,
+			})
+			if err != nil || len(result.Totals) != 1 || result.Totals[0].TotalAmount != tt.wantTotal ||
+				len(result.Items) != 1 || result.Items[0].Amount != tt.wantTotal {
+				t.Fatalf("result=%+v err=%v; want total %s", result, err, tt.wantTotal)
+			}
+		})
+	}
+}
+
 func TestCurrentAttributionRequiresRangeContainingNow(t *testing.T) {
 	now := time.Date(2026, 10, 7, 8, 0, 0, 0, time.UTC)
 	service := NewUsageCostQuery(&usageCostStoreStub{})

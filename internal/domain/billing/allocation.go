@@ -192,3 +192,24 @@ func formatFixed(units *big.Int, scale int) string {
 	}
 	return value
 }
+
+// Prorate 返回 amount×numerator/denominator，按 8 位定点小数四舍五入（远离零）。
+// 用于把整期费用按时间重叠比例折算，全程使用整数运算，不经过浮点数。
+func Prorate(amount string, numerator, denominator int64) (string, error) {
+	if denominator <= 0 || numerator < 0 || numerator > denominator {
+		return "", errors.New("invalid billing proration ratio")
+	}
+	units, err := parseAmount(amount)
+	if err != nil {
+		return "", err
+	}
+	negative := units.Sign() < 0
+	product := new(big.Int).Mul(new(big.Int).Abs(units), big.NewInt(numerator))
+	doubled := new(big.Int).Lsh(product, 1)
+	doubled.Add(doubled, big.NewInt(denominator))
+	result := doubled.Quo(doubled, new(big.Int).Lsh(big.NewInt(denominator), 1))
+	if negative {
+		result.Neg(result)
+	}
+	return formatAmount(result), nil
+}

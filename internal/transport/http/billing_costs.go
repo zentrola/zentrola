@@ -15,7 +15,7 @@ import (
 func (s *SecurityHandlers) mountBillingCosts(r chi.Router) {
 	// @Summary 当月预计费用分摊
 	// @Tags 成本管理
-	// @Description 对当前时间范围内生效的个人订阅按成功调用 Token 预计分摊，并合并已完成核算的 API Key 实时成本；历史账期的最终归属仍使用费用统计接口。
+	// @Description 对当前时间范围内生效的个人订阅，按查询窗口与当前账期的重叠时长折算账期费用，再按重叠区间内成功调用 Token 预计分摊，并合并已完成核算的 API Key 实时成本；历史账期的最终归属仍使用费用统计接口。
 	// @Produce json
 	// @Security AdminBearer
 	// @Param from query string true "起始时间（含），UTC RFC3339 Z"

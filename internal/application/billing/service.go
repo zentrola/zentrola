@@ -475,6 +475,38 @@ func priceAt(prices []SubscriptionPrice, at time.Time) *SubscriptionPrice {
 	return result
 }
 
+// subscriptionPeriodAt 按与 SettleDueSubscriptions 相同的锚点和价格规则推算 at 所在的账期，
+// 返回账期起止时间及该账期计费采用的价格；at 不在任何可计费账期内时 price 为 nil。
+func subscriptionPeriodAt(group []SubscriptionPrice, at time.Time) (time.Time, time.Time, *SubscriptionPrice, error) {
+	if len(group) == 0 {
+		return time.Time{}, time.Time{}, nil, nil
+	}
+	at = at.UTC()
+	periodStart := subscriptionAnchor(group)
+	anchorDay := periodStart.Day()
+	for count := 0; !periodStart.After(at); count++ {
+		if count > maxPeriodsPerScan {
+			return time.Time{}, time.Time{}, nil, errors.New("subscription period scan exceeded period limit")
+		}
+		if group[0].CredentialEndAt != nil && !periodStart.Before(group[0].CredentialEndAt.UTC()) {
+			break
+		}
+		price := priceAt(group, periodStart)
+		if price == nil {
+			break
+		}
+		periodEnd, err := addBillingPeriod(periodStart, price.BillingPeriod, anchorDay)
+		if err != nil {
+			return time.Time{}, time.Time{}, nil, err
+		}
+		if periodEnd.After(at) {
+			return periodStart, periodEnd, price, nil
+		}
+		periodStart = periodEnd
+	}
+	return time.Time{}, time.Time{}, nil, nil
+}
+
 // subscriptionAnchor 返回凭据首个账期的起点：最早价格生效时间与凭据生效时间中的较晚者。
 func subscriptionAnchor(group []SubscriptionPrice) time.Time {
 	periodStart := group[0].EffectiveAt.UTC()

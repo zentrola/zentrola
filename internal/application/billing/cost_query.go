@@ -148,6 +148,9 @@ func NewUsageCostQuery(store UsageCostQueryStore) *UsageCostQueryService {
 	return &UsageCostQueryService{store: store, now: func() time.Time { return time.Now().UTC() }}
 }
 
+// CurrentAttribution 估算查询窗口内的实时费用归属：个人订阅取当前时刻所在账期的价格，
+// 按查询窗口与该账期的重叠时长比例折算整期费用，再按重叠区间内成功调用的 Token 分摊；
+// API Key 部分合并窗口内已完成且价格仍有效的核算成本。历史账期的最终归属以计费单据为准。
 func (s *UsageCostQueryService) CurrentAttribution(
 	ctx context.Context,
 	actor admin.Identity,
@@ -179,30 +182,43 @@ func (s *UsageCostQueryService) CurrentAttribution(
 			credential.CredentialEndAt != nil && !credential.CredentialEndAt.After(now) {
 			continue
 		}
-		price := priceAt(pricesForCredential, now)
+		periodStart, periodEnd, price, periodErr := subscriptionPeriodAt(pricesForCredential, now)
+		if periodErr != nil {
+			return Statistics{}, periodErr
+		}
 		if price == nil {
 			continue
 		}
-		usage, usageErr := s.store.SubscriptionUsage(ctx, price.CredentialID, filter.From, now)
+		// 整期费用（含年付）只按查询窗口与当前账期的重叠时长折算，避免任意窗口都计入整期金额。
+		overlapStart, overlapEnd := maxTime(filter.From, periodStart), minTime(filter.To, periodEnd)
+		if !overlapEnd.After(overlapStart) {
+			continue
+		}
+		amount, prorateErr := domain.Prorate(price.PeriodAmount,
+			int64(overlapEnd.Sub(overlapStart)), int64(periodEnd.Sub(periodStart)))
+		if prorateErr != nil {
+			return Statistics{}, prorateErr
+		}
+		usage, usageErr := s.store.SubscriptionUsage(ctx, price.CredentialID, overlapStart, now)
 		if usageErr != nil {
 			return Statistics{}, usageErr
 		}
-		totalTokens, allocations, allocationErr := domain.Allocate(price.PeriodAmount, usage)
+		totalTokens, allocations, allocationErr := domain.Allocate(amount, usage)
 		if allocationErr != nil {
 			return Statistics{}, allocationErr
 		}
 		totalKey := attributionTotalKey{BillingType: "SUBSCRIPTION", Currency: price.Currency}
 		total := totals[totalKey]
 		total.BillingType, total.Currency = totalKey.BillingType, totalKey.Currency
-		total.TotalAmount, err = addAttributionAmount(total.TotalAmount, price.PeriodAmount)
+		total.TotalAmount, err = addAttributionAmount(total.TotalAmount, amount)
 		if err != nil {
 			return Statistics{}, err
 		}
 		total.TotalTokens += totalTokens
 		if len(allocations) == 0 {
-			total.UnallocatedAmount, err = addAttributionAmount(total.UnallocatedAmount, price.PeriodAmount)
+			total.UnallocatedAmount, err = addAttributionAmount(total.UnallocatedAmount, amount)
 		} else {
-			total.AllocatedAmount, err = addAttributionAmount(total.AllocatedAmount, price.PeriodAmount)
+			total.AllocatedAmount, err = addAttributionAmount(total.AllocatedAmount, amount)
 		}
 		if err != nil {
 			return Statistics{}, err
@@ -327,6 +343,20 @@ type attributionKey struct {
 type attributionTotalKey struct {
 	BillingType string
 	Currency    string
+}
+
+func maxTime(left, right time.Time) time.Time {
+	if left.After(right) {
+		return left
+	}
+	return right
+}
+
+func minTime(left, right time.Time) time.Time {
+	if left.Before(right) {
+		return left
+	}
+	return right
 }
 
 func addAttributionAmount(left, right string) (string, error) {
