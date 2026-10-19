@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { all, api, errorText } from '../api'
 import { count } from '../composables'
 import { t } from '../i18n'
+import { addMoney as addAmounts, formatMoney as amount } from '../money'
 import type {
   BillingCurrency,
   BillingStatistics,
@@ -134,31 +135,10 @@ function billingLabel(value: BillingType) {
 function principalLabel(value: string) {
   return t(`billing.principalTypes.${value}`)
 }
-function amount(value: string, valueCurrency: BillingCurrency) {
-  const match = value.match(/^(-?)(\d+)(?:\.(\d+))?$/)
-  if (!match) return '-'
-  const fraction = (match[3] || '').replace(/0+$/, '')
-  const integer = match[2].replace(/\B(?=(\d{3})+(?!\d))/g, ',')
-  const symbol = valueCurrency === 'CNY' ? '¥' : '$'
-  return `${match[1]}${symbol}${integer}${fraction ? `.${fraction}` : ''}`
-}
 function totalFor(valueCurrency: BillingCurrency, valueType: BillingType) {
   return statistics.value?.totals.find(
     (item) => item.currency === valueCurrency && item.billingType === valueType,
   )
-}
-function addAmounts(values: string[]) {
-  const scale = 100000000n
-  let total = 0n
-  for (const value of values) {
-    const match = value.match(/^(\d+)(?:\.(\d+))?$/)
-    if (!match) continue
-    const fraction = (match[2] || '').padEnd(8, '0').slice(0, 8)
-    total += BigInt(match[1]) * scale + BigInt(fraction || '0')
-  }
-  const integer = total / scale
-  const fraction = (total % scale).toString().padStart(8, '0').replace(/0+$/, '')
-  return `${integer}${fraction ? `.${fraction}` : ''}`
 }
 function currentSubscriptionAmount(valueCurrency: BillingCurrency) {
   return addAmounts(

@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ApiError, api, errorText } from '../api'
 import { dateOnly } from '../composables'
 import { t } from '../i18n'
+import { currencySymbol, formatMoney } from '../money'
+import { priceHistoryView, usePriceHistory } from '../priceHistory'
 import { showSuccessToast } from '../toast'
 import ConfirmDialog from './ConfirmDialog.vue'
 import Icon from './Icon.vue'
@@ -18,7 +20,8 @@ import type {
 } from '../types'
 
 const props = defineProps<{ provider: Provider; resource: Resource }>()
-const emit = defineEmits<{ close: []; changed: [] }>()
+// busy 同步保存中状态，外层弹窗据此禁止关闭。
+const emit = defineEmits<{ close: []; changed: []; busy: [value: boolean] }>()
 const loading = ref(true)
 const saving = ref(false)
 const error = ref('')
@@ -53,6 +56,7 @@ const subscriptionForm = reactive({
   effectiveDate: '',
 })
 const pricePattern = /^(0|[1-9][0-9]{0,11})(\.[0-9]{1,8})?$/
+watch(saving, (value) => emit('busy', value))
 
 const mappings = computed(() => detail.value?.mappings ?? [])
 const modelNames = computed(
@@ -61,22 +65,26 @@ const modelNames = computed(
 const selectedMapping = computed(() =>
   mappings.value.find((mapping) => mapping.id === selectedMappingID.value),
 )
-const subscriptionPriceHistory = computed(() =>
-  [...prices.value.subscriptionPrices].sort((left, right) =>
-    right.effectiveAt.localeCompare(left.effectiveAt),
-  ),
+const subscriptionHistory = usePriceHistory(
+  () => prices.value.subscriptionPrices,
+  () => subscriptionHistoryExpanded.value,
 )
-const currentSubscriptionPrice = computed(() => {
-  const now = new Date().toISOString()
-  return subscriptionPriceHistory.value.find((price) => price.effectiveAt <= now)
-})
-const visibleSubscriptionPrices = computed(() => {
-  const history = subscriptionPriceHistory.value
-  if (subscriptionHistoryExpanded.value || history.length <= 3) return history
-  const visible = history.slice(0, 3)
-  const current = currentSubscriptionPrice.value
-  if (current && !visible.some((price) => price.id === current.id)) visible.push(current)
-  return visible.sort((left, right) => right.effectiveAt.localeCompare(left.effectiveAt))
+const subscriptionPriceHistory = computed(() => subscriptionHistory.value.history)
+const currentSubscriptionPrice = computed(() => subscriptionHistory.value.current)
+const visibleSubscriptionPrices = computed(() => subscriptionHistory.value.visible)
+const modelHistories = computed(() => {
+  const grouped = new Map<string, ModelPrice[]>()
+  for (const price of prices.value.modelPrices) {
+    const group = grouped.get(price.providerModelId)
+    if (group) group.push(price)
+    else grouped.set(price.providerModelId, [price])
+  }
+  return new Map(
+    mappings.value.map((mapping) => [
+      mapping.id,
+      priceHistoryView(grouped.get(mapping.id) ?? [], expandedHistoryIDs.value.has(mapping.id)),
+    ]),
+  )
 })
 
 function modelLabel(mapping: ProviderMapping) {
@@ -84,23 +92,15 @@ function modelLabel(mapping: ProviderMapping) {
 }
 
 function modelPriceHistory(mappingID: string): ModelPrice[] {
-  return prices.value.modelPrices
-    .filter((price) => price.providerModelId === mappingID)
-    .sort((left, right) => right.effectiveAt.localeCompare(left.effectiveAt))
+  return modelHistories.value.get(mappingID)?.history ?? []
 }
 
 function currentModelPrice(mappingID: string): ModelPrice | undefined {
-  const now = new Date().toISOString()
-  return modelPriceHistory(mappingID).find((price) => price.effectiveAt <= now)
+  return modelHistories.value.get(mappingID)?.current
 }
 
 function visibleModelPrices(mappingID: string): ModelPrice[] {
-  const history = modelPriceHistory(mappingID)
-  if (expandedHistoryIDs.value.has(mappingID) || history.length <= 3) return history
-  const visible = history.slice(0, 3)
-  const current = currentModelPrice(mappingID)
-  if (current && !visible.some((price) => price.id === current.id)) visible.push(current)
-  return visible.sort((left, right) => right.effectiveAt.localeCompare(left.effectiveAt))
+  return modelHistories.value.get(mappingID)?.visible ?? []
 }
 
 function toggleModelHistory(mappingID: string) {
@@ -122,10 +122,6 @@ function cancelModelEdit() {
   selectedMappingID.value = ''
   editingPrice.value = null
   error.value = ''
-}
-
-function currencySymbol(value: string) {
-  return value === 'CNY' ? '¥' : '$'
 }
 
 function editModel(mapping: ProviderMapping, price?: ModelPrice) {
@@ -545,7 +541,7 @@ onMounted(load)
             >
               <time :datetime="price.effectiveAt">{{ dateOnly(price.effectiveAt) }}</time>
               <span class="price-model-values">
-                {{ currencySymbol(price.currency) }}{{ price.periodAmount }} /
+                {{ formatMoney(price.periodAmount, price.currency) }} /
                 {{ t(`resources.pricing.periods.${price.billingPeriod}`) }}
               </span>
               <span v-if="isScheduled(price)" class="price-scheduled-badge">{{

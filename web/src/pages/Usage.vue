@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { api, all, errorText } from '../api'
+import { all, errorText } from '../api'
 import { useCollection, date, count } from '../composables'
-import { activeLocale, i18n, t } from '../i18n'
+import { activeLocale, codeText, t } from '../i18n'
+import { usePrincipalAutocomplete } from '../principalAutocomplete'
 import { showErrorToast } from '../toast'
-import type { Usage, UsageStatistic, Member, Model, Page, Provider, Resource } from '../types'
+import type { Usage, UsageStatistic, Model, Provider, Resource } from '../types'
 import Icon from '../components/Icon.vue'
 import Status from '../components/Status.vue'
 import Modal from '../components/Modal.vue'
@@ -37,12 +38,18 @@ const models = ref<Model[]>([]),
   providers = ref<Provider[]>([]),
   resources = ref<Resource[]>([]),
   selected = ref<Usage | null>(null)
-const memberAutocomplete = ref<HTMLElement | null>(null),
-  dateRangeControl = ref<HTMLElement | null>(null),
-  memberSuggestionsOpen = ref(false),
-  memberSuggestionsLoading = ref(false),
-  memberSearchError = ref(''),
-  memberSuggestions = ref<Member[]>([]),
+const {
+  root: memberAutocomplete,
+  open: memberSuggestionsOpen,
+  loading: memberSuggestionsLoading,
+  error: memberSearchError,
+  suggestions: memberSuggestions,
+  onInput: onMemberInput,
+  openSuggestions: openMemberSuggestions,
+  select: selectMember,
+  reset: resetMemberAutocomplete,
+} = usePrincipalAutocomplete({ name: memberName, id: memberID, kind: () => principalKind.value })
+const dateRangeControl = ref<HTMLElement | null>(null),
   datePickerOpen = ref(false),
   draftFrom = ref(''),
   draftTo = ref(''),
@@ -50,18 +57,18 @@ const memberAutocomplete = ref<HTMLElement | null>(null),
   rangeSelectionStarted = ref(false),
   hoveredDate = ref(''),
   datePickerValidation = ref('')
-let memberSearchTimer: ReturnType<typeof setTimeout> | undefined,
-  memberSearchRevision = 0,
-  lookupPromise: Promise<void> | null = null
+let lookupPromise: Promise<void> | null = null
 
 function errorDescription(errorType: string | null) {
   if (!errorType) return t('common.none')
-  const key = `errors.${errorType}`
-  if (i18n.global.te(key)) return t(key)
   const upstreamHTTPStatus = errorType.match(/^UPSTREAM_HTTP_(\d{3})$/)?.[1]
-  return upstreamHTTPStatus
-    ? t('usage.upstreamHTTPError', { status: upstreamHTTPStatus })
-    : t('errors.UNKNOWN')
+  return codeText(
+    'errors',
+    errorType,
+    upstreamHTTPStatus
+      ? t('usage.upstreamHTTPError', { status: upstreamHTTPStatus })
+      : t('errors.UNKNOWN'),
+  )
 }
 function protocolLabel(protocol: string) {
   const labels: Record<string, string> = {
@@ -287,58 +294,8 @@ function percentage(value: number, totalValue: number) {
 function statisticRank(index: number) {
   return (statisticPage.value - 1) * statisticPageSize.value + index + 1
 }
-function onMemberInput() {
-  memberID.value = ''
-  memberSuggestions.value = []
-  memberSearchError.value = ''
-  scheduleMemberSearch()
-}
 function changePrincipalKind() {
-  memberID.value = ''
-  memberName.value = ''
-  memberSuggestions.value = []
-  memberSuggestionsOpen.value = false
-  clearTimeout(memberSearchTimer)
-  memberSearchRevision++
-}
-function openMemberSuggestions() {
-  if (!memberName.value.trim()) return
-  memberSuggestionsOpen.value = true
-  if (!memberSuggestions.value.length) scheduleMemberSearch()
-}
-function scheduleMemberSearch() {
-  clearTimeout(memberSearchTimer)
-  const keyword = memberName.value.trim(),
-    revision = ++memberSearchRevision
-  if (!keyword) {
-    memberSuggestionsOpen.value = false
-    memberSuggestionsLoading.value = false
-    return
-  }
-  memberSuggestionsOpen.value = true
-  memberSuggestionsLoading.value = true
-  memberSearchTimer = setTimeout(() => void loadMemberSuggestions(keyword, revision), 250)
-}
-async function loadMemberSuggestions(keyword: string, revision: number) {
-  const params = new URLSearchParams({ name: keyword, limit: '8' })
-  try {
-    const result = await api<Page<Member>>(
-      `/${principalKind.value === 'application' ? 'applications' : 'members'}/suggestions?${params}`,
-    )
-    if (revision !== memberSearchRevision || keyword !== memberName.value.trim()) return
-    memberSuggestions.value = result.items
-  } catch (e) {
-    if (revision !== memberSearchRevision) return
-    memberSuggestions.value = []
-    memberSearchError.value = errorText(e)
-  } finally {
-    if (revision === memberSearchRevision) memberSuggestionsLoading.value = false
-  }
-}
-function selectMember(member: Member) {
-  memberID.value = member.id
-  memberName.value = member.name
-  memberSuggestionsOpen.value = false
+  resetMemberAutocomplete()
 }
 function toggleDatePicker() {
   if (datePickerOpen.value) {
@@ -382,7 +339,6 @@ function changeCalendarMonth(amount: number) {
 }
 function closeFloatingPanels(event: PointerEvent) {
   if (!(event.target instanceof Node)) return
-  if (!memberAutocomplete.value?.contains(event.target)) memberSuggestionsOpen.value = false
   if (!dateRangeControl.value?.contains(event.target)) datePickerOpen.value = false
 }
 async function lookups() {
@@ -437,8 +393,6 @@ onMounted(() => {
   search()
 })
 onBeforeUnmount(() => {
-  clearTimeout(memberSearchTimer)
-  memberSearchRevision++
   document.removeEventListener('pointerdown', closeFloatingPanels)
 })
 </script>

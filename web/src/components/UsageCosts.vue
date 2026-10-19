@@ -2,9 +2,12 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { all, api, download, errorText } from '../api'
 import { count, date, dateOnly, useCollection } from '../composables'
+import { saveBlob } from '../files'
 import { t } from '../i18n'
+import { formatMoney as amount } from '../money'
+import { usePrincipalAutocomplete } from '../principalAutocomplete'
 import { showErrorToast } from '../toast'
-import type { BillingCurrency, Member, Model, Page, UsageCost, UsageCostDetail } from '../types'
+import type { Model, UsageCost, UsageCostDetail } from '../types'
 import DateRangePicker from './DateRangePicker.vue'
 import ListFooter from './ListFooter.vue'
 import Modal from './Modal.vue'
@@ -17,11 +20,6 @@ const to = ref('')
 const principalType = ref('')
 const principalId = ref('')
 const callerName = ref('')
-const callerAutocomplete = ref<HTMLElement | null>(null)
-const callerSuggestionsOpen = ref(false)
-const callerSuggestionsLoading = ref(false)
-const callerSearchError = ref('')
-const callerSuggestions = ref<Member[]>([])
 const modelId = ref('')
 const billingType = ref('')
 const query = ref('')
@@ -33,8 +31,29 @@ const detailOpen = ref(false)
 const detailLoading = ref(false)
 const detailError = ref('')
 let detailRevision = 0
-let callerSearchRevision = 0
-let callerSearchTimer: ReturnType<typeof setTimeout> | undefined
+// 导出可能需要较长时间生成文件，单独放宽超时。
+const exportTimeoutMs = 120000
+const {
+  root: callerAutocomplete,
+  open: callerSuggestionsOpen,
+  loading: callerSuggestionsLoading,
+  error: callerSearchError,
+  suggestions: callerSuggestions,
+  onInput: onCallerInput,
+  openSuggestions: openCallerSuggestions,
+  select: selectCaller,
+  clear: clearCallerSuggestions,
+  reset: changeCallerType,
+} = usePrincipalAutocomplete({
+  name: callerName,
+  id: principalId,
+  kind: () =>
+    principalType.value === 'APPLICATION'
+      ? 'application'
+      : principalType.value === 'MEMBER'
+        ? 'member'
+        : '',
+})
 
 const { items, cursor, page, pageSize, total, loading, error, load, previous, retry, setPageSize } =
   useCollection<UsageCost>(() => `/billing/usage-costs?${query.value}`)
@@ -98,68 +117,6 @@ function reset() {
   resetDates()
   void search()
 }
-function clearCallerSuggestions() {
-  clearTimeout(callerSearchTimer)
-  callerSearchRevision++
-  callerSuggestions.value = []
-  callerSuggestionsOpen.value = false
-  callerSuggestionsLoading.value = false
-  callerSearchError.value = ''
-}
-function changeCallerType() {
-  principalId.value = ''
-  callerName.value = ''
-  clearCallerSuggestions()
-}
-function onCallerInput() {
-  principalId.value = ''
-  callerSuggestions.value = []
-  callerSearchError.value = ''
-  scheduleCallerSearch()
-}
-function openCallerSuggestions() {
-  if (!callerName.value.trim() || principalId.value) return
-  callerSuggestionsOpen.value = true
-  if (!callerSuggestions.value.length) scheduleCallerSearch()
-}
-function scheduleCallerSearch() {
-  clearTimeout(callerSearchTimer)
-  const keyword = callerName.value.trim()
-  const revision = ++callerSearchRevision
-  if (!keyword || !principalType.value) {
-    callerSuggestionsOpen.value = false
-    callerSuggestionsLoading.value = false
-    return
-  }
-  callerSuggestionsOpen.value = true
-  callerSuggestionsLoading.value = true
-  callerSearchTimer = setTimeout(() => void loadCallerSuggestions(keyword, revision), 250)
-}
-async function loadCallerSuggestions(keyword: string, revision: number) {
-  const path = principalType.value === 'APPLICATION' ? 'applications' : 'members'
-  const params = new URLSearchParams({ name: keyword, limit: '8' })
-  try {
-    const result = await api<Page<Member>>(`/${path}/suggestions?${params}`)
-    if (revision !== callerSearchRevision || keyword !== callerName.value.trim()) return
-    callerSuggestions.value = result.items
-  } catch (reason) {
-    if (revision !== callerSearchRevision) return
-    callerSuggestions.value = []
-    callerSearchError.value = errorText(reason)
-  } finally {
-    if (revision === callerSearchRevision) callerSuggestionsLoading.value = false
-  }
-}
-function selectCaller(caller: Member) {
-  principalId.value = caller.id
-  callerName.value = caller.name
-  clearCallerSuggestions()
-}
-function closeCallerSuggestions(event: PointerEvent) {
-  if (event.target instanceof Node && !callerAutocomplete.value?.contains(event.target)) {
-    callerSuggestionsOpen.value = false
-  }
-}
 async function loadLookups() {
   lookupError.value = ''
   try {
@@ -167,14 +124,6 @@ async function loadLookups() {
   } catch (reason) {
     lookupError.value = errorText(reason)
   }
-}
-function amount(value: string | null, valueCurrency: BillingCurrency | null) {
-  if (!value || !valueCurrency) return '-'
-  const match = value.match(/^(\d+)(?:\.(\d+))?$/)
-  if (!match) return '-'
-  const fraction = (match[2] || '').replace(/0+$/, '')
-  const integer = match[1].replace(/\B(?=(\d{3})+(?!\d))/g, ',')
-  return `${valueCurrency === 'CNY' ? '¥' : '$'}${integer}${fraction ? `.${fraction}` : ''}`
 }
 function ratingLabel(value: string) {
   return t(`billing.ratingStatuses.${value}`)
@@ -215,13 +164,10 @@ async function exportCSV() {
   result.set('order', 'desc')
   exporting.value = true
   try {
-    const blob = await download(`/billing/usage-costs/export?${result}`)
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = `zentrola-usage-costs-${from.value}-${to.value}.csv`
-    anchor.click()
-    URL.revokeObjectURL(url)
+    const blob = await download(`/billing/usage-costs/export?${result}`, {
+      timeoutMs: exportTimeoutMs,
+    })
+    saveBlob(blob, `zentrola-usage-costs-${from.value}-${to.value}.csv`)
   } catch (reason) {
     showErrorToast(errorText(reason))
   } finally {
@@ -230,15 +176,12 @@ async function exportCSV() {
 }
 
 onMounted(() => {
-  document.addEventListener('pointerdown', closeCallerSuggestions)
   resetDates()
   void loadLookups()
   void search()
 })
 onBeforeUnmount(() => {
-  clearTimeout(callerSearchTimer)
-  callerSearchRevision++
-  document.removeEventListener('pointerdown', closeCallerSuggestions)
+  detailRevision++
 })
 </script>
 

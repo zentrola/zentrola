@@ -1246,3 +1246,9 @@ document.title = i18n.global.t('meta.title')
 
 export const t = (key: string, values: Record<string, string | number> = {}) =>
   i18n.global.t(key, values)
+
+// 将后端代码（错误码、操作类型、状态等）转换为文案；未登记的代码返回 fallback（默认原样显示）。
+export function codeText(prefix: string, code: string, fallback: string = code) {
+  const key = `${prefix}.${code}`
+  return i18n.global.te(key) ? t(key) : fallback
+}
