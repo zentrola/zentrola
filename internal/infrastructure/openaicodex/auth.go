@@ -36,7 +36,8 @@ var (
 	errSessionBusy          = errors.New("codex app-server session is busy")
 )
 
-// rpcError 是 app-server 返回的 JSON-RPC 错误。
+// rpcError 是 app-server 返回的 JSON-RPC 错误。app-server 没有为认证失败定义专用错误码，
+// 因此 JSON-RPC 错误一律视为可重试，不根据错误文本推断永久失败。
 type rpcError struct {
 	Code    int64
 	Message string
@@ -104,6 +105,7 @@ func (a *Adapter) ClassifyRefreshError(err error) (string, bool) {
 	if errors.As(err, &failure) && failure.code != "" {
 		return failure.code, permanentRefreshCode(failure.code)
 	}
+	// 永久失败只依据类型化错误判定：凭据格式无效，或携带永久错误码的 connectionFailure。
 	if errors.Is(err, errInvalidCredential) {
 		return "CREDENTIAL_INVALID", true
 	}
@@ -112,9 +114,6 @@ func (a *Adapter) ClassifyRefreshError(err error) (string, bool) {
 	}
 	if errors.Is(err, errAppServerUnavailable) {
 		return "CODEX_APP_SERVER_UNAVAILABLE", false
-	}
-	if strings.Contains(strings.ToLower(err.Error()), "authentication failed") {
-		return "UPSTREAM_AUTH_FAILED", true
 	}
 	return "SUBSCRIPTION_REFRESH_FAILED", false
 }
@@ -312,12 +311,15 @@ func (a *Adapter) refreshCredential(ctx context.Context, raw []byte, proxy *cata
 	if err != nil {
 		code, _ := a.ClassifyRefreshError(err)
 		return nil, mgmt.SubscriptionInspection{}, &connectionFailure{
-			code: code, cause: fmt.Errorf("codex ChatGPT authentication failed: %w", err),
+			code: code, cause: fmt.Errorf("codex ChatGPT credential refresh failed: %w", err),
 		}
 	}
 	if account.Account == nil || account.Account.Type != "chatgpt" {
+		// 响应结构不符可能来自 app-server 版本不兼容或暂时异常，不能据此判定凭据失效，按可重试处理。
 		clear(updated)
-		return nil, mgmt.SubscriptionInspection{}, errors.New("codex ChatGPT authentication failed")
+		return nil, mgmt.SubscriptionInspection{}, &connectionFailure{
+			code: "UPSTREAM_INVALID_RESPONSE", cause: errors.New("codex app-server returned an unexpected account response"),
+		}
 	}
 	if account.Account.PlanType != "" {
 		inspection.PlanCode = account.Account.PlanType
