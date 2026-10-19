@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { all, api, download, errorText } from '../api'
-import { count, date, useCollection, utcDateOnly } from '../composables'
+import { count, date, useCollection, utcDateOnly, utcPeriodEndDate } from '../composables'
 import { utcDateValue as dateValue, utcDayRangeParams } from '../dateRange'
 import { saveBlob } from '../files'
 import { t } from '../i18n'
@@ -447,7 +447,7 @@ onBeforeUnmount(() => {
             <dt>{{ t('billing.period') }}</dt>
             <dd>
               {{
-                `${utcDateOnly(selected.subscription.periodStart)} – ${utcDateOnly(selected.subscription.periodEnd)}`
+                `${utcDateOnly(selected.subscription.periodStart)} – ${utcPeriodEndDate(selected.subscription.periodEnd)}`
               }}
             </dd>
           </div>

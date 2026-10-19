@@ -253,6 +253,12 @@ test.describe('成本管理', () => {
     await expect(subscriptionDetail).toContainText('个人订阅按账期分摊')
     await expect(subscriptionDetail).toContainText('¥1,000')
     await expect(subscriptionDetail).toContainText('¥700')
+    // 账期左闭右开，结束端展示最后一个包含日而不是 periodEnd 当天。
+    await expect(
+      subscriptionDetail
+        .locator('.subscription-cost-note dl > div')
+        .filter({ hasText: '归属账期' }),
+    ).toContainText('2026年9月1日 – 2026年9月30日')
     await mkdir('../.cache/web-visual', { recursive: true })
     await page.screenshot({ path: '../.cache/web-visual/usage-cost-detail.png', fullPage: true })
     const desktopViewport = page.viewportSize()!

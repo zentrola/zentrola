@@ -293,6 +293,12 @@ export function utcDateOnly(value: string | null | undefined) {
       ).format(new Date(value))
     : t('common.none')
 }
+// 账期按左闭右开 [periodStart, periodEnd) 存储，结束端展示最后一个包含日：减 1 毫秒后按 UTC 取日期。
+export function utcPeriodEndDate(value: string | null | undefined) {
+  if (!value) return t('common.none')
+  const end = new Date(value).getTime()
+  return Number.isNaN(end) ? t('common.none') : utcDateOnly(new Date(end - 1).toISOString())
+}
 export function count(value: number | null) {
   return value === null
     ? t('common.none')
