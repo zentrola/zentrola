@@ -285,7 +285,24 @@ func (s *Service) refreshCredential(ctx context.Context, route Route, credential
 	updated, changed, err := refresh.RefreshIfNeeded(refreshCtx, credential, route.Proxy)
 	if err != nil {
 		clear(updated)
-		return credential, false, classifySubscriptionRefreshError(refresh, err)
+		refreshErr := classifySubscriptionRefreshError(refresh, err)
+		var rotated SubscriptionRotatedCredentialError
+		if !errors.As(err, &rotated) || len(rotated.RotatedCredential()) == 0 {
+			return credential, false, refreshErr
+		}
+		// 刷新失败但上游已轮换凭据：旧 refresh token 已被使用，必须先保存新凭据，否则下次刷新必然失败。
+		rotatedCredential := rotated.RotatedCredential()
+		if s.persistRefreshedCredential(refreshCtx, refresh, route, rotatedCredential) != nil {
+			clear(rotatedCredential)
+			return credential, false, refreshErr
+		}
+		// 新凭据已保存且足够新时，刷新的目的已经达成，按刷新成功继续使用。
+		if subscriptionCredentialUsable(refresh, route, rotatedCredential, time.Now().UTC()) {
+			clear(credential)
+			return rotatedCredential, true, nil
+		}
+		clear(rotatedCredential)
+		return credential, false, refreshErr
 	}
 	if !changed {
 		clear(updated)
@@ -294,29 +311,39 @@ func (s *Service) refreshCredential(ctx context.Context, route Route, credential
 	if len(updated) == 0 {
 		return credential, false, ErrSubscription
 	}
+	if err := s.persistRefreshedCredential(refreshCtx, refresh, route, updated); err != nil {
+		clear(updated)
+		return credential, false, err
+	}
+	clear(credential)
+	return updated, true, nil
+}
+
+// persistRefreshedCredential 以刷新前读取的密文为条件保存新凭据及其刷新元数据，
+// 不覆盖其他实例或管理员对同一凭据的并发更新。
+func (s *Service) persistRefreshedCredential(ctx context.Context, refresh SubscriptionRefresher, route Route, updated []byte) error {
 	if inspector, ok := refresh.(SubscriptionRefreshMetadataInspector); ok {
-		refreshedAt, expiresAt, inspectErr := inspector.CredentialRefreshMetadata(updated)
-		if inspectErr != nil {
-			clear(updated)
-			return credential, false, classifySubscriptionRefreshError(refresh, inspectErr)
+		refreshedAt, expiresAt, err := inspector.CredentialRefreshMetadata(updated)
+		if err != nil {
+			return classifySubscriptionRefreshError(refresh, err)
 		}
 		route.CredentialRefreshedAt, route.CredentialExpiresAt = refreshedAt, expiresAt
 	}
 	encryptor, encryptOK := s.cipher.(CredentialEncryptor)
 	updater, updateOK := s.store.(CredentialUpdater)
 	if !encryptOK || !updateOK {
-		clear(updated)
-		return credential, false, ErrSubscription
+		return ErrSubscription
 	}
 	sealed, err := encryptor.Encrypt(updated, catalog.CredentialOwner{ProviderID: route.ProviderID, ResourceID: route.ResourceID})
-	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(refreshCtx), 3*time.Second)
-	defer cancel()
-	if err != nil || updater.UpdateResourceCredential(persistCtx, route, sealed) != nil {
-		clear(updated)
-		return credential, false, ErrSubscription
+	if err != nil {
+		return ErrSubscription
 	}
-	clear(credential)
-	return updated, true, nil
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
+	if updater.UpdateResourceCredential(persistCtx, route, sealed) != nil {
+		return ErrSubscription
+	}
+	return nil
 }
 
 // subscriptionCredentialUsable 判断凭据在不刷新的情况下是否仍可安全使用。

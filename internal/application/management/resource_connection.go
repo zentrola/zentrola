@@ -143,6 +143,11 @@ func (s *ResourceService) TestResourceSelection(ctx context.Context, actor admin
 				result.Code = "PROXY_CONFIGURATION_UNRECOVERABLE"
 			} else if probe, probeErr := subscription.Probe(ctx, plain, proxy); probeErr != nil {
 				result.Code = subscriptionConnectionCode(probeErr)
+				if sealed, inspection, ok := s.sealRotatedCredential(actor, resource.Resource, subscription, probeErr); ok {
+					refreshedSealed = sealed
+					resource.CredentialRefreshedAt = inspection.CredentialRefreshedAt
+					resource.CredentialExpiresAt = inspection.CredentialExpiresAt
+				}
 			} else {
 				normalizeSubscriptionProbe(&probe)
 				subscriptionProbe = &probe
@@ -222,11 +227,15 @@ func (s *ResourceService) TestResourceSelection(ctx context.Context, actor admin
 		if current.Version != resource.Version {
 			result.OK = false
 			result.Code = "RESOURCE_CHANGED"
-			if subscriptionProbe != nil {
-				if err := persistRotatedCredential(auditCtx, w, current, resource.Sealed, refreshedSealed,
-					resource.CredentialRefreshedAt, resource.CredentialExpiresAt, businessTime(s.now)); err != nil {
-					return err
-				}
+		}
+		if refreshedSealed.KeyVersion != 0 && !(result.OK && subscriptionProbe != nil) {
+			// 探测失败或资源已变化时不会整体更新资源，但上游可能已轮换凭据，仍须单独保存新凭据。
+			if err := persistRotatedCredential(auditCtx, w, current, resource.Sealed, refreshedSealed,
+				resource.CredentialRefreshedAt, resource.CredentialExpiresAt, businessTime(s.now)); err != nil {
+				return err
+			}
+			if current, err = w.Resource(auditCtx, id); err != nil {
+				return err
 			}
 		}
 		expectedVersion := current.Version
@@ -321,6 +330,29 @@ func connectionProbeModelRank(providerCode, modelCode string) int {
 		return 25
 	}
 	return 10
+}
+
+// sealRotatedCredential 从失败的订阅操作中取出上游已轮换的凭据并加密，同时解析新凭据的刷新与过期时间。
+// 明文在返回前清除；无法解析或加密时放弃保存，不影响原有的失败结果。
+func (s *ResourceService) sealRotatedCredential(actor admin.Identity, resource Resource, subscription SubscriptionAdapter, err error) (catalog.SealedCredential, SubscriptionInspection, bool) {
+	var rotated SubscriptionRotatedCredentialError
+	if !errors.As(err, &rotated) {
+		return catalog.SealedCredential{}, SubscriptionInspection{}, false
+	}
+	credential := rotated.RotatedCredential()
+	if len(credential) == 0 {
+		return catalog.SealedCredential{}, SubscriptionInspection{}, false
+	}
+	defer clear(credential)
+	inspection, inspectErr := subscription.Inspect(credential)
+	if inspectErr != nil {
+		return catalog.SealedCredential{}, SubscriptionInspection{}, false
+	}
+	sealed, encryptErr := s.cipher.Encrypt(credential, owner(actor, resource))
+	if encryptErr != nil {
+		return catalog.SealedCredential{}, SubscriptionInspection{}, false
+	}
+	return sealed, inspection, true
 }
 
 func subscriptionConnectionCode(err error) string {

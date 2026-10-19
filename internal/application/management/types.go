@@ -328,6 +328,13 @@ type SubscriptionAdapter interface {
 	Inspect([]byte) (SubscriptionInspection, error)
 	Probe(context.Context, []byte, *catalog.OutboundProxy) (SubscriptionProbe, error)
 }
+
+// SubscriptionRotatedCredentialError 由订阅适配器在操作失败、但上游已轮换凭据时返回。
+// refresh token 只能使用一次，轮换后旧凭据已失效，调用方必须保存 RotatedCredential 返回的新凭据并清除明文。
+type SubscriptionRotatedCredentialError interface {
+	error
+	RotatedCredential() []byte
+}
 type SubscriptionCredentialExporter interface {
 	ExportCredential([]byte) ([]byte, error)
 }

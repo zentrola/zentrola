@@ -173,6 +173,13 @@ type SubscriptionRefreshInspector interface {
 type SubscriptionRefreshPlanner interface {
 	RefreshBefore(time.Time) time.Time
 }
+
+// SubscriptionRotatedCredentialError 由订阅刷新器在刷新失败、但上游已轮换凭据时返回。
+// refresh token 只能使用一次，调用方必须保存 RotatedCredential 返回的新凭据并清除明文。
+type SubscriptionRotatedCredentialError interface {
+	error
+	RotatedCredential() []byte
+}
 type SubscriptionRefreshMetadataInspector interface {
 	CredentialRefreshMetadata([]byte) (refreshedAt, expiresAt *time.Time, err error)
 }
