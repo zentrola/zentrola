@@ -206,3 +206,73 @@ func TestOpenAIChatStreamWithoutUsageIsIncomplete(t *testing.T) {
 		t.Fatalf("stream without usage completed: complete=%v code=%s", o.Complete(), o.ErrorCode())
 	}
 }
+
+func TestOpenAIResponsesOversizedCompletedEventKeepsUsage(t *testing.T) {
+	image := strings.Repeat("QUJD", 3<<20/4)
+	completed := "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"output\":[{\"type\":\"image_generation_call\",\"result\":\"" + image +
+		"\",\"note\":\"escaped \\\" quote\",\"usage\":{\"input_tokens\":999}}],\"usage\":{\"input_tokens\":12,\"input_tokens_details\":{\"cached_tokens\":4},\"output_tokens\":9}}}"
+	created := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"usage\":null}}\n\n"
+	// 多行 data 以 "\n" 拼接，只能在 JSON 空白位置拆分。
+	split := strings.Index(completed, `],"usage"`) + 1
+	partial := "event: response.image_generation_call.partial_image\ndata: {\"type\":\"response.image_generation_call.partial_image\",\"partial_image_b64\":\"" + image + "\"}\n\n"
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "named completed", body: created + partial + "event: response.completed\ndata: " + completed + "\n\n"},
+		{name: "data only completed", body: created + "data: " + completed + "\n\n"},
+		{name: "multi line data", body: created + "data: " + completed[:split] + "\ndata: " + completed[split:] + "\n\n"},
+		{name: "crlf", body: strings.ReplaceAll(created, "\n", "\r\n") + "event: response.completed\r\ndata: " + completed + "\r\n\r\n"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			for _, chunk := range []int{4093, 32 << 10, 1 << 20} {
+				o := NewOpenAIResponsesUsageObserver(true)
+				for i := 0; i < len(test.body); i += chunk {
+					o.Feed([]byte(test.body[i:min(i+chunk, len(test.body))]))
+				}
+				in, out, cached := o.Tokens(o.Complete())
+				if !o.Complete() || in == nil || *in != 12 || out == nil || *out != 9 || cached == nil || *cached != 4 {
+					t.Fatalf("chunk=%d diagnostics=%+v", chunk, o.Diagnostics())
+				}
+				if len(o.line) > sseEventLimit || len(o.data) > sseEventLimit {
+					t.Fatalf("oversized event buffered: line=%d data=%d", len(o.line), len(o.data))
+				}
+			}
+		})
+	}
+}
+
+func TestOpenAIResponsesOversizedTerminalEventsAreObserved(t *testing.T) {
+	large := strings.Repeat("x", sseEventLimit+1)
+	for name, test := range map[string]struct {
+		body             string
+		failed, badUsage bool
+		complete         bool
+	}{
+		"failed without event name": {
+			body:   "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"" + large + "\"}}}\n\n",
+			failed: true,
+		},
+		"invalid json": {
+			body:     "data: {\"type\":\"response.completed\",\"response\":{\"x\":\"" + large + "\"\n\n",
+			badUsage: true,
+		},
+		"non object usage": {
+			body:     "data: {\"type\":\"response.completed\",\"response\":{\"x\":\"" + large + "\",\"usage\":7}}\n\n",
+			badUsage: true, complete: true,
+		},
+		"named non terminal event": {
+			body: "event: response.output_text.done\ndata: {\"type\":\"response.output_text.done\",\"text\":\"" + large + "\"}\n\n",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			o := NewOpenAIResponsesUsageObserver(true)
+			o.Feed([]byte(test.body))
+			diagnostics := o.Diagnostics()
+			if diagnostics.Failed != test.failed || diagnostics.BadUsage != test.badUsage || diagnostics.Stopped != test.complete {
+				t.Fatalf("diagnostics=%+v", diagnostics)
+			}
+		})
+	}
+}

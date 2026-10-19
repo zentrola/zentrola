@@ -148,3 +148,36 @@ func TestOpenAIChatStreamWithoutUsageStopsAtDone(t *testing.T) {
 		t.Fatalf("body=%q trace=%+v", recorder.Body.String(), trace)
 	}
 }
+
+func TestOpenAIResponsesOversizedCompletedEventRecordsUsage(t *testing.T) {
+	stream := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"usage\":null}}\n\n" +
+		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"image_generation_call\",\"result\":\"" +
+		strings.Repeat("QUJD", 1<<20) + "\"}],\"usage\":{\"input_tokens\":12,\"input_tokens_details\":{\"cached_tokens\":3},\"output_tokens\":7}}}\n\n"
+	var trace *usage.Event
+	upstream := completionUpstream(func(_ context.Context, _ gw.Route, request gw.Request, _ []byte) (*gw.Response, error) {
+		trace = request.Trace
+		return &gw.Response{
+			Status:  http.StatusOK,
+			Headers: map[string][]string{"Content-Type": {"text/event-stream"}},
+			Body:    io.NopCloser(strings.NewReader(stream)),
+		}, nil
+	})
+	service := gw.New(completionStore{}, completionCipher{}, upstream)
+	handler := NewOpenAIGatewayHandler(service, GatewayOptions{
+		MaxBodyBytes: 1 << 20, RequestTimeout: time.Second, BodyReadTimeout: time.Second, WriteTimeout: time.Second,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"client-model","stream":true}`))
+	request.Header.Set("Content-Type", "application/json")
+	request = request.WithContext(context.WithValue(request.Context(), principalIdentityKey{}, appsec.PrincipalIdentity{ID: 1, AccessKeyID: 2}))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Body.String() != stream {
+		t.Fatalf("stream changed: bytes=%d", recorder.Body.Len())
+	}
+	if trace == nil || trace.Status != usage.Success || trace.Attempt == nil || trace.Attempt.InputTokens == nil ||
+		*trace.Attempt.InputTokens != 12 || trace.Attempt.OutputTokens == nil || *trace.Attempt.OutputTokens != 7 ||
+		trace.Attempt.CachedInputTokens == nil || *trace.Attempt.CachedInputTokens != 3 {
+		t.Fatalf("oversized completed usage missing: %+v", trace)
+	}
+}

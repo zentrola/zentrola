@@ -9,7 +9,8 @@ import (
 )
 
 // UsageObserver 旁路读取字节，绝不重编码 Gateway 响应或保留完整响应。
-// SSE 仅缓存当前事件（最多 256 KiB）；JSON 只捕获顶层 type / usage。
+// SSE 仅缓存当前事件（最多 256 KiB）；超限的 Responses 事件改为流式扫描，
+// 只抽取 type 与 response.usage。JSON 只捕获顶层 type / usage。
 type UsageObserver struct {
 	openai                        bool
 	responses                     bool
@@ -18,6 +19,8 @@ type UsageObserver struct {
 	fallbackStream                bool
 	prefix                        []byte
 	line, data                    []byte
+	lineMode                      sseLineMode
+	scan                          *responsesEventScanner
 	eventName                     string
 	drop                          bool
 	start, stop, failed, badUsage bool
@@ -33,6 +36,18 @@ type UsageObserver struct {
 	lastEvent             string
 	json                  metadataJSON
 }
+
+// sseLineMode 描述当前 SSE 行的处理方式。超过单事件上限后每行只判定一次，
+// 剩余字节直接流入扫描器或被跳过，不再逐字节重复判定。
+type sseLineMode uint8
+
+const (
+	sseLineBuffered sseLineMode = iota
+	sseLineStreaming
+	sseLineDiscard
+)
+
+const sseEventLimit = 256 << 10
 
 type UsageDiagnostics struct {
 	Stream          bool
@@ -177,30 +192,72 @@ func (o *UsageObserver) feed(p []byte) {
 		o.json.feed(p)
 		return
 	}
-	for _, b := range p {
-		if b == '\n' {
-			o.sseLine()
-			clear(o.line)
-			o.line = o.line[:0]
-			continue
+	for len(p) > 0 {
+		newline := bytes.IndexByte(p, '\n')
+		segment := p
+		if newline >= 0 {
+			segment = p[:newline]
 		}
-		if len(o.line) < 256<<10 {
-			o.line = append(o.line, b)
-		} else {
-			o.dropCurrentSSEEvent()
+		switch o.lineMode {
+		case sseLineStreaming:
+			o.scan.feed(segment)
+		case sseLineDiscard:
+		default:
+			if room := sseEventLimit - len(o.line); len(segment) > room {
+				o.line = append(o.line, segment[:room]...)
+				o.overflowLine()
+				p = p[room:]
+				continue
+			}
+			o.line = append(o.line, segment...)
 		}
+		if newline < 0 {
+			return
+		}
+		p = p[newline+1:]
+		o.endLine()
 	}
 }
+
+func (o *UsageObserver) endLine() {
+	mode := o.lineMode
+	o.lineMode = sseLineBuffered
+	switch mode {
+	case sseLineBuffered:
+		o.sseLine()
+	case sseLineStreaming:
+		// 与缓存路径保持一致：多条 data 行按 "\n" 拼接。
+		o.scan.feed([]byte{'\n'})
+	}
+	clear(o.line)
+	o.line = o.line[:0]
+}
+
+// overflowLine 在单行超过事件上限时调用，每行只调用一次。
+func (o *UsageObserver) overflowLine() {
+	o.lineMode = sseLineDiscard
+	if o.drop {
+		return
+	}
+	switch {
+	case bytes.HasPrefix(o.line, []byte("data:")):
+		if o.responses && o.scannableResponsesEvent() {
+			o.startResponsesScan()
+			o.scan.feed(bytes.TrimPrefix(o.line[5:], []byte{' '}))
+			o.lineMode = sseLineStreaming
+			return
+		}
+		o.dropCurrentSSEEvent()
+	case bytes.HasPrefix(o.line, []byte("event:")):
+		o.dropCurrentSSEEvent()
+	}
+	// 注释、id、retry 等字段不参与 usage 判定，超长时仅跳过该行。
+}
+
 func (o *UsageObserver) sseLine() {
 	line := bytes.TrimSuffix(o.line, []byte{'\r'})
 	if len(line) == 0 {
-		if !o.drop && len(o.data) > 0 {
-			o.event(o.data)
-		}
-		clear(o.data)
-		o.data = o.data[:0]
-		o.drop = false
-		o.eventName = ""
+		o.endEvent()
 		return
 	}
 	if o.drop {
@@ -217,8 +274,16 @@ func (o *UsageObserver) sseLine() {
 	}
 	if bytes.HasPrefix(line, []byte("data:")) {
 		part := bytes.TrimPrefix(line[5:], []byte{' '})
-		if len(o.data)+len(part)+1 > 256<<10 {
-			o.dropCurrentSSEEvent()
+		if o.scan == nil && len(o.data)+len(part)+1 > sseEventLimit {
+			if !o.responses || !o.scannableResponsesEvent() {
+				o.dropCurrentSSEEvent()
+				return
+			}
+			o.startResponsesScan()
+		}
+		if o.scan != nil {
+			o.scan.feed(part)
+			o.scan.feed([]byte{'\n'})
 			return
 		}
 		o.data = append(o.data, part...)
@@ -226,34 +291,85 @@ func (o *UsageObserver) sseLine() {
 	}
 }
 
-func (o *UsageObserver) dropCurrentSSEEvent() {
-	o.drop = true
-	// Responses 的图像生成事件可能包含数 MiB 的 base64。它们不携带
-	// usage，跳过观察即可；原始字节仍由 HTTP 转发链路直接交付客户端。
-	if !o.imageGenerationSSEEvent() {
-		o.badUsage = true
+func (o *UsageObserver) endEvent() {
+	if !o.drop {
+		if o.scan != nil {
+			o.finishResponsesScan()
+		} else if len(o.data) > 0 {
+			o.event(o.data)
+		}
 	}
+	clear(o.data)
+	o.data = o.data[:0]
+	o.drop = false
+	o.scan = nil
+	o.eventName = ""
 }
 
-func (o *UsageObserver) imageGenerationSSEEvent() bool {
-	if !o.responses {
-		return false
+func (o *UsageObserver) dropCurrentSSEEvent() {
+	o.drop = true
+	o.scan = nil
+	// event 字段已声明为不携带 usage 或终止状态的 Responses 事件（如图像生成的
+	// 数 MiB base64 片段）跳过观察即可；原始字节仍由 HTTP 转发链路直接交付客户端。
+	if o.responses && !o.scannableResponsesEvent() {
+		return
 	}
-	if strings.Contains(o.eventName, "image_generation") {
+	o.badUsage = true
+}
+
+// scannableResponsesEvent 判断超限事件是否可能决定开始、完成、失败或 usage。
+// event 字段不是 SSE 必填项，未声明时无法预知类型，同样需要扫描。
+func (o *UsageObserver) scannableResponsesEvent() bool {
+	switch o.eventName {
+	case "", "response.created", "response.in_progress", "response.completed", "response.done",
+		"response.failed", "response.incomplete", "error":
 		return true
-	}
-	// event 字段不是 SSE 必填项。兼容只发送 data 的上游，但仅检查事件
-	// 开头的小段元数据，避免扫描完整 base64。
-	for _, prefix := range [][]byte{o.data, o.line} {
-		if len(prefix) > 4<<10 {
-			prefix = prefix[:4<<10]
-		}
-		if bytes.Contains(prefix, []byte("image_generation")) {
-			return true
-		}
 	}
 	return false
 }
+
+func (o *UsageObserver) startResponsesScan() {
+	if o.scan != nil {
+		return
+	}
+	o.scan = &responsesEventScanner{}
+	o.scan.feed(o.data)
+	clear(o.data)
+	o.data = o.data[:0]
+}
+
+func (o *UsageObserver) finishResponsesScan() {
+	kind, usage, ok := o.scan.result()
+	if !ok {
+		o.eventCount++
+		o.lastEvent = "[invalid-json]"
+		o.badUsage = true
+		return
+	}
+	if o.scan.usageInvalid && kind == "response.completed" {
+		o.badUsage = true
+	}
+	o.responsesEvent(kind, usage)
+}
+
+func (o *UsageObserver) responsesEvent(kind string, usage []byte) {
+	o.eventCount++
+	o.lastEvent = kind
+	if len(o.lastEvent) > 128 {
+		o.lastEvent = o.lastEvent[:128] + "..."
+	}
+	switch kind {
+	case "response.created", "response.in_progress":
+		o.start = true
+	case "response.completed":
+		o.start = true
+		o.update(usage)
+		o.stop = true
+	case "error", "response.failed", "response.incomplete":
+		o.failed = true
+	}
+}
+
 func (o *UsageObserver) event(raw []byte) {
 	if o.openai {
 		if o.responses {
@@ -262,7 +378,6 @@ func (o *UsageObserver) event(raw []byte) {
 				Response struct {
 					Usage json.RawMessage `json:"usage"`
 				} `json:"response"`
-				Error json.RawMessage `json:"error"`
 			}
 			if json.Unmarshal(raw, &event) != nil {
 				o.eventCount++
@@ -270,21 +385,7 @@ func (o *UsageObserver) event(raw []byte) {
 				o.badUsage = true
 				return
 			}
-			o.eventCount++
-			o.lastEvent = event.Type
-			if len(o.lastEvent) > 128 {
-				o.lastEvent = o.lastEvent[:128] + "..."
-			}
-			switch event.Type {
-			case "response.created", "response.in_progress":
-				o.start = true
-			case "response.completed":
-				o.start = true
-				o.update(event.Response.Usage)
-				o.stop = true
-			case "error", "response.failed", "response.incomplete":
-				o.failed = true
-			}
+			o.responsesEvent(event.Type, event.Response.Usage)
 			return
 		}
 		if bytes.Equal(bytes.TrimSpace(raw), []byte("[DONE]")) {
