@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -82,7 +84,7 @@ func TestAppServerTimeoutTerminatesProcessTree(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			raw, pidPath := hangingCredential(t)
-			adapter := New(executable)
+			adapter := New(executable, WithLogger(slog.New(slog.NewJSONHandler(io.Discard, nil))))
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
 			started := time.Now()

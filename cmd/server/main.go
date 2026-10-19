@@ -297,6 +297,7 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 	codexSubscription := openaicodex.New(
 		cfg.Gateway.CodexExecutable,
 		openaicodex.WithRefreshAhead(cfg.Gateway.SubscriptionRefreshAhead),
+		openaicodex.WithLogger(logger),
 	)
 	claudeSubscription := anthropicclaude.New()
 	postgresManagementStore := postgres.NewManagementStore(pool, ids, logger)

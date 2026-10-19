@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -61,6 +62,7 @@ type Adapter struct {
 	refreshAhead time.Duration
 	runSession   accountSessionRunner
 	sessionSlot  chan struct{}
+	logger       *slog.Logger
 }
 
 type accountRPC interface {
@@ -79,11 +81,23 @@ func WithRefreshAhead(value time.Duration) Option {
 	}
 }
 
+// WithLogger 设置诊断日志输出；未设置时使用 slog.Default。
+func WithLogger(logger *slog.Logger) Option {
+	return func(adapter *Adapter) {
+		if logger != nil {
+			adapter.logger = logger
+		}
+	}
+}
+
 func New(executable string, options ...Option) *Adapter {
 	if strings.TrimSpace(executable) == "" {
 		executable = "codex"
 	}
-	adapter := &Adapter{executable: executable, refreshAhead: defaultRefreshAhead, sessionSlot: make(chan struct{}, 1)}
+	adapter := &Adapter{
+		executable: executable, refreshAhead: defaultRefreshAhead, sessionSlot: make(chan struct{}, 1),
+		logger: slog.Default(),
+	}
 	adapter.runSession = adapter.runAccountSession
 	for _, option := range options {
 		option(adapter)
@@ -272,8 +286,10 @@ func (a *Adapter) Probe(ctx context.Context, raw []byte, proxy *catalog.Outbound
 		return client.call(ctx, 2, "account/rateLimits/read", nil, &limits)
 	})
 	if err != nil {
+		code := subscriptionErrorCode(err)
+		a.logSessionFailure(ctx, "subscription_probe", "codex subscription probe failed", code, err)
 		return mgmt.SubscriptionProbe{}, &connectionFailure{
-			code: subscriptionErrorCode(err), cause: fmt.Errorf("cannot read Codex ChatGPT rate limits: %w", err),
+			code: code, cause: fmt.Errorf("cannot read Codex ChatGPT rate limits: %w", err),
 		}
 	}
 	if plan := limits.planType(); plan != "" {
@@ -286,6 +302,22 @@ func (a *Adapter) Probe(ctx context.Context, raw []byte, proxy *catalog.Outbound
 		Quotas:       limits.quotas(observedAt),
 		ResetCredits: limits.resetCredits(),
 	}, nil
+}
+
+// logSessionFailure 记录 app-server 会话失败的脱敏原因。额度检测与凭据刷新只向调用方返回错误码，
+// 兜底码的具体原因只能从这里的 app-server 错误和标准错误摘要中排查。
+func (a *Adapter) logSessionFailure(ctx context.Context, operation, message, code string, err error) {
+	args := []any{
+		slog.String("operation", operation),
+		slog.String("auth_adapter", AdapterCode),
+		slog.String("error_code", code),
+		slog.String("error", errorForLog(err)),
+	}
+	var failure *sessionFailure
+	if errors.As(err, &failure) && failure.stderr != "" {
+		args = append(args, slog.String("app_server_stderr", failure.stderr))
+	}
+	a.logger.WarnContext(ctx, message, args...)
 }
 
 func subscriptionErrorCode(err error) string {
@@ -310,16 +342,21 @@ func (a *Adapter) refreshCredential(ctx context.Context, raw []byte, proxy *cata
 	})
 	if err != nil {
 		code, _ := a.ClassifyRefreshError(err)
+		a.logSessionFailure(ctx, "subscription_refresh", "codex subscription refresh failed", code, err)
 		return nil, mgmt.SubscriptionInspection{}, &connectionFailure{
 			code: code, cause: fmt.Errorf("codex ChatGPT credential refresh failed: %w", err),
 		}
 	}
 	if account.Account == nil || account.Account.Type != "chatgpt" {
 		// 响应结构不符可能来自 app-server 版本不兼容或暂时异常，不能据此判定凭据失效，按可重试处理。
-		clear(updated)
-		return nil, mgmt.SubscriptionInspection{}, &connectionFailure{
+		var cause error = &connectionFailure{
 			code: "UPSTREAM_INVALID_RESPONSE", cause: errors.New("codex app-server returned an unexpected account response"),
 		}
+		if credentialRotated(raw, updated) {
+			return nil, mgmt.SubscriptionInspection{}, &sessionFailure{cause: cause, credential: updated}
+		}
+		clear(updated)
+		return nil, mgmt.SubscriptionInspection{}, cause
 	}
 	if account.Account.PlanType != "" {
 		inspection.PlanCode = account.Account.PlanType
@@ -348,16 +385,25 @@ func (a *Adapter) runAccountSession(ctx context.Context, raw []byte, proxy *cata
 	if err != nil {
 		return nil, mgmt.SubscriptionInspection{}, err
 	}
-	defer client.close()
+	defer func() {
+		client.close()
+		client.stderr.reset()
+	}()
+	// app-server 启动后可能在任意 RPC 之前就用 refresh token 换取新 Token 并写回 auth.json；
+	// 会话失败时仍要读回轮换后的凭据，否则存储中只剩已被使用过的 refresh token。
+	failed := func(err error) error {
+		client.close()
+		return newSessionFailure(err, client.stderr.summary(), rotatedCredential(authPath, raw))
+	}
 	if err := client.initialize(ctx); err != nil {
 		if ctx.Err() != nil {
 			// 超时或取消时保留 context 错误，使调用方归类为超时，而不是 app-server 不可用。
-			return nil, mgmt.SubscriptionInspection{}, fmt.Errorf("codex app-server initialization interrupted: %w", err)
+			return nil, mgmt.SubscriptionInspection{}, failed(fmt.Errorf("codex app-server initialization interrupted: %w", err))
 		}
-		return nil, mgmt.SubscriptionInspection{}, fmt.Errorf("%w: initialization failed: %v", errAppServerUnavailable, err)
+		return nil, mgmt.SubscriptionInspection{}, failed(fmt.Errorf("%w: initialization failed: %v", errAppServerUnavailable, err))
 	}
 	if err := action(client); err != nil {
-		return nil, mgmt.SubscriptionInspection{}, err
+		return nil, mgmt.SubscriptionInspection{}, failed(err)
 	}
 	updated, err := os.ReadFile(authPath)
 	if err != nil {
@@ -497,6 +543,7 @@ type rpcClient struct {
 	// lines 由 readLines 协程写入 app-server 的每行输出，读取结束时关闭。
 	lines     chan []byte
 	done      chan struct{}
+	stderr    *stderrTail
 	tree      *processTree
 	closeOnce sync.Once
 }
@@ -533,7 +580,8 @@ func startClient(ctx context.Context, executable, directory string, proxy *catal
 		tree.release()
 		return nil, fmt.Errorf("%w: cannot open output", errAppServerUnavailable)
 	}
-	command.Stderr = io.Discard
+	stderr := &stderrTail{}
+	command.Stderr = stderr
 	if err := command.Start(); err != nil {
 		stdin.Close()
 		tree.release()
@@ -545,7 +593,7 @@ func startClient(ctx context.Context, executable, directory string, proxy *catal
 	// 加入进程树失败时仍可终止直接子进程，不阻止会话继续。
 	_ = tree.attach()
 	client := &rpcClient{
-		command: command, stdin: stdin, lines: make(chan []byte), done: make(chan struct{}), tree: tree,
+		command: command, stdin: stdin, lines: make(chan []byte), done: make(chan struct{}), stderr: stderr, tree: tree,
 	}
 	go client.readLines(stdout)
 	return client, nil
@@ -565,6 +613,36 @@ func (c *rpcClient) readLines(stdout io.Reader) {
 			return
 		}
 	}
+}
+
+// rotatedCredential 读取会话结束后 app-server 留下的 auth.json，仅当同一账号的 Token 已被轮换时返回规范化后的新凭据。
+// 调用前必须等待 app-server 退出，避免读到写入中的文件。
+func rotatedCredential(authPath string, original []byte) []byte {
+	updated, err := os.ReadFile(authPath)
+	if err != nil {
+		return nil
+	}
+	defer clear(updated)
+	if !credentialRotated(original, updated) {
+		return nil
+	}
+	normalized, err := ensureLastRefresh(updated)
+	if err != nil {
+		return nil
+	}
+	return normalized
+}
+
+func credentialRotated(original, updated []byte) bool {
+	previous, err := parseCredential(original)
+	if err != nil {
+		return false
+	}
+	next, err := parseCredential(updated)
+	if err != nil || next.Tokens.AccountID != previous.Tokens.AccountID {
+		return false
+	}
+	return next.Tokens.RefreshToken != previous.Tokens.RefreshToken || next.Tokens.AccessToken != previous.Tokens.AccessToken
 }
 
 func (c *rpcClient) initialize(ctx context.Context) error {
