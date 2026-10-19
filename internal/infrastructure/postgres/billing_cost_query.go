@@ -45,7 +45,7 @@ func (s *BillingStore) UsageCostSummary(ctx context.Context, actor admin.Identit
 	result := app.UsageCostSummary{
 		From: filter.From.UTC(), To: filter.To.UTC(), Requests: row.Requests, Attempts: row.Attempts,
 		Successful: row.Successful, InputTokens: row.InputTokens, CachedInputTokens: row.CachedInputTokens,
-		OutputTokens: row.OutputTokens, Rated: row.Rated, Shared: row.Shared, Unrated: row.Unrated,
+		CacheCreationInputTokens: row.CacheCreationInputTokens, OutputTokens: row.OutputTokens, Rated: row.Rated, Shared: row.Shared, Unrated: row.Unrated,
 		Totals: make([]app.UsageCostTotal, 0, len(totals)),
 	}
 	for _, total := range totals {
@@ -88,7 +88,7 @@ func (s *BillingStore) UsageCosts(ctx context.Context, actor admin.Identity, fil
 			row.ModelID, row.ModelName, row.ProviderID, row.ProviderName, row.ProviderModelID,
 			row.ResourceID, row.ResourceName, row.ClientProtocol, row.Status, row.ErrorType,
 			row.StartedAt.Time, row.CompletedAt.Time, row.LatencyMs, row.InputTokens,
-			row.CachedInputTokens, row.OutputTokens, row.BillingType, row.RatingStatus,
+			row.CachedInputTokens, row.CacheCreationInputTokens, row.OutputTokens, row.BillingType, row.RatingStatus,
 			row.RatingID, row.RatingRevision, row.Currency, priceNumber(row.TotalCost), row.RatedAt.Time,
 		))
 		result.Total = row.TotalCount
@@ -122,7 +122,7 @@ func (s *BillingStore) UsageCost(ctx context.Context, actor admin.Identity, id i
 			row.ModelID, row.ModelName, row.ProviderID, row.ProviderName, row.ProviderModelID,
 			row.ResourceID, row.ResourceName, row.ClientProtocol, row.Status, row.ErrorType,
 			row.StartedAt.Time, row.CompletedAt.Time, row.LatencyMs, row.InputTokens,
-			row.CachedInputTokens, row.OutputTokens, row.BillingType, row.RatingStatus,
+			row.CachedInputTokens, row.CacheCreationInputTokens, row.OutputTokens, row.BillingType, row.RatingStatus,
 			row.RatingID, row.RatingRevision, row.Currency, priceNumber(row.TotalCost), row.RatedAt.Time,
 		),
 		Ratings: []app.UsageCostRating{},
@@ -136,8 +136,10 @@ func (s *BillingStore) UsageCost(ctx context.Context, actor admin.Identity, id i
 			ID: rating.ID, Revision: rating.Revision, ModelPriceID: rating.ModelPriceID,
 			PriceEffectiveAt: rating.PriceEffectiveAt.Time.UTC(), InputPrice: priceNumber(rating.InputPrice),
 			CachedInputPrice: priceNumber(rating.CachedInputPrice), OutputPrice: priceNumber(rating.OutputPrice),
-			InputCost: priceNumber(rating.InputCost), CachedInputCost: priceNumber(rating.CachedInputCost),
-			OutputCost: priceNumber(rating.OutputCost), TotalCost: priceNumber(rating.TotalCost),
+			CacheCreationInputPrice: optionalPriceNumber(rating.CacheCreationInputPrice),
+			InputCost:               priceNumber(rating.InputCost), CachedInputCost: priceNumber(rating.CachedInputCost),
+			CacheCreationInputCost: priceNumber(rating.CacheCreationInputCost),
+			OutputCost:             priceNumber(rating.OutputCost), TotalCost: priceNumber(rating.TotalCost),
 			Currency: rating.Currency, CreatedAt: rating.CreatedAt.Time.UTC(),
 		})
 	}
@@ -197,7 +199,8 @@ func (s *BillingStore) CurrentAPIKeyAttribution(
 func usageCostRow(id int64, requestID string, attemptNo, principalID int64, principalName, principalType string,
 	modelID int64, modelName string, providerID int64, providerName string, providerModelID, resourceID int64,
 	resourceName, clientProtocol, status string, errorType *string, startedAt, completedAt time.Time,
-	latencyMS int64, inputTokens, cachedInputTokens, outputTokens *int64, billingType, ratingStatus string,
+	latencyMS int64, inputTokens, cachedInputTokens, cacheCreationInputTokens, outputTokens *int64,
+	billingType, ratingStatus string,
 	ratingID int64, ratingRevision int32, currency, totalCost string, ratedAt time.Time,
 ) app.UsageCostRow {
 	result := app.UsageCostRow{
@@ -207,7 +210,7 @@ func usageCostRow(id int64, requestID string, attemptNo, principalID int64, prin
 		ResourceID: resourceID, ResourceName: resourceName, ClientProtocol: clientProtocol,
 		Status: status, ErrorType: errorType, StartedAt: startedAt.UTC(), CompletedAt: completedAt.UTC(),
 		LatencyMS: latencyMS, InputTokens: inputTokens, CachedInputTokens: cachedInputTokens,
-		OutputTokens: outputTokens, BillingType: billingType, RatingStatus: ratingStatus,
+		CacheCreationInputTokens: cacheCreationInputTokens, OutputTokens: outputTokens, BillingType: billingType, RatingStatus: ratingStatus,
 	}
 	if currency != "" {
 		result.Currency = &currency

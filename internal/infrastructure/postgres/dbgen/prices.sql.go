@@ -53,27 +53,28 @@ func (q *Queries) ManageDeleteSubscriptionPrice(ctx context.Context, arg ManageD
 const manageInsertModelPrice = `-- name: ManageInsertModelPrice :exec
 INSERT INTO provider_credential_model_price (
     id, provider_credential_id, provider_model_id, currency,
-    input_price, output_price, cached_input_price, effective_at,
-    created_by, created_at
+    input_price, output_price, cached_input_price, cache_creation_input_price,
+    effective_at, created_by, created_at
 ) VALUES (
     $1, $2, $3,
     $4, $5, $6,
-    $7, $8,
-    $9, $10
+    $7, $8, $9,
+    $10, $11
 )
 `
 
 type ManageInsertModelPriceParams struct {
-	ID                   int64
-	ProviderCredentialID int64
-	ProviderModelID      int64
-	Currency             string
-	InputPrice           pgtype.Numeric
-	OutputPrice          pgtype.Numeric
-	CachedInputPrice     pgtype.Numeric
-	EffectiveAt          pgtype.Timestamptz
-	CreatedBy            string
-	CreatedAt            pgtype.Timestamptz
+	ID                      int64
+	ProviderCredentialID    int64
+	ProviderModelID         int64
+	Currency                string
+	InputPrice              pgtype.Numeric
+	OutputPrice             pgtype.Numeric
+	CachedInputPrice        pgtype.Numeric
+	CacheCreationInputPrice pgtype.Numeric
+	EffectiveAt             pgtype.Timestamptz
+	CreatedBy               string
+	CreatedAt               pgtype.Timestamptz
 }
 
 func (q *Queries) ManageInsertModelPrice(ctx context.Context, arg ManageInsertModelPriceParams) error {
@@ -85,6 +86,7 @@ func (q *Queries) ManageInsertModelPrice(ctx context.Context, arg ManageInsertMo
 		arg.InputPrice,
 		arg.OutputPrice,
 		arg.CachedInputPrice,
+		arg.CacheCreationInputPrice,
 		arg.EffectiveAt,
 		arg.CreatedBy,
 		arg.CreatedAt,
@@ -194,22 +196,24 @@ func (q *Queries) ManageModelPriceReferenced(ctx context.Context, priceID int64)
 
 const manageModelPrices = `-- name: ManageModelPrices :many
 SELECT id, provider_credential_id, provider_model_id, currency,
-    input_price, output_price, cached_input_price, effective_at, created_at
+    input_price, output_price, cached_input_price, cache_creation_input_price,
+    effective_at, created_at
 FROM provider_credential_model_price
 WHERE provider_credential_id = $1
 ORDER BY provider_model_id, effective_at DESC, id DESC
 `
 
 type ManageModelPricesRow struct {
-	ID                   int64
-	ProviderCredentialID int64
-	ProviderModelID      int64
-	Currency             string
-	InputPrice           pgtype.Numeric
-	OutputPrice          pgtype.Numeric
-	CachedInputPrice     pgtype.Numeric
-	EffectiveAt          pgtype.Timestamptz
-	CreatedAt            pgtype.Timestamptz
+	ID                      int64
+	ProviderCredentialID    int64
+	ProviderModelID         int64
+	Currency                string
+	InputPrice              pgtype.Numeric
+	OutputPrice             pgtype.Numeric
+	CachedInputPrice        pgtype.Numeric
+	CacheCreationInputPrice pgtype.Numeric
+	EffectiveAt             pgtype.Timestamptz
+	CreatedAt               pgtype.Timestamptz
 }
 
 func (q *Queries) ManageModelPrices(ctx context.Context, providerCredentialID int64) ([]ManageModelPricesRow, error) {
@@ -229,6 +233,7 @@ func (q *Queries) ManageModelPrices(ctx context.Context, providerCredentialID in
 			&i.InputPrice,
 			&i.OutputPrice,
 			&i.CachedInputPrice,
+			&i.CacheCreationInputPrice,
 			&i.EffectiveAt,
 			&i.CreatedAt,
 		); err != nil {
@@ -327,21 +332,23 @@ SET currency = $1,
     input_price = $2,
     output_price = $3,
     cached_input_price = $4,
-    effective_at = $5
-WHERE id = $6
-  AND provider_credential_id = $7
-  AND provider_model_id = $8
+    cache_creation_input_price = $5,
+    effective_at = $6
+WHERE id = $7
+  AND provider_credential_id = $8
+  AND provider_model_id = $9
 `
 
 type ManageUpdateModelPriceParams struct {
-	Currency             string
-	InputPrice           pgtype.Numeric
-	OutputPrice          pgtype.Numeric
-	CachedInputPrice     pgtype.Numeric
-	EffectiveAt          pgtype.Timestamptz
-	ID                   int64
-	ProviderCredentialID int64
-	ProviderModelID      int64
+	Currency                string
+	InputPrice              pgtype.Numeric
+	OutputPrice             pgtype.Numeric
+	CachedInputPrice        pgtype.Numeric
+	CacheCreationInputPrice pgtype.Numeric
+	EffectiveAt             pgtype.Timestamptz
+	ID                      int64
+	ProviderCredentialID    int64
+	ProviderModelID         int64
 }
 
 func (q *Queries) ManageUpdateModelPrice(ctx context.Context, arg ManageUpdateModelPriceParams) (int64, error) {
@@ -350,6 +357,7 @@ func (q *Queries) ManageUpdateModelPrice(ctx context.Context, arg ManageUpdateMo
 		arg.InputPrice,
 		arg.OutputPrice,
 		arg.CachedInputPrice,
+		arg.CacheCreationInputPrice,
 		arg.EffectiveAt,
 		arg.ID,
 		arg.ProviderCredentialID,

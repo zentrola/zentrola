@@ -228,9 +228,11 @@ func (s *BillingStore) UsageRatingCandidates(ctx context.Context, scan app.Ratin
 				UsageRecordID: row.UsageRecordID, PrincipalID: row.PrincipalID,
 				CredentialID: row.ProviderCredentialID, ProviderModelID: row.ProviderModelID,
 				ModelPriceID: row.ModelPriceID, UsageStartedAt: row.UsageStartedAt.Time.UTC(),
-				InputTokens: row.InputTokens, CachedInputTokens: row.CachedInputTokens, OutputTokens: row.OutputTokens,
+				InputTokens: row.InputTokens, CachedInputTokens: row.CachedInputTokens,
+				CacheCreationInputTokens: row.CacheCreationInputTokens, OutputTokens: row.OutputTokens,
 				InputPrice: priceNumber(row.InputPrice), CachedInputPrice: priceNumber(row.CachedInputPrice),
-				OutputPrice: priceNumber(row.OutputPrice), Currency: row.Currency,
+				CacheCreationInputPrice: priceNumber(row.CacheCreationInputPrice), OutputPrice: priceNumber(row.OutputPrice),
+				Currency: row.Currency,
 			})
 		}
 		return result, nil
@@ -246,9 +248,11 @@ func (s *BillingStore) UsageRatingCandidates(ctx context.Context, scan app.Ratin
 				CredentialID: row.ProviderCredentialID, ProviderModelID: row.ProviderModelID,
 				ModelPriceID: row.ModelPriceID, LatestRatingID: row.LatestRatingID,
 				LatestRevision: row.LatestRevision, UsageStartedAt: row.UsageStartedAt.Time.UTC(),
-				InputTokens: row.InputTokens, CachedInputTokens: row.CachedInputTokens, OutputTokens: row.OutputTokens,
+				InputTokens: row.InputTokens, CachedInputTokens: row.CachedInputTokens,
+				CacheCreationInputTokens: row.CacheCreationInputTokens, OutputTokens: row.OutputTokens,
 				InputPrice: priceNumber(row.InputPrice), CachedInputPrice: priceNumber(row.CachedInputPrice),
-				OutputPrice: priceNumber(row.OutputPrice), Currency: row.Currency,
+				CacheCreationInputPrice: priceNumber(row.CacheCreationInputPrice), OutputPrice: priceNumber(row.OutputPrice),
+				Currency: row.Currency,
 			})
 		}
 		return result, nil
@@ -265,6 +269,7 @@ func (s *BillingStore) CreateUsageRating(ctx context.Context, rating app.UsageRa
 	inputPrice, cachedPrice, outputPrice := pgNumeric(&rating.InputPrice), pgNumeric(&rating.CachedInputPrice), pgNumeric(&rating.OutputPrice)
 	inputCost, cachedCost, outputCost := pgNumeric(&rating.InputCost), pgNumeric(&rating.CachedInputCost), pgNumeric(&rating.OutputCost)
 	totalCost := pgNumeric(&rating.TotalCost)
+	cacheCreationPrice, cacheCreationCost := optionalPriceNumeric(rating.CacheCreationInputPrice), pgNumeric(&rating.CacheCreationInputCost)
 	inserted, err := s.q.BillingInsertUsageRating(ctx, dbgen.BillingInsertUsageRatingParams{
 		ID: rating.ID, UsageRecordID: rating.UsageRecordID, Revision: rating.Revision,
 		SupersedesRatingID: supersedesID, PrincipalID: rating.PrincipalID,
@@ -274,6 +279,8 @@ func (s *BillingStore) CreateUsageRating(ctx context.Context, rating app.UsageRa
 		InputPrice: inputPrice, CachedInputPrice: cachedPrice, OutputPrice: outputPrice,
 		InputCost: inputCost, CachedInputCost: cachedCost, OutputCost: outputCost,
 		TotalCost: totalCost, Currency: rating.Currency, CreatedAt: priceTime(rating.CreatedAt),
+		CacheCreationInputTokens: rating.CacheCreationInputTokens, CacheCreationInputPrice: cacheCreationPrice,
+		CacheCreationInputCost: cacheCreationCost,
 	})
 	return inserted > 0, billingStoreError("create_usage_rating", err)
 }

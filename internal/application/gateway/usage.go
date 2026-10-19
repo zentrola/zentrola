@@ -657,6 +657,19 @@ func (o *UsageObserver) Tokens(complete bool) (*int64, *int64, *int64) {
 	return input, o.output, o.cached
 }
 
+// CacheCreationTokens 返回 Anthropic 的缓存写入 Token 数，它已包含在 Tokens 产出的总输入中。
+// 仅在总输入可用时返回；OpenAI 协议不区分缓存写入，始终为 nil。
+func (o *UsageObserver) CacheCreationTokens() *int64 {
+	if o == nil || o.openai || o.cacheCreation == nil {
+		return nil
+	}
+	if input, _, _ := o.Tokens(false); input == nil {
+		return nil
+	}
+	value := *o.cacheCreation
+	return &value
+}
+
 // anthropicTotalInput 将 Anthropic 互不包含的 input / cache_creation / cache_read
 // 合并为总输入。溢出时视为计量不可靠。
 func anthropicTotalInput(input int64, parts ...*int64) (int64, bool) {

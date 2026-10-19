@@ -142,13 +142,14 @@ func TestUsageCostDetailRejectsQueryString(t *testing.T) {
 func TestUsageCostCSVUsesBOMUTCAndFormulaProtection(t *testing.T) {
 	from := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
 	started := time.Date(2026, 9, 6, 7, 30, 0, 123000000, time.UTC)
+	cacheCreationTokens := int64(1200)
 	recorder := httptest.NewRecorder()
 	writeUsageCostCSV(recorder, app.UsageCostFilter{From: from, To: from.AddDate(0, 1, 0)}, []app.UsageCostRow{{
 		ID: 1, RequestID: "=cmd", AttemptNo: 1, PrincipalID: 2, PrincipalName: "+member",
 		ModelID: 3, ModelName: "-model", ProviderID: 4, ProviderName: "@provider",
 		ResourceID: 5, ResourceName: "safe", StartedAt: started,
 		PrincipalType: "MEMBER", ClientProtocol: "OPENAI_CHAT", Status: "SUCCESS",
-		BillingType: "API_KEY", RatingStatus: "RATED",
+		BillingType: "API_KEY", RatingStatus: "RATED", CacheCreationInputTokens: &cacheCreationTokens,
 	}}, "zh-CN")
 	body := recorder.Body.Bytes()
 	if len(body) < 3 || string(body[:3]) != "\xef\xbb\xbf" {
@@ -166,11 +167,14 @@ func TestUsageCostCSVUsesBOMUTCAndFormulaProtection(t *testing.T) {
 			t.Fatalf("column %d = %q, want %q", index, rows[1][index], want)
 		}
 	}
+	if rows[0][17] != "cache_creation_input_tokens" || rows[1][17] != "1200" || rows[1][16] != "" {
+		t.Fatalf("cache creation column = %q/%q, cached = %q", rows[0][17], rows[1][17], rows[1][16])
+	}
 	if rows[1][3] != "2026-09-06T07:30:00.123Z" {
 		t.Fatalf("started_at = %q", rows[1][3])
 	}
 	for index, want := range map[int]string{
-		4: "用户", 13: "OpenAI Chat", 14: "成功", 18: "按 Token 调用计费", 19: "已核算",
+		4: "用户", 13: "OpenAI Chat", 14: "成功", 19: "按 Token 调用计费", 20: "已核算",
 	} {
 		if rows[1][index] != want {
 			t.Fatalf("column %d = %q, want %q", index, rows[1][index], want)
@@ -198,7 +202,7 @@ func TestUsageCostCSVUsesEnglishLabels(t *testing.T) {
 	}
 	for index, want := range map[int]string{
 		4: "Application", 13: "Anthropic Messages", 14: "Failed",
-		18: "Personal subscription allocation", 19: "Subscription period allocation",
+		19: "Personal subscription allocation", 20: "Subscription period allocation",
 	} {
 		if rows[1][index] != want {
 			t.Fatalf("column %d = %q, want %q", index, rows[1][index], want)
@@ -219,7 +223,7 @@ func TestUsageCostCSVWithoutLanguageKeepsEnumCodes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for index, want := range map[int]string{4: "MEMBER", 14: "SUCCESS", 18: "API_KEY", 19: "RATED"} {
+	for index, want := range map[int]string{4: "MEMBER", 14: "SUCCESS", 19: "API_KEY", 20: "RATED"} {
 		if rows[1][index] != want {
 			t.Fatalf("column %d = %q, want %q", index, rows[1][index], want)
 		}

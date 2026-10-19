@@ -282,7 +282,7 @@ func writeUsageCostCSV(w http.ResponseWriter, filter app.UsageCostFilter, rows [
 		"usage_record_id", "request_id", "attempt_no", "started_at", "principal_type", "principal_id",
 		"principal_name", "model_id", "model_name", "provider_id", "provider_name", "resource_id",
 		"resource_name", "client_protocol", "status", "input_tokens", "cached_input_tokens",
-		"output_tokens", "billing_type", "rating_status", "rating_revision", "currency", "total_cost",
+		"cache_creation_input_tokens", "output_tokens", "billing_type", "rating_status", "rating_revision", "currency", "total_cost",
 	})
 	for _, row := range rows {
 		_ = writer.Write([]string{
@@ -291,7 +291,7 @@ func writeUsageCostCSV(w http.ResponseWriter, filter app.UsageCostFilter, rows [
 			safeCSVText(row.PrincipalName), strconv.FormatInt(row.ModelID, 10), safeCSVText(row.ModelName),
 			strconv.FormatInt(row.ProviderID, 10), safeCSVText(row.ProviderName), strconv.FormatInt(row.ResourceID, 10),
 			safeCSVText(row.ResourceName), usageCostCSVLabel("client_protocol", row.ClientProtocol, language), usageCostCSVLabel("status", row.Status, language), optionalInt64(row.InputTokens),
-			optionalInt64(row.CachedInputTokens), optionalInt64(row.OutputTokens), usageCostCSVLabel("billing_type", row.BillingType, language), usageCostCSVLabel("rating_status", row.RatingStatus, language),
+			optionalInt64(row.CachedInputTokens), optionalInt64(row.CacheCreationInputTokens), optionalInt64(row.OutputTokens), usageCostCSVLabel("billing_type", row.BillingType, language), usageCostCSVLabel("rating_status", row.RatingStatus, language),
 			optionalInt32(row.RatingRevision), optionalString(row.Currency), optionalString(row.TotalCost),
 		})
 	}

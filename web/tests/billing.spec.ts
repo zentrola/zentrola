@@ -225,7 +225,10 @@ test.describe('成本管理', () => {
 
     await page.getByRole('button', { name: '查看详情' }).first().click()
     const usageDetail = page.getByRole('dialog', { name: '详情', exact: true })
-    await expect(usageDetail.locator('.billing-detail-grid > div')).toHaveCount(11)
+    await expect(usageDetail.locator('.billing-detail-grid > div')).toHaveCount(12)
+    await expect(
+      usageDetail.locator('.billing-detail-grid > div').filter({ hasText: '缓存写入 Token' }),
+    ).toContainText('-')
     const detailColumns = await usageDetail
       .locator('.billing-detail-grid > div')
       .evaluateAll((fields) => fields.map((field) => field.getBoundingClientRect().left))
@@ -235,6 +238,14 @@ test.describe('成本管理', () => {
     await expect(usageDetail.getByText('$0.0036', { exact: true })).toBeVisible()
     await expect(usageDetail.getByText('$0.0042', { exact: true })).toBeVisible()
     await expect(usageDetail.getByText('$0.0079', { exact: true })).toBeVisible()
+    await expect(
+      usageDetail.getByRole('columnheader', { name: '缓存写入单价/百万 Token' }),
+    ).toBeVisible()
+    await expect(usageDetail.getByRole('columnheader', { name: '缓存写入成本' })).toBeVisible()
+    await expect(usageDetail.getByText('$0.00000375', { exact: true })).toBeVisible()
+    await expect(
+      usageDetail.locator('tbody tr').nth(0).getByTitle('未配置缓存写入单价，按输入单价计费'),
+    ).toHaveText('-')
     await usageDetail.getByRole('button', { name: '关闭' }).click()
 
     await page.getByRole('button', { name: '查看详情' }).nth(1).click()

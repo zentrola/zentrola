@@ -205,6 +205,39 @@ func TestUpdateAndDeleteModelPrice(t *testing.T) {
 	}
 }
 
+func TestModelPriceCacheCreationPriceIsOptional(t *testing.T) {
+	effectiveAt := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	price := func(value string) *string { return &value }
+	store := &priceStoreStub{
+		resource: ResourceRecord{Resource: Resource{ID: 1, ProviderID: 3, Name: "key", AuthType: "API_KEY"}},
+		mappings: []ProviderMapping{{ID: 2, ProviderID: 3}},
+	}
+	service := PriceService{store: store, ids: &priceIDs{}, now: func() time.Time { return effectiveAt }}
+	input := ModelPriceInput{ProviderModelID: 2, Currency: "USD", InputPrice: "3", OutputPrice: "15",
+		CachedInputPrice: "0.3", CacheCreationInputPrice: price("3.7500"), EffectiveAt: effectiveAt}
+	saved, err := service.SaveModelPrice(context.Background(), admin.Identity{ID: 7}, 1, input, appsec.RequestMeta{})
+	if err != nil || saved.CacheCreationInputPrice == nil || *saved.CacheCreationInputPrice != "3.75" {
+		t.Fatalf("saved = %+v, err = %v", saved, err)
+	}
+	input.CacheCreationInputPrice = price("3.75")
+	if same, err := service.SaveModelPrice(context.Background(), admin.Identity{ID: 7}, 1, input, appsec.RequestMeta{}); err != nil || same.ID != saved.ID || store.audits != 1 {
+		t.Fatalf("same = %+v, audits = %d, err = %v", same, store.audits, err)
+	}
+	// 同一生效日期下，配置与未配置缓存写入单价属于不同价格，必须视为冲突。
+	input.CacheCreationInputPrice = nil
+	if _, err := service.SaveModelPrice(context.Background(), admin.Identity{ID: 7}, 1, input, appsec.RequestMeta{}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("cache creation price change error = %v; want conflict", err)
+	}
+	updated, err := service.UpdateModelPrice(context.Background(), admin.Identity{ID: 7}, 1, saved.ID, input, appsec.RequestMeta{})
+	if err != nil || updated.CacheCreationInputPrice != nil || store.audits != 2 {
+		t.Fatalf("updated = %+v, audits = %d, err = %v", updated, store.audits, err)
+	}
+	input.CacheCreationInputPrice = price("-1")
+	if _, err := service.UpdateModelPrice(context.Background(), admin.Identity{ID: 7}, 1, saved.ID, input, appsec.RequestMeta{}); !errors.Is(err, appsec.ErrInvalidArgument) {
+		t.Fatalf("negative cache creation price error = %v", err)
+	}
+}
+
 func atNineUTC(value time.Time) time.Time { return value.Add(9 * time.Hour) }
 
 func TestSaveSubscriptionPrice(t *testing.T) {

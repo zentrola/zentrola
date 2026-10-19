@@ -47,11 +47,13 @@ WITH raw AS (
            price.currency AS effective_currency,
            price.input_price AS effective_input_price,
            price.cached_input_price AS effective_cached_input_price,
+           price.cache_creation_input_price AS effective_cache_creation_input_price,
            price.output_price AS effective_output_price,
            rating.model_price_id,
            rating.currency AS rating_currency,
            rating.input_price AS rating_input_price,
            rating.cached_input_price AS rating_cached_input_price,
+           rating.cache_creation_input_price AS rating_cache_creation_input_price,
            rating.output_price AS rating_output_price,
            rating.total_cost
     FROM usage_record usage
@@ -92,8 +94,10 @@ WHERE input_tokens IS NOT NULL
   AND cached_input_tokens <= input_tokens
   AND effective_price_id IS NOT NULL
   AND billing_rating_matches_price(
-      model_price_id, rating_currency, rating_input_price, rating_cached_input_price, rating_output_price,
-      effective_price_id, effective_currency, effective_input_price, effective_cached_input_price, effective_output_price
+      model_price_id, rating_currency, rating_input_price, rating_cached_input_price,
+      rating_cache_creation_input_price, rating_output_price,
+      effective_price_id, effective_currency, effective_input_price, effective_cached_input_price,
+      effective_cache_creation_input_price, effective_output_price
   )
 GROUP BY principal_id, principal_name, principal_type, rating_currency
 ORDER BY tokens DESC, principal_id, rating_currency;
@@ -268,11 +272,13 @@ SELECT usage.id AS usage_record_id,
        usage.started_at AS usage_started_at,
        usage.input_tokens::bigint AS input_tokens,
        usage.cached_input_tokens::bigint AS cached_input_tokens,
+       COALESCE(usage.cache_creation_input_tokens, 0)::bigint AS cache_creation_input_tokens,
        usage.output_tokens::bigint AS output_tokens,
        price.id AS model_price_id,
        price.currency,
        price.input_price,
        price.cached_input_price,
+       price.cache_creation_input_price,
        price.output_price
 FROM pending
 JOIN usage_record usage ON usage.id = pending.id
@@ -290,7 +296,8 @@ ORDER BY usage.id;
 -- name: BillingRepricedUsageCandidates :many
 -- 价格金额纠错后需要追加 revision 的调用。触发器禁止新价格覆盖已核算历史、禁止修改或删除
 -- 被引用价格的结构，因此最新核算引用的价格版本始终是调用时的有效价格，只需查找价格快照与该
--- 价格当前金额不一致的最新核算；两个范围分支分别走价格快照索引，跳过快照一致的记录。
+-- 价格当前金额不一致的最新核算；两个范围分支分别走价格快照索引，跳过快照一致的记录。未配置的
+-- 缓存写入单价在两侧都映射为 -1，与索引表达式一致。
 WITH stale AS (
     SELECT rating.id, rating.usage_record_id, rating.revision, rating.model_price_id
     FROM provider_credential_model_price price
@@ -299,8 +306,8 @@ WITH stale AS (
      AND credential.auth_type = 'API_KEY'
     JOIN usage_rating rating
       ON rating.model_price_id = price.id
-     AND (rating.input_price, rating.cached_input_price, rating.output_price)
-         < (price.input_price, price.cached_input_price, price.output_price)
+     AND (rating.input_price, rating.cached_input_price, rating.output_price, COALESCE(rating.cache_creation_input_price, -1))
+         < (price.input_price, price.cached_input_price, price.output_price, COALESCE(price.cache_creation_input_price, -1))
     UNION ALL
     SELECT rating.id, rating.usage_record_id, rating.revision, rating.model_price_id
     FROM provider_credential_model_price price
@@ -309,8 +316,8 @@ WITH stale AS (
      AND credential.auth_type = 'API_KEY'
     JOIN usage_rating rating
       ON rating.model_price_id = price.id
-     AND (rating.input_price, rating.cached_input_price, rating.output_price)
-         > (price.input_price, price.cached_input_price, price.output_price)
+     AND (rating.input_price, rating.cached_input_price, rating.output_price, COALESCE(rating.cache_creation_input_price, -1))
+         > (price.input_price, price.cached_input_price, price.output_price, COALESCE(price.cache_creation_input_price, -1))
 )
 SELECT usage.id AS usage_record_id,
        usage.principal_id,
@@ -319,11 +326,13 @@ SELECT usage.id AS usage_record_id,
        usage.started_at AS usage_started_at,
        usage.input_tokens::bigint AS input_tokens,
        usage.cached_input_tokens::bigint AS cached_input_tokens,
+       COALESCE(usage.cache_creation_input_tokens, 0)::bigint AS cache_creation_input_tokens,
        usage.output_tokens::bigint AS output_tokens,
        price.id AS model_price_id,
        price.currency,
        price.input_price,
        price.cached_input_price,
+       price.cache_creation_input_price,
        price.output_price,
        stale.id AS latest_rating_id,
        stale.revision AS latest_revision
@@ -350,7 +359,8 @@ INSERT INTO usage_rating (
     provider_credential_id, provider_model_id, model_price_id, usage_started_at,
     input_tokens, cached_input_tokens, output_tokens,
     input_price, cached_input_price, output_price,
-    input_cost, cached_input_cost, output_cost, total_cost, currency, created_at
+    input_cost, cached_input_cost, output_cost, total_cost, currency, created_at,
+    cache_creation_input_tokens, cache_creation_input_price, cache_creation_input_cost
 ) VALUES (
     sqlc.arg(id), sqlc.arg(usage_record_id), sqlc.arg(revision), sqlc.narg(supersedes_rating_id),
     sqlc.arg(principal_id), sqlc.arg(provider_credential_id), sqlc.arg(provider_model_id),
@@ -358,7 +368,8 @@ INSERT INTO usage_rating (
     sqlc.arg(cached_input_tokens), sqlc.arg(output_tokens), sqlc.arg(input_price),
     sqlc.arg(cached_input_price), sqlc.arg(output_price), sqlc.arg(input_cost),
     sqlc.arg(cached_input_cost), sqlc.arg(output_cost), sqlc.arg(total_cost),
-    sqlc.arg(currency), sqlc.arg(created_at)
+    sqlc.arg(currency), sqlc.arg(created_at), sqlc.arg(cache_creation_input_tokens),
+    sqlc.narg(cache_creation_input_price), sqlc.arg(cache_creation_input_cost)
 )
 ON CONFLICT (usage_record_id, revision) DO NOTHING;
 
@@ -570,8 +581,9 @@ WITH candidates AS (
                WHEN price.id IS NULL THEN 'MISSING_PRICE'
                WHEN NOT billing_rating_matches_price(
                    latest.model_price_id, latest.currency, latest.input_price,
-                   latest.cached_input_price, latest.output_price,
-                   price.id, price.currency, price.input_price, price.cached_input_price, price.output_price
+                   latest.cached_input_price, latest.cache_creation_input_price, latest.output_price,
+                   price.id, price.currency, price.input_price, price.cached_input_price,
+                   price.cache_creation_input_price, price.output_price
                ) THEN 'PENDING_RATING'
                ELSE NULL
            END::text AS reason
@@ -619,12 +631,14 @@ WITH raw AS (
            usage.status,
            usage.input_tokens,
            usage.cached_input_tokens,
+           usage.cache_creation_input_tokens,
            usage.output_tokens,
            credential.auth_type AS billing_type,
            price.id AS effective_price_id,
            price.currency AS effective_currency,
            price.input_price AS effective_input_price,
            price.cached_input_price AS effective_cached_input_price,
+           price.cache_creation_input_price AS effective_cache_creation_input_price,
            price.output_price AS effective_output_price,
            subscription.currency AS subscription_currency,
            rating.id AS rating_id,
@@ -632,6 +646,7 @@ WITH raw AS (
            rating.currency AS rating_currency,
            rating.input_price AS rating_input_price,
            rating.cached_input_price AS rating_cached_input_price,
+           rating.cache_creation_input_price AS rating_cache_creation_input_price,
            rating.output_price AS rating_output_price,
            rating.total_cost
     FROM usage_record usage
@@ -685,9 +700,10 @@ WITH raw AS (
                  OR cached_input_tokens > input_tokens THEN 'INCOMPLETE_TOKENS'
                WHEN effective_price_id IS NULL THEN 'MISSING_PRICE'
                WHEN NOT billing_rating_matches_price(
-                   model_price_id, rating_currency, rating_input_price, rating_cached_input_price, rating_output_price,
+                   model_price_id, rating_currency, rating_input_price, rating_cached_input_price,
+                   rating_cache_creation_input_price, rating_output_price,
                    effective_price_id, effective_currency, effective_input_price,
-                   effective_cached_input_price, effective_output_price
+                   effective_cached_input_price, effective_cache_creation_input_price, effective_output_price
                ) THEN 'PENDING_RATING'
                ELSE 'RATED'
            END::text AS rating_status,
@@ -704,6 +720,7 @@ SELECT COUNT(DISTINCT request_id)::bigint AS requests,
        COUNT(*) FILTER (WHERE status = 'SUCCESS')::bigint AS successful,
        COALESCE(SUM(input_tokens), 0)::bigint AS input_tokens,
        COALESCE(SUM(cached_input_tokens), 0)::bigint AS cached_input_tokens,
+       COALESCE(SUM(cache_creation_input_tokens), 0)::bigint AS cache_creation_input_tokens,
        COALESCE(SUM(output_tokens), 0)::bigint AS output_tokens,
        COUNT(*) FILTER (WHERE rating_status = 'RATED')::bigint AS rated,
        COUNT(*) FILTER (WHERE rating_status = 'SUBSCRIPTION_SHARED')::bigint AS shared,
@@ -716,12 +733,14 @@ WITH raw AS (
            usage.status,
            usage.input_tokens,
            usage.cached_input_tokens,
+           usage.cache_creation_input_tokens,
            usage.output_tokens,
            credential.auth_type AS billing_type,
            price.id AS effective_price_id,
            price.currency AS effective_currency,
            price.input_price AS effective_input_price,
            price.cached_input_price AS effective_cached_input_price,
+           price.cache_creation_input_price AS effective_cache_creation_input_price,
            price.output_price AS effective_output_price,
            subscription.currency AS subscription_currency,
            rating.id AS rating_id,
@@ -729,6 +748,7 @@ WITH raw AS (
            rating.currency AS rating_currency,
            rating.input_price AS rating_input_price,
            rating.cached_input_price AS rating_cached_input_price,
+           rating.cache_creation_input_price AS rating_cache_creation_input_price,
            rating.output_price AS rating_output_price,
            rating.total_cost
     FROM usage_record usage
@@ -776,9 +796,10 @@ WITH raw AS (
                  OR cached_input_tokens > input_tokens THEN 'INCOMPLETE_TOKENS'
                WHEN effective_price_id IS NULL THEN 'MISSING_PRICE'
                WHEN NOT billing_rating_matches_price(
-                   model_price_id, rating_currency, rating_input_price, rating_cached_input_price, rating_output_price,
+                   model_price_id, rating_currency, rating_input_price, rating_cached_input_price,
+                   rating_cache_creation_input_price, rating_output_price,
                    effective_price_id, effective_currency, effective_input_price,
-                   effective_cached_input_price, effective_output_price
+                   effective_cached_input_price, effective_cache_creation_input_price, effective_output_price
                ) THEN 'PENDING_RATING'
                ELSE 'RATED'
            END::text AS rating_status,
@@ -821,12 +842,14 @@ WITH raw AS (
            usage.latency_ms,
            usage.input_tokens,
            usage.cached_input_tokens,
+           usage.cache_creation_input_tokens,
            usage.output_tokens,
            credential.auth_type AS billing_type,
            price.id AS effective_price_id,
            price.currency AS effective_currency,
            price.input_price AS effective_input_price,
            price.cached_input_price AS effective_cached_input_price,
+           price.cache_creation_input_price AS effective_cache_creation_input_price,
            price.output_price AS effective_output_price,
            subscription.currency AS subscription_currency,
            rating.id AS rating_id,
@@ -835,6 +858,7 @@ WITH raw AS (
            rating.currency AS rating_currency,
            rating.input_price AS rating_input_price,
            rating.cached_input_price AS rating_cached_input_price,
+           rating.cache_creation_input_price AS rating_cache_creation_input_price,
            rating.output_price AS rating_output_price,
            rating.total_cost,
            rating.created_at AS rated_at
@@ -885,9 +909,10 @@ WITH raw AS (
                  OR cached_input_tokens > input_tokens THEN 'INCOMPLETE_TOKENS'
                WHEN effective_price_id IS NULL THEN 'MISSING_PRICE'
                WHEN NOT billing_rating_matches_price(
-                   model_price_id, rating_currency, rating_input_price, rating_cached_input_price, rating_output_price,
+                   model_price_id, rating_currency, rating_input_price, rating_cached_input_price,
+                   rating_cache_creation_input_price, rating_output_price,
                    effective_price_id, effective_currency, effective_input_price,
-                   effective_cached_input_price, effective_output_price
+                   effective_cached_input_price, effective_cache_creation_input_price, effective_output_price
                ) THEN 'PENDING_RATING'
                ELSE 'RATED'
            END::text AS rating_status,
@@ -922,6 +947,7 @@ SELECT id,
        latency_ms,
        input_tokens,
        cached_input_tokens,
+       cache_creation_input_tokens,
        output_tokens,
        billing_type,
        rating_status,
@@ -967,12 +993,14 @@ WITH raw AS (
            usage.latency_ms,
            usage.input_tokens,
            usage.cached_input_tokens,
+           usage.cache_creation_input_tokens,
            usage.output_tokens,
            credential.auth_type AS billing_type,
            price.id AS effective_price_id,
            price.currency AS effective_currency,
            price.input_price AS effective_input_price,
            price.cached_input_price AS effective_cached_input_price,
+           price.cache_creation_input_price AS effective_cache_creation_input_price,
            price.output_price AS effective_output_price,
            subscription.currency AS subscription_currency,
            rating.id AS rating_id,
@@ -981,6 +1009,7 @@ WITH raw AS (
            rating.currency AS rating_currency,
            rating.input_price AS rating_input_price,
            rating.cached_input_price AS rating_cached_input_price,
+           rating.cache_creation_input_price AS rating_cache_creation_input_price,
            rating.output_price AS rating_output_price,
            rating.total_cost,
            rating.created_at AS rated_at
@@ -1030,6 +1059,7 @@ SELECT id,
        latency_ms,
        input_tokens,
        cached_input_tokens,
+       cache_creation_input_tokens,
        output_tokens,
        billing_type,
        CASE
@@ -1039,9 +1069,10 @@ SELECT id,
              OR cached_input_tokens > input_tokens THEN 'INCOMPLETE_TOKENS'
            WHEN effective_price_id IS NULL THEN 'MISSING_PRICE'
            WHEN NOT billing_rating_matches_price(
-               model_price_id, rating_currency, rating_input_price, rating_cached_input_price, rating_output_price,
+               model_price_id, rating_currency, rating_input_price, rating_cached_input_price,
+               rating_cache_creation_input_price, rating_output_price,
                effective_price_id, effective_currency, effective_input_price,
-               effective_cached_input_price, effective_output_price
+               effective_cached_input_price, effective_cache_creation_input_price, effective_output_price
            ) THEN 'PENDING_RATING'
            ELSE 'RATED'
        END::text AS rating_status,
@@ -1059,9 +1090,11 @@ SELECT rating.id,
        price.effective_at AS price_effective_at,
        rating.input_price,
        rating.cached_input_price,
+       rating.cache_creation_input_price,
        rating.output_price,
        rating.input_cost,
        rating.cached_input_cost,
+       rating.cache_creation_input_cost,
        rating.output_cost,
        rating.total_cost,
        rating.currency,

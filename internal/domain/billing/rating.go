@@ -10,7 +10,7 @@ import (
 const ratingScale = 14
 
 type RatedCost struct {
-	Input, CachedInput, Output, Total string
+	Input, CachedInput, CacheCreationInput, Output, Total string
 }
 
 type RatedShare struct {
@@ -21,8 +21,11 @@ type RatedShare struct {
 
 // RateAPIKeyUsage 使用价格的 8 位定点整数计算单次调用成本。价格单位是每百万
 // Token；因此价格最小单位乘以 Token 数后，恰好就是 14 位成本的最小单位。
-func RateAPIKeyUsage(inputTokens, cachedInputTokens, outputTokens int64, inputPrice, cachedInputPrice, outputPrice string) (RatedCost, error) {
-	if inputTokens < 0 || cachedInputTokens < 0 || cachedInputTokens > inputTokens || outputTokens < 0 {
+// inputTokens 为总输入，包含缓存命中与缓存写入；cacheCreationInputPrice 为空表示
+// 未配置缓存写入单价，此时缓存写入按普通输入单价计费，总成本与不区分缓存写入时一致。
+func RateAPIKeyUsage(inputTokens, cachedInputTokens, cacheCreationInputTokens, outputTokens int64, inputPrice, cachedInputPrice, cacheCreationInputPrice, outputPrice string) (RatedCost, error) {
+	if inputTokens < 0 || cachedInputTokens < 0 || cacheCreationInputTokens < 0 || outputTokens < 0 ||
+		cachedInputTokens > inputTokens || cacheCreationInputTokens > inputTokens-cachedInputTokens {
 		return RatedCost{}, errors.New("invalid api key token usage")
 	}
 	inputUnits, err := parseFixed(inputPrice, amountScale)
@@ -33,21 +36,31 @@ func RateAPIKeyUsage(inputTokens, cachedInputTokens, outputTokens int64, inputPr
 	if err != nil || cachedUnits.Sign() < 0 {
 		return RatedCost{}, errors.New("invalid api key cached input price")
 	}
+	cacheCreationUnits := inputUnits
+	if cacheCreationInputPrice != "" {
+		cacheCreationUnits, err = parseFixed(cacheCreationInputPrice, amountScale)
+		if err != nil || cacheCreationUnits.Sign() < 0 {
+			return RatedCost{}, errors.New("invalid api key cache creation input price")
+		}
+	}
 	outputUnits, err := parseFixed(outputPrice, amountScale)
 	if err != nil || outputUnits.Sign() < 0 {
 		return RatedCost{}, errors.New("invalid api key output price")
 	}
-	normalInput := inputTokens - cachedInputTokens
+	normalInput := inputTokens - cachedInputTokens - cacheCreationInputTokens
 	inputCost := new(big.Int).Mul(inputUnits, big.NewInt(normalInput))
 	cachedCost := new(big.Int).Mul(cachedUnits, big.NewInt(cachedInputTokens))
+	cacheCreationCost := new(big.Int).Mul(cacheCreationUnits, big.NewInt(cacheCreationInputTokens))
 	outputCost := new(big.Int).Mul(outputUnits, big.NewInt(outputTokens))
 	total := new(big.Int).Add(new(big.Int).Set(inputCost), cachedCost)
+	total.Add(total, cacheCreationCost)
 	total.Add(total, outputCost)
 	return RatedCost{
-		Input:       formatFixed(inputCost, ratingScale),
-		CachedInput: formatFixed(cachedCost, ratingScale),
-		Output:      formatFixed(outputCost, ratingScale),
-		Total:       formatFixed(total, ratingScale),
+		Input:              formatFixed(inputCost, ratingScale),
+		CachedInput:        formatFixed(cachedCost, ratingScale),
+		CacheCreationInput: formatFixed(cacheCreationCost, ratingScale),
+		Output:             formatFixed(outputCost, ratingScale),
+		Total:              formatFixed(total, ratingScale),
 	}, nil
 }
 
