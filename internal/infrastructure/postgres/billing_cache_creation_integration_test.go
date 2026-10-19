@@ -1,9 +1,12 @@
 package postgres
 
 import (
+	"io/fs"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/pressly/goose/v3"
 	app "github.com/zentrola/zentrola/internal/application/billing"
 	"github.com/zentrola/zentrola/internal/domain/admin"
 	usage "github.com/zentrola/zentrola/internal/domain/usage"
@@ -162,5 +165,57 @@ func TestAPIKeyCacheCreationRatingAndRepricing(t *testing.T) {
             input_cost + cached_input_cost + output_cost, currency, created_at, cache_creation_input_tokens, NULL, 0
         FROM usage_rating WHERE usage_record_id=$1 ORDER BY revision DESC LIMIT 1`, writtenID); err == nil {
 		t.Fatal("usage rating with inconsistent cache creation cost was accepted")
+	}
+}
+
+// usage_rating 是持续增长的追加式表；00057 新增的 CHECK 必须以 NOT VALID 添加，
+// 迁移时不扫描历史核算，且回滚后可以重新执行。
+func TestCacheCreationPricingMigrationSkipsUsageRatingValidation(t *testing.T) {
+	ctx, pool, _ := isolatedDatabase(t)
+	db := stdlib.OpenDBFromPool(pool)
+	defer db.Close()
+	source, err := fs.Sub(migrations, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, err := goose.NewProvider(goose.DialectPostgres, db, source, goose.WithDisableGlobalRegistry(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	constraints := []string{
+		"usage_rating_cache_creation_input_tokens_check",
+		"usage_rating_cache_creation_input_price_check",
+		"usage_rating_cache_creation_input_cost_check",
+	}
+	cacheCreationState := func() (unvalidated, columns int) {
+		t.Helper()
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM pg_constraint
+            WHERE conrelid = 'usage_rating'::regclass AND contype = 'c' AND NOT convalidated AND conname = ANY($1)`,
+			constraints).Scan(&unvalidated); err != nil {
+			t.Fatal(err)
+		}
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.columns
+            WHERE table_schema = current_schema() AND table_name = 'usage_rating' AND column_name LIKE 'cache_creation_%'`).
+			Scan(&columns); err != nil {
+			t.Fatal(err)
+		}
+		return unvalidated, columns
+	}
+	for _, step := range []struct {
+		name                         string
+		run                          func() error
+		wantUnvalidated, wantColumns int
+	}{
+		{name: "up", run: func() error { _, err := provider.UpTo(ctx, 57); return err }, wantUnvalidated: 3, wantColumns: 3},
+		{name: "down", run: func() error { _, err := provider.DownTo(ctx, 56); return err }},
+		{name: "up again", run: func() error { _, err := provider.UpTo(ctx, 57); return err }, wantUnvalidated: 3, wantColumns: 3},
+	} {
+		if err := step.run(); err != nil {
+			t.Fatalf("%s: %v", step.name, err)
+		}
+		if unvalidated, columns := cacheCreationState(); unvalidated != step.wantUnvalidated || columns != step.wantColumns {
+			t.Fatalf("%s: unvalidated checks=%d columns=%d; want %d and %d",
+				step.name, unvalidated, columns, step.wantUnvalidated, step.wantColumns)
+		}
 	}
 }

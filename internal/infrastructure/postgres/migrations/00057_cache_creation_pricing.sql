@@ -26,16 +26,20 @@ COMMENT ON COLUMN provider_credential_model_price.cache_creation_input_price IS 
 
 -- usage_rating 为追加式表，默认值 0 回填历史核算（历史调用的缓存写入按 0 处理），并保持与未写入新列的
 -- 既有插入语句兼容；触发器会按用量记录与价格复核缓存写入 Token 和成本，默认值不会造成错误计费。
+-- 常量默认值只写入元数据；历史记录取默认值 0/NULL 必然满足新约束，因此约束统一以 NOT VALID 添加，
+-- 只校验新写入的记录，避免持有 ACCESS EXCLUSIVE 锁时全表扫描核算表。
 ALTER TABLE usage_rating
     ADD COLUMN cache_creation_input_tokens BIGINT NOT NULL DEFAULT 0,
-    ADD COLUMN cache_creation_input_price NUMERIC(20, 8)
-        CONSTRAINT usage_rating_cache_creation_input_price_check CHECK (cache_creation_input_price >= 0),
-    ADD COLUMN cache_creation_input_cost NUMERIC(30, 14) NOT NULL DEFAULT 0
-        CONSTRAINT usage_rating_cache_creation_input_cost_check CHECK (cache_creation_input_cost >= 0),
+    ADD COLUMN cache_creation_input_price NUMERIC(20, 8),
+    ADD COLUMN cache_creation_input_cost NUMERIC(30, 14) NOT NULL DEFAULT 0,
+    ADD CONSTRAINT usage_rating_cache_creation_input_price_check
+        CHECK (cache_creation_input_price >= 0) NOT VALID,
+    ADD CONSTRAINT usage_rating_cache_creation_input_cost_check
+        CHECK (cache_creation_input_cost >= 0) NOT VALID,
     ADD CONSTRAINT usage_rating_cache_creation_input_tokens_check CHECK (
         cache_creation_input_tokens >= 0
         AND cache_creation_input_tokens <= input_tokens - cached_input_tokens
-    );
+    ) NOT VALID;
 COMMENT ON COLUMN usage_rating.input_tokens IS '输入 Token 总数快照，包含缓存命中与缓存写入输入';
 COMMENT ON COLUMN usage_rating.cache_creation_input_tokens IS '缓存写入输入 Token 数快照；用量记录未区分缓存写入时为 0';
 COMMENT ON COLUMN usage_rating.cache_creation_input_price IS '缓存写入输入每百万 Token 价格快照，保留 8 位小数；NULL=价格未配置，按普通输入单价计费';
@@ -270,6 +274,8 @@ CREATE INDEX ix_usage_rating_price_snapshot
 -- 但旧版核算公式无法再复算这些记录。
 ALTER TABLE usage_rating
     DROP CONSTRAINT usage_rating_cache_creation_input_tokens_check,
+    DROP CONSTRAINT usage_rating_cache_creation_input_cost_check,
+    DROP CONSTRAINT usage_rating_cache_creation_input_price_check,
     DROP COLUMN cache_creation_input_cost,
     DROP COLUMN cache_creation_input_price,
     DROP COLUMN cache_creation_input_tokens;
