@@ -1,0 +1,53 @@
+/* 模型价格与订阅费用编辑弹窗共用的表单样式，由各组件以 scoped 方式引入。 */
+.price-note,
+.price-feedback {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.price-feedback {
+  margin: 14px 0;
+}
+.price-feedback.is-error {
+  color: var(--color-danger);
+}
+.price-dialog-form {
+  display: grid;
+  gap: 16px;
+}
+.price-dialog-form .price-note,
+.price-dialog-form .price-feedback {
+  margin: 0;
+}
+.price-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.price-fields label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-text);
+}
+.price-fields input,
+.price-fields select {
+  width: 100%;
+  min-height: 36px;
+  padding: 7px 9px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+.price-fields input:focus-visible,
+.price-fields select:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+@media (max-width: 640px) {
+  .price-fields {
+    grid-template-columns: 1fr;
+  }
+}

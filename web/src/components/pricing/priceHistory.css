@@ -1,0 +1,80 @@
+/* 模型价格与订阅费用列表共用的价格历史样式，由各组件以 scoped 方式引入。 */
+.price-model-values {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.price-history {
+  display: grid;
+  gap: 6px;
+}
+.price-history.is-expanded {
+  max-height: 320px;
+  padding-right: 4px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.price-history-toggle {
+  justify-self: start;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-primary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.price-history-toggle:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 3px;
+}
+.price-history-item {
+  display: grid;
+  grid-template-columns: minmax(138px, auto) minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 28px;
+  padding: 4px 8px;
+  border-left: 2px solid var(--color-border);
+}
+.price-history-actions {
+  display: inline-flex;
+  gap: 2px;
+}
+.price-icon-button {
+  width: 32px;
+  height: 32px;
+  color: var(--color-primary);
+}
+.price-icon-button.danger {
+  color: var(--danger);
+}
+.price-icon-button.danger:hover:not(:disabled) {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 9%, transparent);
+}
+.price-history-item.is-current {
+  border-left-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 5%, transparent);
+}
+.price-history-item time {
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.price-scheduled-badge {
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 11px;
+}
+@media (max-width: 640px) {
+  .price-history-item {
+    grid-template-columns: 1fr auto;
+  }
+  .price-history-item .price-model-values {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
