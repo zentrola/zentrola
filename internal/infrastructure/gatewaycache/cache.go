@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"net"
 	"sort"
@@ -382,7 +381,7 @@ func (c *Cache) get(ctx context.Context, key string, target any, cacheType strin
 	result, err := getScript.Run(ctx, c.client, []string{c.generationKey()}, key, seed).Slice()
 	if err != nil || len(result) != 2 {
 		// 读失败不会产生陈旧缓存，不置失效标记；调用方上下文结束也不计入熔断。
-		if err != nil && callerContextDone(ctx, err) {
+		if err != nil && callerContextDone(ctx) {
 			return "", false
 		}
 		if err != nil {
@@ -528,14 +527,16 @@ func newGeneration() (string, error) {
 
 // recordFor 区分调用方上下文结束与 Redis 故障，前者不触发熔断。
 func (c *Cache) recordFor(ctx context.Context, err error) error {
-	if err != nil && callerContextDone(ctx, err) {
+	if err != nil && callerContextDone(ctx) {
 		return err
 	}
 	return c.record(err)
 }
 
-func callerContextDone(ctx context.Context, err error) bool {
-	return ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+// callerContextDone 只依据调用方上下文判断请求是否已结束。net 拨号超时等 Redis 侧错误
+// 同样满足 errors.Is(err, context.DeadlineExceeded)，不能据错误本身判定，否则熔断永远不会触发。
+func callerContextDone(ctx context.Context) bool {
+	return ctx.Err() != nil
 }
 
 func (c *Cache) record(err error) error {

@@ -187,14 +187,16 @@ func (s *State) redisUnavailable() bool {
 // recordFor 区分调用方上下文结束与 Redis 故障。客户端断开或请求超时导致的错误
 // 不触发熔断，也不改变既有的可用性判定，避免单个请求取消让所有路由状态失效。
 func (s *State) recordFor(ctx context.Context, err error) error {
-	if err != nil && callerContextDone(ctx, err) {
+	if err != nil && callerContextDone(ctx) {
 		return err
 	}
 	return s.record(err)
 }
 
-func callerContextDone(ctx context.Context, err error) bool {
-	return ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+// callerContextDone 只依据调用方上下文判断请求是否已结束。net 拨号超时等 Redis 侧错误
+// 同样满足 errors.Is(err, context.DeadlineExceeded)，不能据错误本身判定，否则熔断永远不会触发。
+func callerContextDone(ctx context.Context) bool {
+	return ctx.Err() != nil
 }
 
 func (s *State) record(err error) error {

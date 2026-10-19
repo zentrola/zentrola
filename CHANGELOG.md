@@ -68,6 +68,7 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - Codex app-server timeouts are classified as `UPSTREAM_TIMEOUT`, and the whole app-server process tree is stopped. Management probes and reset-credit redemption hold the subscription refresh lock and keep rotated credentials on version conflicts.
 - In the Admin Web, lists no longer show stale results after filters change during loading, quota status no longer fails for more than 100 rows, deleted credentials no longer reappear after concurrent reloads, price dates no longer show one day off west of UTC, and CSV export works reliably for long ranges. Missing English error text and full-width punctuation on English pages were fixed.
 - A client disconnect during a Codex subscription refresh no longer stops the app-server midway, so a rotated refresh token is no longer lost; refresh failures after the client has gone no longer cool down the credential.
+- Redis dial timeouts are no longer mistaken for a client disconnect, so route state and gateway caches stop calling an unreachable Redis for a short time as intended.
 - 使用提示缓存的 Anthropic 调用此前被归为 `INCOMPLETE_TOKENS` 而不计费，现已正常核算；跨协议转换保留缓存 Token 字段。
 - 补录更早生效的订阅价格可能生成与已出账单据重叠的账期；结算与数据库现在都会拒绝重叠账期。
 - 用量核算和 API Key 结算不再每轮重扫全部历史，单条失败不再阻塞整轮，计费任务日志记录脱敏后的错误详情。
@@ -78,6 +79,7 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - Codex app-server 超时归类为 `UPSTREAM_TIMEOUT`，并终止整棵进程树；管理端订阅探测与重置卡兑换持有订阅刷新锁，版本冲突时保留轮换后的凭据。
 - 管理端修复：加载中切换筛选后列表仍显示旧结果、超过 100 行时额度状态查询失败、并发刷新后已删除的凭据重新出现、西半球时区价格日期差一天、长时间范围 CSV 导出不稳定，以及英文界面缺失错误文案和混用全角标点。
 - Codex 订阅刷新期间客户端断开连接不再中途终止 app-server，已轮换的 refresh token 不会因此丢失；客户端已断开后的刷新失败不再冷却该凭据。
+- Redis 拨号超时不再被误判为客户端断开，路由状态与网关缓存在 Redis 不可达时会按预期短暂停止访问 Redis。
 
 ### Database / 数据库
 
