@@ -190,7 +190,7 @@ func (g *GatewayHandler) parseForwardRequest(w http.ResponseWriter, r *http.Requ
 	}
 	controller := http.NewResponseController(w)
 	_ = controller.SetReadDeadline(time.Now().Add(g.cfg.BodyReadTimeout))
-	request.body, err = io.ReadAll(http.MaxBytesReader(w, r.Body, g.cfg.MaxBodyBytes))
+	request.body, err = readRequestBody(http.MaxBytesReader(w, r.Body, g.cfg.MaxBodyBytes), r.ContentLength, g.cfg.MaxBodyBytes)
 	_ = controller.SetReadDeadline(time.Time{})
 	if err == nil {
 		return request, nil
@@ -200,6 +200,28 @@ func (g *GatewayHandler) parseForwardRequest(w http.ResponseWriter, r *http.Requ
 		return parsedGatewayRequest{}, &gw.Failure{Code: "REQUEST_TOO_LARGE", Type: "request_too_large", Message: "Request body too large.", Status: 413}
 	}
 	return parsedGatewayRequest{}, gw.ErrInvalid
+}
+
+// readRequestBody 在 Content-Length 可信且不超过上限时一次性分配缓冲区，避免
+// io.ReadAll 在大请求上多次扩容复制。实际长度仍由 reader（MaxBytesReader）约束。
+func readRequestBody(reader io.Reader, contentLength, limit int64) ([]byte, error) {
+	if contentLength <= 0 || contentLength > limit {
+		return io.ReadAll(reader)
+	}
+	body := make([]byte, contentLength)
+	n, err := io.ReadFull(reader, body)
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			err = nil
+		}
+		return body[:n], err
+	}
+	// 声明长度之后仍有数据时继续读取，由 MaxBytesReader 负责超限判定。
+	rest, err := io.ReadAll(reader)
+	if len(rest) > 0 {
+		body = append(body, rest...)
+	}
+	return body, err
 }
 
 func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

@@ -181,3 +181,43 @@ func TestOpenAIResponsesOversizedCompletedEventRecordsUsage(t *testing.T) {
 		t.Fatalf("oversized completed usage missing: %+v", trace)
 	}
 }
+
+type failAfterReader struct {
+	data io.Reader
+	err  error
+}
+
+func (r *failAfterReader) Read(p []byte) (int, error) {
+	n, err := r.data.Read(p)
+	if err == io.EOF {
+		return n, r.err
+	}
+	return n, err
+}
+
+func TestStreamIdleTimeoutRecordedAsUpstreamTimeout(t *testing.T) {
+	content := "data: {\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"},\"finish_reason\":null}],\"usage\":null}\n\n"
+	var trace *usage.Event
+	upstream := completionUpstream(func(_ context.Context, _ gw.Route, request gw.Request, _ []byte) (*gw.Response, error) {
+		trace = request.Trace
+		return &gw.Response{
+			Status:  http.StatusOK,
+			Headers: map[string][]string{"Content-Type": {"text/event-stream"}},
+			Body:    io.NopCloser(&failAfterReader{data: strings.NewReader(content), err: gw.ErrTimeout}),
+		}, nil
+	})
+	service := gw.New(completionStore{}, completionCipher{}, upstream)
+	handler := NewOpenAIGatewayHandler(service, GatewayOptions{
+		MaxBodyBytes: 1 << 20, RequestTimeout: time.Second, BodyReadTimeout: time.Second, WriteTimeout: time.Second,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"client-model","stream":true,"messages":[]}`))
+	request.Header.Set("Content-Type", "application/json")
+	request = request.WithContext(context.WithValue(request.Context(), principalIdentityKey{}, appsec.PrincipalIdentity{ID: 1, AccessKeyID: 2}))
+	func() {
+		defer func() { _ = recover() }()
+		handler.ServeHTTP(httptest.NewRecorder(), request)
+	}()
+	if trace == nil || trace.Status != usage.Failed || trace.ErrorType != "UPSTREAM_TIMEOUT" {
+		t.Fatalf("idle timeout trace = %+v", trace)
+	}
+}

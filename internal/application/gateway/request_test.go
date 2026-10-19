@@ -100,3 +100,17 @@ func TestUpstreamBodyForcesChatStreamUsage(t *testing.T) {
 		})
 	}
 }
+
+func TestParseSkipsUnusedFieldsButStillValidatesThem(t *testing.T) {
+	for _, body := range []string{
+		`{"model":"a","messages":[{"role":"user","content":"x"}`,
+		`{"model":"a","messages":[1,]}`,
+	} {
+		if _, err := ParseOpenAI([]byte(body)); err == nil {
+			t.Fatalf("invalid unused field accepted: %s", body)
+		}
+	}
+	if _, err := ParseOpenAI([]byte(`{"model":"a","messages":null,"metadata":{"k":"v"}}`)); err != nil {
+		t.Fatalf("valid body rejected: %v", err)
+	}
+}

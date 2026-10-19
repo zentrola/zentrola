@@ -21,6 +21,11 @@ type Parsed struct {
 	streamOptionsStart, streamOptionsEnd int
 }
 
+// skipJSONValue 只校验并跳过 messages 等路由无关字段，避免为大字段额外复制 RawMessage。
+type skipJSONValue struct{}
+
+func (*skipJSONValue) UnmarshalJSON([]byte) error { return nil }
+
 func validModel(model string) bool {
 	return len(model) > 0 && len(model) <= 128 && strings.TrimSpace(model) == model && !strings.ContainsAny(model, "\x00\r\n\t ")
 }
@@ -53,8 +58,16 @@ func parse(body []byte, nullableStream bool) (Parsed, error) {
 		}
 		seen[key] = true
 		var raw json.RawMessage
-		if err := d.Decode(&raw); err != nil {
-			return result, ErrInvalid
+		switch key {
+		case "model", "stream", "previous_response_id", "tools", "stream_options":
+			if err := d.Decode(&raw); err != nil {
+				return result, ErrInvalid
+			}
+		default:
+			if err := d.Decode(&skipJSONValue{}); err != nil {
+				return result, ErrInvalid
+			}
+			continue
 		}
 		switch key {
 		case "model":

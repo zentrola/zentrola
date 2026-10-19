@@ -254,7 +254,8 @@ func (p *gatewayResponsePump) finish(readErr error) {
 			return
 		}
 		p.interrupted("UPSTREAM_STREAM_INTERRUPTED")
-		if p.trace != nil && errors.Is(p.upstreamContext.Err(), context.DeadlineExceeded) {
+		// 请求级截止或上游流空闲超时都归为上游超时。
+		if p.trace != nil && (errors.Is(p.upstreamContext.Err(), context.DeadlineExceeded) || errors.Is(readErr, gw.ErrTimeout)) {
 			p.trace.Status = usage.Failed
 			p.trace.ErrorType = "UPSTREAM_TIMEOUT"
 		}
