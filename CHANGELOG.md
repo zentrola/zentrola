@@ -93,14 +93,18 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 
 - Added migration `00055` to allow the `RESOURCE_QUOTA_REFRESH` audit event. Rolling it back is refused once quota refresh audit records exist.
 - 新增 `00055` 迁移，允许记录 `RESOURCE_QUOTA_REFRESH` 审计事件；已存在额度刷新审计记录时拒绝回滚。
-- Added migration `00056` with indexes for usage rating scans, a price-consistency SQL function, and a trigger that rejects partially overlapping subscription charges. Existing overlapping charges are not changed.
-- 新增 `00056` 迁移：增加用量核算扫描索引、价格一致性 SQL 函数，以及拒绝订阅账期部分重叠的触发器；不修改已存在的重叠单据。
+- Added migration `00056` with a price-consistency SQL function and a trigger that rejects partially overlapping subscription charges. Existing overlapping charges are not changed.
+- 新增 `00056` 迁移：增加价格一致性 SQL 函数，以及拒绝订阅账期部分重叠的触发器；不修改已存在的重叠单据。
+- Added migration `00057` with cache-write Token, price, and cost columns on usage records, model prices, and usage ratings. The new checks on `usage_record` and `usage_rating` are added as `NOT VALID`, so existing rows are not scanned.
+- 新增 `00057` 迁移：为用量记录、模型价格和用量核算增加缓存写入 Token、单价与成本字段；`usage_record` 与 `usage_rating` 上的新约束以 `NOT VALID` 方式添加，不扫描历史记录。
+- Added migration `00058`, which builds the usage rating scan indexes on `usage_record` and `usage_rating` with `CREATE INDEX CONCURRENTLY` outside a transaction.
+- 新增 `00058` 迁移：在事务外以 `CREATE INDEX CONCURRENTLY` 方式为 `usage_record` 与 `usage_rating` 建立用量核算扫描索引。
 
 ### Upgrade notes / 升级说明
 
-- No configuration changes are required: `CLAUDE_CODE_VERSION` and `GATEWAY_STREAM_IDLE_TIMEOUT` are optional. Upgrading needs migrations `00055` and `00056`, which are applied at startup when `MIGRATIONS_AUTO_APPLY=true`; otherwise run `zentrola migrate` before starting the new version. Migration `00056` builds indexes on `usage_record` and `usage_rating` and blocks writes to them while it runs, so upgrade large deployments during low traffic.
+- No configuration changes are required: `CLAUDE_CODE_VERSION` and `GATEWAY_STREAM_IDLE_TIMEOUT` are optional. Upgrading needs migrations `00055` to `00058`, which are applied at startup when `MIGRATIONS_AUTO_APPLY=true`; otherwise run `zentrola migrate` before starting the new version. Migration `00058` builds indexes on `usage_record` and `usage_rating` concurrently without blocking writes, but it waits for running transactions and takes longer on large tables. If it is interrupted, run the migration again; it rebuilds the leftover indexes.
 - Anthropic input Token counts and monthly quota usage increase after the upgrade because cached prompts are now counted. OpenAI-compatible upstreams that reject `stream_options` will fail streaming Chat requests.
-- 无需修改现有配置，`CLAUDE_CODE_VERSION` 与 `GATEWAY_STREAM_IDLE_TIMEOUT` 均为可选项。升级时需执行迁移 `00055` 和 `00056`：`MIGRATIONS_AUTO_APPLY=true` 时 Backend 启动会自动执行，否则请在启动新版本前运行 `zentrola migrate`。`00056` 会在 `usage_record` 与 `usage_rating` 上建索引，执行期间阻塞这两张表的写入，数据量大的部署请在低峰期升级。
+- 无需修改现有配置，`CLAUDE_CODE_VERSION` 与 `GATEWAY_STREAM_IDLE_TIMEOUT` 均为可选项。升级时需执行迁移 `00055` 至 `00058`：`MIGRATIONS_AUTO_APPLY=true` 时 Backend 启动会自动执行，否则请在启动新版本前运行 `zentrola migrate`。`00058` 在 `usage_record` 与 `usage_rating` 上并发建索引，不阻塞写入，但会等待正在运行的事务结束，数据量大时耗时较长；执行中断后重新执行迁移即可，会重建遗留的索引。
 - 升级后 Anthropic 输入 Token 与月度配额用量会因计入缓存提示而增加；不支持 `stream_options` 的 OpenAI 兼容上游会导致 Chat 流式请求失败。
 
 ## [1.2.0] - 2026-10-13

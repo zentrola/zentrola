@@ -47,11 +47,8 @@ COMMENT ON COLUMN usage_rating.input_cost IS '普通输入成本，不含缓存�
 COMMENT ON COLUMN usage_rating.cache_creation_input_cost IS '缓存写入输入成本，保留 14 位小数';
 COMMENT ON COLUMN usage_rating.total_cost IS '单次调用总成本，等于普通输入、缓存命中、缓存写入与输出成本之和，保留 14 位小数';
 
--- 价格纠错重算扫描需要同时比较缓存写入单价快照；NULL 统一映射为 -1（单价不可能为负），使行比较
--- 仍可走索引范围扫描。
-DROP INDEX ix_usage_rating_price_snapshot;
-CREATE INDEX ix_usage_rating_price_snapshot
-    ON usage_rating (model_price_id, input_price, cached_input_price, output_price, COALESCE(cache_creation_input_price, -1));
+-- 价格纠错重算扫描使用的 ix_usage_rating_price_snapshot 包含缓存写入单价快照，由 00058 在事务外
+-- 以 CONCURRENTLY 方式创建。
 
 DROP FUNCTION billing_rating_matches_price(BIGINT, TEXT, NUMERIC, NUMERIC, NUMERIC, BIGINT, TEXT, NUMERIC, NUMERIC, NUMERIC);
 
@@ -265,10 +262,6 @@ $$;
 
 COMMENT ON FUNCTION billing_rating_matches_price(BIGINT, TEXT, NUMERIC, NUMERIC, NUMERIC, BIGINT, TEXT, NUMERIC, NUMERIC, NUMERIC) IS
     '判断最新核算的价格快照是否与调用时有效价格一致；任一侧缺失时返回 FALSE。单表达式 SQL 函数会被规划器内联，不影响查询计划';
-
-DROP INDEX ix_usage_rating_price_snapshot;
-CREATE INDEX ix_usage_rating_price_snapshot
-    ON usage_rating (model_price_id, input_price, cached_input_price, output_price);
 
 -- 回滚会丢失缓存写入维度：按缓存写入单价核算的历史成本仍保留在 total_cost 中，
 -- 但旧版核算公式无法再复算这些记录。

@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"io/fs"
+	"strings"
 	"testing"
 	"time"
 
@@ -216,6 +217,81 @@ func TestCacheCreationPricingMigrationSkipsUsageRatingValidation(t *testing.T) {
 		if unvalidated, columns := cacheCreationState(); unvalidated != step.wantUnvalidated || columns != step.wantColumns {
 			t.Fatalf("%s: unvalidated checks=%d columns=%d; want %d and %d",
 				step.name, unvalidated, columns, step.wantUnvalidated, step.wantColumns)
+		}
+	}
+}
+
+// 00058 在事务外并发建索引：结果必须是有效索引且表达式与重算扫描一致；重新执行时替换同名的
+// 遗留索引（如中断后残留或旧形状的索引），回滚后可以再次执行。
+func TestBillingScanIndexesAreBuiltConcurrently(t *testing.T) {
+	ctx, pool, _ := isolatedDatabase(t)
+	db := stdlib.OpenDBFromPool(pool)
+	defer db.Close()
+	source, err := fs.Sub(migrations, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, err := goose.NewProvider(goose.DialectPostgres, db, source, goose.WithDisableGlobalRegistry(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	indexes := func() map[string]string {
+		t.Helper()
+		rows, err := pool.Query(ctx, `SELECT c.relname, pg_get_indexdef(i.indexrelid)
+            FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
+            WHERE c.relname IN ('ix_usage_record_rating_candidate', 'ix_usage_rating_price_snapshot')
+              AND c.relnamespace = current_schema()::regnamespace AND i.indisvalid AND i.indisready`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		result := map[string]string{}
+		for rows.Next() {
+			var name, definition string
+			if err := rows.Scan(&name, &definition); err != nil {
+				t.Fatal(err)
+			}
+			result[name] = definition
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	wantBuilt := func(step string) {
+		t.Helper()
+		built := indexes()
+		if len(built) != 2 || !strings.Contains(built["ix_usage_record_rating_candidate"], "WHERE") ||
+			!strings.Contains(built["ix_usage_rating_price_snapshot"], "COALESCE(cache_creation_input_price") {
+			t.Fatalf("%s: valid billing scan indexes=%v", step, built)
+		}
+	}
+	if _, err := provider.UpTo(ctx, 57); err != nil {
+		t.Fatal(err)
+	}
+	if built := indexes(); len(built) != 0 {
+		t.Fatalf("billing scan indexes exist before 00058: %v", built)
+	}
+	// 模拟旧形状的同名遗留索引，00058 必须替换而不是跳过。
+	if _, err := pool.Exec(ctx, `CREATE INDEX ix_usage_rating_price_snapshot ON usage_rating (model_price_id)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range []struct {
+		name string
+		run  func() error
+		want bool
+	}{
+		{name: "up", run: func() error { _, err := provider.UpTo(ctx, 58); return err }, want: true},
+		{name: "down", run: func() error { _, err := provider.DownTo(ctx, 57); return err }},
+		{name: "up again", run: func() error { _, err := provider.UpTo(ctx, 58); return err }, want: true},
+	} {
+		if err := step.run(); err != nil {
+			t.Fatalf("%s: %v", step.name, err)
+		}
+		if step.want {
+			wantBuilt(step.name)
+		} else if built := indexes(); len(built) != 0 {
+			t.Fatalf("%s: billing scan indexes remain: %v", step.name, built)
 		}
 	}
 }
