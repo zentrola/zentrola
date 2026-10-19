@@ -192,7 +192,7 @@ func New(store Store, ids shared.IDGenerator) *Service {
 }
 
 // SettleDueSubscriptions 为已到期的个人订阅账期生成账单，并为价格金额纠错生成调整单。
-// 单个账期失败只计入 Failed 后继续；读取价格或已出账账期失败、
+// 单个账期失败（含与已出账账期重叠）只计入 Failed 后继续；读取价格或已出账账期失败、
 // 上下文取消、ID 生成失败等全局错误才中止本轮。
 func (s *Service) SettleDueSubscriptions(ctx context.Context, cutoff time.Time) (Summary, error) {
 	var summary Summary
@@ -209,17 +209,16 @@ func (s *Service) SettleDueSubscriptions(ctx context.Context, cutoff time.Time) 
 		return summary, err
 	}
 	existing := make(map[periodKey]struct{}, len(periods))
+	charged := make(map[int64][]ChargePeriod)
 	for _, period := range periods {
 		existing[newPeriodKey(period.CredentialID, period.PeriodStart, period.PeriodEnd)] = struct{}{}
+		charged[period.CredentialID] = append(charged[period.CredentialID], period)
 	}
 
 	groups := groupSubscriptionPrices(prices)
 	periodCount := 0
 	for _, group := range groups {
-		periodStart := group[0].EffectiveAt.UTC()
-		if group[0].CredentialEffectiveAt.After(periodStart) {
-			periodStart = group[0].CredentialEffectiveAt.UTC()
-		}
+		periodStart := subscriptionAnchor(group)
 		anchorDay := periodStart.Day()
 		for !periodStart.After(cutoff) {
 			if group[0].CredentialEndAt != nil && !periodStart.Before(group[0].CredentialEndAt.UTC()) {
@@ -247,6 +246,14 @@ func (s *Service) SettleDueSubscriptions(ctx context.Context, cutoff time.Time) 
 			if periodCount > maxPeriodsPerScan {
 				return summary, errors.New("billing settlement scan exceeded period limit")
 			}
+			if overlap := overlappingCharge(charged[price.CredentialID], periodStart, periodEnd); overlap != nil {
+				// 价格或凭据生效时间被补录、修改后锚点可能漂移；重叠账期不能再次出账，只记录失败等待人工处理。
+				summary.recordFailure("subscription credential=%d period=%s/%s overlaps charged period %s/%s",
+					price.CredentialID, formatPeriodTime(periodStart), formatPeriodTime(periodEnd),
+					formatPeriodTime(overlap.PeriodStart), formatPeriodTime(overlap.PeriodEnd))
+				periodStart = periodEnd
+				continue
+			}
 			created, chargeErr := s.settleSubscriptionPeriod(ctx, price, periodStart, periodEnd)
 			if chargeErr != nil {
 				if ctx.Err() != nil {
@@ -266,6 +273,8 @@ func (s *Service) SettleDueSubscriptions(ctx context.Context, cutoff time.Time) 
 				summary.Skipped++
 			}
 			existing[key] = struct{}{}
+			charged[price.CredentialID] = append(charged[price.CredentialID],
+				ChargePeriod{CredentialID: price.CredentialID, PeriodStart: periodStart, PeriodEnd: periodEnd})
 			periodStart = periodEnd
 		}
 	}
@@ -359,6 +368,20 @@ func (s *Service) adjustSubscriptionDocument(ctx context.Context, correction Cor
 	return adjustmentSkipped, nil
 }
 
+// overlappingCharge 返回与 [start, end) 部分重叠（但不完全相同）的已出账账期。
+func overlappingCharge(periods []ChargePeriod, start, end time.Time) *ChargePeriod {
+	for index := range periods {
+		period := &periods[index]
+		if period.PeriodStart.Equal(start) && period.PeriodEnd.Equal(end) {
+			continue
+		}
+		if period.PeriodStart.Before(end) && period.PeriodEnd.After(start) {
+			return period
+		}
+	}
+	return nil
+}
+
 func formatPeriodTime(value time.Time) string {
 	return value.UTC().Format(time.RFC3339)
 }
@@ -450,6 +473,15 @@ func priceAt(prices []SubscriptionPrice, at time.Time) *SubscriptionPrice {
 		result = &prices[index]
 	}
 	return result
+}
+
+// subscriptionAnchor 返回凭据首个账期的起点：最早价格生效时间与凭据生效时间中的较晚者。
+func subscriptionAnchor(group []SubscriptionPrice) time.Time {
+	periodStart := group[0].EffectiveAt.UTC()
+	if group[0].CredentialEffectiveAt.After(periodStart) {
+		periodStart = group[0].CredentialEffectiveAt.UTC()
+	}
+	return periodStart
 }
 
 func addBillingPeriod(start time.Time, period string, anchorDay int) (time.Time, error) {

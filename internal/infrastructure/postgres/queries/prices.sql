@@ -69,6 +69,15 @@ SELECT EXISTS (
       AND source_id = sqlc.arg(price_id)::bigint
 );
 
+-- name: ManageSubscriptionChargedUntil :one
+-- 凭据已出账订阅账期的最晚结束时间；没有账期时为 NULL。
+SELECT MAX(period_end)::timestamptz AS charged_until
+FROM billing_document
+WHERE provider_credential_id = sqlc.arg(provider_credential_id)::bigint
+  AND billing_type = 'SUBSCRIPTION'
+  AND document_type = 'CHARGE'
+  AND status = 'CONFIRMED';
+
 -- name: ManageModelPriceReferenced :one
 SELECT EXISTS (
     SELECT 1

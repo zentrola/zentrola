@@ -128,6 +128,15 @@ func (s *managementSession) SubscriptionPriceReferenced(ctx context.Context, pri
 	return s.q.ManageSubscriptionPriceReferenced(ctx, priceID)
 }
 
+func (s *managementSession) SubscriptionChargedUntil(ctx context.Context, credentialID int64) (*time.Time, error) {
+	value, err := s.q.ManageSubscriptionChargedUntil(ctx, credentialID)
+	if err != nil || !value.Valid {
+		return nil, err
+	}
+	chargedUntil := value.Time.UTC()
+	return &chargedUntil, nil
+}
+
 func (s *managementSession) ModelPriceReferenced(ctx context.Context, priceID int64) (bool, error) {
 	return s.q.ManageModelPriceReferenced(ctx, priceID)
 }

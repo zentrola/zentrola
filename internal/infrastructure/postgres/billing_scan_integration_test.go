@@ -1,9 +1,12 @@
 package postgres
 
 import (
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	app "github.com/zentrola/zentrola/internal/application/billing"
 	"github.com/zentrola/zentrola/internal/infrastructure/idgen"
 )
@@ -135,5 +138,67 @@ func TestBillingScansReturnOnlyPendingWork(t *testing.T) {
 	var revisions int
 	if err := pool.QueryRow(ctx, `SELECT max(revision) FROM usage_rating WHERE usage_record_id=7201`).Scan(&revisions); err != nil || revisions != 3 {
 		t.Fatalf("latest revision=%d err=%v", revisions, err)
+	}
+}
+
+func TestSubscriptionChargeOverlapIsRejected(t *testing.T) {
+	ctx, pool, _ := integrationDatabase(t)
+	original := time.Date(2026, 9, 15, 0, 0, 0, 0, time.UTC)
+	backfilled := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	for _, statement := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO provider (id,provider_code,provider_name,provider_type,status,created_by,updated_by,created_at,updated_at)
+         VALUES (3301,'overlap-provider','Overlap Provider','OFFICIAL','ACTIVE','system','system',$1,$1)`, []any{original}},
+		{`INSERT INTO provider_credential (
+             id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,
+             auth_type,auth_adapter,subscription_type,effective_at,created_by,updated_by,created_at,updated_at
+         ) VALUES (5301,3301,'Overlap Subscription',decode(repeat('36',32),'hex'),decode(repeat('36',12),'hex'),1,
+             'SUBSCRIPTION','TEST','PERSONAL',$2,'system','system',$1,$1)`, []any{original, backfilled}},
+		{`INSERT INTO provider_credential_subscription_price (
+             id,provider_credential_id,currency,period_amount,billing_period,effective_at,created_by,created_at
+         ) VALUES (6301,5301,'CNY',100,'MONTH',$1,'system',$1)`, []any{original}},
+	} {
+		if _, err := pool.Exec(ctx, statement.sql, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := NewBillingStore(pool)
+	service := app.New(store, idgen.New(pool))
+	if summary, err := service.SettleDueSubscriptions(ctx, time.Date(2026, 10, 16, 0, 0, 0, 0, time.UTC)); err != nil || summary.Created != 1 {
+		t.Fatalf("initial settlement=%+v err=%v", summary, err)
+	}
+	// 绕过管理端校验直接补录更早价格，模拟历史数据：锚点漂移后结算必须跳过重叠账期。
+	if _, err := pool.Exec(ctx, `INSERT INTO provider_credential_subscription_price (
+        id,provider_credential_id,currency,period_amount,billing_period,effective_at,created_by,created_at
+    ) VALUES (6302,5301,'CNY',90,'MONTH',$1,'system',$1)`, backfilled); err != nil {
+		t.Fatal(err)
+	}
+	summary, err := service.SettleDueSubscriptions(ctx, time.Date(2026, 10, 16, 0, 0, 0, 0, time.UTC))
+	if err != nil || summary.Failed == 0 || !strings.Contains(strings.Join(summary.FailureSamples, ";"), "overlaps") {
+		t.Fatalf("overlap settlement=%+v err=%v", summary, err)
+	}
+	var overlaps int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM billing_document a JOIN billing_document b
+        ON a.provider_credential_id=b.provider_credential_id AND a.id<b.id
+       AND a.period_start<b.period_end AND a.period_end>b.period_start
+        WHERE a.billing_type='SUBSCRIPTION' AND b.billing_type='SUBSCRIPTION'
+          AND a.document_type='CHARGE' AND b.document_type='CHARGE'`).Scan(&overlaps); err != nil || overlaps != 0 {
+		t.Fatalf("overlapping charges=%d err=%v", overlaps, err)
+	}
+
+	// 数据库触发器作为最后防线拒绝部分重叠的新账期。
+	_, err = store.CreateCharge(ctx, app.Document{
+		ID: 9301, CredentialID: 5301, SourceID: 6301, BillingType: "SUBSCRIPTION", DocumentType: "CHARGE",
+		Status: "CONFIRMED", SourceType: "SUBSCRIPTION_PRICE",
+		PeriodStart: time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), PeriodEnd: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC),
+		TotalAmount: "100", Currency: "CNY", CreatedAt: time.Now().UTC(),
+	})
+	var storeErr *app.StoreError
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &storeErr) || storeErr.SQLState != "23P01" || !errors.As(err, &pgErr) ||
+		!strings.Contains(app.SafeErrorText(err), "overlaps an existing charge") {
+		t.Fatalf("overlapping charge error=%v", err)
 	}
 }

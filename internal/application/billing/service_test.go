@@ -245,6 +245,31 @@ func TestStatisticsValidatesUTCWindowAndType(t *testing.T) {
 	}
 }
 
+func TestSettleSkipsPeriodOverlappingChargedHistory(t *testing.T) {
+	backfilled := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	original := time.Date(2026, 9, 15, 0, 0, 0, 0, time.UTC)
+	store := &billingStoreStub{
+		prices: []SubscriptionPrice{
+			{ID: 1, CredentialID: 9, Currency: "CNY", PeriodAmount: "100", BillingPeriod: "MONTH", EffectiveAt: backfilled, CredentialEffectiveAt: backfilled},
+			{ID: 2, CredentialID: 9, Currency: "CNY", PeriodAmount: "100", BillingPeriod: "MONTH", EffectiveAt: original, CredentialEffectiveAt: backfilled},
+		},
+		// 补录更早价格前，原锚点已出账 9/15–10/15。
+		periods: []ChargePeriod{{CredentialID: 9, PeriodStart: original, PeriodEnd: time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)}},
+	}
+	service := New(store, &billingIDs{})
+	summary, err := service.SettleDueSubscriptions(context.Background(), time.Date(2026, 10, 16, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Created != 1 || summary.Failed != 1 || len(store.charges) != 1 ||
+		!store.charges[0].PeriodEnd.Equal(time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("summary=%+v charges=%+v", summary, store.charges)
+	}
+	if len(summary.FailureSamples) != 1 || !strings.Contains(summary.FailureSamples[0], "overlaps charged period") {
+		t.Fatalf("failure samples=%v", summary.FailureSamples)
+	}
+}
+
 func TestSettleContinuesAfterSinglePeriodFailure(t *testing.T) {
 	start := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)

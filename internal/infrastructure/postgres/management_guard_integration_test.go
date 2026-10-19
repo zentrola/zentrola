@@ -14,6 +14,7 @@ import (
 func TestPriceGuardsRejectChangesAffectingBilledHistory(t *testing.T) {
 	ctx, pool, _ := integrationDatabase(t)
 	periodStart := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	periodEnd := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 	for _, statement := range []string{
 		`INSERT INTO admin_user (id,username,password_hash,display_name,status,created_by,updated_by,created_at,updated_at)
          VALUES (71,'guard-admin','test-hash','Guard Admin','ACTIVE','system','system',$1,$1)`,
@@ -68,6 +69,22 @@ func TestPriceGuardsRejectChangesAffectingBilledHistory(t *testing.T) {
 	service := mgmt.New(store, ids, nil, nil, mgmt.WithPriceStore(store))
 	actor := admin.Identity{ID: 71, DisplayName: "Guard Admin"}
 	meta := appsec.RequestMeta{}
+
+	if _, err := service.SaveSubscriptionPrice(ctx, actor, 5402, mgmt.SubscriptionPriceInput{
+		Currency: "CNY", PeriodAmount: "90", BillingPeriod: "MONTH", EffectiveAt: periodStart.AddDate(0, -1, 0),
+	}, meta); !errors.Is(err, mgmt.ErrConflict) {
+		t.Fatalf("backfilled subscription price error=%v; want conflict", err)
+	}
+	if _, err := service.SaveSubscriptionPrice(ctx, actor, 5402, mgmt.SubscriptionPriceInput{
+		Currency: "CNY", PeriodAmount: "90", BillingPeriod: "MONTH", EffectiveAt: periodEnd,
+	}, meta); err != nil {
+		t.Fatalf("subscription price at charged boundary: %v", err)
+	}
+	if _, err := service.UpdateSubscriptionPrice(ctx, actor, 5402, 6402, mgmt.SubscriptionPriceInput{
+		Currency: "CNY", PeriodAmount: "80", BillingPeriod: "MONTH", EffectiveAt: periodStart,
+	}, meta); err != nil {
+		t.Fatalf("charged subscription amount correction: %v", err)
+	}
 
 	if err := service.DeleteModelPrice(ctx, actor, 5401, 4401, 6401, meta); !errors.Is(err, mgmt.ErrConflict) {
 		t.Fatalf("referenced model price delete error=%v; want conflict", err)

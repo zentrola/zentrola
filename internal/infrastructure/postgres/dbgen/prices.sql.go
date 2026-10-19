@@ -242,6 +242,23 @@ func (q *Queries) ManageModelPrices(ctx context.Context, providerCredentialID in
 	return items, nil
 }
 
+const manageSubscriptionChargedUntil = `-- name: ManageSubscriptionChargedUntil :one
+SELECT MAX(period_end)::timestamptz AS charged_until
+FROM billing_document
+WHERE provider_credential_id = $1::bigint
+  AND billing_type = 'SUBSCRIPTION'
+  AND document_type = 'CHARGE'
+  AND status = 'CONFIRMED'
+`
+
+// 凭据已出账订阅账期的最晚结束时间；没有账期时为 NULL。
+func (q *Queries) ManageSubscriptionChargedUntil(ctx context.Context, providerCredentialID int64) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, manageSubscriptionChargedUntil, providerCredentialID)
+	var charged_until pgtype.Timestamptz
+	err := row.Scan(&charged_until)
+	return charged_until, err
+}
+
 const manageSubscriptionPriceReferenced = `-- name: ManageSubscriptionPriceReferenced :one
 SELECT EXISTS (
     SELECT 1

@@ -26,6 +26,7 @@ type priceStoreStub struct {
 	// modelReferenced 与 overrides 模拟模型价格的核算引用与历史覆盖检查结果。
 	modelReferenced bool
 	overrides       bool
+	chargedUntil    *time.Time
 }
 
 func (s *priceStoreStub) ReadPrice(_ context.Context, _ admin.Identity, fn func(PriceReadSession) error) error {
@@ -101,6 +102,9 @@ func (s *priceStoreStub) Audit(_ context.Context, audit Audit, _ appsec.RequestM
 }
 func (s *priceStoreStub) SubscriptionPriceReferenced(context.Context, int64) (bool, error) {
 	return s.referenced, nil
+}
+func (s *priceStoreStub) SubscriptionChargedUntil(context.Context, int64) (*time.Time, error) {
+	return s.chargedUntil, nil
 }
 func (s *priceStoreStub) ModelPriceReferenced(context.Context, int64) (bool, error) {
 	return s.modelReferenced, nil
@@ -271,6 +275,82 @@ func TestReferencedSubscriptionPriceOnlyAllowsAmountCorrection(t *testing.T) {
 	}
 	if err := service.DeleteSubscriptionPrice(context.Background(), admin.Identity{ID: 7}, 1, 9, appsec.RequestMeta{}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("referenced delete error=%v", err)
+	}
+}
+
+func TestSubscriptionPriceChangesCannotAffectChargedPeriods(t *testing.T) {
+	chargedUntil := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	existingAt := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	futureAt := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	newStore := func() *priceStoreStub {
+		return &priceStoreStub{
+			resource:     ResourceRecord{Resource: Resource{ID: 1, Name: "subscription", AuthType: "SUBSCRIPTION"}},
+			chargedUntil: &chargedUntil,
+			subs: []SubscriptionPrice{
+				{ID: 9, ProviderCredentialID: 1, Currency: "CNY", PeriodAmount: "100", BillingPeriod: "MONTH", EffectiveAt: futureAt},
+				{ID: 8, ProviderCredentialID: 1, Currency: "CNY", PeriodAmount: "100", BillingPeriod: "MONTH", EffectiveAt: existingAt},
+			},
+		}
+	}
+	ctx, actor, meta := context.Background(), admin.Identity{ID: 7}, appsec.RequestMeta{}
+	for _, tt := range []struct {
+		name    string
+		run     func(*PriceService) error
+		wantErr error
+	}{
+		{name: "backfill before charged period", wantErr: ErrConflict, run: func(service *PriceService) error {
+			_, err := service.SaveSubscriptionPrice(ctx, actor, 1, SubscriptionPriceInput{Currency: "CNY", PeriodAmount: "90",
+				BillingPeriod: "MONTH", EffectiveAt: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)}, meta)
+			return err
+		}},
+		{name: "insert inside charged period", wantErr: ErrConflict, run: func(service *PriceService) error {
+			_, err := service.SaveSubscriptionPrice(ctx, actor, 1, SubscriptionPriceInput{Currency: "CNY", PeriodAmount: "90",
+				BillingPeriod: "MONTH", EffectiveAt: time.Date(2026, 9, 15, 0, 0, 0, 0, time.UTC)}, meta)
+			return err
+		}},
+		{name: "insert at charged boundary", run: func(service *PriceService) error {
+			_, err := service.SaveSubscriptionPrice(ctx, actor, 1, SubscriptionPriceInput{Currency: "CNY", PeriodAmount: "90",
+				BillingPeriod: "MONTH", EffectiveAt: chargedUntil}, meta)
+			return err
+		}},
+		{name: "move future price into charged period", wantErr: ErrConflict, run: func(service *PriceService) error {
+			_, err := service.UpdateSubscriptionPrice(ctx, actor, 1, 9, SubscriptionPriceInput{Currency: "CNY", PeriodAmount: "100",
+				BillingPeriod: "MONTH", EffectiveAt: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)}, meta)
+			return err
+		}},
+		{name: "change charged price period", wantErr: ErrConflict, run: func(service *PriceService) error {
+			_, err := service.UpdateSubscriptionPrice(ctx, actor, 1, 8, SubscriptionPriceInput{Currency: "CNY", PeriodAmount: "100",
+				BillingPeriod: "YEAR", EffectiveAt: existingAt}, meta)
+			return err
+		}},
+		{name: "correct charged price amount", run: func(service *PriceService) error {
+			_, err := service.UpdateSubscriptionPrice(ctx, actor, 1, 8, SubscriptionPriceInput{Currency: "CNY", PeriodAmount: "80",
+				BillingPeriod: "MONTH", EffectiveAt: existingAt}, meta)
+			return err
+		}},
+		{name: "change future price period", run: func(service *PriceService) error {
+			_, err := service.UpdateSubscriptionPrice(ctx, actor, 1, 9, SubscriptionPriceInput{Currency: "CNY", PeriodAmount: "100",
+				BillingPeriod: "YEAR", EffectiveAt: futureAt}, meta)
+			return err
+		}},
+		{name: "delete price before charged period", wantErr: ErrConflict, run: func(service *PriceService) error {
+			return service.DeleteSubscriptionPrice(ctx, actor, 1, 8, meta)
+		}},
+		{name: "delete future price", run: func(service *PriceService) error {
+			return service.DeleteSubscriptionPrice(ctx, actor, 1, 9, meta)
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			store := newStore()
+			service := &PriceService{store: store, ids: &priceIDs{next: 100}, now: func() time.Time { return chargedUntil }}
+			err := tt.run(service)
+			if tt.wantErr == nil && err != nil || tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
+				t.Fatalf("error=%v; want %v", err, tt.wantErr)
+			}
+			if tt.wantErr != nil && store.audits != 0 {
+				t.Fatalf("rejected change was audited: %d", store.audits)
+			}
+		})
 	}
 }
 

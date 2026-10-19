@@ -76,6 +76,8 @@ type PriceWriteSession interface {
 	UpdateSubscriptionPrice(context.Context, SubscriptionPrice) (bool, error)
 	DeleteSubscriptionPrice(context.Context, int64, int64) (bool, error)
 	SubscriptionPriceReferenced(context.Context, int64) (bool, error)
+	// SubscriptionChargedUntil 返回凭据已出账订阅账期的最晚结束时间；尚未出账时为 nil。
+	SubscriptionChargedUntil(context.Context, int64) (*time.Time, error)
 	// ModelPriceReferenced 判断模型价格版本是否已被用量核算引用。
 	ModelPriceReferenced(context.Context, int64) (bool, error)
 	// ModelPriceOverridesRatedUsage 判断价格版本按其生效时间放入历史后，是否会替换已核算调用的价格。
@@ -410,6 +412,9 @@ func (s *PriceService) SaveSubscriptionPrice(ctx context.Context, actor admin.Id
 				before = price
 			}
 		}
+		if err := rejectChargedSubscriptionPeriod(ctx, writer, credentialID, input.EffectiveAt); err != nil {
+			return err
+		}
 		id, err := nextID(ctx, s.ids)
 		if err != nil {
 			return err
@@ -474,6 +479,15 @@ func (s *PriceService) UpdateSubscriptionPrice(ctx context.Context, actor admin.
 				return ErrConflict
 			}
 		}
+		if before.Currency != input.Currency || before.BillingPeriod != input.BillingPeriod || !before.EffectiveAt.Equal(input.EffectiveAt) {
+			// 仅纠正金额由调整单处理；币种、周期或生效时间变化会改变账期边界，原值与新值都不得落在已出账账期内。
+			if err := rejectChargedSubscriptionPeriod(ctx, writer, credentialID, before.EffectiveAt); err != nil {
+				return err
+			}
+			if err := rejectChargedSubscriptionPeriod(ctx, writer, credentialID, input.EffectiveAt); err != nil {
+				return err
+			}
+		}
 		saved = *before
 		saved.Currency = input.Currency
 		saved.PeriodAmount = input.PeriodAmount
@@ -522,6 +536,9 @@ func (s *PriceService) DeleteSubscriptionPrice(ctx context.Context, actor admin.
 		if referenced {
 			return ErrConflict
 		}
+		if err := rejectChargedSubscriptionPeriod(ctx, writer, credentialID, before.EffectiveAt); err != nil {
+			return err
+		}
 		deleted, err := writer.DeleteSubscriptionPrice(ctx, credentialID, priceID)
 		if err != nil {
 			return err
@@ -532,6 +549,19 @@ func (s *PriceService) DeleteSubscriptionPrice(ctx context.Context, actor admin.
 		return writer.Audit(ctx, Audit{Event: operation.ResourcePriceUpdate, Target: "RESOURCE", ID: credentialID,
 			Name: resource.Name, Before: *before, After: nil}, meta)
 	})
+}
+
+// rejectChargedSubscriptionPeriod 拒绝生效时间早于已出账账期最晚结束时间的订阅价格变更。
+// 账期锚点取自最早价格，补录或移动更早的价格会让结算按新锚点生成与已出账账期重叠的新账期。
+func rejectChargedSubscriptionPeriod(ctx context.Context, writer PriceWriteSession, credentialID int64, effectiveAt time.Time) error {
+	chargedUntil, err := writer.SubscriptionChargedUntil(ctx, credentialID)
+	if err != nil {
+		return err
+	}
+	if chargedUntil != nil && effectiveAt.Before(chargedUntil.UTC()) {
+		return ErrConflict
+	}
+	return nil
 }
 
 // rejectModelPriceHistoryOverride 与数据库触发器口径一致：价格版本不得覆盖已核算调用的价格。
