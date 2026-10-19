@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -35,6 +36,9 @@ func runFakeAppServer() {
 	if account := fakeAccountID(); strings.HasPrefix(account, "hang-") {
 		runHangingAppServer(account)
 		return
+	} else if strings.HasPrefix(account, "shutdown-write-") {
+		runShutdownWritingAppServer(account)
+		return
 	}
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
@@ -55,4 +59,29 @@ func runFakeAppServer() {
 			fmt.Printf(`{"id":%d,"error":{"code":-32601,"message":"method not found"}}`+"\n", *request.ID)
 		}
 	}
+}
+
+// runShutdownWritingAppServer 正常响应初始化与账号读取，但直到标准输入关闭、准备退出时才把轮换后的
+// Token 写回 auth.json，模拟 app-server 延迟持久化凭据。
+func runShutdownWritingAppServer(account string) {
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		var request struct {
+			ID     *int64 `json:"id"`
+			Method string `json:"method"`
+		}
+		if json.Unmarshal(scanner.Bytes(), &request) != nil || request.ID == nil {
+			continue
+		}
+		switch request.Method {
+		case "initialize":
+			fmt.Printf(`{"id":%d,"result":{}}`+"\n", *request.ID)
+		case "account/read":
+			fmt.Printf(`{"id":%d,"result":{"account":{"type":"chatgpt","planType":"plus"}}}`+"\n", *request.ID)
+		default:
+			fmt.Printf(`{"id":%d,"error":{"code":-32601,"message":"method not found"}}`+"\n", *request.ID)
+		}
+	}
+	rotated := `{"auth_mode":"chatgpt","tokens":{"id_token":"id","access_token":"rotated-access","refresh_token":"rotated-refresh","account_id":"` + account + `"}}`
+	_ = os.WriteFile(filepath.Join(os.Getenv("CODEX_HOME"), "auth.json"), []byte(rotated), 0o600)
 }

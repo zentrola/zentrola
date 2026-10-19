@@ -405,6 +405,8 @@ func (a *Adapter) runAccountSession(ctx context.Context, raw []byte, proxy *cata
 	if err := action(client); err != nil {
 		return nil, mgmt.SubscriptionInspection{}, failed(err)
 	}
+	// 成功路径同样先关闭并等待 app-server 退出再读取 auth.json，避免读到尚未写回或写入中的凭据。
+	client.close()
 	updated, err := os.ReadFile(authPath)
 	if err != nil {
 		return nil, mgmt.SubscriptionInspection{}, fmt.Errorf("%w: cannot read refreshed credential", errAppServerUnavailable)

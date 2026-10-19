@@ -127,6 +127,38 @@ func TestAppServerTimeoutTerminatesProcessTree(t *testing.T) {
 	}
 }
 
+func TestRefreshReadsCredentialAfterAppServerExits(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name, account string
+	}{
+		{name: "rotated token written on shutdown", account: "shutdown-write-1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// access token 不含过期时间，刷新路径会认为需要刷新。
+			raw := []byte(`{"auth_mode":"chatgpt","tokens":{"id_token":"id","access_token":"access","refresh_token":"refresh","account_id":"` + tt.account + `"}}`)
+			adapter := New(executable, WithLogger(slog.New(slog.NewJSONHandler(io.Discard, nil))))
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			updated, changed, err := adapter.RefreshIfNeeded(ctx, raw, nil)
+			if err != nil || !changed {
+				t.Fatalf("changed=%v err=%v", changed, err)
+			}
+			cache, err := parseCredential(updated)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cache.Tokens.RefreshToken != "rotated-refresh" || cache.Tokens.AccessToken != "rotated-access" {
+				t.Fatal("credential was read before app-server finished writing the rotated token")
+			}
+		})
+	}
+}
+
 func TestRPCClientCallReturnsContextErrorWhenServerStops(t *testing.T) {
 	tests := []struct {
 		name      string

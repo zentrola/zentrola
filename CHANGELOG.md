@@ -70,6 +70,7 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - A client disconnect during a Codex subscription refresh no longer stops the app-server midway, so a rotated refresh token is no longer lost; refresh failures after the client has gone no longer cool down the credential.
 - Redis dial timeouts are no longer mistaken for a client disconnect, so route state and gateway caches stop calling an unreachable Redis for a short time as intended.
 - OpenAI Chat and Responses requests routed to an Anthropic endpoint now record cache write tokens, so cache writes are rated at the cache write price instead of the input price. Total input tokens still include cache writes and cache reads.
+- After a successful Codex app-server session, the credential file is read only after the app-server has exited, so a token written back on shutdown is no longer missed.
 - 使用提示缓存的 Anthropic 调用此前被归为 `INCOMPLETE_TOKENS` 而不计费，现已正常核算；跨协议转换保留缓存 Token 字段。
 - 补录更早生效的订阅价格可能生成与已出账单据重叠的账期；结算与数据库现在都会拒绝重叠账期。
 - 用量核算和 API Key 结算不再每轮重扫全部历史，单条失败不再阻塞整轮，计费任务日志记录脱敏后的错误详情。
@@ -82,6 +83,7 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - Codex 订阅刷新期间客户端断开连接不再中途终止 app-server，已轮换的 refresh token 不会因此丢失；客户端已断开后的刷新失败不再冷却该凭据。
 - Redis 拨号超时不再被误判为客户端断开，路由状态与网关缓存在 Redis 不可达时会按预期短暂停止访问 Redis。
 - 经 OpenAI Chat 或 Responses 协议路由到 Anthropic 端点的请求会记录缓存写入 Token，缓存写入按缓存写入单价核算，不再按输入单价计费；总输入 Token 仍包含缓存写入与缓存读取。
+- Codex app-server 会话成功后，等 app-server 退出再读取凭据文件，不再遗漏退出时才写回的 Token。
 
 ### Database / 数据库
 
