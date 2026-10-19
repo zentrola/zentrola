@@ -9452,6 +9452,10 @@
                 "billingType": {
                     "type": "string"
                 },
+                "cacheCreationInputTokens": {
+                    "description": "CacheCreationInputTokens 为缓存写入 Token 数，包含在 InputTokens 中；nil 表示上游未区分。",
+                    "type": "integer"
+                },
                 "cachedInputTokens": {
                     "type": "integer"
                 },
@@ -9554,6 +9558,13 @@
         "billing.UsageCostRating": {
             "type": "object",
             "properties": {
+                "cacheCreationInputCost": {
+                    "type": "string"
+                },
+                "cacheCreationInputPrice": {
+                    "description": "CacheCreationInputPrice 为 nil 表示价格未配置缓存写入单价，按普通输入单价核算。",
+                    "type": "string"
+                },
                 "cachedInputCost": {
                     "type": "string"
                 },
@@ -9605,6 +9616,10 @@
                 },
                 "billingType": {
                     "type": "string"
+                },
+                "cacheCreationInputTokens": {
+                    "description": "CacheCreationInputTokens 为缓存写入 Token 数，包含在 InputTokens 中；nil 表示上游未区分。",
+                    "type": "integer"
                 },
                 "cachedInputTokens": {
                     "type": "integer"
@@ -9700,6 +9715,10 @@
             "type": "object",
             "properties": {
                 "attempts": {
+                    "type": "integer"
+                },
+                "cacheCreationInputTokens": {
+                    "description": "CacheCreationInputTokens 为缓存写入 Token 合计，包含在 InputTokens 中。",
                     "type": "integer"
                 },
                 "cachedInputTokens": {
@@ -10562,6 +10581,11 @@
                 "outputPrice"
             ],
             "properties": {
+                "cacheCreationInputPrice": {
+                    "description": "CacheCreationInputPrice 是缓存写入每百万 Token 的价格；省略、null 或空字符串表示不配置，\n核算时按普通输入单价计费。",
+                    "type": "string",
+                    "x-nullable": true
+                },
                 "cachedInputPrice": {
                     "type": "string"
                 },
@@ -10929,6 +10953,10 @@
         "management.ModelPrice": {
             "type": "object",
             "properties": {
+                "cacheCreationInputPrice": {
+                    "description": "CacheCreationInputPrice 为 nil 表示未配置缓存写入单价，核算时按普通输入单价计费。",
+                    "type": "string"
+                },
                 "cachedInputPrice": {
                     "type": "string"
                 },

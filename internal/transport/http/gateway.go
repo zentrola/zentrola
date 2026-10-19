@@ -242,6 +242,7 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				a.ErrorType = trace.ErrorType
 				if observer != nil {
 					a.InputTokens, a.OutputTokens, a.CachedInputTokens = observer.Tokens(trace.Status == usage.Success)
+					a.CacheCreationInputTokens = observer.CacheCreationTokens()
 				}
 			}
 			if g.writer != nil && (trace.Attempt != nil || len(trace.Attempts) > 0) {
@@ -481,6 +482,9 @@ func addUsageTokenFields(ctx context.Context, event *usage.Event, observer *gw.U
 	}
 	if cached != nil {
 		addAccessLogFields(ctx, "cached_input_tokens", *cached)
+	}
+	if cacheCreation := observer.CacheCreationTokens(); cacheCreation != nil {
+		addAccessLogFields(ctx, "cache_creation_input_tokens", *cacheCreation)
 	}
 }
 

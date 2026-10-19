@@ -417,6 +417,10 @@ onBeforeUnmount(() => {
           <dd>{{ count(selected.cachedInputTokens) }}</dd>
         </div>
         <div>
+          <dt>{{ t('billing.cacheCreationTokens') }}</dt>
+          <dd>{{ count(selected.cacheCreationInputTokens) }}</dd>
+        </div>
+        <div>
           <dt>{{ t('billing.outputTokens') }}</dt>
           <dd>{{ count(selected.outputTokens) }}</dd>
         </div>
@@ -464,9 +468,11 @@ onBeforeUnmount(() => {
               <th>{{ t('billing.priceEffectiveAt') }}</th>
               <th class="numeric">{{ t('billing.inputPrice') }}</th>
               <th class="numeric">{{ t('billing.cachedInputPrice') }}</th>
+              <th class="numeric">{{ t('billing.cacheCreationInputPrice') }}</th>
               <th class="numeric">{{ t('billing.outputPrice') }}</th>
               <th class="numeric">{{ t('billing.inputCost') }}</th>
               <th class="numeric">{{ t('billing.cachedInputCost') }}</th>
+              <th class="numeric">{{ t('billing.cacheCreationInputCost') }}</th>
               <th class="numeric">{{ t('billing.outputCost') }}</th>
               <th class="numeric">{{ t('billing.amount') }}</th>
             </tr>
@@ -478,9 +484,20 @@ onBeforeUnmount(() => {
               <td>{{ date(rating.priceEffectiveAt) }}</td>
               <td class="numeric">{{ amount(rating.inputPrice, rating.currency) }}</td>
               <td class="numeric">{{ amount(rating.cachedInputPrice, rating.currency) }}</td>
+              <td
+                class="numeric"
+                :title="
+                  rating.cacheCreationInputPrice
+                    ? undefined
+                    : t('billing.cacheCreationPriceFallback')
+                "
+              >
+                {{ amount(rating.cacheCreationInputPrice, rating.currency) }}
+              </td>
               <td class="numeric">{{ amount(rating.outputPrice, rating.currency) }}</td>
               <td class="numeric">{{ amount(rating.inputCost, rating.currency) }}</td>
               <td class="numeric">{{ amount(rating.cachedInputCost, rating.currency) }}</td>
+              <td class="numeric">{{ amount(rating.cacheCreationInputCost, rating.currency) }}</td>
               <td class="numeric">{{ amount(rating.outputCost, rating.currency) }}</td>
               <td class="numeric">{{ amount(rating.totalCost, rating.currency) }}</td>
             </tr>

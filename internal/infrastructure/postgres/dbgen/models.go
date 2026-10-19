@@ -432,7 +432,7 @@ type ProviderCredentialModelPrice struct {
 	ProviderModelID int64
 	// 计价币种：CNY=人民币，USD=美元；不同币种不自动换算或合计
 	Currency string
-	// 普通输入每百万 Token 的价格
+	// 普通输入每百万 Token 的价格；未配置缓存写入单价时缓存写入也按此价格计费
 	InputPrice pgtype.Numeric
 	// 输出每百万 Token 的价格
 	OutputPrice pgtype.Numeric
@@ -444,6 +444,8 @@ type ProviderCredentialModelPrice struct {
 	CreatedBy string
 	// 记录创建时间，UTC
 	CreatedAt pgtype.Timestamptz
+	// 缓存写入输入每百万 Token 的价格；NULL=未配置，按普通输入单价计费
+	CacheCreationInputPrice pgtype.Numeric
 }
 
 // Provider 认证资源最近观测到的额度窗口；只保存当前状态，不作为 Usage 事实
@@ -564,7 +566,7 @@ type UsageRating struct {
 	ModelPriceID int64
 	// 原始调用开始时间快照，UTC；用于确定价格版本和自然月账期
 	UsageStartedAt pgtype.Timestamptz
-	// 输入 Token 总数快照，包含缓存命中输入
+	// 输入 Token 总数快照，包含缓存命中与缓存写入输入
 	InputTokens int64
 	// 缓存命中输入 Token 数快照
 	CachedInputTokens int64
@@ -576,18 +578,24 @@ type UsageRating struct {
 	CachedInputPrice pgtype.Numeric
 	// 输出每百万 Token 价格快照，保留 8 位小数
 	OutputPrice pgtype.Numeric
-	// 普通输入成本，保留 14 位小数
+	// 普通输入成本，不含缓存命中与缓存写入输入，保留 14 位小数
 	InputCost pgtype.Numeric
 	// 缓存命中输入成本，保留 14 位小数
 	CachedInputCost pgtype.Numeric
 	// 输出成本，保留 14 位小数
 	OutputCost pgtype.Numeric
-	// 单次调用总成本，保留 14 位小数
+	// 单次调用总成本，等于普通输入、缓存命中、缓存写入与输出成本之和，保留 14 位小数
 	TotalCost pgtype.Numeric
 	// 成本币种：CNY=人民币，USD=美元；不同币种分别结算
 	Currency string
 	// 核算记录创建时间，UTC
 	CreatedAt pgtype.Timestamptz
+	// 缓存写入输入 Token 数快照；用量记录未区分缓存写入时为 0
+	CacheCreationInputTokens int64
+	// 缓存写入输入每百万 Token 价格快照，保留 8 位小数；NULL=价格未配置，按普通输入单价计费
+	CacheCreationInputPrice pgtype.Numeric
+	// 缓存写入输入成本，保留 14 位小数
+	CacheCreationInputCost pgtype.Numeric
 }
 
 // 一次真实上游调用 Attempt 的原始用量事实；不保存价格与成本，无逻辑删除
@@ -614,7 +622,7 @@ type UsageRecord struct {
 	UsageScene string
 	// 客户端协议：OPENAI_CHAT=Chat Completions；OPENAI_RESPONSES=Responses；OPENAI_IMAGES=Images；ANTHROPIC_MESSAGES=Messages
 	ClientProtocol string
-	// 输入 Token 数；NULL=上游未返回可靠值，0=已确认零用量
+	// 输入 Token 总数，包含缓存读取与缓存写入；NULL=上游未返回可靠值，0=已确认零用量
 	InputTokens *int64
 	// 输出 Token 数；NULL=上游未返回可靠值，0=已确认零用量
 	OutputTokens *int64
@@ -632,4 +640,6 @@ type UsageRecord struct {
 	CreatedAt pgtype.Timestamptz
 	// 调用发生时具有该模型权限的有效 Group ID 快照，不受后续成员和授权变更影响
 	QuotaGroupIds []int64
+	// 缓存写入 Token 数，包含在 input_tokens 中；NULL=上游未返回或协议不区分缓存写入，计费按 0 处理
+	CacheCreationInputTokens *int64
 }

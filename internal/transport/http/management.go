@@ -587,7 +587,7 @@ func (s *SecurityHandlers) mountManagementQueryRoutes(r chi.Router) {
 		data, err := m.SaveModelPrice(req.Context(), adminFrom(req), id, mgmt.ModelPriceInput{
 			ProviderModelID: modelID, Currency: input.Currency, InputPrice: input.InputPrice,
 			OutputPrice: input.OutputPrice, CachedInputPrice: input.CachedInputPrice,
-			EffectiveAt: input.EffectiveAt,
+			CacheCreationInputPrice: input.CacheCreationInputPrice, EffectiveAt: input.EffectiveAt,
 		}, requestMeta(req))
 		adminResult(w, req, http.StatusOK, data, err)
 	})
@@ -624,7 +624,8 @@ func (s *SecurityHandlers) mountManagementQueryRoutes(r chi.Router) {
 		}
 		data, err := m.UpdateModelPrice(req.Context(), adminFrom(req), id, priceID, mgmt.ModelPriceInput{
 			ProviderModelID: modelID, Currency: input.Currency, InputPrice: input.InputPrice,
-			OutputPrice: input.OutputPrice, CachedInputPrice: input.CachedInputPrice, EffectiveAt: input.EffectiveAt,
+			OutputPrice: input.OutputPrice, CachedInputPrice: input.CachedInputPrice,
+			CacheCreationInputPrice: input.CacheCreationInputPrice, EffectiveAt: input.EffectiveAt,
 		}, requestMeta(req))
 		adminResult(w, req, http.StatusOK, data, err)
 	})

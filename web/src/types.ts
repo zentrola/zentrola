@@ -147,6 +147,8 @@ export interface ModelPrice {
   inputPrice: string
   outputPrice: string
   cachedInputPrice: string
+  /** 为 null 时未配置缓存写入单价，核算按普通输入单价计费。 */
+  cacheCreationInputPrice: string | null
   effectiveAt: string
   createdAt: string
 }
@@ -414,6 +416,7 @@ export interface UsageCostSummary {
   successful: number
   inputTokens: number
   cachedInputTokens: number
+  cacheCreationInputTokens: number
   outputTokens: number
   rated: number
   shared: number
@@ -442,6 +445,7 @@ export interface UsageCost {
   latencyMs: number
   inputTokens: number | null
   cachedInputTokens: number | null
+  cacheCreationInputTokens: number | null
   outputTokens: number | null
   billingType: BillingType
   ratingStatus: UsageCostRatingStatus
@@ -458,9 +462,11 @@ export interface UsageCostRating {
   priceEffectiveAt: string
   inputPrice: string
   cachedInputPrice: string
+  cacheCreationInputPrice: string | null
   outputPrice: string
   inputCost: string
   cachedInputCost: string
+  cacheCreationInputCost: string
   outputCost: string
   totalCost: string
   currency: BillingCurrency

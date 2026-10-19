@@ -17,15 +17,17 @@ import (
 var priceDecimal = regexp.MustCompile(`^(0|[1-9][0-9]{0,11})(\.[0-9]{1,8})?$`)
 
 type ModelPrice struct {
-	ID                   int64     `json:"id,string"`
-	ProviderCredentialID int64     `json:"providerCredentialId,string"`
-	ProviderModelID      int64     `json:"providerModelId,string"`
-	Currency             string    `json:"currency"`
-	InputPrice           string    `json:"inputPrice"`
-	OutputPrice          string    `json:"outputPrice"`
-	CachedInputPrice     string    `json:"cachedInputPrice"`
-	EffectiveAt          time.Time `json:"effectiveAt"`
-	CreatedAt            time.Time `json:"createdAt"`
+	ID                   int64  `json:"id,string"`
+	ProviderCredentialID int64  `json:"providerCredentialId,string"`
+	ProviderModelID      int64  `json:"providerModelId,string"`
+	Currency             string `json:"currency"`
+	InputPrice           string `json:"inputPrice"`
+	OutputPrice          string `json:"outputPrice"`
+	CachedInputPrice     string `json:"cachedInputPrice"`
+	// CacheCreationInputPrice 为 nil 表示未配置缓存写入单价，核算时按普通输入单价计费。
+	CacheCreationInputPrice *string   `json:"cacheCreationInputPrice"`
+	EffectiveAt             time.Time `json:"effectiveAt"`
+	CreatedAt               time.Time `json:"createdAt"`
 }
 
 type SubscriptionPrice struct {
@@ -50,7 +52,9 @@ type ModelPriceInput struct {
 	InputPrice       string
 	OutputPrice      string
 	CachedInputPrice string
-	EffectiveAt      time.Time
+	// CacheCreationInputPrice 为 nil 表示不配置缓存写入单价。
+	CacheCreationInputPrice *string
+	EffectiveAt             time.Time
 }
 
 type SubscriptionPriceInput struct {
@@ -98,7 +102,15 @@ func findModelPrice(prices []ModelPrice, credentialID, modelID, priceID int64) *
 func sameModelPrice(left ModelPrice, input ModelPriceInput) bool {
 	return left.Currency == input.Currency && left.InputPrice == input.InputPrice &&
 		left.OutputPrice == input.OutputPrice && left.CachedInputPrice == input.CachedInputPrice &&
+		sameOptionalPrice(left.CacheCreationInputPrice, input.CacheCreationInputPrice) &&
 		left.EffectiveAt.Equal(input.EffectiveAt)
+}
+
+func sameOptionalPrice(left, right *string) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
 }
 
 func findSubscriptionPrice(prices []SubscriptionPrice, credentialID, priceID int64) *SubscriptionPrice {
@@ -136,10 +148,27 @@ func normalizePriceDecimal(value string) string {
 	return value
 }
 
+func normalizeOptionalPriceDecimal(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	normalized := normalizePriceDecimal(*value)
+	return &normalized
+}
+
+func (input *ModelPriceInput) normalize() {
+	input.InputPrice = normalizePriceDecimal(input.InputPrice)
+	input.OutputPrice = normalizePriceDecimal(input.OutputPrice)
+	input.CachedInputPrice = normalizePriceDecimal(input.CachedInputPrice)
+	input.CacheCreationInputPrice = normalizeOptionalPriceDecimal(input.CacheCreationInputPrice)
+}
+
 func (input ModelPriceInput) valid() bool {
 	return input.ProviderModelID > 0 && validPriceCurrency(input.Currency) &&
 		priceDecimal.MatchString(input.InputPrice) && priceDecimal.MatchString(input.OutputPrice) &&
-		priceDecimal.MatchString(input.CachedInputPrice) && validPriceDate(input.EffectiveAt)
+		priceDecimal.MatchString(input.CachedInputPrice) &&
+		(input.CacheCreationInputPrice == nil || priceDecimal.MatchString(*input.CacheCreationInputPrice)) &&
+		validPriceDate(input.EffectiveAt)
 }
 
 func validPriceDate(value time.Time) bool {
@@ -190,9 +219,7 @@ func (s *PriceService) SaveModelPrice(ctx context.Context, actor admin.Identity,
 	if credentialID <= 0 || !input.valid() {
 		return saved, appsec.ErrInvalidArgument
 	}
-	input.InputPrice = normalizePriceDecimal(input.InputPrice)
-	input.OutputPrice = normalizePriceDecimal(input.OutputPrice)
-	input.CachedInputPrice = normalizePriceDecimal(input.CachedInputPrice)
+	input.normalize()
 	if s == nil || dependencyMissing(s.store) {
 		return saved, appsec.ErrUnavailable
 	}
@@ -229,8 +256,7 @@ func (s *PriceService) SaveModelPrice(ctx context.Context, actor admin.Identity,
 				continue
 			}
 			if price.EffectiveAt.Equal(input.EffectiveAt) {
-				if price.Currency == input.Currency && price.InputPrice == input.InputPrice &&
-					price.OutputPrice == input.OutputPrice && price.CachedInputPrice == input.CachedInputPrice {
+				if sameModelPrice(*price, input) {
 					saved = *price
 					return nil
 				}
@@ -247,7 +273,8 @@ func (s *PriceService) SaveModelPrice(ctx context.Context, actor admin.Identity,
 		at := businessTime(s.now)
 		saved = ModelPrice{ID: id, ProviderCredentialID: credentialID, ProviderModelID: input.ProviderModelID,
 			Currency: input.Currency, InputPrice: input.InputPrice, OutputPrice: input.OutputPrice,
-			CachedInputPrice: input.CachedInputPrice, EffectiveAt: input.EffectiveAt.UTC(), CreatedAt: at}
+			CachedInputPrice: input.CachedInputPrice, CacheCreationInputPrice: input.CacheCreationInputPrice,
+			EffectiveAt: input.EffectiveAt.UTC(), CreatedAt: at}
 		if err := rejectModelPriceHistoryOverride(ctx, writer, saved); err != nil {
 			return err
 		}
@@ -269,9 +296,7 @@ func (s *PriceService) UpdateModelPrice(ctx context.Context, actor admin.Identit
 	if credentialID <= 0 || priceID <= 0 || !input.valid() {
 		return saved, appsec.ErrInvalidArgument
 	}
-	input.InputPrice = normalizePriceDecimal(input.InputPrice)
-	input.OutputPrice = normalizePriceDecimal(input.OutputPrice)
-	input.CachedInputPrice = normalizePriceDecimal(input.CachedInputPrice)
+	input.normalize()
 	if s == nil || dependencyMissing(s.store) {
 		return saved, appsec.ErrUnavailable
 	}
@@ -316,6 +341,7 @@ func (s *PriceService) UpdateModelPrice(ctx context.Context, actor admin.Identit
 		saved.InputPrice = input.InputPrice
 		saved.OutputPrice = input.OutputPrice
 		saved.CachedInputPrice = input.CachedInputPrice
+		saved.CacheCreationInputPrice = input.CacheCreationInputPrice
 		saved.EffectiveAt = input.EffectiveAt.UTC()
 		if effectiveChanged {
 			if err := rejectModelPriceHistoryOverride(ctx, writer, saved); err != nil {

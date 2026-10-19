@@ -32,50 +32,54 @@ type UsageCostTotal struct {
 }
 
 type UsageCostSummary struct {
-	From              time.Time        `json:"from"`
-	To                time.Time        `json:"to"`
-	Requests          int64            `json:"requests"`
-	Attempts          int64            `json:"attempts"`
-	Successful        int64            `json:"successful"`
-	InputTokens       int64            `json:"inputTokens"`
-	CachedInputTokens int64            `json:"cachedInputTokens"`
-	OutputTokens      int64            `json:"outputTokens"`
-	Rated             int64            `json:"rated"`
-	Shared            int64            `json:"shared"`
-	Unrated           int64            `json:"unrated"`
-	Totals            []UsageCostTotal `json:"totals"`
+	From              time.Time `json:"from"`
+	To                time.Time `json:"to"`
+	Requests          int64     `json:"requests"`
+	Attempts          int64     `json:"attempts"`
+	Successful        int64     `json:"successful"`
+	InputTokens       int64     `json:"inputTokens"`
+	CachedInputTokens int64     `json:"cachedInputTokens"`
+	// CacheCreationInputTokens 为缓存写入 Token 合计，包含在 InputTokens 中。
+	CacheCreationInputTokens int64            `json:"cacheCreationInputTokens"`
+	OutputTokens             int64            `json:"outputTokens"`
+	Rated                    int64            `json:"rated"`
+	Shared                   int64            `json:"shared"`
+	Unrated                  int64            `json:"unrated"`
+	Totals                   []UsageCostTotal `json:"totals"`
 }
 
 type UsageCostRow struct {
-	ID                int64      `json:"id,string"`
-	RequestID         string     `json:"requestId"`
-	AttemptNo         int64      `json:"attemptNo"`
-	PrincipalID       int64      `json:"principalId,string"`
-	PrincipalName     string     `json:"principalName"`
-	PrincipalType     string     `json:"principalType"`
-	ModelID           int64      `json:"modelId,string"`
-	ModelName         string     `json:"modelName"`
-	ProviderID        int64      `json:"providerId,string"`
-	ProviderName      string     `json:"providerName"`
-	ProviderModelID   int64      `json:"providerModelId,string"`
-	ResourceID        int64      `json:"resourceId,string"`
-	ResourceName      string     `json:"resourceName"`
-	ClientProtocol    string     `json:"clientProtocol"`
-	Status            string     `json:"status"`
-	ErrorType         *string    `json:"errorType"`
-	StartedAt         time.Time  `json:"startedAt"`
-	CompletedAt       time.Time  `json:"completedAt"`
-	LatencyMS         int64      `json:"latencyMs"`
-	InputTokens       *int64     `json:"inputTokens"`
-	CachedInputTokens *int64     `json:"cachedInputTokens"`
-	OutputTokens      *int64     `json:"outputTokens"`
-	BillingType       string     `json:"billingType"`
-	RatingStatus      string     `json:"ratingStatus"`
-	RatingID          *int64     `json:"ratingId,string"`
-	RatingRevision    *int32     `json:"ratingRevision"`
-	Currency          *string    `json:"currency"`
-	TotalCost         *string    `json:"totalCost"`
-	RatedAt           *time.Time `json:"ratedAt"`
+	ID                int64     `json:"id,string"`
+	RequestID         string    `json:"requestId"`
+	AttemptNo         int64     `json:"attemptNo"`
+	PrincipalID       int64     `json:"principalId,string"`
+	PrincipalName     string    `json:"principalName"`
+	PrincipalType     string    `json:"principalType"`
+	ModelID           int64     `json:"modelId,string"`
+	ModelName         string    `json:"modelName"`
+	ProviderID        int64     `json:"providerId,string"`
+	ProviderName      string    `json:"providerName"`
+	ProviderModelID   int64     `json:"providerModelId,string"`
+	ResourceID        int64     `json:"resourceId,string"`
+	ResourceName      string    `json:"resourceName"`
+	ClientProtocol    string    `json:"clientProtocol"`
+	Status            string    `json:"status"`
+	ErrorType         *string   `json:"errorType"`
+	StartedAt         time.Time `json:"startedAt"`
+	CompletedAt       time.Time `json:"completedAt"`
+	LatencyMS         int64     `json:"latencyMs"`
+	InputTokens       *int64    `json:"inputTokens"`
+	CachedInputTokens *int64    `json:"cachedInputTokens"`
+	// CacheCreationInputTokens 为缓存写入 Token 数，包含在 InputTokens 中；nil 表示上游未区分。
+	CacheCreationInputTokens *int64     `json:"cacheCreationInputTokens"`
+	OutputTokens             *int64     `json:"outputTokens"`
+	BillingType              string     `json:"billingType"`
+	RatingStatus             string     `json:"ratingStatus"`
+	RatingID                 *int64     `json:"ratingId,string"`
+	RatingRevision           *int32     `json:"ratingRevision"`
+	Currency                 *string    `json:"currency"`
+	TotalCost                *string    `json:"totalCost"`
+	RatedAt                  *time.Time `json:"ratedAt"`
 }
 
 type UsageCostPage struct {
@@ -90,13 +94,16 @@ type UsageCostRating struct {
 	PriceEffectiveAt time.Time `json:"priceEffectiveAt"`
 	InputPrice       string    `json:"inputPrice"`
 	CachedInputPrice string    `json:"cachedInputPrice"`
-	OutputPrice      string    `json:"outputPrice"`
-	InputCost        string    `json:"inputCost"`
-	CachedInputCost  string    `json:"cachedInputCost"`
-	OutputCost       string    `json:"outputCost"`
-	TotalCost        string    `json:"totalCost"`
-	Currency         string    `json:"currency"`
-	CreatedAt        time.Time `json:"createdAt"`
+	// CacheCreationInputPrice 为 nil 表示价格未配置缓存写入单价，按普通输入单价核算。
+	CacheCreationInputPrice *string   `json:"cacheCreationInputPrice"`
+	OutputPrice             string    `json:"outputPrice"`
+	InputCost               string    `json:"inputCost"`
+	CachedInputCost         string    `json:"cachedInputCost"`
+	CacheCreationInputCost  string    `json:"cacheCreationInputCost"`
+	OutputCost              string    `json:"outputCost"`
+	TotalCost               string    `json:"totalCost"`
+	Currency                string    `json:"currency"`
+	CreatedAt               time.Time `json:"createdAt"`
 }
 
 type SubscriptionAllocation struct {

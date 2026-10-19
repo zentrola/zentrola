@@ -48,6 +48,8 @@ const modelForm = reactive({
   inputPrice: '',
   outputPrice: '',
   cachedInputPrice: '',
+  // 留空表示不配置缓存写入单价，核算按普通输入单价计费。
+  cacheCreationInputPrice: '',
   effectiveDate: '',
 })
 const subscriptionForm = reactive({
@@ -132,6 +134,7 @@ function editModel(mapping: ProviderMapping, price?: ModelPrice) {
   modelForm.inputPrice = price?.inputPrice ?? ''
   modelForm.outputPrice = price?.outputPrice ?? ''
   modelForm.cachedInputPrice = price?.cachedInputPrice ?? ''
+  modelForm.cacheCreationInputPrice = price?.cacheCreationInputPrice ?? ''
   modelForm.effectiveDate = price?.effectiveAt.slice(0, 10) ?? ''
   error.value = ''
 }
@@ -207,7 +210,9 @@ async function saveModel() {
   if (
     ![modelForm.inputPrice, modelForm.outputPrice, modelForm.cachedInputPrice].every((value) =>
       pricePattern.test(value),
-    )
+    ) ||
+    (modelForm.cacheCreationInputPrice !== '' &&
+      !pricePattern.test(modelForm.cacheCreationInputPrice))
   ) {
     error.value = t('resources.pricing.invalidAmount')
     return
@@ -228,6 +233,7 @@ async function saveModel() {
         inputPrice: modelForm.inputPrice,
         outputPrice: modelForm.outputPrice,
         cachedInputPrice: modelForm.cachedInputPrice,
+        cacheCreationInputPrice: modelForm.cacheCreationInputPrice || null,
         effectiveAt: `${modelForm.effectiveDate}T00:00:00Z`,
       },
     )
@@ -390,7 +396,8 @@ onMounted(load)
                   {{ currencySymbol(currentModelPrice(mapping.id)!.currency) }}
                   {{ currentModelPrice(mapping.id)!.inputPrice }} /
                   {{ currentModelPrice(mapping.id)!.outputPrice }} /
-                  {{ currentModelPrice(mapping.id)!.cachedInputPrice }}
+                  {{ currentModelPrice(mapping.id)!.cachedInputPrice }} /
+                  {{ currentModelPrice(mapping.id)!.cacheCreationInputPrice ?? '-' }}
                 </span>
                 <span v-else class="price-model-current is-empty">{{
                   t('resources.pricing.notConfigured')
@@ -448,8 +455,8 @@ onMounted(load)
                 <time :datetime="price.effectiveAt">{{ utcDateOnly(price.effectiveAt) }}</time>
                 <span class="price-model-values">
                   {{ currencySymbol(price.currency) }} {{ price.inputPrice }} /
-                  {{ price.outputPrice }} /
-                  {{ price.cachedInputPrice }}
+                  {{ price.outputPrice }} / {{ price.cachedInputPrice }} /
+                  {{ price.cacheCreationInputPrice ?? '-' }}
                 </span>
                 <span v-if="isScheduled(price)" class="price-scheduled-badge">{{
                   t('resources.pricing.scheduled')
@@ -640,6 +647,16 @@ onMounted(load)
             v-model.trim="modelForm.cachedInputPrice"
             inputmode="decimal"
             required
+            :disabled="saving"
+          />
+        </label>
+        <label>
+          <span>{{ t('resources.pricing.cacheCreationInput') }}</span>
+          <input
+            v-model.trim="modelForm.cacheCreationInputPrice"
+            inputmode="decimal"
+            :placeholder="t('resources.pricing.cacheCreationInputPlaceholder')"
+            :title="t('resources.pricing.cacheCreationInputHint')"
             :disabled="saving"
           />
         </label>

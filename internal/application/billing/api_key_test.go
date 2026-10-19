@@ -32,6 +32,41 @@ func TestRatePendingAPIKeyUsageCreatesNextRevision(t *testing.T) {
 	}
 }
 
+func TestRatePendingAPIKeyUsageSnapshotsCacheCreation(t *testing.T) {
+	startedAt := time.Date(2026, 9, 15, 1, 2, 3, 0, time.UTC)
+	tests := []struct {
+		name, cacheCreationPrice, cacheCreationCost, totalCost string
+	}{
+		{name: "configured price", cacheCreationPrice: "3.75", cacheCreationCost: "0.00015", totalCost: "0.000456"},
+		{name: "fallback to input price", cacheCreationPrice: "", cacheCreationCost: "0.00012", totalCost: "0.000426"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store := &billingStoreStub{ratingCandidates: []UsageRatingCandidate{{
+				UsageRecordID: 10, PrincipalID: 20, CredentialID: 30, ProviderModelID: 40,
+				ModelPriceID: 50, UsageStartedAt: startedAt,
+				InputTokens: 110, CachedInputTokens: 20, CacheCreationInputTokens: 40, OutputTokens: 10,
+				InputPrice: "3", CachedInputPrice: "0.3", CacheCreationInputPrice: test.cacheCreationPrice,
+				OutputPrice: "15", Currency: "USD",
+			}}}
+			service := New(store, &billingIDs{next: 100})
+			service.now = func() time.Time { return startedAt.Add(time.Minute) }
+			if _, err := service.RatePendingAPIKeyUsage(context.Background(), 100); err != nil {
+				t.Fatal(err)
+			}
+			if len(store.ratings) != 1 {
+				t.Fatalf("ratings=%+v", store.ratings)
+			}
+			rating := store.ratings[0]
+			if rating.CacheCreationInputTokens != 40 || rating.CacheCreationInputPrice != test.cacheCreationPrice ||
+				rating.InputCost != "0.00015" || rating.CacheCreationInputCost != test.cacheCreationCost ||
+				rating.TotalCost != test.totalCost {
+				t.Fatalf("unexpected rating: %+v", rating)
+			}
+		})
+	}
+}
+
 func TestSettleDueAPIKeyCreatesMonthlyCharge(t *testing.T) {
 	period := APIKeyPeriod{
 		CredentialID: 30, Currency: "CNY",

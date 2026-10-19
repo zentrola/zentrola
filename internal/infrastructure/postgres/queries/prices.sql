@@ -1,6 +1,7 @@
 -- name: ManageModelPrices :many
 SELECT id, provider_credential_id, provider_model_id, currency,
-    input_price, output_price, cached_input_price, effective_at, created_at
+    input_price, output_price, cached_input_price, cache_creation_input_price,
+    effective_at, created_at
 FROM provider_credential_model_price
 WHERE provider_credential_id = $1
 ORDER BY provider_model_id, effective_at DESC, id DESC;
@@ -15,12 +16,12 @@ ORDER BY effective_at DESC, id DESC;
 -- name: ManageInsertModelPrice :exec
 INSERT INTO provider_credential_model_price (
     id, provider_credential_id, provider_model_id, currency,
-    input_price, output_price, cached_input_price, effective_at,
-    created_by, created_at
+    input_price, output_price, cached_input_price, cache_creation_input_price,
+    effective_at, created_by, created_at
 ) VALUES (
     sqlc.arg(id), sqlc.arg(provider_credential_id), sqlc.arg(provider_model_id),
     sqlc.arg(currency), sqlc.arg(input_price), sqlc.arg(output_price),
-    sqlc.arg(cached_input_price), sqlc.arg(effective_at),
+    sqlc.arg(cached_input_price), sqlc.narg(cache_creation_input_price), sqlc.arg(effective_at),
     sqlc.arg(created_by), sqlc.arg(created_at)
 );
 
@@ -30,6 +31,7 @@ SET currency = sqlc.arg(currency),
     input_price = sqlc.arg(input_price),
     output_price = sqlc.arg(output_price),
     cached_input_price = sqlc.arg(cached_input_price),
+    cache_creation_input_price = sqlc.narg(cache_creation_input_price),
     effective_at = sqlc.arg(effective_at)
 WHERE id = sqlc.arg(id)
   AND provider_credential_id = sqlc.arg(provider_credential_id)

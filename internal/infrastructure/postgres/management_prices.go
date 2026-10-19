@@ -31,6 +31,14 @@ func priceNumber(value pgtype.Numeric) string {
 	return formatted
 }
 
+// optionalPriceNumeric 将空字符串映射为 NULL，用于可选的缓存写入单价。
+func optionalPriceNumeric(value string) pgtype.Numeric {
+	if value == "" {
+		return pgtype.Numeric{}
+	}
+	return pgNumeric(&value)
+}
+
 func priceTime(value time.Time) pgtype.Timestamptz {
 	return pgtype.Timestamptz{Time: value.UTC(), Valid: true}
 }
@@ -46,7 +54,8 @@ func (s *managementSession) ModelPrices(ctx context.Context, credentialID int64)
 			ID: row.ID, ProviderCredentialID: row.ProviderCredentialID, ProviderModelID: row.ProviderModelID,
 			Currency: row.Currency, InputPrice: priceNumber(row.InputPrice),
 			OutputPrice: priceNumber(row.OutputPrice), CachedInputPrice: priceNumber(row.CachedInputPrice),
-			EffectiveAt: row.EffectiveAt.Time.UTC(), CreatedAt: row.CreatedAt.Time.UTC(),
+			CacheCreationInputPrice: optionalPriceNumber(row.CacheCreationInputPrice),
+			EffectiveAt:             row.EffectiveAt.Time.UTC(), CreatedAt: row.CreatedAt.Time.UTC(),
 		})
 	}
 	return prices, nil
@@ -76,7 +85,8 @@ func (s *managementSession) InsertModelPrice(ctx context.Context, price mgmt.Mod
 		ID: price.ID, ProviderCredentialID: price.ProviderCredentialID,
 		ProviderModelID: price.ProviderModelID, Currency: price.Currency,
 		InputPrice: input, OutputPrice: output, CachedInputPrice: cached,
-		EffectiveAt: priceTime(price.EffectiveAt), CreatedBy: actor, CreatedAt: priceTime(price.CreatedAt),
+		CacheCreationInputPrice: pgNumeric(price.CacheCreationInputPrice),
+		EffectiveAt:             priceTime(price.EffectiveAt), CreatedBy: actor, CreatedAt: priceTime(price.CreatedAt),
 	})
 }
 
@@ -86,7 +96,7 @@ func (s *managementSession) UpdateModelPrice(ctx context.Context, price mgmt.Mod
 	cached := pgNumeric(&price.CachedInputPrice)
 	count, err := s.q.ManageUpdateModelPrice(ctx, dbgen.ManageUpdateModelPriceParams{
 		Currency: price.Currency, InputPrice: input, OutputPrice: output, CachedInputPrice: cached,
-		EffectiveAt: priceTime(price.EffectiveAt), ID: price.ID,
+		CacheCreationInputPrice: pgNumeric(price.CacheCreationInputPrice), EffectiveAt: priceTime(price.EffectiveAt), ID: price.ID,
 		ProviderCredentialID: price.ProviderCredentialID, ProviderModelID: price.ProviderModelID,
 	})
 	return count == 1, err

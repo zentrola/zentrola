@@ -21,18 +21,21 @@ type UsageRatingCandidate struct {
 	LatestRatingID                                                          int64
 	LatestRevision                                                          int32
 	UsageStartedAt                                                          time.Time
-	InputTokens, CachedInputTokens, OutputTokens                            int64
+	InputTokens, CachedInputTokens, CacheCreationInputTokens, OutputTokens  int64
 	InputPrice, CachedInputPrice, OutputPrice, Currency                     string
+	// CacheCreationInputPrice 为空表示价格未配置缓存写入单价，按普通输入单价计费。
+	CacheCreationInputPrice string
 }
 
 type UsageRating struct {
-	ID, UsageRecordID, SupersedesRatingID                       int64
-	Revision                                                    int32
-	PrincipalID, CredentialID, ProviderModelID, ModelPriceID    int64
-	UsageStartedAt, CreatedAt                                   time.Time
-	InputTokens, CachedInputTokens, OutputTokens                int64
-	InputPrice, CachedInputPrice, OutputPrice                   string
-	InputCost, CachedInputCost, OutputCost, TotalCost, Currency string
+	ID, UsageRecordID, SupersedesRatingID                                  int64
+	Revision                                                               int32
+	PrincipalID, CredentialID, ProviderModelID, ModelPriceID               int64
+	UsageStartedAt, CreatedAt                                              time.Time
+	InputTokens, CachedInputTokens, CacheCreationInputTokens, OutputTokens int64
+	InputPrice, CachedInputPrice, CacheCreationInputPrice, OutputPrice     string
+	InputCost, CachedInputCost, CacheCreationInputCost, OutputCost         string
+	TotalCost, Currency                                                    string
 }
 
 type APIKeyPeriod struct {
@@ -141,8 +144,8 @@ func (s *Service) rateScan(ctx context.Context, scan RatingScan, pageSize int32,
 
 func (s *Service) rateCandidate(ctx context.Context, candidate UsageRatingCandidate) (bool, error) {
 	cost, err := domain.RateAPIKeyUsage(
-		candidate.InputTokens, candidate.CachedInputTokens, candidate.OutputTokens,
-		candidate.InputPrice, candidate.CachedInputPrice, candidate.OutputPrice,
+		candidate.InputTokens, candidate.CachedInputTokens, candidate.CacheCreationInputTokens, candidate.OutputTokens,
+		candidate.InputPrice, candidate.CachedInputPrice, candidate.CacheCreationInputPrice, candidate.OutputPrice,
 	)
 	if err != nil {
 		return false, err
@@ -157,10 +160,11 @@ func (s *Service) rateCandidate(ctx context.Context, candidate UsageRatingCandid
 		CredentialID: candidate.CredentialID, ProviderModelID: candidate.ProviderModelID,
 		ModelPriceID: candidate.ModelPriceID, UsageStartedAt: candidate.UsageStartedAt.UTC(),
 		CreatedAt: s.now().UTC(), InputTokens: candidate.InputTokens,
-		CachedInputTokens: candidate.CachedInputTokens, OutputTokens: candidate.OutputTokens,
-		InputPrice: candidate.InputPrice, CachedInputPrice: candidate.CachedInputPrice,
-		OutputPrice: candidate.OutputPrice, InputCost: cost.Input,
-		CachedInputCost: cost.CachedInput, OutputCost: cost.Output, TotalCost: cost.Total,
+		CachedInputTokens: candidate.CachedInputTokens, CacheCreationInputTokens: candidate.CacheCreationInputTokens,
+		OutputTokens: candidate.OutputTokens, InputPrice: candidate.InputPrice,
+		CachedInputPrice: candidate.CachedInputPrice, CacheCreationInputPrice: candidate.CacheCreationInputPrice,
+		OutputPrice: candidate.OutputPrice, InputCost: cost.Input, CachedInputCost: cost.CachedInput,
+		CacheCreationInputCost: cost.CacheCreationInput, OutputCost: cost.Output, TotalCost: cost.Total,
 		Currency: candidate.Currency,
 	}
 	return s.store.CreateUsageRating(ctx, rating)

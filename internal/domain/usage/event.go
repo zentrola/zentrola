@@ -25,4 +25,7 @@ type Attempt struct {
 	Status                                           Status
 	ErrorType                                        string
 	InputTokens, OutputTokens, CachedInputTokens     *int64
+	// CacheCreationInputTokens 为缓存写入 Token 数，包含在 InputTokens 中；
+	// nil 表示上游未返回或协议不区分缓存写入。
+	CacheCreationInputTokens *int64
 }

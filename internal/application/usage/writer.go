@@ -78,6 +78,7 @@ func (w *Writer) Submit(event domain.Event) error {
 		source.InputTokens = clone(source.InputTokens)
 		source.OutputTokens = clone(source.OutputTokens)
 		source.CachedInputTokens = clone(source.CachedInputTokens)
+		source.CacheCreationInputTokens = clone(source.CacheCreationInputTokens)
 		source.ID = 0
 		return source
 	}

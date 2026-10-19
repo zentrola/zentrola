@@ -294,16 +294,25 @@ type SaveModelPriceRequest struct {
 	InputPrice       string `json:"inputPrice" binding:"required"`
 	OutputPrice      string `json:"outputPrice" binding:"required"`
 	CachedInputPrice string `json:"cachedInputPrice" binding:"required"`
+	// CacheCreationInputPrice 是缓存写入每百万 Token 的价格；省略、null 或空字符串表示不配置，
+	// 核算时按普通输入单价计费。
+	CacheCreationInputPrice *string `json:"cacheCreationInputPrice" extensions:"x-nullable"`
 	// EffectiveAt 是以 Z 结尾的 UTC 日期起点。
 	EffectiveAt time.Time `json:"effectiveAt" binding:"required" example:"2026-10-01T00:00:00Z"`
 }
 
-func (*SaveModelPriceRequest) Normalize() {}
+func (r *SaveModelPriceRequest) Normalize() {
+	if r.CacheCreationInputPrice != nil && strings.TrimSpace(*r.CacheCreationInputPrice) == "" {
+		r.CacheCreationInputPrice = nil
+	}
+}
 func (r SaveModelPriceRequest) Valid() bool {
 	return (r.Currency == "CNY" || r.Currency == "USD") &&
 		credentialPriceDecimal.MatchString(r.InputPrice) &&
 		credentialPriceDecimal.MatchString(r.OutputPrice) &&
-		credentialPriceDecimal.MatchString(r.CachedInputPrice) && validUTCDateStart(r.EffectiveAt)
+		credentialPriceDecimal.MatchString(r.CachedInputPrice) &&
+		(r.CacheCreationInputPrice == nil || credentialPriceDecimal.MatchString(*r.CacheCreationInputPrice)) &&
+		validUTCDateStart(r.EffectiveAt)
 }
 
 func validUTCDateStart(value time.Time) bool {

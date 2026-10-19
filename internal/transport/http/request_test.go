@@ -267,6 +267,43 @@ func TestCredentialPriceRequestsValidateCurrencyPrecisionAndUTC(t *testing.T) {
 	}
 }
 
+func TestModelPriceRequestCacheCreationPriceIsOptional(t *testing.T) {
+	tests := []struct {
+		name  string
+		field string
+		want  *string
+		valid bool
+	}{
+		{name: "omitted", field: "", want: nil, valid: true},
+		{name: "null", field: `,"cacheCreationInputPrice":null`, want: nil, valid: true},
+		{name: "blank", field: `,"cacheCreationInputPrice":"  "`, want: nil, valid: true},
+		{name: "configured", field: `,"cacheCreationInputPrice":"3.75"`, want: stringPointer("3.75"), valid: true},
+		{name: "excess precision", field: `,"cacheCreationInputPrice":"1.123456789"`, valid: false},
+		{name: "negative", field: `,"cacheCreationInputPrice":"-1"`, valid: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPut, "/api/v1/resources/1/prices/models/2", strings.NewReader(
+				`{"currency":"USD","inputPrice":"3","outputPrice":"15","cachedInputPrice":"0.3","effectiveAt":"2026-10-01T00:00:00Z"`+test.field+`}`,
+			))
+			model, ok := decodeRequest[SaveModelPriceRequest](recorder, request)
+			if ok != test.valid {
+				t.Fatalf("accepted=%v want=%v status=%d body=%s", ok, test.valid, recorder.Code, recorder.Body.String())
+			}
+			if !ok {
+				return
+			}
+			got := model.CacheCreationInputPrice
+			if (got == nil) != (test.want == nil) || got != nil && *got != *test.want {
+				t.Fatalf("cacheCreationInputPrice=%v want=%v", got, test.want)
+			}
+		})
+	}
+}
+
+func stringPointer(value string) *string { return &value }
+
 func TestMissingRequiredParameterReturnsField(t *testing.T) {
 	t.Run("top level", func(t *testing.T) {
 		assertMissingParameter[UpdateStatusRequest](t, http.MethodPatch, "/api/v1/models/1/status", `{}`, "status")

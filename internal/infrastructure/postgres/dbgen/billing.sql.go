@@ -331,11 +331,13 @@ WITH raw AS (
            price.currency AS effective_currency,
            price.input_price AS effective_input_price,
            price.cached_input_price AS effective_cached_input_price,
+           price.cache_creation_input_price AS effective_cache_creation_input_price,
            price.output_price AS effective_output_price,
            rating.model_price_id,
            rating.currency AS rating_currency,
            rating.input_price AS rating_input_price,
            rating.cached_input_price AS rating_cached_input_price,
+           rating.cache_creation_input_price AS rating_cache_creation_input_price,
            rating.output_price AS rating_output_price,
            rating.total_cost
     FROM usage_record usage
@@ -344,7 +346,7 @@ WITH raw AS (
       ON credential.id = usage.provider_credential_id
      AND credential.auth_type = 'API_KEY'
     LEFT JOIN LATERAL (
-        SELECT candidate.id, candidate.provider_credential_id, candidate.provider_model_id, candidate.currency, candidate.input_price, candidate.output_price, candidate.cached_input_price, candidate.effective_at, candidate.created_by, candidate.created_at
+        SELECT candidate.id, candidate.provider_credential_id, candidate.provider_model_id, candidate.currency, candidate.input_price, candidate.output_price, candidate.cached_input_price, candidate.effective_at, candidate.created_by, candidate.created_at, candidate.cache_creation_input_price
         FROM provider_credential_model_price candidate
         WHERE candidate.provider_credential_id = usage.provider_credential_id
           AND candidate.provider_model_id = usage.provider_model_id
@@ -353,7 +355,7 @@ WITH raw AS (
         LIMIT 1
     ) price ON TRUE
     LEFT JOIN LATERAL (
-        SELECT candidate.id, candidate.usage_record_id, candidate.revision, candidate.supersedes_rating_id, candidate.principal_id, candidate.provider_credential_id, candidate.provider_model_id, candidate.model_price_id, candidate.usage_started_at, candidate.input_tokens, candidate.cached_input_tokens, candidate.output_tokens, candidate.input_price, candidate.cached_input_price, candidate.output_price, candidate.input_cost, candidate.cached_input_cost, candidate.output_cost, candidate.total_cost, candidate.currency, candidate.created_at
+        SELECT candidate.id, candidate.usage_record_id, candidate.revision, candidate.supersedes_rating_id, candidate.principal_id, candidate.provider_credential_id, candidate.provider_model_id, candidate.model_price_id, candidate.usage_started_at, candidate.input_tokens, candidate.cached_input_tokens, candidate.output_tokens, candidate.input_price, candidate.cached_input_price, candidate.output_price, candidate.input_cost, candidate.cached_input_cost, candidate.output_cost, candidate.total_cost, candidate.currency, candidate.created_at, candidate.cache_creation_input_tokens, candidate.cache_creation_input_price, candidate.cache_creation_input_cost
         FROM usage_rating candidate
         WHERE candidate.usage_record_id = usage.id
         ORDER BY candidate.revision DESC, candidate.id DESC
@@ -376,8 +378,10 @@ WHERE input_tokens IS NOT NULL
   AND cached_input_tokens <= input_tokens
   AND effective_price_id IS NOT NULL
   AND billing_rating_matches_price(
-      model_price_id, rating_currency, rating_input_price, rating_cached_input_price, rating_output_price,
-      effective_price_id, effective_currency, effective_input_price, effective_cached_input_price, effective_output_price
+      model_price_id, rating_currency, rating_input_price, rating_cached_input_price,
+      rating_cache_creation_input_price, rating_output_price,
+      effective_price_id, effective_currency, effective_input_price, effective_cached_input_price,
+      effective_cache_creation_input_price, effective_output_price
   )
 GROUP BY principal_id, principal_name, principal_type, rating_currency
 ORDER BY tokens DESC, principal_id, rating_currency
@@ -844,7 +848,8 @@ INSERT INTO usage_rating (
     provider_credential_id, provider_model_id, model_price_id, usage_started_at,
     input_tokens, cached_input_tokens, output_tokens,
     input_price, cached_input_price, output_price,
-    input_cost, cached_input_cost, output_cost, total_cost, currency, created_at
+    input_cost, cached_input_cost, output_cost, total_cost, currency, created_at,
+    cache_creation_input_tokens, cache_creation_input_price, cache_creation_input_cost
 ) VALUES (
     $1, $2, $3, $4,
     $5, $6, $7,
@@ -852,33 +857,37 @@ INSERT INTO usage_rating (
     $11, $12, $13,
     $14, $15, $16,
     $17, $18, $19,
-    $20, $21
+    $20, $21, $22,
+    $23, $24
 )
 ON CONFLICT (usage_record_id, revision) DO NOTHING
 `
 
 type BillingInsertUsageRatingParams struct {
-	ID                   int64
-	UsageRecordID        int64
-	Revision             int32
-	SupersedesRatingID   *int64
-	PrincipalID          int64
-	ProviderCredentialID int64
-	ProviderModelID      int64
-	ModelPriceID         int64
-	UsageStartedAt       pgtype.Timestamptz
-	InputTokens          int64
-	CachedInputTokens    int64
-	OutputTokens         int64
-	InputPrice           pgtype.Numeric
-	CachedInputPrice     pgtype.Numeric
-	OutputPrice          pgtype.Numeric
-	InputCost            pgtype.Numeric
-	CachedInputCost      pgtype.Numeric
-	OutputCost           pgtype.Numeric
-	TotalCost            pgtype.Numeric
-	Currency             string
-	CreatedAt            pgtype.Timestamptz
+	ID                       int64
+	UsageRecordID            int64
+	Revision                 int32
+	SupersedesRatingID       *int64
+	PrincipalID              int64
+	ProviderCredentialID     int64
+	ProviderModelID          int64
+	ModelPriceID             int64
+	UsageStartedAt           pgtype.Timestamptz
+	InputTokens              int64
+	CachedInputTokens        int64
+	OutputTokens             int64
+	InputPrice               pgtype.Numeric
+	CachedInputPrice         pgtype.Numeric
+	OutputPrice              pgtype.Numeric
+	InputCost                pgtype.Numeric
+	CachedInputCost          pgtype.Numeric
+	OutputCost               pgtype.Numeric
+	TotalCost                pgtype.Numeric
+	Currency                 string
+	CreatedAt                pgtype.Timestamptz
+	CacheCreationInputTokens int64
+	CacheCreationInputPrice  pgtype.Numeric
+	CacheCreationInputCost   pgtype.Numeric
 }
 
 func (q *Queries) BillingInsertUsageRating(ctx context.Context, arg BillingInsertUsageRatingParams) (int64, error) {
@@ -904,6 +913,9 @@ func (q *Queries) BillingInsertUsageRating(ctx context.Context, arg BillingInser
 		arg.TotalCost,
 		arg.Currency,
 		arg.CreatedAt,
+		arg.CacheCreationInputTokens,
+		arg.CacheCreationInputPrice,
+		arg.CacheCreationInputCost,
 	)
 	if err != nil {
 		return 0, err
@@ -1001,8 +1013,8 @@ WITH stale AS (
      AND credential.auth_type = 'API_KEY'
     JOIN usage_rating rating
       ON rating.model_price_id = price.id
-     AND (rating.input_price, rating.cached_input_price, rating.output_price)
-         < (price.input_price, price.cached_input_price, price.output_price)
+     AND (rating.input_price, rating.cached_input_price, rating.output_price, COALESCE(rating.cache_creation_input_price, -1))
+         < (price.input_price, price.cached_input_price, price.output_price, COALESCE(price.cache_creation_input_price, -1))
     UNION ALL
     SELECT rating.id, rating.usage_record_id, rating.revision, rating.model_price_id
     FROM provider_credential_model_price price
@@ -1011,8 +1023,8 @@ WITH stale AS (
      AND credential.auth_type = 'API_KEY'
     JOIN usage_rating rating
       ON rating.model_price_id = price.id
-     AND (rating.input_price, rating.cached_input_price, rating.output_price)
-         > (price.input_price, price.cached_input_price, price.output_price)
+     AND (rating.input_price, rating.cached_input_price, rating.output_price, COALESCE(rating.cache_creation_input_price, -1))
+         > (price.input_price, price.cached_input_price, price.output_price, COALESCE(price.cache_creation_input_price, -1))
 )
 SELECT usage.id AS usage_record_id,
        usage.principal_id,
@@ -1021,11 +1033,13 @@ SELECT usage.id AS usage_record_id,
        usage.started_at AS usage_started_at,
        usage.input_tokens::bigint AS input_tokens,
        usage.cached_input_tokens::bigint AS cached_input_tokens,
+       COALESCE(usage.cache_creation_input_tokens, 0)::bigint AS cache_creation_input_tokens,
        usage.output_tokens::bigint AS output_tokens,
        price.id AS model_price_id,
        price.currency,
        price.input_price,
        price.cached_input_price,
+       price.cache_creation_input_price,
        price.output_price,
        stale.id AS latest_rating_id,
        stale.revision AS latest_revision
@@ -1053,26 +1067,29 @@ type BillingRepricedUsageCandidatesParams struct {
 }
 
 type BillingRepricedUsageCandidatesRow struct {
-	UsageRecordID        int64
-	PrincipalID          int64
-	ProviderCredentialID int64
-	ProviderModelID      int64
-	UsageStartedAt       pgtype.Timestamptz
-	InputTokens          int64
-	CachedInputTokens    int64
-	OutputTokens         int64
-	ModelPriceID         int64
-	Currency             string
-	InputPrice           pgtype.Numeric
-	CachedInputPrice     pgtype.Numeric
-	OutputPrice          pgtype.Numeric
-	LatestRatingID       int64
-	LatestRevision       int32
+	UsageRecordID            int64
+	PrincipalID              int64
+	ProviderCredentialID     int64
+	ProviderModelID          int64
+	UsageStartedAt           pgtype.Timestamptz
+	InputTokens              int64
+	CachedInputTokens        int64
+	CacheCreationInputTokens int64
+	OutputTokens             int64
+	ModelPriceID             int64
+	Currency                 string
+	InputPrice               pgtype.Numeric
+	CachedInputPrice         pgtype.Numeric
+	CacheCreationInputPrice  pgtype.Numeric
+	OutputPrice              pgtype.Numeric
+	LatestRatingID           int64
+	LatestRevision           int32
 }
 
 // 价格金额纠错后需要追加 revision 的调用。触发器禁止新价格覆盖已核算历史、禁止修改或删除
 // 被引用价格的结构，因此最新核算引用的价格版本始终是调用时的有效价格，只需查找价格快照与该
-// 价格当前金额不一致的最新核算；两个范围分支分别走价格快照索引，跳过快照一致的记录。
+// 价格当前金额不一致的最新核算；两个范围分支分别走价格快照索引，跳过快照一致的记录。未配置的
+// 缓存写入单价在两侧都映射为 -1，与索引表达式一致。
 func (q *Queries) BillingRepricedUsageCandidates(ctx context.Context, arg BillingRepricedUsageCandidatesParams) ([]BillingRepricedUsageCandidatesRow, error) {
 	rows, err := q.db.Query(ctx, billingRepricedUsageCandidates, arg.AfterID, arg.PageLimit)
 	if err != nil {
@@ -1090,11 +1107,13 @@ func (q *Queries) BillingRepricedUsageCandidates(ctx context.Context, arg Billin
 			&i.UsageStartedAt,
 			&i.InputTokens,
 			&i.CachedInputTokens,
+			&i.CacheCreationInputTokens,
 			&i.OutputTokens,
 			&i.ModelPriceID,
 			&i.Currency,
 			&i.InputPrice,
 			&i.CachedInputPrice,
+			&i.CacheCreationInputPrice,
 			&i.OutputPrice,
 			&i.LatestRatingID,
 			&i.LatestRevision,
@@ -1441,8 +1460,9 @@ WITH candidates AS (
                WHEN price.id IS NULL THEN 'MISSING_PRICE'
                WHEN NOT billing_rating_matches_price(
                    latest.model_price_id, latest.currency, latest.input_price,
-                   latest.cached_input_price, latest.output_price,
-                   price.id, price.currency, price.input_price, price.cached_input_price, price.output_price
+                   latest.cached_input_price, latest.cache_creation_input_price, latest.output_price,
+                   price.id, price.currency, price.input_price, price.cached_input_price,
+                   price.cache_creation_input_price, price.output_price
                ) THEN 'PENDING_RATING'
                ELSE NULL
            END::text AS reason
@@ -1452,7 +1472,7 @@ WITH candidates AS (
       ON credential.id = usage.provider_credential_id
      AND credential.auth_type = 'API_KEY'
     LEFT JOIN LATERAL (
-        SELECT candidate.id, candidate.provider_credential_id, candidate.provider_model_id, candidate.currency, candidate.input_price, candidate.output_price, candidate.cached_input_price, candidate.effective_at, candidate.created_by, candidate.created_at
+        SELECT candidate.id, candidate.provider_credential_id, candidate.provider_model_id, candidate.currency, candidate.input_price, candidate.output_price, candidate.cached_input_price, candidate.effective_at, candidate.created_by, candidate.created_at, candidate.cache_creation_input_price
         FROM provider_credential_model_price candidate
         WHERE candidate.provider_credential_id = usage.provider_credential_id
           AND candidate.provider_model_id = usage.provider_model_id
@@ -1461,7 +1481,7 @@ WITH candidates AS (
         LIMIT 1
     ) price ON TRUE
     LEFT JOIN LATERAL (
-        SELECT rating.id, rating.usage_record_id, rating.revision, rating.supersedes_rating_id, rating.principal_id, rating.provider_credential_id, rating.provider_model_id, rating.model_price_id, rating.usage_started_at, rating.input_tokens, rating.cached_input_tokens, rating.output_tokens, rating.input_price, rating.cached_input_price, rating.output_price, rating.input_cost, rating.cached_input_cost, rating.output_cost, rating.total_cost, rating.currency, rating.created_at
+        SELECT rating.id, rating.usage_record_id, rating.revision, rating.supersedes_rating_id, rating.principal_id, rating.provider_credential_id, rating.provider_model_id, rating.model_price_id, rating.usage_started_at, rating.input_tokens, rating.cached_input_tokens, rating.output_tokens, rating.input_price, rating.cached_input_price, rating.output_price, rating.input_cost, rating.cached_input_cost, rating.output_cost, rating.total_cost, rating.currency, rating.created_at, rating.cache_creation_input_tokens, rating.cache_creation_input_price, rating.cache_creation_input_cost
         FROM usage_rating rating
         WHERE rating.usage_record_id = usage.id
         ORDER BY rating.revision DESC, rating.id DESC
@@ -1585,16 +1605,18 @@ SELECT usage.id AS usage_record_id,
        usage.started_at AS usage_started_at,
        usage.input_tokens::bigint AS input_tokens,
        usage.cached_input_tokens::bigint AS cached_input_tokens,
+       COALESCE(usage.cache_creation_input_tokens, 0)::bigint AS cache_creation_input_tokens,
        usage.output_tokens::bigint AS output_tokens,
        price.id AS model_price_id,
        price.currency,
        price.input_price,
        price.cached_input_price,
+       price.cache_creation_input_price,
        price.output_price
 FROM pending
 JOIN usage_record usage ON usage.id = pending.id
 JOIN LATERAL (
-    SELECT candidate.id, candidate.provider_credential_id, candidate.provider_model_id, candidate.currency, candidate.input_price, candidate.output_price, candidate.cached_input_price, candidate.effective_at, candidate.created_by, candidate.created_at
+    SELECT candidate.id, candidate.provider_credential_id, candidate.provider_model_id, candidate.currency, candidate.input_price, candidate.output_price, candidate.cached_input_price, candidate.effective_at, candidate.created_by, candidate.created_at, candidate.cache_creation_input_price
     FROM provider_credential_model_price candidate
     WHERE candidate.provider_credential_id = usage.provider_credential_id
       AND candidate.provider_model_id = usage.provider_model_id
@@ -1611,19 +1633,21 @@ type BillingUnratedUsageCandidatesParams struct {
 }
 
 type BillingUnratedUsageCandidatesRow struct {
-	UsageRecordID        int64
-	PrincipalID          int64
-	ProviderCredentialID int64
-	ProviderModelID      int64
-	UsageStartedAt       pgtype.Timestamptz
-	InputTokens          int64
-	CachedInputTokens    int64
-	OutputTokens         int64
-	ModelPriceID         int64
-	Currency             string
-	InputPrice           pgtype.Numeric
-	CachedInputPrice     pgtype.Numeric
-	OutputPrice          pgtype.Numeric
+	UsageRecordID            int64
+	PrincipalID              int64
+	ProviderCredentialID     int64
+	ProviderModelID          int64
+	UsageStartedAt           pgtype.Timestamptz
+	InputTokens              int64
+	CachedInputTokens        int64
+	CacheCreationInputTokens int64
+	OutputTokens             int64
+	ModelPriceID             int64
+	Currency                 string
+	InputPrice               pgtype.Numeric
+	CachedInputPrice         pgtype.Numeric
+	CacheCreationInputPrice  pgtype.Numeric
+	OutputPrice              pgtype.Numeric
 }
 
 // 从未核算的可计费调用：先在物化 CTE 中按用量 ID 顺序走可计费部分索引，以反连接排除已有核算的
@@ -1646,11 +1670,13 @@ func (q *Queries) BillingUnratedUsageCandidates(ctx context.Context, arg Billing
 			&i.UsageStartedAt,
 			&i.InputTokens,
 			&i.CachedInputTokens,
+			&i.CacheCreationInputTokens,
 			&i.OutputTokens,
 			&i.ModelPriceID,
 			&i.Currency,
 			&i.InputPrice,
 			&i.CachedInputPrice,
+			&i.CacheCreationInputPrice,
 			&i.OutputPrice,
 		); err != nil {
 			return nil, err
@@ -1686,12 +1712,14 @@ WITH raw AS (
            usage.latency_ms,
            usage.input_tokens,
            usage.cached_input_tokens,
+           usage.cache_creation_input_tokens,
            usage.output_tokens,
            credential.auth_type AS billing_type,
            price.id AS effective_price_id,
            price.currency AS effective_currency,
            price.input_price AS effective_input_price,
            price.cached_input_price AS effective_cached_input_price,
+           price.cache_creation_input_price AS effective_cache_creation_input_price,
            price.output_price AS effective_output_price,
            subscription.currency AS subscription_currency,
            rating.id AS rating_id,
@@ -1700,6 +1728,7 @@ WITH raw AS (
            rating.currency AS rating_currency,
            rating.input_price AS rating_input_price,
            rating.cached_input_price AS rating_cached_input_price,
+           rating.cache_creation_input_price AS rating_cache_creation_input_price,
            rating.output_price AS rating_output_price,
            rating.total_cost,
            rating.created_at AS rated_at
@@ -1709,7 +1738,7 @@ WITH raw AS (
     JOIN provider ON provider.id = usage.provider_id
     JOIN provider_credential credential ON credential.id = usage.provider_credential_id
     LEFT JOIN LATERAL (
-        SELECT candidate.id, candidate.provider_credential_id, candidate.provider_model_id, candidate.currency, candidate.input_price, candidate.output_price, candidate.cached_input_price, candidate.effective_at, candidate.created_by, candidate.created_at FROM provider_credential_model_price candidate
+        SELECT candidate.id, candidate.provider_credential_id, candidate.provider_model_id, candidate.currency, candidate.input_price, candidate.output_price, candidate.cached_input_price, candidate.effective_at, candidate.created_by, candidate.created_at, candidate.cache_creation_input_price FROM provider_credential_model_price candidate
         WHERE candidate.provider_credential_id = usage.provider_credential_id
           AND candidate.provider_model_id = usage.provider_model_id
           AND candidate.effective_at <= usage.started_at
@@ -1722,7 +1751,7 @@ WITH raw AS (
         ORDER BY candidate.effective_at DESC, candidate.id DESC LIMIT 1
     ) subscription ON credential.auth_type = 'SUBSCRIPTION'
     LEFT JOIN LATERAL (
-        SELECT candidate.id, candidate.usage_record_id, candidate.revision, candidate.supersedes_rating_id, candidate.principal_id, candidate.provider_credential_id, candidate.provider_model_id, candidate.model_price_id, candidate.usage_started_at, candidate.input_tokens, candidate.cached_input_tokens, candidate.output_tokens, candidate.input_price, candidate.cached_input_price, candidate.output_price, candidate.input_cost, candidate.cached_input_cost, candidate.output_cost, candidate.total_cost, candidate.currency, candidate.created_at FROM usage_rating candidate
+        SELECT candidate.id, candidate.usage_record_id, candidate.revision, candidate.supersedes_rating_id, candidate.principal_id, candidate.provider_credential_id, candidate.provider_model_id, candidate.model_price_id, candidate.usage_started_at, candidate.input_tokens, candidate.cached_input_tokens, candidate.output_tokens, candidate.input_price, candidate.cached_input_price, candidate.output_price, candidate.input_cost, candidate.cached_input_cost, candidate.output_cost, candidate.total_cost, candidate.currency, candidate.created_at, candidate.cache_creation_input_tokens, candidate.cache_creation_input_price, candidate.cache_creation_input_cost FROM usage_rating candidate
         WHERE candidate.usage_record_id = usage.id
         ORDER BY candidate.revision DESC, candidate.id DESC LIMIT 1
     ) rating ON TRUE
@@ -1749,6 +1778,7 @@ SELECT id,
        latency_ms,
        input_tokens,
        cached_input_tokens,
+       cache_creation_input_tokens,
        output_tokens,
        billing_type,
        CASE
@@ -1758,9 +1788,10 @@ SELECT id,
              OR cached_input_tokens > input_tokens THEN 'INCOMPLETE_TOKENS'
            WHEN effective_price_id IS NULL THEN 'MISSING_PRICE'
            WHEN NOT billing_rating_matches_price(
-               model_price_id, rating_currency, rating_input_price, rating_cached_input_price, rating_output_price,
+               model_price_id, rating_currency, rating_input_price, rating_cached_input_price,
+               rating_cache_creation_input_price, rating_output_price,
                effective_price_id, effective_currency, effective_input_price,
-               effective_cached_input_price, effective_output_price
+               effective_cached_input_price, effective_cache_creation_input_price, effective_output_price
            ) THEN 'PENDING_RATING'
            ELSE 'RATED'
        END::text AS rating_status,
@@ -1773,35 +1804,36 @@ FROM raw
 `
 
 type BillingUsageCostRow struct {
-	ID                int64
-	RequestID         string
-	AttemptNo         int64
-	PrincipalID       int64
-	PrincipalName     string
-	PrincipalType     string
-	ModelID           int64
-	ModelName         string
-	ProviderID        int64
-	ProviderName      string
-	ProviderModelID   int64
-	ResourceID        int64
-	ResourceName      string
-	ClientProtocol    string
-	Status            string
-	ErrorType         *string
-	StartedAt         pgtype.Timestamptz
-	CompletedAt       pgtype.Timestamptz
-	LatencyMs         int64
-	InputTokens       *int64
-	CachedInputTokens *int64
-	OutputTokens      *int64
-	BillingType       string
-	RatingStatus      string
-	RatingID          int64
-	RatingRevision    int32
-	Currency          string
-	TotalCost         pgtype.Numeric
-	RatedAt           pgtype.Timestamptz
+	ID                       int64
+	RequestID                string
+	AttemptNo                int64
+	PrincipalID              int64
+	PrincipalName            string
+	PrincipalType            string
+	ModelID                  int64
+	ModelName                string
+	ProviderID               int64
+	ProviderName             string
+	ProviderModelID          int64
+	ResourceID               int64
+	ResourceName             string
+	ClientProtocol           string
+	Status                   string
+	ErrorType                *string
+	StartedAt                pgtype.Timestamptz
+	CompletedAt              pgtype.Timestamptz
+	LatencyMs                int64
+	InputTokens              *int64
+	CachedInputTokens        *int64
+	CacheCreationInputTokens *int64
+	OutputTokens             *int64
+	BillingType              string
+	RatingStatus             string
+	RatingID                 int64
+	RatingRevision           int32
+	Currency                 string
+	TotalCost                pgtype.Numeric
+	RatedAt                  pgtype.Timestamptz
 }
 
 func (q *Queries) BillingUsageCost(ctx context.Context, usageRecordID int64) (BillingUsageCostRow, error) {
@@ -1829,6 +1861,7 @@ func (q *Queries) BillingUsageCost(ctx context.Context, usageRecordID int64) (Bi
 		&i.LatencyMs,
 		&i.InputTokens,
 		&i.CachedInputTokens,
+		&i.CacheCreationInputTokens,
 		&i.OutputTokens,
 		&i.BillingType,
 		&i.RatingStatus,
@@ -1848,9 +1881,11 @@ SELECT rating.id,
        price.effective_at AS price_effective_at,
        rating.input_price,
        rating.cached_input_price,
+       rating.cache_creation_input_price,
        rating.output_price,
        rating.input_cost,
        rating.cached_input_cost,
+       rating.cache_creation_input_cost,
        rating.output_cost,
        rating.total_cost,
        rating.currency,
@@ -1862,19 +1897,21 @@ ORDER BY rating.revision DESC, rating.id DESC
 `
 
 type BillingUsageCostRatingsRow struct {
-	ID               int64
-	Revision         int32
-	ModelPriceID     int64
-	PriceEffectiveAt pgtype.Timestamptz
-	InputPrice       pgtype.Numeric
-	CachedInputPrice pgtype.Numeric
-	OutputPrice      pgtype.Numeric
-	InputCost        pgtype.Numeric
-	CachedInputCost  pgtype.Numeric
-	OutputCost       pgtype.Numeric
-	TotalCost        pgtype.Numeric
-	Currency         string
-	CreatedAt        pgtype.Timestamptz
+	ID                      int64
+	Revision                int32
+	ModelPriceID            int64
+	PriceEffectiveAt        pgtype.Timestamptz
+	InputPrice              pgtype.Numeric
+	CachedInputPrice        pgtype.Numeric
+	CacheCreationInputPrice pgtype.Numeric
+	OutputPrice             pgtype.Numeric
+	InputCost               pgtype.Numeric
+	CachedInputCost         pgtype.Numeric
+	CacheCreationInputCost  pgtype.Numeric
+	OutputCost              pgtype.Numeric
+	TotalCost               pgtype.Numeric
+	Currency                string
+	CreatedAt               pgtype.Timestamptz
 }
 
 func (q *Queries) BillingUsageCostRatings(ctx context.Context, usageRecordID int64) ([]BillingUsageCostRatingsRow, error) {
@@ -1893,9 +1930,11 @@ func (q *Queries) BillingUsageCostRatings(ctx context.Context, usageRecordID int
 			&i.PriceEffectiveAt,
 			&i.InputPrice,
 			&i.CachedInputPrice,
+			&i.CacheCreationInputPrice,
 			&i.OutputPrice,
 			&i.InputCost,
 			&i.CachedInputCost,
+			&i.CacheCreationInputCost,
 			&i.OutputCost,
 			&i.TotalCost,
 			&i.Currency,
@@ -1918,12 +1957,14 @@ WITH raw AS (
            usage.status,
            usage.input_tokens,
            usage.cached_input_tokens,
+           usage.cache_creation_input_tokens,
            usage.output_tokens,
            credential.auth_type AS billing_type,
            price.id AS effective_price_id,
            price.currency AS effective_currency,
            price.input_price AS effective_input_price,
            price.cached_input_price AS effective_cached_input_price,
+           price.cache_creation_input_price AS effective_cache_creation_input_price,
            price.output_price AS effective_output_price,
            subscription.currency AS subscription_currency,
            rating.id AS rating_id,
@@ -1931,13 +1972,14 @@ WITH raw AS (
            rating.currency AS rating_currency,
            rating.input_price AS rating_input_price,
            rating.cached_input_price AS rating_cached_input_price,
+           rating.cache_creation_input_price AS rating_cache_creation_input_price,
            rating.output_price AS rating_output_price,
            rating.total_cost
     FROM usage_record usage
     JOIN principal ON principal.id = usage.principal_id
     JOIN provider_credential credential ON credential.id = usage.provider_credential_id
     LEFT JOIN LATERAL (
-        SELECT candidate.id, candidate.provider_credential_id, candidate.provider_model_id, candidate.currency, candidate.input_price, candidate.output_price, candidate.cached_input_price, candidate.effective_at, candidate.created_by, candidate.created_at
+        SELECT candidate.id, candidate.provider_credential_id, candidate.provider_model_id, candidate.currency, candidate.input_price, candidate.output_price, candidate.cached_input_price, candidate.effective_at, candidate.created_by, candidate.created_at, candidate.cache_creation_input_price
         FROM provider_credential_model_price candidate
         WHERE candidate.provider_credential_id = usage.provider_credential_id
           AND candidate.provider_model_id = usage.provider_model_id
@@ -1954,7 +1996,7 @@ WITH raw AS (
         LIMIT 1
     ) subscription ON credential.auth_type = 'SUBSCRIPTION'
     LEFT JOIN LATERAL (
-        SELECT candidate.id, candidate.usage_record_id, candidate.revision, candidate.supersedes_rating_id, candidate.principal_id, candidate.provider_credential_id, candidate.provider_model_id, candidate.model_price_id, candidate.usage_started_at, candidate.input_tokens, candidate.cached_input_tokens, candidate.output_tokens, candidate.input_price, candidate.cached_input_price, candidate.output_price, candidate.input_cost, candidate.cached_input_cost, candidate.output_cost, candidate.total_cost, candidate.currency, candidate.created_at
+        SELECT candidate.id, candidate.usage_record_id, candidate.revision, candidate.supersedes_rating_id, candidate.principal_id, candidate.provider_credential_id, candidate.provider_model_id, candidate.model_price_id, candidate.usage_started_at, candidate.input_tokens, candidate.cached_input_tokens, candidate.output_tokens, candidate.input_price, candidate.cached_input_price, candidate.output_price, candidate.input_cost, candidate.cached_input_cost, candidate.output_cost, candidate.total_cost, candidate.currency, candidate.created_at, candidate.cache_creation_input_tokens, candidate.cache_creation_input_price, candidate.cache_creation_input_cost
         FROM usage_rating candidate
         WHERE candidate.usage_record_id = usage.id
         ORDER BY candidate.revision DESC, candidate.id DESC
@@ -1976,7 +2018,7 @@ WITH raw AS (
       AND ($9::text = '' OR usage.client_protocol = $9::text)
       AND ($10::text = '' OR usage.status = $10::text)
 ), classified AS (
-    SELECT raw.id, raw.request_id, raw.status, raw.input_tokens, raw.cached_input_tokens, raw.output_tokens, raw.billing_type, raw.effective_price_id, raw.effective_currency, raw.effective_input_price, raw.effective_cached_input_price, raw.effective_output_price, raw.subscription_currency, raw.rating_id, raw.model_price_id, raw.rating_currency, raw.rating_input_price, raw.rating_cached_input_price, raw.rating_output_price, raw.total_cost,
+    SELECT raw.id, raw.request_id, raw.status, raw.input_tokens, raw.cached_input_tokens, raw.cache_creation_input_tokens, raw.output_tokens, raw.billing_type, raw.effective_price_id, raw.effective_currency, raw.effective_input_price, raw.effective_cached_input_price, raw.effective_cache_creation_input_price, raw.effective_output_price, raw.subscription_currency, raw.rating_id, raw.model_price_id, raw.rating_currency, raw.rating_input_price, raw.rating_cached_input_price, raw.rating_cache_creation_input_price, raw.rating_output_price, raw.total_cost,
            CASE
                WHEN status <> 'SUCCESS' THEN 'NOT_BILLABLE'
                WHEN billing_type = 'SUBSCRIPTION' THEN 'SUBSCRIPTION_SHARED'
@@ -1984,16 +2026,17 @@ WITH raw AS (
                  OR cached_input_tokens > input_tokens THEN 'INCOMPLETE_TOKENS'
                WHEN effective_price_id IS NULL THEN 'MISSING_PRICE'
                WHEN NOT billing_rating_matches_price(
-                   model_price_id, rating_currency, rating_input_price, rating_cached_input_price, rating_output_price,
+                   model_price_id, rating_currency, rating_input_price, rating_cached_input_price,
+                   rating_cache_creation_input_price, rating_output_price,
                    effective_price_id, effective_currency, effective_input_price,
-                   effective_cached_input_price, effective_output_price
+                   effective_cached_input_price, effective_cache_creation_input_price, effective_output_price
                ) THEN 'PENDING_RATING'
                ELSE 'RATED'
            END::text AS rating_status,
            CASE WHEN billing_type = 'SUBSCRIPTION' THEN subscription_currency ELSE effective_currency END AS currency
     FROM raw
 ), filtered AS (
-    SELECT id, request_id, status, input_tokens, cached_input_tokens, output_tokens, billing_type, effective_price_id, effective_currency, effective_input_price, effective_cached_input_price, effective_output_price, subscription_currency, rating_id, model_price_id, rating_currency, rating_input_price, rating_cached_input_price, rating_output_price, total_cost, rating_status, currency FROM classified
+    SELECT id, request_id, status, input_tokens, cached_input_tokens, cache_creation_input_tokens, output_tokens, billing_type, effective_price_id, effective_currency, effective_input_price, effective_cached_input_price, effective_cache_creation_input_price, effective_output_price, subscription_currency, rating_id, model_price_id, rating_currency, rating_input_price, rating_cached_input_price, rating_cache_creation_input_price, rating_output_price, total_cost, rating_status, currency FROM classified
     WHERE ($11::text = '' OR rating_status = $11::text)
       AND ($12::text = '' OR billing_type = $12::text)
       AND ($13::text = '' OR currency = $13::text)
@@ -2003,6 +2046,7 @@ SELECT COUNT(DISTINCT request_id)::bigint AS requests,
        COUNT(*) FILTER (WHERE status = 'SUCCESS')::bigint AS successful,
        COALESCE(SUM(input_tokens), 0)::bigint AS input_tokens,
        COALESCE(SUM(cached_input_tokens), 0)::bigint AS cached_input_tokens,
+       COALESCE(SUM(cache_creation_input_tokens), 0)::bigint AS cache_creation_input_tokens,
        COALESCE(SUM(output_tokens), 0)::bigint AS output_tokens,
        COUNT(*) FILTER (WHERE rating_status = 'RATED')::bigint AS rated,
        COUNT(*) FILTER (WHERE rating_status = 'SUBSCRIPTION_SHARED')::bigint AS shared,
@@ -2027,15 +2071,16 @@ type BillingUsageCostSummaryParams struct {
 }
 
 type BillingUsageCostSummaryRow struct {
-	Requests          int64
-	Attempts          int64
-	Successful        int64
-	InputTokens       int64
-	CachedInputTokens int64
-	OutputTokens      int64
-	Rated             int64
-	Shared            int64
-	Unrated           int64
+	Requests                 int64
+	Attempts                 int64
+	Successful               int64
+	InputTokens              int64
+	CachedInputTokens        int64
+	CacheCreationInputTokens int64
+	OutputTokens             int64
+	Rated                    int64
+	Shared                   int64
+	Unrated                  int64
 }
 
 func (q *Queries) BillingUsageCostSummary(ctx context.Context, arg BillingUsageCostSummaryParams) (BillingUsageCostSummaryRow, error) {
@@ -2061,6 +2106,7 @@ func (q *Queries) BillingUsageCostSummary(ctx context.Context, arg BillingUsageC
 		&i.Successful,
 		&i.InputTokens,
 		&i.CachedInputTokens,
+		&i.CacheCreationInputTokens,
 		&i.OutputTokens,
 		&i.Rated,
 		&i.Shared,
@@ -2075,12 +2121,14 @@ WITH raw AS (
            usage.status,
            usage.input_tokens,
            usage.cached_input_tokens,
+           usage.cache_creation_input_tokens,
            usage.output_tokens,
            credential.auth_type AS billing_type,
            price.id AS effective_price_id,
            price.currency AS effective_currency,
            price.input_price AS effective_input_price,
            price.cached_input_price AS effective_cached_input_price,
+           price.cache_creation_input_price AS effective_cache_creation_input_price,
            price.output_price AS effective_output_price,
            subscription.currency AS subscription_currency,
            rating.id AS rating_id,
@@ -2088,13 +2136,14 @@ WITH raw AS (
            rating.currency AS rating_currency,
            rating.input_price AS rating_input_price,
            rating.cached_input_price AS rating_cached_input_price,
+           rating.cache_creation_input_price AS rating_cache_creation_input_price,
            rating.output_price AS rating_output_price,
            rating.total_cost
     FROM usage_record usage
     JOIN principal ON principal.id = usage.principal_id
     JOIN provider_credential credential ON credential.id = usage.provider_credential_id
     LEFT JOIN LATERAL (
-        SELECT candidate.id, candidate.provider_credential_id, candidate.provider_model_id, candidate.currency, candidate.input_price, candidate.output_price, candidate.cached_input_price, candidate.effective_at, candidate.created_by, candidate.created_at FROM provider_credential_model_price candidate
+        SELECT candidate.id, candidate.provider_credential_id, candidate.provider_model_id, candidate.currency, candidate.input_price, candidate.output_price, candidate.cached_input_price, candidate.effective_at, candidate.created_by, candidate.created_at, candidate.cache_creation_input_price FROM provider_credential_model_price candidate
         WHERE candidate.provider_credential_id = usage.provider_credential_id
           AND candidate.provider_model_id = usage.provider_model_id
           AND candidate.effective_at <= usage.started_at
@@ -2107,7 +2156,7 @@ WITH raw AS (
         ORDER BY candidate.effective_at DESC, candidate.id DESC LIMIT 1
     ) subscription ON credential.auth_type = 'SUBSCRIPTION'
     LEFT JOIN LATERAL (
-        SELECT candidate.id, candidate.usage_record_id, candidate.revision, candidate.supersedes_rating_id, candidate.principal_id, candidate.provider_credential_id, candidate.provider_model_id, candidate.model_price_id, candidate.usage_started_at, candidate.input_tokens, candidate.cached_input_tokens, candidate.output_tokens, candidate.input_price, candidate.cached_input_price, candidate.output_price, candidate.input_cost, candidate.cached_input_cost, candidate.output_cost, candidate.total_cost, candidate.currency, candidate.created_at FROM usage_rating candidate
+        SELECT candidate.id, candidate.usage_record_id, candidate.revision, candidate.supersedes_rating_id, candidate.principal_id, candidate.provider_credential_id, candidate.provider_model_id, candidate.model_price_id, candidate.usage_started_at, candidate.input_tokens, candidate.cached_input_tokens, candidate.output_tokens, candidate.input_price, candidate.cached_input_price, candidate.output_price, candidate.input_cost, candidate.cached_input_cost, candidate.output_cost, candidate.total_cost, candidate.currency, candidate.created_at, candidate.cache_creation_input_tokens, candidate.cache_creation_input_price, candidate.cache_creation_input_cost FROM usage_rating candidate
         WHERE candidate.usage_record_id = usage.id
         ORDER BY candidate.revision DESC, candidate.id DESC LIMIT 1
     ) rating ON TRUE
@@ -2127,7 +2176,7 @@ WITH raw AS (
       AND ($9::text = '' OR usage.client_protocol = $9::text)
       AND ($10::text = '' OR usage.status = $10::text)
 ), classified AS (
-    SELECT raw.id, raw.status, raw.input_tokens, raw.cached_input_tokens, raw.output_tokens, raw.billing_type, raw.effective_price_id, raw.effective_currency, raw.effective_input_price, raw.effective_cached_input_price, raw.effective_output_price, raw.subscription_currency, raw.rating_id, raw.model_price_id, raw.rating_currency, raw.rating_input_price, raw.rating_cached_input_price, raw.rating_output_price, raw.total_cost,
+    SELECT raw.id, raw.status, raw.input_tokens, raw.cached_input_tokens, raw.cache_creation_input_tokens, raw.output_tokens, raw.billing_type, raw.effective_price_id, raw.effective_currency, raw.effective_input_price, raw.effective_cached_input_price, raw.effective_cache_creation_input_price, raw.effective_output_price, raw.subscription_currency, raw.rating_id, raw.model_price_id, raw.rating_currency, raw.rating_input_price, raw.rating_cached_input_price, raw.rating_cache_creation_input_price, raw.rating_output_price, raw.total_cost,
            CASE
                WHEN status <> 'SUCCESS' THEN 'NOT_BILLABLE'
                WHEN billing_type = 'SUBSCRIPTION' THEN 'SUBSCRIPTION_SHARED'
@@ -2135,16 +2184,17 @@ WITH raw AS (
                  OR cached_input_tokens > input_tokens THEN 'INCOMPLETE_TOKENS'
                WHEN effective_price_id IS NULL THEN 'MISSING_PRICE'
                WHEN NOT billing_rating_matches_price(
-                   model_price_id, rating_currency, rating_input_price, rating_cached_input_price, rating_output_price,
+                   model_price_id, rating_currency, rating_input_price, rating_cached_input_price,
+                   rating_cache_creation_input_price, rating_output_price,
                    effective_price_id, effective_currency, effective_input_price,
-                   effective_cached_input_price, effective_output_price
+                   effective_cached_input_price, effective_cache_creation_input_price, effective_output_price
                ) THEN 'PENDING_RATING'
                ELSE 'RATED'
            END::text AS rating_status,
            CASE WHEN billing_type = 'SUBSCRIPTION' THEN subscription_currency ELSE effective_currency END AS currency
     FROM raw
 ), filtered AS (
-    SELECT id, status, input_tokens, cached_input_tokens, output_tokens, billing_type, effective_price_id, effective_currency, effective_input_price, effective_cached_input_price, effective_output_price, subscription_currency, rating_id, model_price_id, rating_currency, rating_input_price, rating_cached_input_price, rating_output_price, total_cost, rating_status, currency FROM classified
+    SELECT id, status, input_tokens, cached_input_tokens, cache_creation_input_tokens, output_tokens, billing_type, effective_price_id, effective_currency, effective_input_price, effective_cached_input_price, effective_cache_creation_input_price, effective_output_price, subscription_currency, rating_id, model_price_id, rating_currency, rating_input_price, rating_cached_input_price, rating_cache_creation_input_price, rating_output_price, total_cost, rating_status, currency FROM classified
     WHERE ($11::text = '' OR rating_status = $11::text)
       AND ($12::text = '' OR billing_type = $12::text)
       AND ($13::text = '' OR currency = $13::text)
@@ -2237,12 +2287,14 @@ WITH raw AS (
            usage.latency_ms,
            usage.input_tokens,
            usage.cached_input_tokens,
+           usage.cache_creation_input_tokens,
            usage.output_tokens,
            credential.auth_type AS billing_type,
            price.id AS effective_price_id,
            price.currency AS effective_currency,
            price.input_price AS effective_input_price,
            price.cached_input_price AS effective_cached_input_price,
+           price.cache_creation_input_price AS effective_cache_creation_input_price,
            price.output_price AS effective_output_price,
            subscription.currency AS subscription_currency,
            rating.id AS rating_id,
@@ -2251,6 +2303,7 @@ WITH raw AS (
            rating.currency AS rating_currency,
            rating.input_price AS rating_input_price,
            rating.cached_input_price AS rating_cached_input_price,
+           rating.cache_creation_input_price AS rating_cache_creation_input_price,
            rating.output_price AS rating_output_price,
            rating.total_cost,
            rating.created_at AS rated_at
@@ -2260,7 +2313,7 @@ WITH raw AS (
     JOIN provider ON provider.id = usage.provider_id
     JOIN provider_credential credential ON credential.id = usage.provider_credential_id
     LEFT JOIN LATERAL (
-        SELECT candidate.id, candidate.provider_credential_id, candidate.provider_model_id, candidate.currency, candidate.input_price, candidate.output_price, candidate.cached_input_price, candidate.effective_at, candidate.created_by, candidate.created_at FROM provider_credential_model_price candidate
+        SELECT candidate.id, candidate.provider_credential_id, candidate.provider_model_id, candidate.currency, candidate.input_price, candidate.output_price, candidate.cached_input_price, candidate.effective_at, candidate.created_by, candidate.created_at, candidate.cache_creation_input_price FROM provider_credential_model_price candidate
         WHERE candidate.provider_credential_id = usage.provider_credential_id
           AND candidate.provider_model_id = usage.provider_model_id
           AND candidate.effective_at <= usage.started_at
@@ -2273,7 +2326,7 @@ WITH raw AS (
         ORDER BY candidate.effective_at DESC, candidate.id DESC LIMIT 1
     ) subscription ON credential.auth_type = 'SUBSCRIPTION'
     LEFT JOIN LATERAL (
-        SELECT candidate.id, candidate.usage_record_id, candidate.revision, candidate.supersedes_rating_id, candidate.principal_id, candidate.provider_credential_id, candidate.provider_model_id, candidate.model_price_id, candidate.usage_started_at, candidate.input_tokens, candidate.cached_input_tokens, candidate.output_tokens, candidate.input_price, candidate.cached_input_price, candidate.output_price, candidate.input_cost, candidate.cached_input_cost, candidate.output_cost, candidate.total_cost, candidate.currency, candidate.created_at FROM usage_rating candidate
+        SELECT candidate.id, candidate.usage_record_id, candidate.revision, candidate.supersedes_rating_id, candidate.principal_id, candidate.provider_credential_id, candidate.provider_model_id, candidate.model_price_id, candidate.usage_started_at, candidate.input_tokens, candidate.cached_input_tokens, candidate.output_tokens, candidate.input_price, candidate.cached_input_price, candidate.output_price, candidate.input_cost, candidate.cached_input_cost, candidate.output_cost, candidate.total_cost, candidate.currency, candidate.created_at, candidate.cache_creation_input_tokens, candidate.cache_creation_input_price, candidate.cache_creation_input_cost FROM usage_rating candidate
         WHERE candidate.usage_record_id = usage.id
         ORDER BY candidate.revision DESC, candidate.id DESC LIMIT 1
     ) rating ON TRUE
@@ -2293,7 +2346,7 @@ WITH raw AS (
       AND ($13::text = '' OR usage.client_protocol = $13::text)
       AND ($14::text = '' OR usage.status = $14::text)
 ), classified AS (
-    SELECT raw.id, raw.request_id, raw.attempt_no, raw.principal_id, raw.principal_name, raw.principal_type, raw.model_id, raw.model_name, raw.provider_id, raw.provider_name, raw.provider_model_id, raw.resource_id, raw.resource_name, raw.client_protocol, raw.status, raw.error_type, raw.started_at, raw.completed_at, raw.latency_ms, raw.input_tokens, raw.cached_input_tokens, raw.output_tokens, raw.billing_type, raw.effective_price_id, raw.effective_currency, raw.effective_input_price, raw.effective_cached_input_price, raw.effective_output_price, raw.subscription_currency, raw.rating_id, raw.rating_revision, raw.model_price_id, raw.rating_currency, raw.rating_input_price, raw.rating_cached_input_price, raw.rating_output_price, raw.total_cost, raw.rated_at,
+    SELECT raw.id, raw.request_id, raw.attempt_no, raw.principal_id, raw.principal_name, raw.principal_type, raw.model_id, raw.model_name, raw.provider_id, raw.provider_name, raw.provider_model_id, raw.resource_id, raw.resource_name, raw.client_protocol, raw.status, raw.error_type, raw.started_at, raw.completed_at, raw.latency_ms, raw.input_tokens, raw.cached_input_tokens, raw.cache_creation_input_tokens, raw.output_tokens, raw.billing_type, raw.effective_price_id, raw.effective_currency, raw.effective_input_price, raw.effective_cached_input_price, raw.effective_cache_creation_input_price, raw.effective_output_price, raw.subscription_currency, raw.rating_id, raw.rating_revision, raw.model_price_id, raw.rating_currency, raw.rating_input_price, raw.rating_cached_input_price, raw.rating_cache_creation_input_price, raw.rating_output_price, raw.total_cost, raw.rated_at,
            CASE
                WHEN status <> 'SUCCESS' THEN 'NOT_BILLABLE'
                WHEN billing_type = 'SUBSCRIPTION' THEN 'SUBSCRIPTION_SHARED'
@@ -2301,16 +2354,17 @@ WITH raw AS (
                  OR cached_input_tokens > input_tokens THEN 'INCOMPLETE_TOKENS'
                WHEN effective_price_id IS NULL THEN 'MISSING_PRICE'
                WHEN NOT billing_rating_matches_price(
-                   model_price_id, rating_currency, rating_input_price, rating_cached_input_price, rating_output_price,
+                   model_price_id, rating_currency, rating_input_price, rating_cached_input_price,
+                   rating_cache_creation_input_price, rating_output_price,
                    effective_price_id, effective_currency, effective_input_price,
-                   effective_cached_input_price, effective_output_price
+                   effective_cached_input_price, effective_cache_creation_input_price, effective_output_price
                ) THEN 'PENDING_RATING'
                ELSE 'RATED'
            END::text AS rating_status,
            CASE WHEN billing_type = 'SUBSCRIPTION' THEN subscription_currency ELSE effective_currency END AS currency
     FROM raw
 ), filtered AS (
-    SELECT id, request_id, attempt_no, principal_id, principal_name, principal_type, model_id, model_name, provider_id, provider_name, provider_model_id, resource_id, resource_name, client_protocol, status, error_type, started_at, completed_at, latency_ms, input_tokens, cached_input_tokens, output_tokens, billing_type, effective_price_id, effective_currency, effective_input_price, effective_cached_input_price, effective_output_price, subscription_currency, rating_id, rating_revision, model_price_id, rating_currency, rating_input_price, rating_cached_input_price, rating_output_price, total_cost, rated_at, rating_status, currency,
+    SELECT id, request_id, attempt_no, principal_id, principal_name, principal_type, model_id, model_name, provider_id, provider_name, provider_model_id, resource_id, resource_name, client_protocol, status, error_type, started_at, completed_at, latency_ms, input_tokens, cached_input_tokens, cache_creation_input_tokens, output_tokens, billing_type, effective_price_id, effective_currency, effective_input_price, effective_cached_input_price, effective_cache_creation_input_price, effective_output_price, subscription_currency, rating_id, rating_revision, model_price_id, rating_currency, rating_input_price, rating_cached_input_price, rating_cache_creation_input_price, rating_output_price, total_cost, rated_at, rating_status, currency,
            (COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0))::bigint AS total_tokens
     FROM classified
     WHERE ($15::text = '' OR rating_status = $15::text)
@@ -2338,6 +2392,7 @@ SELECT id,
        latency_ms,
        input_tokens,
        cached_input_tokens,
+       cache_creation_input_tokens,
        output_tokens,
        billing_type,
        rating_status,
@@ -2382,36 +2437,37 @@ type BillingUsageCostsParams struct {
 }
 
 type BillingUsageCostsRow struct {
-	ID                int64
-	RequestID         string
-	AttemptNo         int64
-	PrincipalID       int64
-	PrincipalName     string
-	PrincipalType     string
-	ModelID           int64
-	ModelName         string
-	ProviderID        int64
-	ProviderName      string
-	ProviderModelID   int64
-	ResourceID        int64
-	ResourceName      string
-	ClientProtocol    string
-	Status            string
-	ErrorType         *string
-	StartedAt         pgtype.Timestamptz
-	CompletedAt       pgtype.Timestamptz
-	LatencyMs         int64
-	InputTokens       *int64
-	CachedInputTokens *int64
-	OutputTokens      *int64
-	BillingType       string
-	RatingStatus      string
-	RatingID          int64
-	RatingRevision    int32
-	Currency          string
-	TotalCost         pgtype.Numeric
-	RatedAt           pgtype.Timestamptz
-	TotalCount        int64
+	ID                       int64
+	RequestID                string
+	AttemptNo                int64
+	PrincipalID              int64
+	PrincipalName            string
+	PrincipalType            string
+	ModelID                  int64
+	ModelName                string
+	ProviderID               int64
+	ProviderName             string
+	ProviderModelID          int64
+	ResourceID               int64
+	ResourceName             string
+	ClientProtocol           string
+	Status                   string
+	ErrorType                *string
+	StartedAt                pgtype.Timestamptz
+	CompletedAt              pgtype.Timestamptz
+	LatencyMs                int64
+	InputTokens              *int64
+	CachedInputTokens        *int64
+	CacheCreationInputTokens *int64
+	OutputTokens             *int64
+	BillingType              string
+	RatingStatus             string
+	RatingID                 int64
+	RatingRevision           int32
+	Currency                 string
+	TotalCost                pgtype.Numeric
+	RatedAt                  pgtype.Timestamptz
+	TotalCount               int64
 }
 
 func (q *Queries) BillingUsageCosts(ctx context.Context, arg BillingUsageCostsParams) ([]BillingUsageCostsRow, error) {
@@ -2463,6 +2519,7 @@ func (q *Queries) BillingUsageCosts(ctx context.Context, arg BillingUsageCostsPa
 			&i.LatencyMs,
 			&i.InputTokens,
 			&i.CachedInputTokens,
+			&i.CacheCreationInputTokens,
 			&i.OutputTokens,
 			&i.BillingType,
 			&i.RatingStatus,

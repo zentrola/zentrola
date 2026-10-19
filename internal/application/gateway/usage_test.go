@@ -133,16 +133,17 @@ func TestUsageAnthropicCacheTokensNormalizeToTotalInput(t *testing.T) {
 		stream                bool
 		body                  string
 		input, output, cached int64
+		cacheCreation         int64
 		complete              bool
 	}{
-		{name: "stream", stream: true, body: stream, input: 46203, output: 350, cached: 45000, complete: true},
+		{name: "stream", stream: true, body: stream, input: 46203, output: 350, cached: 45000, cacheCreation: 1200, complete: true},
 		{name: "stream without cumulative input in delta", stream: true, body: strings.Replace(stream,
 			`"usage":{"input_tokens":3,"cache_creation_input_tokens":1200,"cache_read_input_tokens":45000,"output_tokens":350}`,
-			`"usage":{"output_tokens":350}`, 1), input: 46203, output: 350, cached: 45000, complete: true},
+			`"usage":{"output_tokens":350}`, 1), input: 46203, output: 350, cached: 45000, cacheCreation: 1200, complete: true},
 		{name: "json", body: `{"type":"message","usage":{"input_tokens":3,"cache_creation_input_tokens":1200,"cache_read_input_tokens":45000,"output_tokens":350}}`,
-			input: 46203, output: 350, cached: 45000, complete: true},
+			input: 46203, output: 350, cached: 45000, cacheCreation: 1200, complete: true},
 		{name: "json without cache fields", body: `{"type":"message","usage":{"input_tokens":12,"output_tokens":5}}`,
-			input: 12, output: 5, cached: -1, complete: true},
+			input: 12, output: 5, cached: -1, cacheCreation: -1, complete: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -160,6 +161,14 @@ func TestUsageAnthropicCacheTokensNormalizeToTotalInput(t *testing.T) {
 				}
 				if *cached0(cached) > *in {
 					t.Fatalf("cached exceeds total input: cached=%d input=%d", *cached, *in)
+				}
+				cacheCreation := o.CacheCreationTokens()
+				if test.cacheCreation < 0 && cacheCreation != nil ||
+					test.cacheCreation >= 0 && (cacheCreation == nil || *cacheCreation != test.cacheCreation) {
+					t.Fatalf("chunk=%d cacheCreation=%v", chunk, cacheCreation)
+				}
+				if *cached0(cached)+*cached0(cacheCreation) > *in {
+					t.Fatalf("cache tokens exceed total input: input=%d", *in)
 				}
 			}
 		})
@@ -189,8 +198,8 @@ func TestUsageAnthropicCacheRegressionAndOverflowAreUnreliable(t *testing.T) {
 			o := NewUsageObserver(true)
 			o.Feed([]byte(body))
 			in, out, cached := o.Tokens(o.Complete())
-			if in != nil || out != nil || cached != nil {
-				t.Fatalf("unreliable usage reported: input=%v output=%v cached=%v", in, out, cached)
+			if in != nil || out != nil || cached != nil || o.CacheCreationTokens() != nil {
+				t.Fatalf("unreliable usage reported: input=%v output=%v cached=%v cacheCreation=%v", in, out, cached, o.CacheCreationTokens())
 			}
 		})
 	}
