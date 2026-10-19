@@ -413,3 +413,19 @@ func TestConnectionTimeoutCancellationAndRedirect(t *testing.T) {
 		t.Fatal("cancellation lost")
 	}
 }
+
+func TestCodexSubscriptionConnectionIsNotProbedByTester(t *testing.T) {
+	// Codex 订阅由 openaicodex 适配器通过 app-server 检测，连接测试器不再直接请求 ChatGPT 端点。
+	tester := NewConnectionTester()
+	tester.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		t.Fatalf("unexpected upstream request: %s", r.URL)
+		return nil, nil
+	})
+	result := tester.Test(context.Background(), mgmt.ConnectionTarget{
+		Protocol: "OPENAI", BaseURL: "https://api.openai.com/v1", UpstreamModelCode: "gpt-5",
+		AuthType: mgmt.AuthTypeSubscription, AuthAdapter: mgmt.AuthAdapterOpenAICodex,
+	}, []byte(`{"auth_mode":"chatgpt"}`), nil)
+	if result.OK || result.Code != "SUBSCRIPTION_ADAPTER_UNAVAILABLE" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+}

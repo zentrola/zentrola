@@ -14,7 +14,6 @@ import (
 	mgmt "github.com/zentrola/zentrola/internal/application/management"
 	"github.com/zentrola/zentrola/internal/domain/catalog"
 	"github.com/zentrola/zentrola/internal/infrastructure/anthropicclaude"
-	"github.com/zentrola/zentrola/internal/infrastructure/openaicodex"
 	"github.com/zentrola/zentrola/internal/infrastructure/provider"
 )
 
@@ -125,7 +124,6 @@ func (t *ConnectionTester) Test(ctx context.Context, target mgmt.ConnectionTarge
 	}
 
 	requestCredential := string(credential)
-	accountID := ""
 	oauthBearer := false
 	probeAdapter := t.probeAdapter(target.ProviderCode)
 	probe, ok := probeAdapter.Build(target, base)
@@ -134,26 +132,8 @@ func (t *ConnectionTester) Test(ctx context.Context, target mgmt.ConnectionTarge
 		return
 	}
 	if target.AuthType == mgmt.AuthTypeSubscription {
+		// Codex 订阅的连接测试由 openaicodex 适配器通过官方 app-server 完成，不经过这里。
 		switch target.AuthAdapter {
-		case openaicodex.AdapterCode:
-			if target.Protocol != "OPENAI" {
-				result.Code = "SUBSCRIPTION_ADAPTER_UNAVAILABLE"
-				return
-			}
-			accessToken, account, expiresAt, err := openaicodex.RequestCredential(credential)
-			if err != nil || expiresAt != nil && !expiresAt.After(time.Now().Add(time.Minute)) {
-				result.Code = "UPSTREAM_AUTH_FAILED"
-				return
-			}
-			requestCredential, accountID = accessToken, account
-			target.NetworkScope = catalog.NetworkScopePublic
-			probeAdapter = t.standardAdapter
-			probe = connectionProbe{
-				URL:            "https://chatgpt.com/backend-api/codex/responses",
-				Body:           openAIResponsesProbeBody(target.UpstreamModelCode),
-				ResponseFormat: openAIResponsesInferenceProbe,
-			}
-			ok = true
 		case anthropicclaude.AdapterCode:
 			if target.Protocol != "ANTHROPIC" {
 				result.Code = "SUBSCRIPTION_ADAPTER_UNAVAILABLE"
@@ -200,10 +180,6 @@ func (t *ConnectionTester) Test(ctx context.Context, target mgmt.ConnectionTarge
 		req.Header.Set(probe.APIKeyHeader, requestCredential)
 	} else if target.Protocol == "OPENAI" || oauthBearer {
 		req.Header.Set("Authorization", "Bearer "+requestCredential)
-		if accountID != "" {
-			req.Header.Set("ChatGPT-Account-Id", accountID)
-			req.Header.Set("Originator", "zentrola")
-		}
 		if oauthBearer {
 			req.Header.Set("anthropic-version", "2023-06-01")
 			req.Header.Set("anthropic-beta", anthropicclaude.ClaudeCodeBeta+","+anthropicclaude.OAuthBeta)
@@ -217,7 +193,6 @@ func (t *ConnectionTester) Test(ctx context.Context, target mgmt.ConnectionTarge
 	defer func() {
 		req.Header.Del("Authorization")
 		req.Header.Del("x-api-key")
-		req.Header.Del("ChatGPT-Account-Id")
 		if probe.APIKeyHeader != "" {
 			req.Header.Del(probe.APIKeyHeader)
 		}
@@ -286,7 +261,6 @@ type inferenceProbeFormat uint8
 const (
 	openAIChatInferenceProbe inferenceProbeFormat = iota
 	anthropicInferenceProbe
-	openAIResponsesInferenceProbe
 )
 
 type probeMessage struct {
@@ -302,16 +276,6 @@ func openAIChatProbeBody(model string) []byte {
 		Temperature float64        `json:"temperature"`
 		Stream      bool           `json:"stream"`
 	}{Model: model, Messages: []probeMessage{{Role: "user", Content: "Reply only with OK."}}, MaxTokens: connectionProbeMaxOutputTokens})
-	return body
-}
-
-func openAIResponsesProbeBody(model string) []byte {
-	body, _ := json.Marshal(struct {
-		Model           string `json:"model"`
-		Input           string `json:"input"`
-		MaxOutputTokens int    `json:"max_output_tokens"`
-		Stream          bool   `json:"stream"`
-	}{Model: model, Input: "Reply only with OK.", MaxOutputTokens: connectionProbeMaxOutputTokens})
 	return body
 }
 
@@ -357,27 +321,6 @@ func validInferenceResponse(data []byte, format inferenceProbeFormat) bool {
 				content.Type == "thinking" && content.Signature != "" ||
 				content.Type == "redacted_thinking" && content.Data != "" {
 				return true
-			}
-		}
-		return false
-	case openAIResponsesInferenceProbe:
-		var payload struct {
-			ID     string `json:"id"`
-			Object string `json:"object"`
-			Output []struct {
-				Content []struct {
-					Text string `json:"text"`
-				} `json:"content"`
-			} `json:"output"`
-		}
-		if json.Unmarshal(data, &payload) != nil || payload.ID == "" || payload.Object != "response" {
-			return false
-		}
-		for _, output := range payload.Output {
-			for _, content := range output.Content {
-				if strings.TrimSpace(content.Text) != "" {
-					return true
-				}
 			}
 		}
 		return false
