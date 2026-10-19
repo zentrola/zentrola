@@ -282,6 +282,17 @@ export function dateOnly(value: string | null | undefined) {
       ).format(new Date(value))
     : t('common.none')
 }
+const utcDateFormatters = new Map<string, Intl.DateTimeFormat>()
+// 日期型 UTC 字段（如价格生效日期、账期起止）按 UTC 自然日展示，避免西半球显示为前一天。
+export function utcDateOnly(value: string | null | undefined) {
+  return value
+    ? formatter(
+        utcDateFormatters,
+        activeLocale.value,
+        () => new Intl.DateTimeFormat(activeLocale.value, { dateStyle: 'medium', timeZone: 'UTC' }),
+      ).format(new Date(value))
+    : t('common.none')
+}
 export function count(value: number | null) {
   return value === null
     ? t('common.none')

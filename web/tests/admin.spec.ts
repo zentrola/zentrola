@@ -1891,7 +1891,7 @@ test('首页展示本月指标、应用接入、配置脚本和分项排行榜',
       timeZone: 'UTC',
     }).format(new Date()),
   )
-  await expect(page.locator('.dashboard-section-head > .dashboard-period')).toHaveText(
+  await expect(page.locator('.dashboard-section-head .dashboard-period')).toHaveText(
     expectedMonthLabel,
   )
   await expect(page.getByText('Token 消耗', { exact: true })).toBeVisible()

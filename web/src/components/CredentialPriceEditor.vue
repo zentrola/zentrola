@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ApiError, api, errorText } from '../api'
-import { dateOnly } from '../composables'
+import { utcDateOnly } from '../composables'
 import { t } from '../i18n'
 import { currencySymbol, formatMoney } from '../money'
 import { priceHistoryView, usePriceHistory } from '../priceHistory'
@@ -445,7 +445,7 @@ onMounted(load)
                 class="price-history-item"
                 :class="{ 'is-current': price.id === currentModelPrice(mapping.id)?.id }"
               >
-                <time :datetime="price.effectiveAt">{{ dateOnly(price.effectiveAt) }}</time>
+                <time :datetime="price.effectiveAt">{{ utcDateOnly(price.effectiveAt) }}</time>
                 <span class="price-model-values">
                   {{ currencySymbol(price.currency) }} {{ price.inputPrice }} /
                   {{ price.outputPrice }} /
@@ -539,7 +539,7 @@ onMounted(load)
               class="price-history-item"
               :class="{ 'is-current': price.id === currentSubscriptionPrice?.id }"
             >
-              <time :datetime="price.effectiveAt">{{ dateOnly(price.effectiveAt) }}</time>
+              <time :datetime="price.effectiveAt">{{ utcDateOnly(price.effectiveAt) }}</time>
               <span class="price-model-values">
                 {{ formatMoney(price.periodAmount, price.currency) }} /
                 {{ t(`resources.pricing.periods.${price.billingPeriod}`) }}

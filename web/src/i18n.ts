@@ -342,6 +342,8 @@ export const i18n = createI18n({
         noUsage: '本月暂无使用数据',
       },
       common: {
+        utc: 'UTC',
+        utcDayHint: '日期按 UTC 自然日计算',
         name: '名称',
         remark: '备注',
         code: '编码',
@@ -1083,7 +1085,8 @@ export const i18n = createI18n({
         latency: '耗时',
         time: '请求时间',
         empty: '当前时间范围内暂无调用记录。可调整筛选条件后重试。',
-        invalidRange: '请选择有效的起止日期，起止日期不能相同，且范围不超过 366 天。',
+        invalidRange: '请选择有效的起止日期，起止日期不能相同，且范围不超过 {days} 天。',
+        invalidRangeAllowSameDay: '请选择有效的起止日期，且范围不超过 {days} 天。',
         noAttempt: '未发起上游调用',
         attempt: '上游调用',
         errorType: '错误码',

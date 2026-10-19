@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, useId } from 'vue'
+import { utcDateValue as dateValue, utcDayRange } from '../dateRange'
 import { t } from '../i18n'
 import Icon from './Icon.vue'
 
@@ -9,8 +10,10 @@ const props = withDefaults(
     to: string
     label?: string
     maxDays?: number
+    // 是否允许起止为同一天；用量分析要求至少跨两个自然日。
+    allowSameDay?: boolean
   }>(),
-  { label: '', maxDays: 366 },
+  { label: '', maxDays: 366, allowSameDay: true },
 )
 const emit = defineEmits<{
   'update:from': [value: string]
@@ -25,6 +28,12 @@ const hoveredDate = ref('')
 const selectingEnd = ref(false)
 const validation = ref('')
 const calendarMonth = ref(new Date())
+const utcHintID = useId()
+const invalidRangeText = computed(() =>
+  t(props.allowSameDay ? 'usage.invalidRangeAllowSameDay' : 'usage.invalidRange', {
+    days: props.maxDays,
+  }),
+)
 
 const rangeText = computed(() => {
   if (!props.from || !props.to) return t('usage.dateRangePlaceholder')
@@ -35,9 +44,6 @@ const weekdays = computed(() =>
   Array.from({ length: 7 }, (_, index) => t(`usage.weekdays.${index}`)),
 )
 
-function dateValue(value: Date) {
-  return value.toISOString().slice(0, 10)
-}
 function dateFromValue(value: string) {
   const [year, month, day] = value.split('-').map(Number)
   return new Date(Date.UTC(year, month - 1, day))
@@ -85,14 +91,7 @@ function dayClass(value: string, currentMonth: boolean) {
   }
 }
 function validRange(start: string, end: string) {
-  const startTime = Date.parse(`${start}T00:00:00Z`)
-  const endTime = Date.parse(`${end}T00:00:00Z`)
-  return (
-    Number.isFinite(startTime) &&
-    Number.isFinite(endTime) &&
-    endTime >= startTime &&
-    endTime - startTime + 86400000 <= props.maxDays * 86400000
-  )
+  return utcDayRange(start, end, props.maxDays, props.allowSameDay) !== null
 }
 function toggle() {
   if (open.value) {
@@ -123,7 +122,7 @@ function selectDate(value: string) {
   selectingEnd.value = false
   hoveredDate.value = ''
   if (!validRange(start, end)) {
-    validation.value = t('usage.invalidRange')
+    validation.value = invalidRangeText.value
     return
   }
   emit('update:from', start)
@@ -144,7 +143,13 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', closeOnOutside
 
 <template>
   <div ref="root" class="filter-field date-range-field">
-    <span class="filter-label">{{ label || t('usage.dateRange') }}</span>
+    <span class="filter-label"
+      >{{ label || t('usage.dateRange')
+      }}<span class="utc-badge" :title="t('common.utcDayHint')" aria-hidden="true">{{
+        t('common.utc')
+      }}</span></span
+    >
+    <span :id="utcHintID" class="visually-hidden">{{ t('common.utcDayHint') }}</span>
     <div class="date-range-control" @keydown.esc="open = false">
       <button
         type="button"
@@ -152,6 +157,7 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', closeOnOutside
         aria-haspopup="dialog"
         :aria-expanded="open"
         :aria-label="t('usage.chooseDateRange')"
+        :aria-describedby="utcHintID"
         @click="toggle"
       >
         <span>{{ rangeText }}</span>

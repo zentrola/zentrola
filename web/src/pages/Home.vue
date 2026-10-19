@@ -322,7 +322,10 @@ onMounted(load)
         <div>
           <h2>{{ t('home.monthOverview') }}</h2>
         </div>
-        <span class="dashboard-period">{{ monthLabel }}</span>
+        <span class="dashboard-period-group">
+          <span class="dashboard-period">{{ monthLabel }}</span
+          ><span class="utc-badge" :title="t('common.utcDayHint')">{{ t('common.utc') }}</span>
+        </span>
       </div>
       <dl class="metric-strip">
         <div>

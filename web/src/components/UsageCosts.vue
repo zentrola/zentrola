@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { all, api, download, errorText } from '../api'
-import { count, date, dateOnly, useCollection } from '../composables'
+import { count, date, useCollection, utcDateOnly } from '../composables'
+import { utcDateValue as dateValue, utcDayRangeParams } from '../dateRange'
 import { saveBlob } from '../files'
 import { t } from '../i18n'
 import { formatMoney as amount } from '../money'
@@ -58,9 +59,6 @@ const {
 const { items, cursor, page, pageSize, total, loading, error, load, previous, retry, setPageSize } =
   useCollection<UsageCost>(() => `/billing/usage-costs?${query.value}`)
 
-function dateValue(value: Date) {
-  return value.toISOString().slice(0, 10)
-}
 function resetDates() {
   const now = new Date()
   from.value = dateValue(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)))
@@ -73,23 +71,11 @@ function params() {
     )
     return null
   }
-  const start = Date.parse(`${from.value}T00:00:00Z`)
-  const endDate = new Date(`${to.value}T00:00:00Z`)
-  endDate.setUTCDate(endDate.getUTCDate() + 1)
-  const end = endDate.getTime()
-  if (
-    !Number.isFinite(start) ||
-    !Number.isFinite(end) ||
-    end <= start ||
-    end - start > 366 * 86400000
-  ) {
+  const result = utcDayRangeParams(from.value, to.value)
+  if (!result) {
     showErrorToast(t('billing.invalidRange'))
     return null
   }
-  const result = new URLSearchParams({
-    from: new Date(start).toISOString(),
-    to: new Date(end).toISOString(),
-  })
   for (const [key, value] of [
     ['principalType', principalType.value],
     ['principalId', principalId.value.trim()],
@@ -457,7 +443,7 @@ onBeforeUnmount(() => {
             <dt>{{ t('billing.period') }}</dt>
             <dd>
               {{
-                `${dateOnly(selected.subscription.periodStart)} – ${dateOnly(selected.subscription.periodEnd)}`
+                `${utcDateOnly(selected.subscription.periodStart)} – ${utcDateOnly(selected.subscription.periodEnd)}`
               }}
             </dd>
           </div>

@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { all, api, errorText } from '../api'
 import { count } from '../composables'
+import { utcDateValue as dateValue, utcDayRangeParams } from '../dateRange'
 import { t } from '../i18n'
 import { addMoney as addAmounts, formatMoney as amount } from '../money'
 import type {
@@ -53,9 +54,6 @@ const activeSubscriptionResources = computed(() => {
   )
 })
 
-function dateValue(value: Date) {
-  return value.toISOString().slice(0, 10)
-}
 function resetDates() {
   const now = new Date()
   const currentMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
@@ -63,21 +61,7 @@ function resetDates() {
   to.value = dateValue(now)
 }
 function rangeParams() {
-  const start = Date.parse(`${from.value}T00:00:00Z`)
-  const endDate = new Date(`${to.value}T00:00:00Z`)
-  endDate.setUTCDate(endDate.getUTCDate() + 1)
-  const end = endDate.getTime()
-  if (
-    !Number.isFinite(start) ||
-    !Number.isFinite(end) ||
-    end <= start ||
-    end - start > 366 * 86400000
-  )
-    return null
-  return new URLSearchParams({
-    from: new Date(start).toISOString(),
-    to: new Date(end).toISOString(),
-  })
+  return utcDayRangeParams(from.value, to.value)
 }
 async function loadStatistics() {
   const params = rangeParams()

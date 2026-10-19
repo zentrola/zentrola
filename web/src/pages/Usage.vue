@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { all, errorText } from '../api'
 import { useCollection, date, count } from '../composables'
+import { utcDateValue as dateValue, utcDayRangeParams } from '../dateRange'
 import { activeLocale, codeText, t } from '../i18n'
 import { usePrincipalAutocomplete } from '../principalAutocomplete'
 import { showErrorToast } from '../toast'
 import type { Usage, UsageStatistic, Model, Provider, Resource } from '../types'
+import DateRangePicker from '../components/DateRangePicker.vue'
 import Icon from '../components/Icon.vue'
 import Status from '../components/Status.vue'
 import Modal from '../components/Modal.vue'
@@ -49,14 +51,6 @@ const {
   select: selectMember,
   reset: resetMemberAutocomplete,
 } = usePrincipalAutocomplete({ name: memberName, id: memberID, kind: () => principalKind.value })
-const dateRangeControl = ref<HTMLElement | null>(null),
-  datePickerOpen = ref(false),
-  draftFrom = ref(''),
-  draftTo = ref(''),
-  calendarMonth = ref(new Date()),
-  rangeSelectionStarted = ref(false),
-  hoveredDate = ref(''),
-  datePickerValidation = ref('')
 let lookupPromise: Promise<void> | null = null
 
 function errorDescription(errorType: string | null) {
@@ -110,14 +104,6 @@ const {
 const loading = computed(() =>
   activeView.value === 'statistics' ? statisticsLoading.value : recordsLoading.value,
 )
-const dateRangeText = computed(() => {
-  if (!from.value || !to.value) return t('usage.dateRangePlaceholder')
-  return `${from.value.replaceAll('-', '/')} — ${to.value.replaceAll('-', '/')}`
-})
-const calendarMonths = computed(() => [calendarMonth.value, addMonths(calendarMonth.value, 1)])
-const weekdays = computed(() =>
-  Array.from({ length: 7 }, (_, index) => t(`usage.weekdays.${index}`)),
-)
 function resetTimes() {
   const now = new Date()
   const weekStart = new Date(now)
@@ -125,80 +111,12 @@ function resetTimes() {
   to.value = dateValue(now)
   from.value = dateValue(weekStart)
 }
-function dateValue(value: Date) {
-  return value.toISOString().slice(0, 10)
-}
-function dateFromValue(value: string) {
-  const [year, month, day] = value.split('-').map(Number)
-  return new Date(Date.UTC(year, month - 1, day))
-}
-function startOfMonth(value: Date) {
-  return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), 1))
-}
-function addMonths(value: Date, amount: number) {
-  return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth() + amount, 1))
-}
-function monthTitle(value: Date) {
-  return t('usage.monthTitle', { year: value.getUTCFullYear(), month: value.getUTCMonth() + 1 })
-}
-function calendarDays(month: Date) {
-  const first = startOfMonth(month),
-    start = new Date(first)
-  start.setUTCDate(start.getUTCDate() - start.getUTCDay())
-  return Array.from({ length: 42 }, (_, index) => {
-    const value = new Date(start)
-    value.setUTCDate(start.getUTCDate() + index)
-    return {
-      value: dateValue(value),
-      day: value.getUTCDate(),
-      currentMonth:
-        value.getUTCMonth() === month.getUTCMonth() &&
-        value.getUTCFullYear() === month.getUTCFullYear(),
-    }
-  })
-}
-function draftRange() {
-  if (!draftFrom.value) return ['', '']
-  const candidateEnd = draftTo.value || (rangeSelectionStarted.value ? hoveredDate.value : '')
-  if (!candidateEnd) return [draftFrom.value, draftFrom.value]
-  return draftFrom.value <= candidateEnd
-    ? [draftFrom.value, candidateEnd]
-    : [candidateEnd, draftFrom.value]
-}
-function calendarDayClass(value: string, currentMonth: boolean) {
-  const [start, end] = draftRange()
-  return {
-    muted: !currentMonth,
-    'range-start': value === start,
-    'range-end': value === end,
-    'in-range': Boolean(start && end && value >= start && value <= end),
-  }
-}
-function dateBounds(startValue: string, endValue: string) {
-  const start = Date.parse(`${startValue}T00:00:00Z`),
-    endDate = new Date(`${endValue}T00:00:00Z`)
-  endDate.setUTCDate(endDate.getUTCDate() + 1)
-  const end = endDate.getTime()
-  if (
-    !Number.isFinite(start) ||
-    !Number.isFinite(end) ||
-    startValue === endValue ||
-    end <= start ||
-    end - start > 366 * 86400000
-  )
-    return null
-  return { start, end }
-}
+// 用量按 UTC 自然日统计，且起止不能为同一天。
+const maxRangeDays = 366
 function rangeParams() {
-  const bounds = dateBounds(from.value, to.value)
-  if (!bounds) {
-    showErrorToast(t('usage.invalidRange'))
-    return null
-  }
-  return new URLSearchParams({
-    from: new Date(bounds.start).toISOString(),
-    to: new Date(bounds.end).toISOString(),
-  })
+  const params = utcDayRangeParams(from.value, to.value, maxRangeDays, false)
+  if (!params) showErrorToast(t('usage.invalidRange', { days: maxRangeDays }))
+  return params
 }
 function syncRoute() {
   const routeQuery: Record<string, string> = {
@@ -297,50 +215,6 @@ function statisticRank(index: number) {
 function changePrincipalKind() {
   resetMemberAutocomplete()
 }
-function toggleDatePicker() {
-  if (datePickerOpen.value) {
-    datePickerOpen.value = false
-    return
-  }
-  draftFrom.value = from.value
-  draftTo.value = to.value
-  calendarMonth.value = startOfMonth(dateFromValue(from.value))
-  rangeSelectionStarted.value = false
-  hoveredDate.value = ''
-  datePickerValidation.value = ''
-  datePickerOpen.value = true
-}
-function selectDate(value: string) {
-  if (!rangeSelectionStarted.value) {
-    draftFrom.value = value
-    draftTo.value = ''
-    hoveredDate.value = value
-    rangeSelectionStarted.value = true
-    datePickerValidation.value = ''
-    return
-  }
-  const start = value < draftFrom.value ? value : draftFrom.value,
-    end = value < draftFrom.value ? draftFrom.value : value
-  draftFrom.value = start
-  draftTo.value = end
-  rangeSelectionStarted.value = false
-  hoveredDate.value = ''
-  if (!dateBounds(start, end)) {
-    datePickerValidation.value = t('usage.invalidRange')
-    return
-  }
-  from.value = start
-  to.value = end
-  datePickerValidation.value = ''
-  datePickerOpen.value = false
-}
-function changeCalendarMonth(amount: number) {
-  calendarMonth.value = addMonths(calendarMonth.value, amount)
-}
-function closeFloatingPanels(event: PointerEvent) {
-  if (!(event.target instanceof Node)) return
-  if (!dateRangeControl.value?.contains(event.target)) datePickerOpen.value = false
-}
 async function lookups() {
   lookupError.value = ''
   try {
@@ -387,13 +261,9 @@ function applyRoute() {
   providerID.value = routeValue('providerId')
 }
 onMounted(() => {
-  document.addEventListener('pointerdown', closeFloatingPanels)
   applyRoute()
   if (activeView.value === 'records') void ensureLookups()
   search()
-})
-onBeforeUnmount(() => {
-  document.removeEventListener('pointerdown', closeFloatingPanels)
 })
 </script>
 <template>
@@ -514,85 +384,7 @@ onBeforeUnmount(() => {
           </option>
         </select>
       </label>
-      <div ref="dateRangeControl" class="filter-field date-range-field">
-        <span class="filter-label">{{ t('usage.dateRange') }}</span>
-        <div class="date-range-control" @keydown.esc="datePickerOpen = false">
-          <button
-            type="button"
-            class="date-range-trigger"
-            aria-haspopup="dialog"
-            :aria-expanded="datePickerOpen"
-            :aria-label="t('usage.chooseDateRange')"
-            @click="toggleDatePicker"
-          >
-            <span>{{ dateRangeText }}</span
-            ><Icon name="calendar" :size="18" />
-          </button>
-          <div
-            v-if="datePickerOpen"
-            class="date-range-popover"
-            role="dialog"
-            :aria-label="t('usage.chooseDateRange')"
-          >
-            <div class="calendar-panels">
-              <section
-                v-for="(month, monthIndex) in calendarMonths"
-                :key="dateValue(month)"
-                class="calendar-panel"
-                :aria-label="monthTitle(month)"
-              >
-                <header class="calendar-header">
-                  <button
-                    v-if="monthIndex === 0"
-                    type="button"
-                    class="calendar-nav"
-                    :aria-label="t('usage.previousMonth')"
-                    @click="changeCalendarMonth(-1)"
-                  >
-                    ‹
-                  </button>
-                  <span v-else></span>
-                  <strong>{{ monthTitle(month) }}</strong>
-                  <button
-                    v-if="monthIndex === 1"
-                    type="button"
-                    class="calendar-nav"
-                    :aria-label="t('usage.nextMonth')"
-                    @click="changeCalendarMonth(1)"
-                  >
-                    ›
-                  </button>
-                  <span v-else></span>
-                </header>
-                <div class="calendar-weekdays" aria-hidden="true">
-                  <span v-for="weekday in weekdays" :key="weekday">{{ weekday }}</span>
-                </div>
-                <div class="calendar-days">
-                  <button
-                    v-for="day in calendarDays(month)"
-                    :key="day.value"
-                    type="button"
-                    :class="calendarDayClass(day.value, day.currentMonth)"
-                    :aria-label="t('usage.selectDate', { date: day.value })"
-                    :aria-pressed="day.value === draftFrom || day.value === draftTo"
-                    @mouseenter="hoveredDate = day.value"
-                    @focus="hoveredDate = day.value"
-                    @click="selectDate(day.value)"
-                  >
-                    {{ day.day }}
-                  </button>
-                </div>
-              </section>
-            </div>
-            <p class="date-range-guidance" aria-live="polite">
-              {{ t(rangeSelectionStarted ? 'usage.selectRangeEnd' : 'usage.selectRangeStart') }}
-            </p>
-            <p v-if="datePickerValidation" class="date-range-error" role="alert">
-              {{ datePickerValidation }}
-            </p>
-          </div>
-        </div>
-      </div>
+      <DateRangePicker v-model:from="from" v-model:to="to" :allow-same-day="false" />
       <div class="filter-actions">
         <button class="button primary" :disabled="loading">{{ t('common.searchAction') }}</button>
         <button type="button" class="button" :disabled="loading" @click="reset">

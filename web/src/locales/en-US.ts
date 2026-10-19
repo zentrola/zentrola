@@ -318,6 +318,8 @@ export default {
     noUsage: 'No usage data this month',
   },
   common: {
+    utc: 'UTC',
+    utcDayHint: 'Dates use UTC calendar days',
     name: 'Name',
     remark: 'Notes',
     code: 'Code',
@@ -1092,7 +1094,9 @@ export default {
     time: 'Request time',
     empty: 'No requests in this time range. Adjust the filters and try again.',
     invalidRange:
-      'Choose different start and end dates in chronological order, within a maximum range of 366 days.',
+      'Choose different start and end dates in chronological order, within a maximum range of {days} days.',
+    invalidRangeAllowSameDay:
+      'Choose valid start and end dates in chronological order, within a maximum range of {days} days.',
     noAttempt: 'No upstream attempt',
     attempt: 'Upstream attempt',
     errorType: 'Error code',
