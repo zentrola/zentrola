@@ -35,7 +35,7 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - Claude 订阅请求统一使用 `CLAUDE_CODE_VERSION` 声明的版本，不再透传客户端的 `User-Agent`。
 - Anthropic usage is recorded with OpenAI semantics: input tokens now include cache writes and cache reads, and cached input tokens are cache reads. Monthly Token quotas therefore count cached prompts. Cache writes are rated at the cache write price, or at the input price when none is configured.
 - Streaming OpenAI Chat requests always ask the upstream for usage (`stream_options.include_usage`). If the client did not request it, the extra usage chunk is removed from the response; a stream that ends without usage is recorded as `FAILED` with `UPSTREAM_RESPONSE_INCOMPLETE`.
-- Subscription prices whose effective time is earlier than the end of an already billed period can no longer be added, moved, or deleted; the check waits for an in-progress subscription settlement of the same credential, and amount-only changes are still allowed and settled through adjustments. Model price changes rejected by billing history return `409 CONFLICT` instead of `503`.
+- Subscription prices whose effective time is earlier than the end of an already billed period can no longer be added, moved, or deleted; the check waits for an in-progress subscription settlement of the same credential, and amount-only changes are still allowed and settled through adjustments. If a price change is saved after a settlement has read the prices, that settlement no longer bills the credential at the old price; the period is recalculated in the next run. Model price changes rejected by billing history return `409 CONFLICT` instead of `503`.
 - Model sync no longer overwrites the display name or publisher of an existing model.
 - The current-month cost allocation prorates subscription fees by the overlap between the query window and the current billing period, instead of counting the full period fee.
 - Codex app-server processes only inherit an allowlist of environment variables, and app-server errors no longer block a subscription permanently.
@@ -43,7 +43,7 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - The Admin Web shows a UTC marker next to date ranges, shows price effective dates in UTC, and uses the same provider health rules on the home page and the provider page.
 - Anthropic 用量改按 OpenAI 口径记录：输入 Token 包含缓存写入与缓存读取，缓存输入 Token 为缓存读取。月度 Token 配额因此会计入缓存提示；缓存写入按缓存写入单价核算，未配置时按输入单价核算。
 - OpenAI Chat 流式请求统一向上游请求用量（`stream_options.include_usage`）；客户端未请求时会从响应中剥离额外的用量分片。流结束仍没有用量时记为 `FAILED`（`UPSTREAM_RESPONSE_INCOMPLETE`）。
-- 生效时间早于已出账账期结束时间的订阅价格不能再新增、移动或删除，该检查会等待同一凭据进行中的订阅结算完成；只改金额仍然允许，通过调整单结算。被计费历史拒绝的模型价格变更返回 `409 CONFLICT`，不再返回 `503`。
+- 生效时间早于已出账账期结束时间的订阅价格不能再新增、移动或删除，该检查会等待同一凭据进行中的订阅结算完成；只改金额仍然允许，通过调整单结算。结算读取价格后才保存的价格变更不会再让该轮结算按旧价格出账，相应账期在下一轮结算重新计算。被计费历史拒绝的模型价格变更返回 `409 CONFLICT`，不再返回 `503`。
 - 模型同步不再覆盖已有模型的显示名称和发布方。
 - 当月预计费用分摊按查询窗口与当前账期的重叠时长折算订阅费用，不再计入整期费用。
 - Codex app-server 子进程只继承白名单环境变量；app-server 返回的错误不再导致订阅被永久封禁。

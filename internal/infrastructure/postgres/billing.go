@@ -74,8 +74,9 @@ func (s *BillingStore) SubscriptionUsage(ctx context.Context, credentialID int64
 	return result, nil
 }
 
-func (s *BillingStore) CreateCharge(ctx context.Context, document app.Document) (bool, error) {
-	return s.createDocument(ctx, document, "", 0, nil)
+func (s *BillingStore) CreateCharge(ctx context.Context, prices []app.SubscriptionPrice, document app.Document) (bool, error) {
+	created, err := s.insertDocument(ctx, document, prices, "", 0, nil)
+	return created, billingStoreError("create_document", err)
 }
 
 func (s *BillingStore) SubscriptionCorrections(ctx context.Context) ([]app.Correction, error) {
@@ -115,11 +116,13 @@ func (s *BillingStore) CreateAdjustment(ctx context.Context, expectedCurrent str
 }
 
 func (s *BillingStore) createDocument(ctx context.Context, document app.Document, expectedCurrent string, expectedTokens int64, ratingIDs []int64) (bool, error) {
-	created, err := s.insertDocument(ctx, document, expectedCurrent, expectedTokens, ratingIDs)
+	created, err := s.insertDocument(ctx, document, nil, expectedCurrent, expectedTokens, ratingIDs)
 	return created, billingStoreError("create_document", err)
 }
 
-func (s *BillingStore) insertDocument(ctx context.Context, document app.Document, expectedCurrent string, expectedTokens int64, ratingIDs []int64) (bool, error) {
+// insertDocument 在单个事务中写入单据、明细与核算关联。订阅账期单据还需提供结算所依据的价格历史
+// expectedPrices，在持有与价格写入相同的 advisory lock 后确认其未变化。
+func (s *BillingStore) insertDocument(ctx context.Context, document app.Document, expectedPrices []app.SubscriptionPrice, expectedCurrent string, expectedTokens int64, ratingIDs []int64) (bool, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return false, err
@@ -131,6 +134,13 @@ func (s *BillingStore) insertDocument(ctx context.Context, document app.Document
 		// 价格写事务则先持有该 advisory lock 再修改价格行，两侧加锁顺序一致才不会死锁。
 		if err := q.BillingLockSubscriptionCharges(ctx, document.CredentialID); err != nil {
 			return false, err
+		}
+		unchanged, err := subscriptionPricesUnchanged(ctx, q, document, expectedPrices)
+		if err != nil {
+			return false, err
+		}
+		if !unchanged {
+			return false, app.ErrSubscriptionPricesChanged
 		}
 	}
 	if document.DocumentType == "ADJUSTMENT" {
@@ -200,6 +210,32 @@ func (s *BillingStore) insertDocument(ctx context.Context, document app.Document
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return false, err
+	}
+	return true, nil
+}
+
+// subscriptionPricesUnchanged 确认账期起点及之前的价格历史仍与结算读取时一致：价格 ID、生效时间、
+// 金额、币种和计费周期逐条相同，且来源价格仍是账期起点的有效价格。结算在事务外读取价格，
+// 读取之后提交的价格写入可能改变账期锚点或起点有效价格。调用方必须先持有 BillingLockSubscriptionCharges，
+// 且读取为单独语句：READ COMMITTED 下其快照在加锁之后获取，能看到加锁前已提交的价格写入，
+// 而加锁之后的价格写入要等出账事务结束。
+func subscriptionPricesUnchanged(ctx context.Context, q *dbgen.Queries, document app.Document, expected []app.SubscriptionPrice) (bool, error) {
+	if len(expected) == 0 || expected[len(expected)-1].ID != document.SourceID {
+		return false, errors.New("subscription charge source price does not match price history")
+	}
+	rows, err := q.BillingSubscriptionPriceHistory(ctx, dbgen.BillingSubscriptionPriceHistoryParams{
+		ProviderCredentialID: document.CredentialID, PeriodStart: priceTime(document.PeriodStart),
+	})
+	if err != nil || len(rows) != len(expected) {
+		return false, err
+	}
+	for index, row := range rows {
+		price := expected[index]
+		if row.ID != price.ID || !row.EffectiveAt.Time.Equal(price.EffectiveAt) ||
+			priceNumber(row.PeriodAmount) != price.PeriodAmount || row.Currency != price.Currency ||
+			row.BillingPeriod != price.BillingPeriod {
+			return false, nil
+		}
 	}
 	return true, nil
 }
@@ -579,7 +615,7 @@ func billingStoreError(operation string, err error) error {
 		return nil
 	}
 	var storeErr *app.StoreError
-	if errors.As(err, &storeErr) {
+	if errors.As(err, &storeErr) || errors.Is(err, app.ErrSubscriptionPricesChanged) {
 		return err
 	}
 	result := &app.StoreError{Operation: operation, Err: err}

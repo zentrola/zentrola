@@ -189,7 +189,17 @@ func TestSubscriptionChargeOverlapIsRejected(t *testing.T) {
 	}
 
 	// 数据库触发器作为最后防线拒绝部分重叠的新账期。
-	_, err = store.CreateCharge(ctx, app.Document{
+	prices, err := store.SubscriptionPrices(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	history := make([]app.SubscriptionPrice, 0, len(prices))
+	for _, price := range prices {
+		if price.CredentialID == 5301 {
+			history = append(history, price)
+		}
+	}
+	_, err = store.CreateCharge(ctx, history, app.Document{
 		ID: 9301, CredentialID: 5301, SourceID: 6301, BillingType: "SUBSCRIPTION", DocumentType: "CHARGE",
 		Status: "CONFIRMED", SourceType: "SUBSCRIPTION_PRICE",
 		PeriodStart: time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), PeriodEnd: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC),

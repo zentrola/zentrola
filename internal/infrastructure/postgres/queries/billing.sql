@@ -120,6 +120,15 @@ ON CONFLICT DO NOTHING;
 -- 串行化同一凭据的订阅出账与订阅价格写入；锁在事务结束时释放。
 SELECT pg_advisory_xact_lock(hashtextextended('billing_subscription_charge:' || sqlc.arg(provider_credential_id)::bigint::text, 0));
 
+-- name: BillingSubscriptionPriceHistory :many
+-- 订阅出账持有 BillingLockSubscriptionCharges 后读取账期起点及之前的价格，排序与结算 priceAt 一致，
+-- 用于确认结算读取价格之后没有已提交的价格写入改变账期锚点或起点有效价格。
+SELECT id, currency, period_amount, billing_period, effective_at
+FROM provider_credential_subscription_price
+WHERE provider_credential_id = sqlc.arg(provider_credential_id)::bigint
+  AND effective_at <= sqlc.arg(period_start)::timestamptz
+ORDER BY effective_at, id;
+
 -- name: BillingChargeExists :one
 SELECT EXISTS (
     SELECT 1

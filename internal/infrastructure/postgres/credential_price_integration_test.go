@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zentrola/zentrola/internal/application/billing"
 	mgmt "github.com/zentrola/zentrola/internal/application/management"
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	"github.com/zentrola/zentrola/internal/domain/admin"
@@ -182,6 +183,135 @@ VALUES (6201,62,'CNY',100,'MONTH',$1,'system',$1),
                 WHERE provider_credential_id=$1 AND effective_at > $2 AND effective_at < $3`,
 				test.credentialID, periodStart, periodEnd).Scan(&inside); err != nil || inside != 0 {
 				t.Fatalf("prices inside charged period=%d err=%v", inside, err)
+			}
+		})
+	}
+}
+
+// priceRaceBillingStore 在结算读取订阅价格之后、写入单据之前执行一次 afterPrices，
+// 用于构造价格写事务在这段窗口内完整提交的时序。
+type priceRaceBillingStore struct {
+	*BillingStore
+	afterPrices func() error
+}
+
+func (s *priceRaceBillingStore) SubscriptionPrices(ctx context.Context) ([]billing.SubscriptionPrice, error) {
+	prices, err := s.BillingStore.SubscriptionPrices(ctx)
+	if err != nil || s.afterPrices == nil {
+		return prices, err
+	}
+	hook := s.afterPrices
+	s.afterPrices = nil
+	return prices, hook()
+}
+
+// 结算读取价格后、获取锁写单据前提交的价格写入会改变账期的有效价格或锚点：
+// 本轮必须放弃出账，下一轮按新价格重新计算，不能按读到的旧价格写入单据。
+func TestSubscriptionChargeRejectsPriceChangedAfterSettlementRead(t *testing.T) {
+	ctx, pool, _ := integrationDatabase(t)
+	july := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	august := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	september := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	october := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	for _, statement := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO admin_user (id,username,password_hash,display_name,status,created_by,updated_by,created_at,updated_at)
+VALUES (72,'race-settle-admin','test-hash','Race Settle Admin','ACTIVE','system','system',$1,$1)`, []any{july}},
+		{`INSERT INTO provider (id,provider_code,provider_name,provider_type,status,created_by,updated_by,created_at,updated_at)
+VALUES (42,'race-settle-provider','Race Settle Provider','OFFICIAL','ACTIVE','system','system',$1,$1)`, []any{july}},
+	} {
+		if _, err := pool.Exec(ctx, statement.sql, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 每个用例在自己的子测试开始时才写入凭据，避免前一个用例的结算提前为它出账。
+	credential := `INSERT INTO provider_credential (id,provider_id,resource_name,credential_ciphertext,credential_nonce,auth_type,auth_adapter,subscription_type,effective_at,key_version,created_by,updated_by,created_at,updated_at)
+VALUES ($1,42,$2,decode(repeat('77',32),'hex'),decode(repeat('77',12),'hex'),'SUBSCRIPTION','OPENAI_CODEX','PERSONAL',$3,1,'system','system',$3,$3)`
+	price := `INSERT INTO provider_credential_subscription_price (id,provider_credential_id,currency,period_amount,billing_period,effective_at,created_by,created_at)
+VALUES ($1,$2,'CNY',100,'MONTH',$3,'system',$3)`
+	charge := `INSERT INTO billing_document (
+    id,status,billing_type,document_type,provider_credential_id,source_type,source_id,
+    period_start,period_end,total_tokens,total_amount,currency,created_at
+) VALUES ($1,'CONFIRMED','SUBSCRIPTION','CHARGE',$2,'SUBSCRIPTION_PRICE',$3,$4,$5,0,100,'CNY',$5)`
+	ids := idgen.New(pool)
+	management := NewManagementStore(pool, ids, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	prices := mgmt.New(management, ids, nil, nil, mgmt.WithPriceStore(management))
+	actor := admin.Identity{ID: 72, DisplayName: "Race Settle Admin"}
+	tests := []struct {
+		name                  string
+		credentialID          int64
+		credentialEffectiveAt time.Time
+		cutoff                time.Time
+		setup                 []string
+		input                 mgmt.SubscriptionPriceInput
+		wantStart, wantEnd    time.Time
+		wantAmount            string
+	}{
+		{
+			// 已出账至 9 月 1 日，新价格恰好从下一账期起点生效。
+			name: "new price effective at period start", credentialID: 64, credentialEffectiveAt: august, cutoff: october,
+			setup:     []string{credential, price, charge},
+			input:     mgmt.SubscriptionPriceInput{Currency: "CNY", PeriodAmount: "120", BillingPeriod: "MONTH", EffectiveAt: september},
+			wantStart: september, wantEnd: october, wantAmount: "120.00000000",
+		},
+		{
+			// 尚未出账，补录早于首个价格的价格会把首个账期的锚点前移。
+			name: "backfilled price moves anchor", credentialID: 65, credentialEffectiveAt: july, cutoff: september,
+			setup: []string{credential, price},
+			input: mgmt.SubscriptionPriceInput{
+				Currency: "CNY", PeriodAmount: "90", BillingPeriod: "MONTH", EffectiveAt: july.Add(14 * 24 * time.Hour),
+			},
+			wantStart: july.Add(14 * 24 * time.Hour), wantEnd: august.Add(14 * 24 * time.Hour), wantAmount: "90.00000000",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			args := [][]any{
+				{test.credentialID, "Race Subscription " + test.name, test.credentialEffectiveAt},
+				{test.credentialID*100 + 1, test.credentialID, august},
+				{int64(9401), test.credentialID, test.credentialID*100 + 1, august, september},
+			}
+			for index, statement := range test.setup {
+				if _, err := pool.Exec(ctx, statement, args[index]...); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var saved mgmt.SubscriptionPrice
+			store := &priceRaceBillingStore{BillingStore: NewBillingStore(pool), afterPrices: func() error {
+				var err error
+				saved, err = prices.SaveSubscriptionPrice(ctx, actor, test.credentialID, test.input, appsec.RequestMeta{})
+				return err
+			}}
+			service := billing.New(store, ids)
+			if _, err := service.SettleDueSubscriptions(ctx, test.cutoff); err != nil {
+				t.Fatal(err)
+			}
+			if saved.ID == 0 {
+				t.Fatal("price write hook did not run")
+			}
+			var stale int
+			if err := pool.QueryRow(ctx, `SELECT count(*) FROM billing_document
+                WHERE provider_credential_id=$1 AND document_type='CHARGE' AND id <> 9401`,
+				test.credentialID).Scan(&stale); err != nil || stale != 0 {
+				t.Fatalf("charges written from stale prices=%d err=%v", stale, err)
+			}
+
+			if _, err := service.SettleDueSubscriptions(ctx, test.cutoff); err != nil {
+				t.Fatal(err)
+			}
+			var sourceID int64
+			var start, end time.Time
+			var amount string
+			if err := pool.QueryRow(ctx, `SELECT source_id, period_start, period_end, total_amount::text FROM billing_document
+                WHERE provider_credential_id=$1 AND document_type='CHARGE' AND id <> 9401`,
+				test.credentialID).Scan(&sourceID, &start, &end, &amount); err != nil {
+				t.Fatal(err)
+			}
+			if sourceID != saved.ID || !start.Equal(test.wantStart) || !end.Equal(test.wantEnd) || amount != test.wantAmount {
+				t.Fatalf("recomputed charge source=%d period=%s/%s amount=%s; want source=%d period=%s/%s amount=%s",
+					sourceID, start.UTC(), end.UTC(), amount, saved.ID, test.wantStart, test.wantEnd, test.wantAmount)
 			}
 		})
 	}

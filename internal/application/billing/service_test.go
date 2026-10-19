@@ -23,6 +23,8 @@ type billingStoreStub struct {
 	periods             []ChargePeriod
 	usage               map[int64][]domain.UsageShare
 	charges             []Document
+	chargePrices        [][]SubscriptionPrice
+	chargeAttempts      map[int64]int
 	corrections         []Correction
 	original            map[int64][]domain.UsageShare
 	adjustments         []Document
@@ -54,11 +56,16 @@ func (s *billingStoreStub) ChargePeriods(context.Context) ([]ChargePeriod, error
 func (s *billingStoreStub) SubscriptionUsage(_ context.Context, credentialID int64, _, _ time.Time) ([]domain.UsageShare, error) {
 	return s.usage[credentialID], nil
 }
-func (s *billingStoreStub) CreateCharge(_ context.Context, document Document) (bool, error) {
+func (s *billingStoreStub) CreateCharge(_ context.Context, prices []SubscriptionPrice, document Document) (bool, error) {
+	if s.chargeAttempts == nil {
+		s.chargeAttempts = make(map[int64]int)
+	}
+	s.chargeAttempts[document.CredentialID]++
 	if err := s.chargeErrors[document.CredentialID]; err != nil {
 		return false, err
 	}
 	s.charges = append(s.charges, document)
+	s.chargePrices = append(s.chargePrices, prices)
 	return true, nil
 }
 func (s *billingStoreStub) SubscriptionCorrections(context.Context) ([]Correction, error) {
@@ -175,6 +182,32 @@ func TestSettleUsesNewPriceAtNextBillingBoundary(t *testing.T) {
 		!store.charges[0].PeriodEnd.Equal(time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC)) ||
 		!store.charges[1].PeriodEnd.Equal(time.Date(2026, 10, 31, 0, 0, 0, 0, time.UTC)) {
 		t.Fatalf("unexpected month-end schedule: %+v", store.charges)
+	}
+	// 交给存储层校验的价格历史是账期起点及之前生效的全部价格，最后一条为来源价格。
+	if len(store.chargePrices) != 2 || len(store.chargePrices[0]) != 1 || store.chargePrices[0][0].ID != 1 ||
+		len(store.chargePrices[1]) != 2 || store.chargePrices[1][1].ID != 2 || store.charges[1].SourceID != 2 {
+		t.Fatalf("charge price history=%+v", store.chargePrices)
+	}
+}
+
+func TestSettleSkipsCredentialWhenPricesChangedAfterRead(t *testing.T) {
+	start := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	store := &billingStoreStub{
+		prices: []SubscriptionPrice{
+			{ID: 1, CredentialID: 8, Currency: "CNY", PeriodAmount: "100", BillingPeriod: "MONTH", EffectiveAt: start, CredentialEffectiveAt: start},
+			{ID: 2, CredentialID: 9, Currency: "CNY", PeriodAmount: "200", BillingPeriod: "MONTH", EffectiveAt: start, CredentialEffectiveAt: start},
+		},
+		chargeErrors: map[int64]error{8: ErrSubscriptionPricesChanged},
+	}
+	service := New(store, &billingIDs{})
+	summary, err := service.SettleDueSubscriptions(context.Background(), time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 价格已变化的凭据本轮只尝试一次即放弃后续账期，不计入失败；其他凭据照常出账。
+	if summary.Created != 2 || summary.Skipped != 1 || summary.Failed != 0 ||
+		store.chargeAttempts[8] != 1 || store.chargeAttempts[9] != 2 {
+		t.Fatalf("summary=%+v attempts=%v", summary, store.chargeAttempts)
 	}
 }
 

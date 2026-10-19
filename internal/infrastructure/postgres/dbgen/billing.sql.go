@@ -1352,6 +1352,55 @@ func (q *Queries) BillingSubscriptionCorrections(ctx context.Context) ([]Billing
 	return items, nil
 }
 
+const billingSubscriptionPriceHistory = `-- name: BillingSubscriptionPriceHistory :many
+SELECT id, currency, period_amount, billing_period, effective_at
+FROM provider_credential_subscription_price
+WHERE provider_credential_id = $1::bigint
+  AND effective_at <= $2::timestamptz
+ORDER BY effective_at, id
+`
+
+type BillingSubscriptionPriceHistoryParams struct {
+	ProviderCredentialID int64
+	PeriodStart          pgtype.Timestamptz
+}
+
+type BillingSubscriptionPriceHistoryRow struct {
+	ID            int64
+	Currency      string
+	PeriodAmount  pgtype.Numeric
+	BillingPeriod string
+	EffectiveAt   pgtype.Timestamptz
+}
+
+// 订阅出账持有 BillingLockSubscriptionCharges 后读取账期起点及之前的价格，排序与结算 priceAt 一致，
+// 用于确认结算读取价格之后没有已提交的价格写入改变账期锚点或起点有效价格。
+func (q *Queries) BillingSubscriptionPriceHistory(ctx context.Context, arg BillingSubscriptionPriceHistoryParams) ([]BillingSubscriptionPriceHistoryRow, error) {
+	rows, err := q.db.Query(ctx, billingSubscriptionPriceHistory, arg.ProviderCredentialID, arg.PeriodStart)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []BillingSubscriptionPriceHistoryRow{}
+	for rows.Next() {
+		var i BillingSubscriptionPriceHistoryRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Currency,
+			&i.PeriodAmount,
+			&i.BillingPeriod,
+			&i.EffectiveAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const billingSubscriptionPrices = `-- name: BillingSubscriptionPrices :many
 SELECT p.id, p.provider_credential_id, p.currency, p.period_amount,
        p.billing_period, p.effective_at,

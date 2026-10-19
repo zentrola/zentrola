@@ -20,6 +20,10 @@ const maxPeriodsPerScan = 10000
 // errBillingID 表示无法生成计费记录 ID；属于全局依赖故障，出现时中止本轮而不是逐条计入失败。
 var errBillingID = errors.New("cannot generate billing record ID")
 
+// ErrSubscriptionPricesChanged 表示出账事务获取锁后发现账期起点及之前的价格历史与结算读取时不一致：
+// 价格写入在结算读取价格之后提交，账期锚点或起点有效价格可能已变化。本轮放弃该凭据的出账，由下一轮重新计算。
+var ErrSubscriptionPricesChanged = errors.New("subscription prices changed since settlement read")
+
 type SubscriptionPrice struct {
 	ID, CredentialID                      int64
 	Currency, PeriodAmount, BillingPeriod string
@@ -165,7 +169,10 @@ type Store interface {
 	SubscriptionPrices(context.Context) ([]SubscriptionPrice, error)
 	ChargePeriods(context.Context) ([]ChargePeriod, error)
 	SubscriptionUsage(context.Context, int64, time.Time, time.Time) ([]domain.UsageShare, error)
-	CreateCharge(context.Context, Document) (bool, error)
+	// CreateCharge 写入订阅账期单据。prices 是结算计算该账期所依据的价格历史（生效时间不晚于账期起点，
+	// 按生效时间和 ID 升序，最后一条为来源价格）；实现必须在与价格写入串行化的锁内确认其未变化，
+	// 变化时不写入并返回 ErrSubscriptionPricesChanged。
+	CreateCharge(ctx context.Context, prices []SubscriptionPrice, document Document) (bool, error)
 	SubscriptionCorrections(context.Context) ([]Correction, error)
 	OriginalUsage(context.Context, int64) ([]domain.UsageShare, error)
 	CreateAdjustment(context.Context, string, Document) (bool, error)
@@ -225,10 +232,11 @@ func (s *Service) SettleDueSubscriptions(ctx context.Context, cutoff time.Time) 
 			if group[0].CredentialEndAt != nil && !periodStart.Before(group[0].CredentialEndAt.UTC()) {
 				break
 			}
-			price := priceAt(group, periodStart)
-			if price == nil {
+			history := pricesUntil(group, periodStart)
+			if len(history) == 0 {
 				break
 			}
+			price := &history[len(history)-1]
 			periodEnd, addErr := addBillingPeriod(periodStart, price.BillingPeriod, anchorDay)
 			if addErr != nil {
 				summary.recordFailure("subscription credential=%d price=%d: %v", price.CredentialID, price.ID, addErr)
@@ -255,13 +263,18 @@ func (s *Service) SettleDueSubscriptions(ctx context.Context, cutoff time.Time) 
 				periodStart = periodEnd
 				continue
 			}
-			created, chargeErr := s.settleSubscriptionPeriod(ctx, price, periodStart, periodEnd)
+			created, chargeErr := s.settleSubscriptionPeriod(ctx, history, periodStart, periodEnd)
 			if chargeErr != nil {
 				if ctx.Err() != nil {
 					return summary, ctx.Err()
 				}
 				if errors.Is(chargeErr, errBillingID) {
 					return summary, chargeErr
+				}
+				if errors.Is(chargeErr, ErrSubscriptionPricesChanged) {
+					// 本轮读取的价格已过期，后续账期同样基于过期价格推算；跳过该凭据，下一轮按新价格重新计算。
+					summary.Skipped++
+					break
 				}
 				summary.recordFailure("subscription credential=%d period=%s/%s: %s", price.CredentialID,
 					formatPeriodTime(periodStart), formatPeriodTime(periodEnd), SafeErrorText(chargeErr))
@@ -312,7 +325,9 @@ func (s *Service) SettleDueSubscriptions(ctx context.Context, cutoff time.Time) 
 	return summary, nil
 }
 
-func (s *Service) settleSubscriptionPeriod(ctx context.Context, price *SubscriptionPrice, periodStart, periodEnd time.Time) (bool, error) {
+// settleSubscriptionPeriod 按 history 最后一条价格为账期出账；history 随单据交给存储层校验。
+func (s *Service) settleSubscriptionPeriod(ctx context.Context, history []SubscriptionPrice, periodStart, periodEnd time.Time) (bool, error) {
+	price := &history[len(history)-1]
 	usage, err := s.store.SubscriptionUsage(ctx, price.CredentialID, periodStart, periodEnd)
 	if err != nil {
 		return false, err
@@ -326,7 +341,7 @@ func (s *Service) settleSubscriptionPeriod(ctx context.Context, price *Subscript
 	if err != nil {
 		return false, err
 	}
-	return s.store.CreateCharge(ctx, document)
+	return s.store.CreateCharge(ctx, history, document)
 }
 
 type adjustmentOutcome int
@@ -463,6 +478,15 @@ func groupSubscriptionPrices(prices []SubscriptionPrice) [][]SubscriptionPrice {
 		}
 	}
 	return groups
+}
+
+// pricesUntil 返回按生效时间排序的 prices 中不晚于 at 生效的前缀，最后一条即 at 时的有效价格。
+func pricesUntil(prices []SubscriptionPrice, at time.Time) []SubscriptionPrice {
+	count := 0
+	for count < len(prices) && !prices[count].EffectiveAt.After(at) {
+		count++
+	}
+	return prices[:count:count]
 }
 
 func priceAt(prices []SubscriptionPrice, at time.Time) *SubscriptionPrice {
