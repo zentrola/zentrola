@@ -1,6 +1,8 @@
 package http
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"io"
 	"log/slog"
@@ -25,6 +27,7 @@ func TestOpenAIChatStreamUsageInjection(t *testing.T) {
 		wantStatus                                    usage.Status
 		wantError                                     string
 		wantTokens                                    bool
+		gzip                                          bool
 	}{
 		{
 			name:           "client without include_usage gets transparent stream",
@@ -41,6 +44,14 @@ func TestOpenAIChatStreamUsageInjection(t *testing.T) {
 			wantStatus:     usage.Success, wantTokens: true,
 		},
 		{
+			// 上游无视 Accept-Encoding: identity 返回 gzip 时，网关解压后计量并剥离代为开启的 usage chunk。
+			name:           "gzip upstream is decoded",
+			requestBody:    `{"model":"client-model","stream":true,"messages":[]}`,
+			upstreamStream: content + finish + usageChunk + done,
+			wantClient:     content + finish + done,
+			wantStatus:     usage.Success, wantTokens: true, gzip: true,
+		},
+		{
 			name:           "upstream ignores include_usage",
 			requestBody:    `{"model":"client-model","stream":true,"messages":[]}`,
 			upstreamStream: content + finish + done,
@@ -55,11 +66,13 @@ func TestOpenAIChatStreamUsageInjection(t *testing.T) {
 			upstream := completionUpstream(func(_ context.Context, _ gw.Route, request gw.Request, _ []byte) (*gw.Response, error) {
 				trace = request.Trace
 				upstreamBody = string(request.Body)
-				return &gw.Response{
-					Status:  http.StatusOK,
-					Headers: map[string][]string{"Content-Type": {"text/event-stream"}},
-					Body:    io.NopCloser(strings.NewReader(test.upstreamStream)),
-				}, nil
+				headers := map[string][]string{"Content-Type": {"text/event-stream"}}
+				body := io.NopCloser(strings.NewReader(test.upstreamStream))
+				if test.gzip {
+					headers["Content-Encoding"] = []string{"gzip"}
+					body = io.NopCloser(bytes.NewReader(gzipBytes(t, test.upstreamStream)))
+				}
+				return &gw.Response{Status: http.StatusOK, Headers: headers, Body: body}, nil
 			})
 			service := gw.New(completionStore{}, completionCipher{}, upstream)
 			handler := NewOpenAIGatewayHandler(service, GatewayOptions{
@@ -77,6 +90,9 @@ func TestOpenAIChatStreamUsageInjection(t *testing.T) {
 			if recorder.Code != http.StatusOK || recorder.Body.String() != test.wantClient {
 				t.Fatalf("client stream mismatch: status=%d body=%q", recorder.Code, recorder.Body.String())
 			}
+			if encoding := recorder.Header().Get("Content-Encoding"); encoding != "" {
+				t.Fatalf("decoded stream kept Content-Encoding=%q", encoding)
+			}
 			if trace == nil || trace.Status != test.wantStatus || trace.ErrorType != test.wantError || trace.Attempt == nil {
 				t.Fatalf("trace mismatch: %+v", trace)
 			}
@@ -87,6 +103,19 @@ func TestOpenAIChatStreamUsageInjection(t *testing.T) {
 			}
 		})
 	}
+}
+
+func gzipBytes(t *testing.T, text string) []byte {
+	t.Helper()
+	var buffer bytes.Buffer
+	writer := gzip.NewWriter(&buffer)
+	if _, err := writer.Write([]byte(text)); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buffer.Bytes()
 }
 
 // payloadThenBlockBody 发送完 payload 后阻塞，直到被关闭，模拟上游 [DONE] 后不关闭连接。

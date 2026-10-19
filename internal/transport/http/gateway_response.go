@@ -1,6 +1,7 @@
 package http
 
 import (
+	"compress/gzip"
 	"context"
 	"errors"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"mime"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -41,6 +43,7 @@ type gatewayResponsePump struct {
 
 func (p *gatewayResponsePump) run() {
 	defer p.controller.SetWriteDeadline(time.Time{})
+	p.decodeUpstreamBody()
 	responseStream, contentType, mediaType, streamInferred := p.configureObserver()
 	p.configureUsageFilter(responseStream)
 	if p.retainCompletion {
@@ -100,6 +103,41 @@ func (p *gatewayResponsePump) configureObserver() (bool, string, string, bool) {
 	(*p.observer).UseCompatibilityUsage(p.upstream.CompatibilityUsage)
 	return responseStream, contentType, mediaType, streamInferred
 }
+
+// decodeUpstreamBody 在上游无视 Accept-Encoding: identity 返回 gzip 时解压响应体，并去掉
+// Content-Encoding 后再转发。否则既无法从响应中读取计量，也无法剥离网关代为开启的 usage chunk。
+// 其他编码无法在流上解码，仍原样转发且不观察计量。
+func (p *gatewayResponsePump) decodeUpstreamBody() {
+	encoding := strings.ToLower(strings.TrimSpace(http.Header(p.upstream.Headers).Get("Content-Encoding")))
+	if encoding != "gzip" && encoding != "x-gzip" {
+		return
+	}
+	headers := http.Header(p.upstream.Headers).Clone()
+	headers.Del("Content-Encoding")
+	headers.Del("Content-Length")
+	p.upstream.Headers = headers
+	p.upstream.Body = &gzipResponseBody{source: p.upstream.Body}
+}
+
+// gzipResponseBody 在首次读取时才创建 gzip.Reader：gzip.NewReader 会立即读取头部，提前创建会在
+// 打开下游前阻塞等待上游首字节。
+type gzipResponseBody struct {
+	source io.ReadCloser
+	reader *gzip.Reader
+	err    error
+}
+
+func (b *gzipResponseBody) Read(p []byte) (int, error) {
+	if b.reader == nil && b.err == nil {
+		b.reader, b.err = gzip.NewReader(b.source)
+	}
+	if b.err != nil {
+		return 0, b.err
+	}
+	return b.reader.Read(p)
+}
+
+func (b *gzipResponseBody) Close() error { return b.source.Close() }
 
 // configureUsageFilter 在 include_usage 由网关代为开启时剥离上游追加的 usage chunk。
 // observer 仍读取原始字节，计量不受剥离影响。

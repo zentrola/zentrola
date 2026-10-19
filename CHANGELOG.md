@@ -79,6 +79,7 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - A gateway request waiting for another instance to finish refreshing an expired subscription credential stops waiting as soon as the client disconnects, instead of polling the lock for up to 10 seconds.
 - On Windows, the Codex app-server starts suspended and resumes only after joining the process-tree job, so child processes it spawns right away are also stopped on timeout or cancellation.
 - Usage rating reserves up to half of each run for re-rating after price corrections, so a backlog of unrated usage no longer delays corrected costs, and a run that rates exactly the remaining records no longer reports `API_KEY_RATING_FAILED`.
+- When an upstream ignores `Accept-Encoding: identity` and returns gzip, the gateway decompresses the response before forwarding it. Usage is now recorded for these responses, and the usage chunk the gateway requested on the client's behalf is removed. Other encodings are still forwarded unchanged.
 - 使用提示缓存的 Anthropic 调用此前被归为 `INCOMPLETE_TOKENS` 而不计费，现已正常核算；跨协议转换保留缓存 Token 字段。
 - 补录更早生效的订阅价格可能生成与已出账单据重叠的账期；结算与数据库现在都会拒绝重叠账期。
 - 用量核算和 API Key 结算不再每轮重扫全部历史，单条失败不再阻塞整轮，计费任务日志记录脱敏后的错误详情。
@@ -98,6 +99,7 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - 网关请求等待其他实例刷新已过期的订阅凭据时，客户端断开即停止等待，不再继续轮询刷新锁长达 10 秒。
 - Windows 下 Codex app-server 以挂起状态启动，加入进程树 Job 后才恢复运行，启动瞬间派生的子进程在超时或取消时同样会被终止。
 - 用量核算每轮最多用一半额度处理价格纠错后的重算，未核算用量积压时纠错成本不再被长期推迟；恰好处理完剩余记录的一轮不再报告 `API_KEY_RATING_FAILED`。
+- 上游无视 `Accept-Encoding: identity` 返回 gzip 时，网关先解压再转发：这类响应现在能记录用量，网关代客户端开启的 usage chunk 也会被剥离。其他编码仍原样转发。
 
 ### Database / 数据库
 
