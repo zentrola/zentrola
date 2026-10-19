@@ -1,20 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { all, api, errorText } from '../api'
-import { useCollection, useAction, useListSearch, validText } from '../composables'
+import { useCollection, useAction, useListSearch } from '../composables'
 import { t } from '../i18n'
+import { fillModelForm, modelFormError, type ModelForm } from '../modelForm'
 import { showErrorToast } from '../toast'
-import type { Model, ModelProviderMapping, Modality, Provider } from '../types'
+import type { Model, Provider } from '../types'
 import Icon from '../components/Icon.vue'
-import StatusSwitch from '../components/StatusSwitch.vue'
-import Modal from '../components/Modal.vue'
 import PageHeader from '../components/PageHeader.vue'
 import ListFooter from '../components/ListFooter.vue'
 import ListSearch from '../components/ListSearch.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
-import TableScroll from '../components/TableScroll.vue'
-import TechnicalValue from '../components/TechnicalValue.vue'
-import RowActionMenu from '../components/RowActionMenu.vue'
+import ModelEditorModal from '../components/models/ModelEditorModal.vue'
+import ModelPriorityModal from '../components/models/ModelPriorityModal.vue'
+import ModelTable from '../components/models/ModelTable.vue'
 const {
   items,
   cursor,
@@ -35,46 +34,26 @@ const editTarget = ref<Model | null>(null)
 const deleteTarget = ref<Model | null>(null)
 const providers = ref<Provider[]>([])
 const priorityTarget = ref<Model | null>(null)
-const priorityRows = ref<(ModelProviderMapping & { draft: string })[]>([])
-const priorityLoading = ref(false)
-const prioritySaving = ref(false)
-const priorityError = ref('')
-let priorityLoadVersion = 0
 const providerLoading = ref(false)
 const providerError = ref('')
-const modalities: Modality[] = ['TEXT', 'IMAGE', 'AUDIO', 'VIDEO']
-const form = reactive({
+const form = reactive<ModelForm>({
   name: '',
   code: '',
   publisherProviderId: '',
-  inputModalities: [] as Modality[],
-  outputModalities: [] as Modality[],
+  inputModalities: [],
+  outputModalities: [],
   remark: '',
 })
 function openEdit(model: Model | null = null) {
   editTarget.value = model
-  Object.assign(form, {
-    name: model?.name ?? '',
-    code: model?.code ?? '',
-    publisherProviderId: model?.publisherProviderId ?? '',
-    inputModalities: [...(model?.inputModalities ?? [])],
-    outputModalities: [...(model?.outputModalities ?? [])],
-    remark: model?.remark ?? '',
-  })
+  fillModelForm(form, model)
   actionError.value = ''
   editing.value = true
 }
 function save() {
-  if (
-    !validText(form.name, 128) ||
-    !validText(form.code, 128) ||
-    (form.remark !== '' && !validText(form.remark, 2000))
-  ) {
-    showErrorToast(t('common.byteLimit'))
-    return
-  }
-  if (!form.inputModalities.length || !form.outputModalities.length) {
-    showErrorToast(t('models.modalityRequired'))
+  const invalid = modelFormError(form)
+  if (invalid) {
+    showErrorToast(invalid)
     return
   }
   void run(async () => {
@@ -167,65 +146,6 @@ function deleteModel() {
     await load()
   })
 }
-async function openPriorities(model: Model) {
-  const version = ++priorityLoadVersion
-  priorityTarget.value = model
-  priorityRows.value = []
-  priorityError.value = ''
-  priorityLoading.value = true
-  try {
-    const mappings = await api<ModelProviderMapping[]>(`/models/${model.id}/provider-priorities`)
-    if (version !== priorityLoadVersion || priorityTarget.value?.id !== model.id) return
-    priorityRows.value = mappings.map((mapping) => ({
-      ...mapping,
-      draft: String(mapping.priority),
-    }))
-  } catch (error) {
-    if (version !== priorityLoadVersion || priorityTarget.value?.id !== model.id) return
-    priorityError.value = errorText(error)
-  } finally {
-    if (version === priorityLoadVersion) priorityLoading.value = false
-  }
-}
-function closePriorities() {
-  priorityLoadVersion++
-  priorityTarget.value = null
-}
-function providerRoutingAvailable(row: ModelProviderMapping) {
-  return row.providerStatus === 'ACTIVE' && row.endpointConfigured && row.resourceAvailable
-}
-function providerRoutingStatus(row: ModelProviderMapping) {
-  if (row.providerStatus !== 'ACTIVE') return t('models.providerDisabled')
-  if (!row.endpointConfigured) return t('models.providerNoEndpoint')
-  if (!row.resourceAvailable) return t('models.providerNoResource')
-  return t('models.providerAvailable')
-}
-function savePriorities() {
-  if (!priorityTarget.value) return
-  const model = priorityTarget.value
-  if (priorityRows.value.some((row) => !/^(?:[1-9]|[1-9]\d|100)$/.test(row.draft))) {
-    priorityError.value = t('models.priorityInvalid')
-    return
-  }
-  prioritySaving.value = true
-  priorityError.value = ''
-  void api<ModelProviderMapping[]>(`/models/${model.id}/provider-priorities`, 'PUT', {
-    mappings: priorityRows.value.map((row) => ({
-      id: row.id,
-      priority: Number(row.draft),
-      updatedAt: row.updatedAt,
-    })),
-  })
-    .then(() => {
-      closePriorities()
-    })
-    .catch((error) => {
-      priorityError.value = errorText(error)
-    })
-    .finally(() => {
-      prioritySaving.value = false
-    })
-}
 </script>
 <template>
   <PageHeader name="models" />
@@ -265,99 +185,16 @@ function savePriorities() {
       {{ error || providerError
       }}<button class="text-button" @click="retryAll">{{ t('common.retry') }}</button>
     </p>
-    <TableScroll has-actions>
-      <table class="models-table">
-        <colgroup>
-          <col class="record-id-column" />
-          <col class="model-name-column" />
-          <col class="model-publisher-column" />
-          <col class="model-status-column" />
-          <col class="model-input-column" />
-          <col class="model-output-column" />
-          <col class="model-remark-column" />
-          <col class="model-action-column" />
-        </colgroup>
-        <thead>
-          <tr>
-            <th>{{ t('common.id') }}</th>
-            <th>{{ t('models.name') }}</th>
-            <th>{{ t('models.publisher') }}</th>
-            <th>{{ t('common.enableStatus') }}</th>
-            <th>{{ t('models.input') }}</th>
-            <th>{{ t('models.output') }}</th>
-            <th>{{ t('common.remark') }}</th>
-            <th class="align-right">{{ t('common.actions') }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="model in visible" :key="model.id">
-            <td class="record-id-cell"><TechnicalValue :value="model.id" :copyable="false" /></td>
-            <td>
-              <div class="person">
-                <span class="avatar">{{ model.name.slice(0, 1) }}</span>
-                <div>
-                  <strong class="model-name-regular">{{ model.name }}</strong>
-                  <div class="model-code-line">
-                    <small>{{ model.code }}</small>
-                    <button
-                      type="button"
-                      class="model-provider-trigger"
-                      :disabled="busy"
-                      :aria-label="t('models.providerPrioritiesFor', { name: model.name })"
-                      @click="openPriorities(model)"
-                    >
-                      {{ t('models.providerEntry') }}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </td>
-            <td>{{ model.publisherProviderName || t('common.none') }}</td>
-            <td>
-              <StatusSwitch
-                :value="model.status"
-                :name="model.name"
-                :disabled="busy || loading"
-                :busy="busy && statusTarget?.id === model.id"
-                @change="changeStatus(model)"
-              />
-            </td>
-            <td>
-              <div class="modality-tags">
-                <span v-for="value in model.inputModalities" :key="value" class="modality-tag">{{
-                  t(`models.${value}`)
-                }}</span>
-              </div>
-            </td>
-            <td>
-              <div class="modality-tags">
-                <span v-for="value in model.outputModalities" :key="value" class="modality-tag">{{
-                  t(`models.${value}`)
-                }}</span>
-              </div>
-            </td>
-            <td>
-              <div class="model-remark">{{ model.remark || t('common.none') }}</div>
-            </td>
-            <td>
-              <div class="row-actions">
-                <button class="text-button" :disabled="busy" @click="openEdit(model)">
-                  {{ t('models.editAction') }}
-                </button>
-                <RowActionMenu
-                  :label="t('common.moreActionsFor', { name: model.name })"
-                  :title="t('common.moreActions')"
-                >
-                  <button class="text-button danger" :disabled="busy" @click="openDelete(model)">
-                    {{ t('models.delete') }}
-                  </button>
-                </RowActionMenu>
-              </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </TableScroll>
+    <ModelTable
+      :models="visible"
+      :busy="busy"
+      :loading="loading"
+      :status-target-id="statusTarget?.id"
+      @priorities="priorityTarget = $event"
+      @change-status="changeStatus"
+      @edit="openEdit"
+      @delete="openDelete"
+    />
     <div v-if="!visible.length" class="empty-state">
       <Icon name="models" :size="32" />
       <p>
@@ -385,119 +222,16 @@ function savePriorities() {
       @page-size="setPageSize"
     />
   </section>
-  <Modal
+  <ModelEditorModal
     v-if="editing"
-    :title="t(editTarget ? 'models.edit' : 'models.create')"
+    :edit-target="editTarget"
+    :form="form"
     :busy="busy"
-    medium
+    :providers="providers"
+    :provider-loading="providerLoading"
     @close="editing = false"
-  >
-    <p v-if="!editTarget" class="model-form-hint">{{ t('models.createHint') }}</p>
-    <form id="model-form" class="model-form" @submit.prevent="save">
-      <div class="model-form-row">
-        <label class="model-form-label required-label" for="model-code-input">{{
-          t('models.code')
-        }}</label>
-        <div class="model-form-control">
-          <input
-            id="model-code-input"
-            v-model="form.code"
-            required
-            :disabled="busy"
-            spellcheck="false"
-            autofocus
-          />
-        </div>
-      </div>
-      <div class="model-form-row">
-        <label class="model-form-label required-label" for="model-name-input">{{
-          t('models.name')
-        }}</label>
-        <div class="model-form-control">
-          <input id="model-name-input" v-model="form.name" required :disabled="busy" />
-        </div>
-      </div>
-      <p v-if="editTarget && form.code !== editTarget.code" class="alert" role="status">
-        {{ t('models.codeChange') }}
-      </p>
-      <div class="model-form-row">
-        <label class="model-form-label" for="model-publisher-input">{{
-          t('models.publisher')
-        }}</label>
-        <div class="model-form-control">
-          <select
-            id="model-publisher-input"
-            v-model="form.publisherProviderId"
-            :disabled="busy || providerLoading"
-          >
-            <option value="">{{ t('models.publisherPlaceholder') }}</option>
-            <option v-for="provider in providers" :key="provider.id" :value="provider.id">
-              {{ provider.name }}
-            </option>
-          </select>
-          <small class="model-field-hint">{{ t('models.publisherHint') }}</small>
-        </div>
-      </div>
-      <div class="model-form-row">
-        <div id="model-input-title" class="model-form-label required-label">
-          {{ t('models.input') }}
-        </div>
-        <div
-          class="model-form-control modality-options"
-          role="group"
-          aria-labelledby="model-input-title"
-        >
-          <label v-for="value in modalities" :key="value"
-            ><input
-              v-model="form.inputModalities"
-              type="checkbox"
-              :value="value"
-              :disabled="busy"
-            />{{ t(`models.${value}`) }}</label
-          >
-        </div>
-      </div>
-      <div class="model-form-row">
-        <div id="model-output-title" class="model-form-label required-label">
-          {{ t('models.output') }}
-        </div>
-        <div
-          class="model-form-control modality-options"
-          role="group"
-          aria-labelledby="model-output-title"
-        >
-          <label v-for="value in modalities" :key="value"
-            ><input
-              v-model="form.outputModalities"
-              type="checkbox"
-              :value="value"
-              :disabled="busy"
-            />{{ t(`models.${value}`) }}</label
-          >
-        </div>
-      </div>
-      <div class="model-form-row">
-        <label class="model-form-label" for="model-remark-input">{{ t('common.remark') }}</label>
-        <div class="model-form-control">
-          <textarea
-            id="model-remark-input"
-            v-model="form.remark"
-            :disabled="busy"
-            :placeholder="t('models.remarkPlaceholder')"
-            rows="3"
-          />
-        </div>
-      </div>
-    </form>
-    <template #footer>
-      <button type="button" class="button" :disabled="busy" @click="editing = false">
-        {{ t('common.cancel') }}
-      </button>
-      <button type="submit" form="model-form" class="button primary" :disabled="busy">
-        {{ t(busy ? 'common.working' : 'common.save') }}
-      </button>
-    </template>
-  </Modal>
+    @submit="save"
+  />
   <ConfirmDialog
     v-if="deleteTarget"
     :title="t('models.deleteTitle')"
@@ -509,206 +243,14 @@ function savePriorities() {
     @close="deleteTarget = null"
     @confirm="deleteModel"
   />
-  <Modal
+  <ModelPriorityModal
     v-if="priorityTarget"
-    :title="t('models.providerPrioritiesFor', { name: priorityTarget.name })"
-    :busy="prioritySaving"
-    @close="closePriorities"
-  >
-    <p class="model-priority-hint">{{ t('models.priorityHint') }}</p>
-    <div v-if="priorityError" class="alert" role="alert">
-      {{ priorityError }}
-      <button
-        type="button"
-        class="text-button"
-        :disabled="priorityLoading || prioritySaving"
-        @click="openPriorities(priorityTarget)"
-      >
-        {{ t('models.reloadPriorities') }}
-      </button>
-    </div>
-    <p v-if="priorityLoading">{{ t('common.loading') }}</p>
-    <p v-else-if="!priorityRows.length && !priorityError">
-      {{ t('models.noProviderMappings') }}
-      <RouterLink to="/providers">{{ t('models.configureProviderMappings') }}</RouterLink>
-    </p>
-    <table v-else-if="priorityRows.length" class="model-priority-table">
-      <colgroup>
-        <col class="model-priority-provider-column" />
-        <col class="model-priority-status-column" />
-        <col class="model-priority-value-column" />
-      </colgroup>
-      <thead>
-        <tr>
-          <th scope="col">{{ t('models.provider') }}</th>
-          <th scope="col">{{ t('models.routingStatus') }}</th>
-          <th scope="col">{{ t('models.priority') }}</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="row in priorityRows" :key="row.id">
-          <td class="model-priority-provider" :title="row.providerName">
-            <strong>{{ row.providerName }}</strong>
-          </td>
-          <td
-            class="model-priority-status"
-            :class="{ available: providerRoutingAvailable(row) }"
-            :title="providerRoutingStatus(row)"
-          >
-            {{ providerRoutingStatus(row) }}
-          </td>
-          <td class="model-priority-value">
-            <input
-              v-model="row.draft"
-              type="text"
-              inputmode="numeric"
-              pattern="[0-9]*"
-              :disabled="prioritySaving || row.providerStatus !== 'ACTIVE'"
-              :aria-label="t('models.priorityForProvider', { name: row.providerName })"
-            />
-          </td>
-        </tr>
-      </tbody>
-    </table>
-    <template #footer>
-      <button type="button" class="button" :disabled="prioritySaving" @click="closePriorities">
-        {{ t('common.cancel') }}
-      </button>
-      <button
-        type="button"
-        class="button primary"
-        :disabled="priorityLoading || prioritySaving || !priorityRows.length"
-        @click="savePriorities"
-      >
-        {{ t(prioritySaving ? 'common.working' : 'common.save') }}
-      </button>
-    </template>
-  </Modal>
+    :key="priorityTarget.id"
+    :model="priorityTarget"
+    @close="priorityTarget = null"
+  />
 </template>
 <style scoped>
-.models-table {
-  min-width: 1180px;
-  table-layout: fixed;
-}
-.model-name-column {
-  width: 26%;
-}
-.model-publisher-column {
-  width: 160px;
-}
-.model-status-column {
-  width: 100px;
-}
-.model-input-column,
-.model-output-column {
-  width: 120px;
-}
-.model-remark-column {
-  width: calc(74% - 730px);
-}
-.model-action-column {
-  width: 170px;
-}
-.model-code-line {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px 8px;
-}
-.models-table .person > div {
-  min-width: 0;
-}
-.model-code-line small {
-  min-width: 0;
-  margin-top: 0;
-}
-.model-provider-trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  max-width: 100%;
-  padding: 2px 8px;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  background: var(--color-surface);
-  color: var(--color-text-secondary);
-  font: inherit;
-  font-size: 11px;
-  line-height: 1.5;
-  cursor: pointer;
-}
-.model-provider-trigger:hover {
-  border-color: var(--color-primary);
-  color: var(--color-primary);
-}
-.model-provider-trigger:focus-visible {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
-}
-.model-provider-trigger:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-.model-priority-hint {
-  margin: 0 0 14px;
-  color: var(--color-text-secondary);
-  font-size: 13px;
-  line-height: 1.5;
-}
-.model-priority-table {
-  table-layout: fixed;
-}
-.model-priority-provider-column {
-  width: 44%;
-}
-.model-priority-status-column {
-  width: 32%;
-}
-.model-priority-value-column {
-  width: 24%;
-}
-.model-priority-table th {
-  padding: 8px;
-  border-top: 0;
-  background: transparent;
-}
-.model-priority-table td {
-  height: 56px;
-  padding: 8px;
-}
-.model-priority-table th:first-child,
-.model-priority-table td:first-child {
-  padding-left: 0;
-}
-.model-priority-table th:last-child,
-.model-priority-table td:last-child {
-  padding-right: 0;
-  text-align: right;
-}
-.model-priority-provider,
-.model-priority-status {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.model-priority-provider strong {
-  color: var(--color-text);
-  font-size: 13px;
-}
-.model-priority-status {
-  color: var(--color-text-secondary);
-  font-size: 12px;
-}
-.model-priority-status.available {
-  color: #047857;
-}
-.model-priority-value input {
-  width: 64px;
-  min-height: 36px;
-  padding: 6px 8px;
-  font-size: 14px;
-  text-align: center;
-}
 .model-publisher-filter {
   display: flex;
   flex: none;
@@ -729,89 +271,6 @@ function savePriorities() {
   border-color: var(--color-border);
   font-size: 12px;
 }
-.model-form {
-  display: grid;
-  gap: 16px;
-}
-.model-form label {
-  margin-bottom: 0;
-}
-.model-form-hint {
-  margin: 0 0 20px;
-  color: var(--muted);
-}
-.model-form-row {
-  display: grid;
-  grid-template-columns: 104px minmax(0, 1fr);
-  gap: 18px;
-  align-items: start;
-}
-.model-form-label {
-  display: block;
-  margin: 0;
-  padding-top: 10px;
-  color: var(--color-text-secondary);
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.4;
-  text-align: right;
-}
-.model-form-control {
-  min-width: 0;
-}
-.model-field-hint {
-  display: block;
-  margin-top: 6px;
-  color: var(--muted);
-  line-height: 1.5;
-}
-.required-label::after {
-  content: '*';
-  margin-left: 4px;
-  color: var(--danger);
-}
-.modality-options,
-.modality-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.modality-options label {
-  display: inline-flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
-  min-height: 32px;
-  margin: 0;
-  font-weight: 400;
-  cursor: pointer;
-}
-.modality-options {
-  min-height: 38px;
-}
-.modality-options input {
-  width: 16px;
-  height: 16px;
-  margin: 0;
-  padding: 0;
-  accent-color: var(--blue);
-}
-.modality-tag {
-  display: inline-block;
-  padding: 3px 7px;
-  border-radius: 6px;
-  color: var(--color-primary-hover);
-  background: var(--color-primary-soft);
-  font-size: 11px;
-  white-space: nowrap;
-}
-.model-remark {
-  min-width: 100px;
-  max-width: 240px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  font-size: 12px;
-}
 @media (max-width: 640px) {
   .model-publisher-filter {
     width: 100%;
@@ -819,14 +278,6 @@ function savePriorities() {
   .model-publisher-filter select {
     flex: 1;
     width: auto;
-  }
-  .model-form-row {
-    grid-template-columns: 1fr;
-    gap: 8px;
-  }
-  .model-form-label {
-    padding-top: 0;
-    text-align: left;
   }
 }
 </style>
