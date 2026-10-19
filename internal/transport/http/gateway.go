@@ -9,6 +9,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,6 +23,10 @@ import (
 )
 
 const openAICompletionDrainLimit = 2 * time.Second
+
+// maxRequestBodyPreallocation 是按客户端声明的 Content-Length 预分配请求体缓冲区的上限。
+// 声明接近 GATEWAY_MAX_BODY_BYTES 但慢速发送的连接不能立即占用整块内存，超出部分按实际到达的数据增长。
+const maxRequestBodyPreallocation = 1 << 20
 
 type GatewayHandler struct {
 	service  *gw.Service
@@ -202,19 +207,30 @@ func (g *GatewayHandler) parseForwardRequest(w http.ResponseWriter, r *http.Requ
 	return parsedGatewayRequest{}, gw.ErrInvalid
 }
 
-// readRequestBody 在 Content-Length 可信且不超过上限时一次性分配缓冲区，避免
-// io.ReadAll 在大请求上多次扩容复制。实际长度仍由 reader（MaxBytesReader）约束。
+// readRequestBody 在 Content-Length 可信且不超过上限时按声明长度预分配缓冲区，避免
+// io.ReadAll 在大请求上多次扩容复制。预分配不超过 maxRequestBodyPreallocation，之后按
+// 实际到达的数据倍增且不超过声明长度。实际长度仍由 reader（MaxBytesReader）约束。
 func readRequestBody(reader io.Reader, contentLength, limit int64) ([]byte, error) {
 	if contentLength <= 0 || contentLength > limit {
 		return io.ReadAll(reader)
 	}
-	body := make([]byte, contentLength)
-	n, err := io.ReadFull(reader, body)
-	if err != nil {
-		if errors.Is(err, io.EOF) {
-			err = nil
+	body := make([]byte, 0, min(contentLength, maxRequestBodyPreallocation))
+	for int64(len(body)) < contentLength {
+		if len(body) == cap(body) {
+			body = slices.Grow(body, int(min(int64(cap(body)), contentLength-int64(len(body)))))
 		}
-		return body[:n], err
+		n, err := reader.Read(body[len(body):min(int64(cap(body)), contentLength)])
+		body = body[:len(body)+n]
+		if err != nil {
+			// 与 io.ReadFull 一致：未读到任何数据时视为空请求体，读到部分数据后结束视为截断。
+			if errors.Is(err, io.EOF) {
+				err = nil
+				if len(body) > 0 {
+					err = io.ErrUnexpectedEOF
+				}
+			}
+			return body, err
+		}
 	}
 	// 声明长度之后仍有数据时继续读取，由 MaxBytesReader 负责超限判定。
 	rest, err := io.ReadAll(reader)
