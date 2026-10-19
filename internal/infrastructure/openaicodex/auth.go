@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	mgmt "github.com/zentrola/zentrola/internal/application/management"
@@ -31,8 +32,19 @@ const (
 var (
 	errInvalidCredential    = errors.New("invalid Codex ChatGPT credential")
 	errAppServerUnavailable = errors.New("codex app-server is unavailable")
+	errAppServerStopped     = errors.New("codex app-server stopped unexpectedly")
 	errSessionBusy          = errors.New("codex app-server session is busy")
 )
+
+// rpcError 是 app-server 返回的 JSON-RPC 错误。
+type rpcError struct {
+	Code    int64
+	Message string
+}
+
+func (e *rpcError) Error() string {
+	return fmt.Sprintf("codex app-server request failed (%d): %s", e.Code, e.Message)
+}
 
 type connectionFailure struct {
 	code  string
@@ -283,10 +295,10 @@ func subscriptionErrorCode(err error) string {
 		return "SUBSCRIPTION_CHECK_BUSY"
 	case errors.Is(err, errInvalidCredential):
 		return "CREDENTIAL_INVALID"
-	case errors.Is(err, errAppServerUnavailable):
-		return "CODEX_APP_SERVER_UNAVAILABLE"
 	case errors.Is(err, context.DeadlineExceeded):
 		return "UPSTREAM_TIMEOUT"
+	case errors.Is(err, errAppServerUnavailable):
+		return "CODEX_APP_SERVER_UNAVAILABLE"
 	default:
 		return "SUBSCRIPTION_UNAVAILABLE"
 	}
@@ -336,6 +348,10 @@ func (a *Adapter) runAccountSession(ctx context.Context, raw []byte, proxy *cata
 	}
 	defer client.close()
 	if err := client.initialize(ctx); err != nil {
+		if ctx.Err() != nil {
+			// 超时或取消时保留 context 错误，使调用方归类为超时，而不是 app-server 不可用。
+			return nil, mgmt.SubscriptionInspection{}, fmt.Errorf("codex app-server initialization interrupted: %w", err)
+		}
 		return nil, mgmt.SubscriptionInspection{}, fmt.Errorf("%w: initialization failed: %v", errAppServerUnavailable, err)
 	}
 	if err := action(client); err != nil {
@@ -469,13 +485,24 @@ func (a *Adapter) ExportCredential(raw []byte) ([]byte, error) {
 	return ensureLastRefresh(raw)
 }
 
+// appServerWaitDelay 是 app-server 退出或被终止后等待其输出管道关闭的上限，
+// 防止遗留的后代进程持有管道导致 Wait 无限阻塞。
+const appServerWaitDelay = 2 * time.Second
+
 type rpcClient struct {
 	command *exec.Cmd
 	stdin   io.WriteCloser
-	scanner *bufio.Scanner
+	// lines 由 readLines 协程写入 app-server 的每行输出，读取结束时关闭。
+	lines     chan []byte
+	done      chan struct{}
+	tree      *processTree
+	closeOnce sync.Once
 }
 
 func startClient(ctx context.Context, executable, directory string, proxy *catalog.OutboundProxy) (*rpcClient, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("codex app-server start interrupted: %w", err)
+	}
 	command := exec.CommandContext(ctx, executable, "app-server", "--stdio", "-c", `cli_auth_credentials_store="file"`)
 	// 子进程只继承白名单环境变量，再叠加服务商代理与隔离的 CODEX_HOME。
 	environment, err := provider.EnvironmentWithProxy(ctx, codexEnvironment(os.Environ()), proxy, provider.ProxyRequestLog{
@@ -485,23 +512,57 @@ func startClient(ctx context.Context, executable, directory string, proxy *catal
 		return nil, errors.New("invalid ChatGPT proxy configuration")
 	}
 	command.Env = append(environment, "CODEX_HOME="+directory)
+	tree, err := newProcessTree()
+	if err != nil {
+		return nil, fmt.Errorf("%w: cannot create process group", errAppServerUnavailable)
+	}
+	tree.configure(command)
+	// context 结束时终止整棵进程树，而不仅是直接子进程。
+	command.Cancel = tree.kill
+	command.WaitDelay = appServerWaitDelay
 	stdin, err := command.StdinPipe()
 	if err != nil {
+		tree.release()
 		return nil, fmt.Errorf("%w: cannot open input", errAppServerUnavailable)
 	}
 	stdout, err := command.StdoutPipe()
 	if err != nil {
 		stdin.Close()
+		tree.release()
 		return nil, fmt.Errorf("%w: cannot open output", errAppServerUnavailable)
 	}
 	command.Stderr = io.Discard
 	if err := command.Start(); err != nil {
 		stdin.Close()
+		tree.release()
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, fmt.Errorf("codex app-server start interrupted: %w", ctxErr)
+		}
 		return nil, fmt.Errorf("%w: cannot start process", errAppServerUnavailable)
 	}
+	// 加入进程树失败时仍可终止直接子进程，不阻止会话继续。
+	_ = tree.attach()
+	client := &rpcClient{
+		command: command, stdin: stdin, lines: make(chan []byte), done: make(chan struct{}), tree: tree,
+	}
+	go client.readLines(stdout)
+	return client, nil
+}
+
+// readLines 在独立协程中逐行读取 app-server 输出，使 call 能同时响应 context 结束。
+func (c *rpcClient) readLines(stdout io.Reader) {
+	defer close(c.lines)
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 64<<10), 1<<20)
-	return &rpcClient{command: command, stdin: stdin, scanner: scanner}, nil
+	for scanner.Scan() {
+		line := bytes.Clone(scanner.Bytes())
+		select {
+		case c.lines <- line:
+		case <-c.done:
+			clear(line)
+			return
+		}
+	}
 }
 
 func (c *rpcClient) initialize(ctx context.Context) error {
@@ -524,40 +585,70 @@ func (c *rpcClient) notify(method string, params any) error {
 }
 
 func (c *rpcClient) call(ctx context.Context, id int64, method string, params any, target any) error {
+	if err := ctx.Err(); err != nil {
+		return interruptedRequest(method, err)
+	}
 	request := map[string]any{"id": id, "method": method}
 	if params != nil {
 		request["params"] = params
 	}
 	if err := writeJSONLine(c.stdin, request); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return interruptedRequest(method, ctxErr)
+		}
 		return errors.New("cannot write Codex app-server request")
 	}
-	for c.scanner.Scan() {
-		if err := ctx.Err(); err != nil {
+	for {
+		var line []byte
+		select {
+		case <-ctx.Done():
+			return interruptedRequest(method, ctx.Err())
+		case received, ok := <-c.lines:
+			if !ok {
+				// app-server 因 context 结束被终止时，优先返回 context 错误，以便归类为超时或取消。
+				if err := ctx.Err(); err != nil {
+					return interruptedRequest(method, err)
+				}
+				return errAppServerStopped
+			}
+			line = received
+		}
+		matched, err := decodeResponse(line, id, target)
+		clear(line)
+		if matched {
 			return err
 		}
-		var response struct {
-			ID     *int64          `json:"id"`
-			Result json.RawMessage `json:"result"`
-			Error  *struct {
-				Code    int64  `json:"code"`
-				Message string `json:"message"`
-			} `json:"error"`
-		}
-		if json.Unmarshal(c.scanner.Bytes(), &response) != nil || response.ID == nil || *response.ID != id {
-			continue
-		}
-		if response.Error != nil {
-			return fmt.Errorf("codex app-server request failed (%d): %s", response.Error.Code, response.Error.Message)
-		}
-		if target == nil {
-			return nil
-		}
-		if err := json.Unmarshal(response.Result, target); err != nil {
-			return errors.New("invalid Codex app-server response")
-		}
-		return nil
 	}
-	return errors.New("codex app-server stopped unexpectedly")
+}
+
+// interruptedRequest 包装 context 错误，调用方仍可用 errors.Is 识别超时或取消。
+func interruptedRequest(method string, err error) error {
+	return fmt.Errorf("codex app-server request %s interrupted: %w", method, err)
+}
+
+// decodeResponse 解析一行 app-server 输出；matched 为 false 表示该行不是本次请求的响应。
+func decodeResponse(line []byte, id int64, target any) (matched bool, err error) {
+	var response struct {
+		ID     *int64          `json:"id"`
+		Result json.RawMessage `json:"result"`
+		Error  *struct {
+			Code    int64  `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(line, &response) != nil || response.ID == nil || *response.ID != id {
+		return false, nil
+	}
+	if response.Error != nil {
+		return true, &rpcError{Code: response.Error.Code, Message: response.Error.Message}
+	}
+	if target == nil {
+		return true, nil
+	}
+	if err := json.Unmarshal(response.Result, target); err != nil {
+		return true, errors.New("invalid Codex app-server response")
+	}
+	return true, nil
 }
 
 func writeJSONLine(writer io.Writer, value any) error {
@@ -572,18 +663,23 @@ func writeJSONLine(writer io.Writer, value any) error {
 }
 
 func (c *rpcClient) close() {
-	c.stdin.Close()
-	done := make(chan struct{})
-	go func() {
-		_ = c.command.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		_ = c.command.Process.Kill()
-		<-done
-	}
+	c.closeOnce.Do(func() {
+		close(c.done)
+		c.stdin.Close()
+		done := make(chan struct{})
+		go func() {
+			_ = c.command.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			_ = c.tree.kill()
+			<-done
+		}
+		// app-server 退出后清理仍在运行的后代进程。
+		c.tree.release()
+	})
 }
 
 type accountResponse struct {
