@@ -153,7 +153,8 @@ src/
   App.vue            登录、导航和管理员布局
   style.css          全局视觉规范和响应式样式
 tests/
-  admin.spec.ts      模拟 API 的完整浏览器业务测试
+  mock/              模拟 API：种子数据、按资源拆分的处理器与 fixture()
+  *.spec.ts          按页面分组的浏览器业务测试（home、providers、members 等）
   live.mjs           显式执行的真实本地后端验收
   setup.spec.ts      首次初始化与并发抢先完成的浏览器测试
   setup-live.mjs     显式执行的空库首次设置验收

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, useId } from 'vue'
+import { computed } from 'vue'
+import { useDropdownMenu } from '../dropdownMenu'
 import { activeLocale, setLocale, t, type SupportedLocale } from '../i18n'
 import Icon from './Icon.vue'
 
@@ -7,63 +8,16 @@ const options: { locale: SupportedLocale; label: string }[] = [
   { locale: 'zh-CN', label: '简体中文' },
   { locale: 'en-US', label: 'English' },
 ]
-const open = ref(false)
-const root = ref<HTMLElement>()
-const trigger = ref<HTMLButtonElement>()
-const menu = ref<HTMLElement>()
-const menuId = useId()
+const { open, root, trigger, menu, menuId, close, show, onKeydown, onFocusOut } =
+  useDropdownMenu('[role="menuitemradio"]')
 const currentLabel = computed(
   () => options.find((option) => option.locale === activeLocale.value)?.label ?? '简体中文',
 )
-
-function close(restoreFocus = false) {
-  open.value = false
-  if (restoreFocus) trigger.value?.focus()
-}
-
-async function show(last = false) {
-  open.value = true
-  await nextTick()
-  const items = menu.value?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')
-  items?.[last ? items.length - 1 : 0]?.focus()
-}
 
 function selectLocale(locale: SupportedLocale) {
   setLocale(locale)
   close(true)
 }
-
-function onKeydown(event: KeyboardEvent) {
-  if (event.key === 'Escape') {
-    event.preventDefault()
-    close(true)
-    return
-  }
-  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
-  event.preventDefault()
-  const items = Array.from(
-    menu.value?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]') ?? [],
-  )
-  const current = items.indexOf(document.activeElement as HTMLButtonElement)
-  const next =
-    event.key === 'Home'
-      ? 0
-      : event.key === 'End'
-        ? items.length - 1
-        : (current + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length
-  items[next]?.focus()
-}
-
-function onOutside(event: PointerEvent) {
-  if (!root.value?.contains(event.target as Node)) close()
-}
-
-function onFocusOut(event: FocusEvent) {
-  if (!root.value?.contains(event.relatedTarget as Node | null)) close()
-}
-
-onMounted(() => document.addEventListener('pointerdown', onOutside))
-onUnmounted(() => document.removeEventListener('pointerdown', onOutside))
 </script>
 
 <template>

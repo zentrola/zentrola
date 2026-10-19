@@ -1,66 +1,25 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, ref, useId, watch } from 'vue'
+import { watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { useDropdownMenu } from '../dropdownMenu'
 import { t } from '../i18n'
 import Icon from './Icon.vue'
 
 defineProps<{ username: string; displayName: string }>()
 const emit = defineEmits<{ changePassword: []; logout: [] }>()
-const open = ref(false)
-const root = ref<HTMLElement>(),
-  trigger = ref<HTMLButtonElement>(),
-  menu = ref<HTMLElement>()
-const menuId = useId()
+const { open, root, trigger, menu, menuId, close, show, onKeydown, onFocusOut } = useDropdownMenu()
 const route = useRoute()
 
-function close(restoreFocus = false) {
-  open.value = false
-  if (restoreFocus) trigger.value?.focus()
-}
-async function show(last = false) {
-  open.value = true
-  await nextTick()
-  const items = menu.value?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
-  items?.[last ? items.length - 1 : 0]?.focus()
-}
 function select(action: 'changePassword' | 'logout') {
   // 弹窗打开前将焦点放回账号按钮，关闭弹窗后也能回到稳定的入口。
   close(true)
   if (action === 'changePassword') emit('changePassword')
   else emit('logout')
 }
-function onKeydown(event: KeyboardEvent) {
-  if (event.key === 'Escape') {
-    event.preventDefault()
-    close(true)
-    return
-  }
-  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
-  event.preventDefault()
-  const items = Array.from(
-    menu.value?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [],
-  )
-  const current = items.indexOf(document.activeElement as HTMLButtonElement)
-  const next =
-    event.key === 'Home'
-      ? 0
-      : event.key === 'End'
-        ? items.length - 1
-        : (current + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length
-  items[next]?.focus()
-}
-function onOutside(event: PointerEvent) {
-  if (!root.value?.contains(event.target as Node)) close()
-}
-function onFocusOut(event: FocusEvent) {
-  if (!root.value?.contains(event.relatedTarget as Node | null)) close()
-}
 watch(
   () => route.fullPath,
   () => close(),
 )
-onMounted(() => document.addEventListener('pointerdown', onOutside))
-onUnmounted(() => document.removeEventListener('pointerdown', onOutside))
 </script>
 
 <template>
