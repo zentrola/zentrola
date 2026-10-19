@@ -115,3 +115,40 @@ func TestBillingWorkerSettlesAPIKeysWhenSubscriptionSettlementFails(t *testing.T
 		t.Fatalf("unexpected logs: %s", logs)
 	}
 }
+
+// timeoutSubscriptionStore 让订阅结算一直阻塞到本轮超时，并记录 API Key 结算是否仍被调用。
+type timeoutSubscriptionStore struct {
+	billingStoreStub
+	apiKeyPeriodsCalled bool
+}
+
+func (*timeoutSubscriptionStore) SubscriptionPrices(ctx context.Context) ([]SubscriptionPrice, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (s *timeoutSubscriptionStore) APIKeyPeriods(ctx context.Context, _ time.Time) ([]APIKeyPeriod, error) {
+	s.apiKeyPeriodsCalled = true
+	return nil, ctx.Err()
+}
+
+func TestBillingWorkerStopsAfterRunTimeout(t *testing.T) {
+	period := APIKeyPeriod{
+		CredentialID: 30, Currency: "CNY",
+		PeriodStart: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC),
+		PeriodEnd:   time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC),
+	}
+	store := &timeoutSubscriptionStore{billingStoreStub: billingStoreStub{apiKeyPeriods: []APIKeyPeriod{period}}}
+	var output bytes.Buffer
+	worker := &Worker{
+		service: New(store, &billingIDs{}), coordinator: &settlementCoordinatorStub{acquired: true},
+		logger: slog.New(slog.NewJSONHandler(&output, nil)), timeout: 50 * time.Millisecond,
+	}
+	worker.settle(context.Background())
+	logs := output.String()
+	// 本轮已超时：只报告订阅结算失败，不再用失效的 context 继续 API Key 结算并重复报错。
+	if store.apiKeyPeriodsCalled || !strings.Contains(logs, "SUBSCRIPTION_BILLING_FAILED") ||
+		strings.Contains(logs, "API_KEY_BILLING_FAILED") {
+		t.Fatalf("api key settlement called=%v logs: %s", store.apiKeyPeriodsCalled, logs)
+	}
+}

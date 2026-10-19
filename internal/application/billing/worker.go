@@ -77,10 +77,14 @@ func (w *Worker) settle(parent context.Context) {
 	// 订阅与 API Key 结算互不依赖：任一方全局失败只记录日志，另一方仍继续结算。
 	subscriptionSummary, subscriptionErr := w.service.SettleDueSubscriptions(ctx, cutoff)
 	if subscriptionErr != nil && parent.Err() == nil {
+		// 全局错误前已完成的出账仍然有效，因此同时输出本轮汇总。
 		w.logger.Error("subscription billing settlement failed", "error_code", "SUBSCRIPTION_BILLING_FAILED",
-			"error", SafeErrorText(subscriptionErr))
+			"error", SafeErrorText(subscriptionErr), "created", subscriptionSummary.Created,
+			"adjusted", subscriptionSummary.Adjusted, "failed", subscriptionSummary.Failed,
+			"failure_samples", subscriptionSummary.FailureSamples)
 	}
-	if parent.Err() != nil {
+	// 本轮超时（不只是进程退出）后 ctx 已失效，继续 API Key 结算只会立即失败并重复记录错误。
+	if ctx.Err() != nil {
 		return
 	}
 	apiKeySummary, apiKeyErr := w.service.SettleDueAPIKeys(ctx, cutoff)
