@@ -4,32 +4,50 @@ All notable changes to Zentrola are documented here. Dates use UTC. The project 
 
 Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循语义化版本。
 
-## [1.2.1] - 2026-10-18
+## [1.2.1] - 2026-10-19
 
 ### Added / 新增
 
 - Anthropic official model catalog sync: model synchronization reads `/v1/models` with an API Key, or with a Claude Code subscription token when no supported API Key is configured. Deprecated models are skipped, and image input support is recorded from the catalog.
-- Manual quota refresh for Claude subscriptions: the credential list can send one minimal request (1 output token, preferring a Haiku model mapping) and read only the unified rate limits from the response headers. It uses a tiny amount of subscription quota, may start a new 5-hour window, and does not change the credential runtime status. Refreshes are audited as `RESOURCE_QUOTA_REFRESH` (migration `00055`).
+- OpenAI model catalog sync with Codex subscriptions: when no API Key is available, model synchronization reads the ChatGPT Codex catalog with a Codex subscription credential. Hidden models are skipped, image input support is recorded, and model names follow the same rules as API Key sync. Expired access tokens are not refreshed during sync and return `SUBSCRIPTION_CREDENTIAL_EXPIRED`.
+- Manual quota refresh for Claude subscriptions: the credential list can send one minimal request (1 output token, preferring a Haiku model mapping) and read only the unified rate limits from the response headers. It uses a tiny amount of subscription quota, may start a new 5-hour window, and does not change the credential runtime status. Refreshes are audited as `RESOURCE_QUOTA_REFRESH`.
 - `CLAUDE_CODE_VERSION` sets the client version declared by all Claude subscription requests (`User-Agent: claude-cli/<version> (external, cli)`); it defaults to a built-in version when empty, and must use the `x.y.z` format. When the upstream rejects a Claude subscription request, the backend logs the upstream `error.type` and truncated `error.message`.
 - Anthropic 官方模型目录同步：优先使用 API Key 读取 `/v1/models`，没有可用 API Key 时使用 Claude Code 订阅 Token；已弃用的模型不会同步，并按目录记录是否支持图片输入。
-- Claude 订阅手动刷新额度：凭据列表可发送一次最小请求（输出 1 个 Token，优先使用 Haiku 模型映射），只从响应头读取统一限额。会消耗极少量订阅额度，可能开启新的 5 小时窗口，不改变凭据运行状态；刷新记录为审计事件 `RESOURCE_QUOTA_REFRESH`（迁移 `00055`）。
+- OpenAI 模型目录支持 Codex 订阅同步：没有可用 API Key 时，使用 Codex 订阅凭据读取 ChatGPT Codex 模型目录；跳过隐藏模型，记录是否支持图片输入，模型名称与 API Key 同步规则一致。同步时不刷新已过期的访问令牌，并返回 `SUBSCRIPTION_CREDENTIAL_EXPIRED`。
+- Claude 订阅手动刷新额度：凭据列表可发送一次最小请求（输出 1 个 Token，优先使用 Haiku 模型映射），只从响应头读取统一限额。会消耗极少量订阅额度，可能开启新的 5 小时窗口，不改变凭据运行状态；刷新记录为审计事件 `RESOURCE_QUOTA_REFRESH`。
 - 新增 `CLAUDE_CODE_VERSION`，统一设置所有 Claude 订阅请求声明的客户端版本（`User-Agent: claude-cli/<版本> (external, cli)`）；留空时使用内置默认版本，必须为 `x.y.z` 格式。Claude 订阅请求被上游拒绝时，后端日志会记录上游的 `error.type` 和截断后的 `error.message`。
 
 ### Changed / 变更
 
 - Claude subscription connection tests now send one minimal request to the selected model instead of reading the usage endpoint. Quota status, reset time, and check time are updated from the unified 5-hour and 7-day rate limits returned in the response. Enabling a provider with a Claude subscription also requires choosing a model mapping.
 - Claude subscription quota data is also synced from gateway responses, at most once every 5 minutes per credential unless the quota status or reset time changes. When the quota is exhausted, the gateway stops routing to that credential until the reset time.
+- Provider-level model sync skips credentials whose runtime status is `BLOCKED`, so a failing API Key no longer prevents a healthy subscription credential from being used. If every credential is blocked, the previous order (API Key first, then priority) still applies so the real upstream error is returned.
+- Claude subscription requests always use the version declared by `CLAUDE_CODE_VERSION` and no longer forward the client's own `User-Agent`.
 - Claude 订阅连接测试改为向所选模型发送一次最小请求，不再读取额度接口；额度状态、重置时间和检查时间改为根据响应中的 5 小时、7 天统一限额更新。使用 Claude 订阅启用服务商时需要选择模型映射。
 - 网关转发 Claude 订阅请求时也会同步额度：额度状态或重置时间不变时，每个凭据最多每 5 分钟写入一次；额度耗尽后网关在重置前不再路由到该凭据。
+- 服务商级模型同步会跳过运行状态为 `BLOCKED` 的凭据，避免失效的 API Key 导致正常的订阅凭据始终用不上；全部凭据都被封禁时，仍按 API Key 优先、再按优先级的顺序选择，以返回上游的真实错误。
+- Claude 订阅请求统一使用 `CLAUDE_CODE_VERSION` 声明的版本，不再透传客户端的 `User-Agent`。
 
 ### Fixed / 修复
 
+- Gateway requests routed to Claude Code subscription credentials no longer fail with HTTP 429: the gateway prepends the Claude Code system prompt when it is missing (keeping the client's system prompt and `cache_control`), merges the `claude-code-20250219` beta, and applies the same handling to `/v1/messages/count_tokens`. API Key routing is unchanged.
 - Claude subscription connection tests no longer fail with HTTP 429: the probe now identifies itself as Claude Code and accepts responses that contain only a signed thinking block.
 - Claude subscription OAuth tokens are sent only to `https://api.anthropic.com` by the gateway and connection tests, even when the provider endpoint points to another host.
 - Enabling a provider with a Claude subscription rechecks that the tested model mapping is still valid, matching the API Key behavior.
+- 网关路由到 Claude Code 订阅凭据的请求不再返回 HTTP 429：缺少 Claude Code 系统提示时，网关会将其插入到最前面（保留客户端原有系统提示和 `cache_control`），合并 `claude-code-20250219` beta，`/v1/messages/count_tokens` 也按相同方式处理。API Key 路由行为不变。
 - Claude 订阅连接测试不再返回 HTTP 429：探测请求会声明 Claude Code 身份，并接受只包含带签名思考块的响应。
 - 网关和连接测试只会把 Claude 订阅 OAuth Token 发往 `https://api.anthropic.com`，即使服务商端点指向其他主机。
 - 使用 Claude 订阅启用服务商时，会与 API Key 一样复核被测试的模型映射仍然有效。
+
+### Database / 数据库
+
+- Added migration `00055` to allow the `RESOURCE_QUOTA_REFRESH` audit event. Rolling it back is refused once quota refresh audit records exist.
+- 新增 `00055` 迁移，允许记录 `RESOURCE_QUOTA_REFRESH` 审计事件；已存在额度刷新审计记录时拒绝回滚。
+
+### Upgrade notes / 升级说明
+
+- No configuration changes are required: `CLAUDE_CODE_VERSION` is optional. Upgrading only needs migration `00055`, which is applied at startup when `MIGRATIONS_AUTO_APPLY=true`; otherwise run `zentrola migrate` before starting the new version.
+- 无需修改现有配置，`CLAUDE_CODE_VERSION` 为可选项。升级时只需执行迁移 `00055`：`MIGRATIONS_AUTO_APPLY=true` 时 Backend 启动会自动执行，否则请在启动新版本前运行 `zentrola migrate`。
 
 ## [1.2.0] - 2026-10-13
 
