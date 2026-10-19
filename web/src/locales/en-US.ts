@@ -1174,6 +1174,7 @@ export default {
       RESOURCE_CREATE: 'Add provider credential',
       RESOURCE_CREDENTIAL_UPDATE: 'Update provider credential',
       RESOURCE_CREDENTIAL_EXPORT: 'Export personal subscription credential',
+      RESOURCE_DELETE: 'Delete provider credential',
       RESOURCE_STATUS_CHANGE: 'Change provider credential status',
       RESOURCE_CONNECTION_TEST: 'Test provider connection',
       RESOURCE_RATE_LIMIT_RESET: 'Use rate-limit reset credit',

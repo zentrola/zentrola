@@ -141,6 +141,41 @@ test.describe('操作日志', () => {
     await expect(page.getByText('没有匹配的记录')).toBeVisible()
   })
 
+  test('操作日志类型筛选包含删除凭证且历史类型仍可展示', async ({ page }) => {
+    const state = await fixture(page)
+    const credentialOperation = (id: string, type: string, requestId: string) => ({
+      id,
+      operatorName: 'auditor',
+      type,
+      targetType: 'RESOURCE',
+      targetId: '601',
+      targetName: '测试凭证',
+      requestId,
+      result: 'SUCCESS',
+      errorCode: null,
+      before: { status: 'ACTIVE' },
+      after: null,
+      createdAt: stamp,
+    })
+    state.operations.push(
+      credentialOperation('200', 'RESOURCE_DELETE', 'req_resource_delete'),
+      credentialOperation('201', 'RESOURCE_STATUS_CHANGE', 'req_resource_status'),
+    )
+    await signIn(page, 'home')
+    await page.getByRole('link', { name: '操作日志', exact: true }).click()
+    await expect(page.getByRole('row').filter({ hasText: '服务商凭证状态变更' })).toHaveCount(1)
+    await expect(page.getByRole('row').filter({ hasText: '删除服务商凭证' })).toHaveCount(1)
+
+    const typeSelect = page.getByRole('combobox', { name: '操作类型' })
+    await expect(typeSelect.locator('option[value="RESOURCE_DELETE"]')).toHaveText('删除服务商凭证')
+    await expect(typeSelect.locator('option[value="RESOURCE_STATUS_CHANGE"]')).toHaveCount(0)
+    await typeSelect.selectOption('RESOURCE_DELETE')
+    await page.getByRole('button', { name: '搜索', exact: true }).click()
+    await expect(page.locator('tbody tr')).toHaveCount(1)
+    await expect(page.locator('tbody tr').first()).toContainText('删除服务商凭证')
+    expect(state.operationQueries.at(-1)!.get('type')).toBe('RESOURCE_DELETE')
+  })
+
   test('操作日志首屏加载中切换为查看全部时以最新筛选结果为准', async ({ page }) => {
     await fixture(page)
     let releaseApplicationOperations = () => {}

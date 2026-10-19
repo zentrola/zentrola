@@ -3,7 +3,6 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useCollection, date } from '../composables'
 import { codeText, t } from '../i18n'
-import enUS from '../locales/en-US'
 import type { Operation } from '../types'
 import Icon from '../components/Icon.vue'
 import Status from '../components/Status.vue'
@@ -17,7 +16,56 @@ import TableScroll from '../components/TableScroll.vue'
 type OperationFilters = { keyword: string; type: string; result: string }
 // 关键词最长 100 字符，与后端校验保持一致。
 const keywordMaxLength = 100
-const operationTypes = Object.keys(enUS.operations.types)
+// 筛选项与 internal/domain/operation/types.go 中仍会写入的类型保持一致；
+// 已停止写入的 RESOURCE_STATUS_CHANGE 只保留文案用于展示历史记录，不放进筛选。
+const operationTypes = [
+  'ADMIN_INITIALIZE',
+  'ADMIN_PASSWORD_RESET',
+  'MEMBER_CREATE',
+  'MEMBER_UPDATE',
+  'MEMBER_DELETE',
+  'MEMBER_STATUS_CHANGE',
+  'APPLICATION_CREATE',
+  'APPLICATION_UPDATE',
+  'APPLICATION_DELETE',
+  'APPLICATION_STATUS_CHANGE',
+  'PRINCIPAL_TOKEN_QUOTA_ADD',
+  'PRINCIPAL_TOKEN_QUOTA_REMOVE',
+  'ACCESS_KEY_CREATE',
+  'ACCESS_KEY_REVOKE',
+  'GROUP_CREATE',
+  'GROUP_UPDATE',
+  'GROUP_STATUS_CHANGE',
+  'GROUP_DELETE',
+  'GROUP_TOKEN_QUOTA_ADD',
+  'GROUP_TOKEN_QUOTA_REMOVE',
+  'GROUP_MEMBER_ADD',
+  'GROUP_MEMBER_REMOVE',
+  'GROUP_APPLICATION_ADD',
+  'GROUP_APPLICATION_REMOVE',
+  'GROUP_MODEL_GRANT',
+  'GROUP_MODEL_REVOKE',
+  'MODEL_CREATE',
+  'MODEL_UPDATE',
+  'MODEL_DELETE',
+  'MODEL_STATUS_CHANGE',
+  'MODEL_CATALOG_SYNC',
+  'PROVIDER_CREATE',
+  'PROVIDER_UPDATE',
+  'PROVIDER_DELETE',
+  'PROVIDER_STATUS_CHANGE',
+  'RESOURCE_CREATE',
+  'RESOURCE_CREDENTIAL_UPDATE',
+  'RESOURCE_CREDENTIAL_EXPORT',
+  'RESOURCE_DELETE',
+  'RESOURCE_CONNECTION_TEST',
+  'RESOURCE_RATE_LIMIT_RESET',
+  'RESOURCE_QUOTA_REFRESH',
+  'RESOURCE_PRICE_UPDATE',
+  'LOGIN_SUCCESS',
+  'LOGIN_FAILED',
+  'LOGIN_LOCKED',
+] as const
 const operationResults = ['SUCCESS', 'FAILED'] as const
 const emptyFilters = (): OperationFilters => ({ keyword: '', type: '', result: '' })
 const route = useRoute()

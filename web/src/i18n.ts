@@ -1164,6 +1164,7 @@ export const i18n = createI18n({
           RESOURCE_CREATE: '添加服务商凭证',
           RESOURCE_CREDENTIAL_UPDATE: '更新服务商凭证',
           RESOURCE_CREDENTIAL_EXPORT: '导出个人订阅凭证',
+          RESOURCE_DELETE: '删除服务商凭证',
           RESOURCE_STATUS_CHANGE: '服务商凭证状态变更',
           RESOURCE_CONNECTION_TEST: '测试服务商连接',
           RESOURCE_RATE_LIMIT_RESET: '使用额度重置卡',
