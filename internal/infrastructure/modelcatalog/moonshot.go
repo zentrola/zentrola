@@ -20,7 +20,7 @@ func (moonshotAdapter) Request(mgmt.ModelDiscoverySource, int, string) (catalogR
 	return catalogRequest{URL: "https://api.moonshot.cn/v1/models", Bearer: true}, nil
 }
 
-func (moonshotAdapter) Decode(data []byte, _ int) ([]mgmt.DiscoveredModel, string, error) {
+func (moonshotAdapter) Decode(_ mgmt.ModelDiscoverySource, data []byte, _ int) ([]mgmt.DiscoveredModel, string, error) {
 	var payload struct {
 		Object string `json:"object"`
 		Data   []struct {

@@ -46,7 +46,7 @@ func (qwenAdapter) Request(source mgmt.ModelDiscoverySource, page int, _ string)
 	return catalogRequest{URL: endpoint.String(), Bearer: true, NetworkScope: configuredEndpoint.NetworkScope}, nil
 }
 
-func (qwenAdapter) Decode(data []byte, requestedPage int) ([]mgmt.DiscoveredModel, string, error) {
+func (qwenAdapter) Decode(_ mgmt.ModelDiscoverySource, data []byte, requestedPage int) ([]mgmt.DiscoveredModel, string, error) {
 	var payload struct {
 		Success bool `json:"success"`
 		Output  struct {

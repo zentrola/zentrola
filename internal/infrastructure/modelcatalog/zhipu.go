@@ -19,7 +19,7 @@ func (zhipuAdapter) Request(mgmt.ModelDiscoverySource, int, string) (catalogRequ
 	return catalogRequest{URL: "https://open.bigmodel.cn/api/paas/v4/models", Bearer: true}, nil
 }
 
-func (zhipuAdapter) Decode(data []byte, _ int) ([]mgmt.DiscoveredModel, string, error) {
+func (zhipuAdapter) Decode(_ mgmt.ModelDiscoverySource, data []byte, _ int) ([]mgmt.DiscoveredModel, string, error) {
 	var payload struct {
 		Object string `json:"object"`
 		Data   []struct {

@@ -994,7 +994,7 @@ export const i18n = createI18n({
         syncingModels: '正在读取模型目录…',
         syncPassed: '模型目录同步完成',
         syncHint:
-          '使用已配置的 API Key 读取官方接口；创建缺失模型和服务商映射，同编码模型更新名称，新模型默认启用，其他既有配置保持不变。',
+          '优先使用已配置的 API Key 读取官方接口，没有可用 API Key 时使用支持的个人订阅凭证；创建缺失模型和服务商映射，同编码模型更新名称，新模型默认启用，其他既有配置保持不变。',
         syncResult: '模型同步结果',
         modelSyncSource: '同步来源',
         modelSyncSources: {
@@ -1212,6 +1212,8 @@ export const i18n = createI18n({
         SUBSCRIPTION_UNAVAILABLE: '个人订阅额度读取失败，请检查网络或代理配置。',
         SUBSCRIPTION_CHECK_BUSY: '正在检测其他个人订阅，请稍后重试。',
         SUBSCRIPTION_REFRESH_FAILED: '个人订阅认证刷新失败，请稍后重试或重新导入 auth.json。',
+        SUBSCRIPTION_CREDENTIAL_EXPIRED:
+          '个人订阅访问令牌已过期，请等待后台自动刷新，或先测试该凭证连接后再同步。',
         UPSTREAM_INVALID_RESPONSE: '上游返回了无效响应。',
         MODEL_CATALOG_UNSUPPORTED: '该服务商暂不支持同步官方模型目录。',
         UPSTREAM_URL_REJECTED: '上游地址不符合允许规则。',

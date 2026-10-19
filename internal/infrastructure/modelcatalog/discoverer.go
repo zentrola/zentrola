@@ -20,29 +20,40 @@ type catalogRequest struct {
 	URL          string
 	Bearer       bool
 	APIKeyHeader string
-	NetworkScope string
+	// AccountIDHeader 非空时注入订阅凭据解析出的账号标识，缺少账号标识的凭据会被拒绝。
+	AccountIDHeader string
+	NetworkScope    string
 	// Headers 只承载协议版本等非敏感请求头，凭据始终由 Bearer 或 APIKeyHeader 注入。
 	Headers map[string]string
 }
 
 const (
-	maxCatalogResponseBytes = 1 << 20
+	// Codex 订阅目录随模型附带完整的客户端指令，单页体积远大于 API Key 目录。
+	maxCatalogResponseBytes = 4 << 20
 	maxCatalogModels        = 1000
 	maxCatalogPages         = 10
 )
 
+var errSubscriptionExpired = errors.New("subscription access token expired")
+
 // adapter 隔离服务商专有的目录地址、认证方式和响应结构。
-// 适配器仅由服务商编码选择，与推理协议无关。
+// 适配器仅由服务商编码选择，与推理协议无关；同一服务商的不同凭据类型可在适配器内部使用不同目录。
 type adapter interface {
 	Name() string
 	Request(mgmt.ModelDiscoverySource, int, string) (catalogRequest, error)
-	Decode([]byte, int) ([]mgmt.DiscoveredModel, string, error)
+	Decode(mgmt.ModelDiscoverySource, []byte, int) ([]mgmt.DiscoveredModel, string, error)
+}
+
+// subscriptionToken 是订阅凭据转换出的单次目录请求凭据，Token 使用后必须清零。
+type subscriptionToken struct {
+	Token     []byte
+	AccountID string
 }
 
 // subscriptionAdapter 由支持订阅凭据读取模型目录的适配器实现，负责把存储凭据转换为请求 Token。
 type subscriptionAdapter interface {
 	SupportsSubscription(authAdapter string) bool
-	SubscriptionCredential([]byte) ([]byte, error)
+	SubscriptionCredential([]byte) (subscriptionToken, error)
 }
 
 type Discoverer struct {
@@ -117,6 +128,7 @@ func (d *Discoverer) Discover(ctx context.Context, source mgmt.ModelDiscoverySou
 		result.Code = "MODEL_CATALOG_UNSUPPORTED"
 		return
 	}
+	var accountID string
 	if source.AuthType == mgmt.AuthTypeSubscription {
 		if !d.SupportsCredential(source.ProviderCode, source.AuthType, source.AuthAdapter) {
 			result.Code = "MODEL_CATALOG_UNSUPPORTED"
@@ -125,10 +137,13 @@ func (d *Discoverer) Discover(ctx context.Context, source mgmt.ModelDiscoverySou
 		token, err := adapter.(subscriptionAdapter).SubscriptionCredential(credential)
 		if err != nil {
 			result.Code = "CREDENTIAL_INVALID"
+			if errors.Is(err, errSubscriptionExpired) {
+				result.Code = "SUBSCRIPTION_CREDENTIAL_EXPIRED"
+			}
 			return
 		}
-		defer clear(token)
-		credential = token
+		defer clear(token.Token)
+		credential, accountID = token.Token, token.AccountID
 	}
 	if !validCredential(credential) {
 		result.Code = "CREDENTIAL_INVALID"
@@ -142,6 +157,10 @@ func (d *Discoverer) Discover(ctx context.Context, source mgmt.ModelDiscoverySou
 		requestSpec, requestErr := adapter.Request(source, page, cursor)
 		if requestErr != nil {
 			result.Code = "UPSTREAM_URL_REJECTED"
+			return nil, result
+		}
+		if requestSpec.AccountIDHeader != "" && !validCredential([]byte(accountID)) {
+			result.Code = "CREDENTIAL_INVALID"
 			return nil, result
 		}
 		baseClient := d.client
@@ -167,6 +186,9 @@ func (d *Discoverer) Discover(ctx context.Context, source mgmt.ModelDiscoverySou
 		if requestSpec.APIKeyHeader != "" {
 			req.Header.Set(requestSpec.APIKeyHeader, string(credential))
 		}
+		if requestSpec.AccountIDHeader != "" {
+			req.Header.Set(requestSpec.AccountIDHeader, accountID)
+		}
 		for name, value := range requestSpec.Headers {
 			req.Header.Set(name, value)
 		}
@@ -176,6 +198,9 @@ func (d *Discoverer) Discover(ctx context.Context, source mgmt.ModelDiscoverySou
 		req.Header.Del("Authorization")
 		if requestSpec.APIKeyHeader != "" {
 			req.Header.Del(requestSpec.APIKeyHeader)
+		}
+		if requestSpec.AccountIDHeader != "" {
+			req.Header.Del(requestSpec.AccountIDHeader)
 		}
 		if requestErr != nil {
 			cleanup()
@@ -206,7 +231,7 @@ func (d *Discoverer) Discover(ctx context.Context, source mgmt.ModelDiscoverySou
 			result.Code = "UPSTREAM_INVALID_RESPONSE"
 			return nil, result
 		}
-		pageModels, nextCursor, decodeErr := adapter.Decode(data, page)
+		pageModels, nextCursor, decodeErr := adapter.Decode(source, data, page)
 		if decodeErr != nil {
 			result.Code = "UPSTREAM_INVALID_RESPONSE"
 			return nil, result

@@ -998,7 +998,7 @@ export default {
     syncingModels: 'Reading the model catalog…',
     syncPassed: 'Model catalog synchronized',
     syncHint:
-      'Uses a configured API key to read the official API. Missing models and provider mappings are created, matching names are refreshed, new models are enabled, and other existing configuration is preserved.',
+      'Reads the official API with a configured API key first, or with a supported personal subscription credential when no API key is usable. Missing models and provider mappings are created, matching names are refreshed, new models are enabled, and other existing configuration is preserved.',
     syncResult: 'Model sync result',
     modelSyncSource: 'Sync source',
     modelSyncSources: {
@@ -1234,6 +1234,8 @@ export default {
       'The personal subscription quota could not be read. Check the network or proxy.',
     SUBSCRIPTION_REFRESH_FAILED:
       'The personal subscription could not be refreshed. Try again later or import auth.json again.',
+    SUBSCRIPTION_CREDENTIAL_EXPIRED:
+      'The personal subscription access token has expired. Wait for the automatic refresh, or test the credential connection before synchronizing.',
     UPSTREAM_INVALID_RESPONSE: 'The upstream service returned an invalid response.',
     MODEL_CATALOG_UNSUPPORTED:
       'Official model catalog sync is not supported for this provider yet.',

@@ -21,7 +21,7 @@ func (deepSeekAdapter) Request(mgmt.ModelDiscoverySource, int, string) (catalogR
 	return catalogRequest{URL: "https://api.deepseek.com/models", Bearer: true}, nil
 }
 
-func (deepSeekAdapter) Decode(data []byte, _ int) ([]mgmt.DiscoveredModel, string, error) {
+func (deepSeekAdapter) Decode(_ mgmt.ModelDiscoverySource, data []byte, _ int) ([]mgmt.DiscoveredModel, string, error) {
 	var payload struct {
 		Object string `json:"object"`
 		Data   []struct {

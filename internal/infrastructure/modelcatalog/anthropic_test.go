@@ -100,7 +100,9 @@ func TestDiscovererReportsCredentialCapabilities(t *testing.T) {
 		{catalog.AnthropicOfficialCode, mgmt.AuthTypeSubscription, mgmt.AuthAdapterClaudeCode, true},
 		{catalog.AnthropicOfficialCode, mgmt.AuthTypeSubscription, mgmt.AuthAdapterOpenAICodex, false},
 		{catalog.OpenAIOfficialCode, mgmt.AuthTypeAPIKey, "API_KEY", true},
-		{catalog.OpenAIOfficialCode, mgmt.AuthTypeSubscription, mgmt.AuthAdapterOpenAICodex, false},
+		{catalog.OpenAIOfficialCode, mgmt.AuthTypeSubscription, mgmt.AuthAdapterOpenAICodex, true},
+		{catalog.OpenAIOfficialCode, mgmt.AuthTypeSubscription, mgmt.AuthAdapterClaudeCode, false},
+		{catalog.GoogleOfficialCode, mgmt.AuthTypeSubscription, mgmt.AuthAdapterOpenAICodex, false},
 		{catalog.AnthropicOfficialCode, "UNKNOWN", "", false},
 		{"provider-custom", mgmt.AuthTypeAPIKey, "API_KEY", false},
 	} {
@@ -117,9 +119,15 @@ func TestDiscoverRejectsUnsupportedOrInvalidSubscriptionWithoutRequest(t *testin
 		credential string
 		code       string
 	}{
-		{"codex subscription", mgmt.ModelDiscoverySource{
-			ProviderCode: catalog.OpenAIOfficialCode, AuthType: mgmt.AuthTypeSubscription, AuthAdapter: mgmt.AuthAdapterOpenAICodex,
+		{"Claude subscription on OpenAI", mgmt.ModelDiscoverySource{
+			ProviderCode: catalog.OpenAIOfficialCode, AuthType: mgmt.AuthTypeSubscription, AuthAdapter: mgmt.AuthAdapterClaudeCode,
+		}, `{"kind":"claude_code_setup_token","access_token":"sk-ant-oat01-test"}`, "MODEL_CATALOG_UNSUPPORTED"},
+		{"Codex subscription on Google", mgmt.ModelDiscoverySource{
+			ProviderCode: catalog.GoogleOfficialCode, AuthType: mgmt.AuthTypeSubscription, AuthAdapter: mgmt.AuthAdapterOpenAICodex,
 		}, `{"access_token":"token"}`, "MODEL_CATALOG_UNSUPPORTED"},
+		{"invalid Codex auth file", mgmt.ModelDiscoverySource{
+			ProviderCode: catalog.OpenAIOfficialCode, AuthType: mgmt.AuthTypeSubscription, AuthAdapter: mgmt.AuthAdapterOpenAICodex,
+		}, `{"access_token":"token"}`, "CREDENTIAL_INVALID"},
 		{"invalid Claude token", mgmt.ModelDiscoverySource{
 			ProviderCode: catalog.AnthropicOfficialCode, AuthType: mgmt.AuthTypeSubscription, AuthAdapter: anthropicclaude.AdapterCode,
 		}, `{"kind":"unknown","access_token":"token"}`, "CREDENTIAL_INVALID"},

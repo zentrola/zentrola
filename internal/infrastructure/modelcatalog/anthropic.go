@@ -54,15 +54,15 @@ func (anthropicAdapter) SupportsSubscription(authAdapter string) bool {
 	return authAdapter == anthropicclaude.AdapterCode
 }
 
-func (anthropicAdapter) SubscriptionCredential(raw []byte) ([]byte, error) {
+func (anthropicAdapter) SubscriptionCredential(raw []byte) (subscriptionToken, error) {
 	token, err := anthropicclaude.RequestCredential(raw)
 	if err != nil {
-		return nil, err
+		return subscriptionToken{}, err
 	}
-	return []byte(token), nil
+	return subscriptionToken{Token: []byte(token)}, nil
 }
 
-func (anthropicAdapter) Decode(data []byte, _ int) ([]mgmt.DiscoveredModel, string, error) {
+func (anthropicAdapter) Decode(_ mgmt.ModelDiscoverySource, data []byte, _ int) ([]mgmt.DiscoveredModel, string, error) {
 	var payload struct {
 		Data []struct {
 			Type         string  `json:"type"`

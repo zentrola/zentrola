@@ -39,7 +39,7 @@ func (googleAdapter) Request(_ mgmt.ModelDiscoverySource, page int, pageToken st
 	return catalogRequest{URL: endpoint.String(), APIKeyHeader: "X-Goog-Api-Key"}, nil
 }
 
-func (googleAdapter) Decode(data []byte, _ int) ([]mgmt.DiscoveredModel, string, error) {
+func (googleAdapter) Decode(_ mgmt.ModelDiscoverySource, data []byte, _ int) ([]mgmt.DiscoveredModel, string, error) {
 	var payload struct {
 		Models []struct {
 			Name                       string   `json:"name"`

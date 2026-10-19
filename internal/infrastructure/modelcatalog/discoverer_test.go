@@ -104,9 +104,23 @@ func TestDiscoverOpenAIModels(t *testing.T) {
 }
 
 func TestOpenAIModelCatalogDoesNotDuplicateInternalAutoReviewModel(t *testing.T) {
-	models, _, err := (openAIAdapter{}).Decode([]byte(`{"object":"list","data":[{"id":"codex-auto-review","object":"model","owned_by":"openai"}]}`), 1)
-	if err != nil || len(models) != 1 || models[0].Code != "codex-auto-review" || models[0].Name != "Codex Auto Review" {
-		t.Fatalf("unexpected internal model discovery: %+v err=%v", models, err)
+	for _, tt := range []struct {
+		name   string
+		source mgmt.ModelDiscoverySource
+		body   string
+	}{
+		{"API Key", mgmt.ModelDiscoverySource{ProviderCode: catalog.OpenAIOfficialCode},
+			`{"object":"list","data":[{"id":"codex-auto-review","object":"model","owned_by":"openai"}]}`},
+		{"Codex subscription", mgmt.ModelDiscoverySource{
+			ProviderCode: catalog.OpenAIOfficialCode, AuthType: mgmt.AuthTypeSubscription, AuthAdapter: mgmt.AuthAdapterOpenAICodex,
+		}, `{"models":[{"slug":"codex-auto-review","visibility":"hide"}]}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			models, _, err := (openAIAdapter{}).Decode(tt.source, []byte(tt.body), 1)
+			if err != nil || len(models) != 1 || models[0].Code != "codex-auto-review" || models[0].Name != "Codex Auto Review" {
+				t.Fatalf("unexpected internal model discovery: %+v err=%v", models, err)
+			}
+		})
 	}
 }
 

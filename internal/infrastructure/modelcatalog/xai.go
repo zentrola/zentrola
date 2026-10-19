@@ -22,7 +22,7 @@ func (xAIAdapter) Request(mgmt.ModelDiscoverySource, int, string) (catalogReques
 	return catalogRequest{URL: xAILanguageModelsURL, Bearer: true}, nil
 }
 
-func (xAIAdapter) Decode(data []byte, _ int) ([]mgmt.DiscoveredModel, string, error) {
+func (xAIAdapter) Decode(_ mgmt.ModelDiscoverySource, data []byte, _ int) ([]mgmt.DiscoveredModel, string, error) {
 	var payload struct {
 		Models []struct {
 			ID               string   `json:"id"`
