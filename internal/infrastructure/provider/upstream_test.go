@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -60,6 +63,7 @@ func TestTransportErrorCode(t *testing.T) {
 		{"proxy transport failure", context.Background(), timeoutError{}, true, TransportProxyServer},
 		{"direct deadline", expired, errors.New("transport failed"), false, TransportTimeout},
 		{"direct network timeout", context.Background(), &net.OpError{Op: "read", Err: timeoutError{}}, false, TransportTimeout},
+		{"stream idle timeout", context.Background(), ErrStreamIdleTimeout, false, TransportTimeout},
 		{"direct failure", context.Background(), errors.New("connection refused"), false, TransportUnavailable},
 	}
 	for _, tt := range tests {
@@ -116,5 +120,118 @@ func TestTransportFailureLogsAreRedacted(t *testing.T) {
 		if strings.Contains(output, secret) {
 			t.Fatalf("log leaked %q: %s", secret, output)
 		}
+	}
+}
+
+func TestTrackedBodyIdleTimeoutCancelsStalledStream(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		for range 3 {
+			_, _ = io.WriteString(w, "data: {}\n\n")
+			w.(http.Flusher).Flush()
+			time.Sleep(20 * time.Millisecond)
+		}
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
+	response, err := server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cleaned atomic.Int32
+	body := NewTrackedBody(response.Body, TrackedBodyOptions{
+		IdleTimeout: 150 * time.Millisecond, Cancel: cancel, Cleanup: func() { cleaned.Add(1) },
+	})
+	started := time.Now()
+	data, err := io.ReadAll(body)
+	if !errors.Is(err, ErrStreamIdleTimeout) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("read error=%v, want stream idle timeout", err)
+	}
+	if string(data) != strings.Repeat("data: {}\n\n", 3) {
+		t.Fatalf("data before timeout was lost: %q", data)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("idle timeout took %s", elapsed)
+	}
+	if ctx.Err() == nil {
+		t.Fatal("request context was not cancelled")
+	}
+	if _, err := body.Read(make([]byte, 1)); !errors.Is(err, ErrStreamIdleTimeout) {
+		t.Fatalf("read after timeout error=%v", err)
+	}
+	_ = body.Close()
+	_ = body.Close()
+	if cleaned.Load() != 1 {
+		t.Fatalf("cleanup calls=%d, want 1", cleaned.Load())
+	}
+}
+
+type slowReader struct {
+	chunks []string
+	delay  time.Duration
+}
+
+func (r *slowReader) Read(p []byte) (int, error) {
+	if len(r.chunks) == 0 {
+		return 0, io.EOF
+	}
+	time.Sleep(r.delay)
+	n := copy(p, r.chunks[0])
+	r.chunks = r.chunks[1:]
+	return n, nil
+}
+
+func TestTrackedBody(t *testing.T) {
+	sentinel := errors.New("gateway timeout")
+	tests := []struct {
+		name      string
+		reader    io.Reader
+		idle      time.Duration
+		idleError error
+		wantData  string
+		wantErr   error
+	}{
+		{"steady stream within timeout", &slowReader{chunks: []string{"a", "b", "c"}, delay: 30 * time.Millisecond}, 200 * time.Millisecond, nil, "abc", nil},
+		{"idle timeout disabled", &slowReader{chunks: []string{"a", "b"}, delay: 60 * time.Millisecond}, 0, nil, "ab", nil},
+		{"custom idle error", &slowReader{chunks: []string{"a", "b"}, delay: 300 * time.Millisecond}, 100 * time.Millisecond, sentinel, "", sentinel},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var cancelled atomic.Bool
+			body := NewTrackedBody(io.NopCloser(tt.reader), TrackedBodyOptions{
+				IdleTimeout: tt.idle, IdleError: tt.idleError, Cancel: func() { cancelled.Store(true) },
+			})
+			defer body.Close()
+			data, err := io.ReadAll(body)
+			if tt.wantErr == nil && err != nil || tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
+				t.Fatalf("err=%v, want %v", err, tt.wantErr)
+			}
+			if tt.wantErr == nil && (string(data) != tt.wantData || cancelled.Load()) {
+				t.Fatalf("data=%q cancelled=%v", data, cancelled.Load())
+			}
+			if tt.wantErr != nil && !cancelled.Load() {
+				t.Fatal("idle timeout did not cancel the request")
+			}
+		})
+	}
+}
+
+func TestTrackedBodyClearsSentCredentialsOnClose(t *testing.T) {
+	headers := http.Header{"Authorization": {"Bearer secret"}, "X-Api-Key": {"secret"}, "Content-Type": {"application/json"}}
+	sent := &SentHeaders{headers: headers}
+	body := NewTrackedBody(io.NopCloser(strings.NewReader("ok")), TrackedBodyOptions{SentHeaders: sent, SensitiveHeaders: []string{"Authorization", "x-api-key"}})
+	if headers.Get("Authorization") == "" {
+		t.Fatal("credentials cleared before close")
+	}
+	_ = body.Close()
+	if headers.Get("Authorization") != "" || headers.Get("X-Api-Key") != "" || headers.Get("Content-Type") == "" {
+		t.Fatalf("unexpected headers after close: %v", headers)
 	}
 }

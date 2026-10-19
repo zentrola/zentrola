@@ -322,3 +322,51 @@ func TestGatewayClientRejectsDuplicateSystem(t *testing.T) {
 		t.Fatalf("err = %v, want ErrInvalid", err)
 	}
 }
+
+func TestGatewayClientStreamIdleTimeout(t *testing.T) {
+	tests := []struct {
+		name    string
+		idle    time.Duration
+		wantErr error
+	}{
+		{name: "stalled stream times out", idle: 50 * time.Millisecond, wantErr: gw.ErrTimeout},
+		{name: "disabled timeout waits for upstream", idle: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := NewGatewayClient(time.Second)
+			client.UseStreamIdleTimeout(tt.idle)
+			var requestCtx context.Context
+			client.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				requestCtx = r.Context()
+				reader, writer := io.Pipe()
+				go func() {
+					_, _ = writer.Write([]byte("event: ping\n\n"))
+					if tt.idle == 0 {
+						time.Sleep(150 * time.Millisecond)
+						_ = writer.Close()
+					}
+				}()
+				return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: reader}, nil
+			})
+			resp, err := client.Open(context.Background(), gw.Route{BaseURL: "https://api.anthropic.com"}, gw.Request{Path: "/v1/messages", Body: []byte(`{}`)}, []byte("key"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			data, err := io.ReadAll(resp.Body)
+			if string(data) != "event: ping\n\n" {
+				t.Fatalf("data=%q", data)
+			}
+			if tt.wantErr == nil {
+				if err != nil || requestCtx.Err() != nil {
+					t.Fatalf("err=%v ctx=%v", err, requestCtx.Err())
+				}
+				return
+			}
+			if !errors.Is(err, tt.wantErr) || !errors.Is(err, context.DeadlineExceeded) || requestCtx.Err() == nil {
+				t.Fatalf("err=%v ctx=%v, want upstream timeout and cancelled request", err, requestCtx.Err())
+			}
+		})
+	}
+}

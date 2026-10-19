@@ -5,10 +5,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
+	"fmt"
 	"log/slog"
 	"net/http"
-	"sync"
 	"time"
 
 	gw "github.com/zentrola/zentrola/internal/application/gateway"
@@ -20,9 +19,10 @@ import (
 const codexSubscriptionBaseURL = "https://chatgpt.com/backend-api/codex"
 
 type GatewayClient struct {
-	client        *http.Client
-	privateClient *http.Client
-	logger        *slog.Logger
+	client            *http.Client
+	privateClient     *http.Client
+	logger            *slog.Logger
+	streamIdleTimeout time.Duration
 }
 
 func NewGatewayClient(headerTimeout time.Duration, loggers ...*slog.Logger) *GatewayClient {
@@ -35,6 +35,11 @@ func NewGatewayClient(headerTimeout time.Duration, loggers ...*slog.Logger) *Gat
 		logger = loggers[0]
 	}
 	return &GatewayClient{client: clients.Public, privateClient: clients.Private, logger: logger}
+}
+
+// UseStreamIdleTimeout 设置上游响应体的空闲读超时，必须在处理请求前调用；0 表示不限制。
+func (c *GatewayClient) UseStreamIdleTimeout(timeout time.Duration) {
+	c.streamIdleTimeout = max(timeout, 0)
 }
 
 func (c *GatewayClient) CloseIdleConnections() {
@@ -78,8 +83,11 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 	} else if route.AuthType != "SUBSCRIPTION" && input.Protocol == gw.OpenAIImagesProtocol {
 		upstreamPath = "/images/generations"
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+upstreamPath, bytes.NewReader(input.Body))
+	// 请求使用独立的可取消 context，供响应体空闲超时时中断上游连接。
+	requestCtx, cancel := context.WithCancel(ctx)
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, baseURL+upstreamPath, bytes.NewReader(input.Body))
 	if err != nil {
+		cancel()
 		return nil, gw.ErrInvalid
 	}
 	req.GetBody = nil
@@ -103,6 +111,7 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 		Logger: c.logger, Operation: "gateway_inference", ProviderID: route.ProviderID, ResourceID: route.ResourceID, Protocol: gw.OpenAIEndpoint,
 	})
 	if err != nil {
+		cancel()
 		return nil, gw.ErrProxy
 	}
 	logFields := provider.UpstreamRequestLog{RequestID: input.RequestID, ProviderID: route.ProviderID, ResourceID: route.ResourceID, Protocol: input.Protocol}
@@ -112,6 +121,7 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 		requestHeaders := provider.HeadersForLog(req.Header)
 		sentHeaders.Delete(gatewaySensitiveHeaders...)
 		cleanup()
+		cancel()
 		failure := gatewayTransportFailure(provider.TransportErrorCode(ctx, err, route.Proxy != nil))
 		if failure == gw.ErrCancelled {
 			return nil, failure
@@ -125,13 +135,21 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 		provider.LogRedirectRejected(ctx, c.logger, resp.StatusCode, resp.Header.Get("Location"), requestHeaders, logFields)
 		resp.Body.Close()
 		cleanup()
+		cancel()
 		return nil, gw.ErrUpstream
 	}
-	return &gw.Response{Status: resp.StatusCode, Headers: resp.Header, Body: &responseBody{ReadCloser: resp.Body, sentHeaders: sentHeaders, cleanup: cleanup}}, nil
+	return &gw.Response{Status: resp.StatusCode, Headers: resp.Header, Body: provider.NewTrackedBody(resp.Body, provider.TrackedBodyOptions{
+		SentHeaders: sentHeaders, SensitiveHeaders: gatewaySensitiveHeaders,
+		IdleTimeout: c.streamIdleTimeout, IdleError: errStreamIdleTimeout, Cancel: cancel, Cleanup: cleanup,
+	})}, nil
 }
 
 // gatewaySensitiveHeaders 是响应结束后需从已发送请求中清除的凭据 Header。
 var gatewaySensitiveHeaders = []string{"Authorization", "ChatGPT-Account-Id"}
+
+// errStreamIdleTimeout 同时满足 errors.Is(err, gw.ErrTimeout) 与 errors.Is(err, context.DeadlineExceeded)，
+// 供上层把响应体空闲超时归类为上游超时。
+var errStreamIdleTimeout = fmt.Errorf("%w: %w", provider.ErrStreamIdleTimeout, gw.ErrTimeout)
 
 // gatewayTransportFailure 把传输错误分类码映射为网关失败类型。
 func gatewayTransportFailure(code string) *gw.Failure {
@@ -204,23 +222,4 @@ type codexInputMessage struct {
 type codexInputContent struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
-}
-
-type responseBody struct {
-	io.ReadCloser
-	sentHeaders *provider.SentHeaders
-	once        sync.Once
-	err         error
-	cleanup     func()
-}
-
-func (b *responseBody) Close() error {
-	b.once.Do(func() {
-		b.err = b.ReadCloser.Close()
-		b.sentHeaders.Delete(gatewaySensitiveHeaders...)
-		if b.cleanup != nil {
-			b.cleanup()
-		}
-	})
-	return b.err
 }

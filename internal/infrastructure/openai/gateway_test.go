@@ -313,3 +313,24 @@ func TestGatewayReportsProxyAuthenticationRejection(t *testing.T) {
 		t.Fatalf("unsafe or incomplete proxy diagnostic: %s", output)
 	}
 }
+
+func TestStreamIdleTimeout(t *testing.T) {
+	c := NewGatewayClient(time.Second)
+	c.UseStreamIdleTimeout(50 * time.Millisecond)
+	var requestCtx context.Context
+	c.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		requestCtx = r.Context()
+		reader, writer := io.Pipe()
+		go func() { _, _ = writer.Write([]byte("data: {}\n\n")) }()
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: reader}, nil
+	})
+	resp, err := c.Open(context.Background(), gw.Route{BaseURL: "https://api.deepseek.com"}, gw.Request{Protocol: gw.OpenAIProtocol, Path: "/v1/chat/completions", Body: []byte(`{}`)}, []byte("key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if string(data) != "data: {}\n\n" || !errors.Is(err, gw.ErrTimeout) || !errors.Is(err, context.DeadlineExceeded) || requestCtx.Err() == nil {
+		t.Fatalf("data=%q err=%v ctx=%v", data, err, requestCtx.Err())
+	}
+}

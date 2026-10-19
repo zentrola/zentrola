@@ -55,8 +55,10 @@ type Billing struct {
 }
 
 type Gateway struct {
-	MaxBodyBytes                                                                  int64
-	RequestTimeout, HeaderTimeout, BodyReadTimeout, WriteTimeout                  time.Duration
+	MaxBodyBytes                                                 int64
+	RequestTimeout, HeaderTimeout, BodyReadTimeout, WriteTimeout time.Duration
+	// StreamIdleTimeout 是上游响应体连续无数据的最长等待时间；0 表示不限制，仅受 RequestTimeout 约束。
+	StreamIdleTimeout                                                             time.Duration
 	IdentityCacheTTL, RouteCacheTTL                                               time.Duration
 	CodexExecutable                                                               string
 	SubscriptionRefreshAhead, SubscriptionRefreshInterval, SubscriptionRunTimeout time.Duration
@@ -311,6 +313,7 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 			MaxBodyBytes:                         int64(integer("GATEWAY_MAX_BODY_BYTES", "33554432", 128<<20)),
 			RequestTimeout:                       duration("GATEWAY_REQUEST_TIMEOUT", "15m"),
 			HeaderTimeout:                        duration("GATEWAY_HEADER_TIMEOUT", "120s"),
+			StreamIdleTimeout:                    durationAllowZero("GATEWAY_STREAM_IDLE_TIMEOUT", "120s"),
 			BodyReadTimeout:                      duration("GATEWAY_BODY_READ_TIMEOUT", "30s"),
 			WriteTimeout:                         duration("GATEWAY_WRITE_TIMEOUT", "30s"),
 			IdentityCacheTTL:                     duration("GATEWAY_IDENTITY_CACHE_TTL", "10m"),

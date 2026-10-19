@@ -26,6 +26,8 @@ func TestConfigValidation(t *testing.T) {
 		{"invalid log retention", "LOG_FILE_RETENTION_DAYS", "-1", "LOG_FILE_RETENTION_DAYS"},
 		{"invalid boolean", "CORS_ENABLED", "maybe", "CORS_ENABLED"},
 		{"unbounded gateway", "GATEWAY_REQUEST_TIMEOUT", "0s", "GATEWAY_REQUEST_TIMEOUT"},
+		{"negative stream idle timeout", "GATEWAY_STREAM_IDLE_TIMEOUT", "-1s", "GATEWAY_STREAM_IDLE_TIMEOUT"},
+		{"invalid stream idle timeout", "GATEWAY_STREAM_IDLE_TIMEOUT", "soon", "GATEWAY_STREAM_IDLE_TIMEOUT"},
 		{"invalid identity cache TTL", "GATEWAY_IDENTITY_CACHE_TTL", "0s", "GATEWAY_IDENTITY_CACHE_TTL"},
 		{"invalid route cache TTL", "GATEWAY_ROUTE_CACHE_TTL", "0s", "GATEWAY_ROUTE_CACHE_TTL"},
 		{"invalid subscription refresh ahead", "CODEX_SUBSCRIPTION_REFRESH_AHEAD", "0s", "CODEX_SUBSCRIPTION_REFRESH_AHEAD"},
@@ -381,6 +383,32 @@ func TestLoadDoesNotModifyProcessEnvironment(t *testing.T) {
 		t.Fatal("loading files must not modify the process environment")
 	}
 }
+
+func TestGatewayStreamIdleTimeoutConfiguration(t *testing.T) {
+	tests := []struct {
+		name  string
+		value *string
+		want  time.Duration
+	}{
+		{name: "default", want: 120 * time.Second},
+		{name: "configured", value: stringPointer("45s"), want: 45 * time.Second},
+		{name: "disabled", value: stringPointer("0"), want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			values := map[string]string{"POSTGRES_PASSWORD": "test-only"}
+			if tt.value != nil {
+				values["GATEWAY_STREAM_IDLE_TIMEOUT"] = *tt.value
+			}
+			cfg, err := parse(func(key string) (string, bool) { value, ok := values[key]; return value, ok })
+			if err != nil || cfg.Gateway.StreamIdleTimeout != tt.want {
+				t.Fatalf("StreamIdleTimeout = %s, err=%v; want %s", cfg.Gateway.StreamIdleTimeout, err, tt.want)
+			}
+		})
+	}
+}
+
+func stringPointer(value string) *string { return &value }
 
 func TestClaudeCodeVersionConfiguration(t *testing.T) {
 	for _, tt := range []struct{ name, value, want string }{

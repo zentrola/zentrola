@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -23,6 +24,7 @@ type GatewayClient struct {
 	logger              *slog.Logger
 	observer            SubscriptionResponseObserver
 	claudeCodeUserAgent string
+	streamIdleTimeout   time.Duration
 }
 
 // SubscriptionResponseObserver 旁路观测 Claude 订阅的原始上游响应头（如统一限额），
@@ -40,6 +42,11 @@ func (c *GatewayClient) ObserveSubscriptionResponses(observer SubscriptionRespon
 // 空值或无效版本使用内置默认版本。所有订阅请求统一使用该版本，不透传客户端自带的 User-Agent。
 func (c *GatewayClient) UseClaudeCodeVersion(version string) {
 	c.claudeCodeUserAgent = anthropicclaude.ClaudeCodeUserAgent(version)
+}
+
+// UseStreamIdleTimeout 设置上游响应体的空闲读超时，必须在处理请求前调用；0 表示不限制。
+func (c *GatewayClient) UseStreamIdleTimeout(timeout time.Duration) {
+	c.streamIdleTimeout = max(timeout, 0)
 }
 
 func NewGatewayClient(headerTimeout time.Duration, loggers ...*slog.Logger) *GatewayClient {
@@ -114,9 +121,12 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 	if input.BetaQuery {
 		url += "?beta=true"
 	}
+	// 请求使用独立的可取消 context，供响应体空闲超时时中断上游连接。
+	requestCtx, cancel := context.WithCancel(ctx)
 	// 清空 GetBody，使 net/http 不会把 POST 当作可重放请求自动重试。
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(input.Body))
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, url, bytes.NewReader(input.Body))
 	if err != nil {
+		cancel()
 		return nil, gw.ErrInvalid
 	}
 	req.GetBody = nil
@@ -163,6 +173,7 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 		Logger: c.logger, Operation: "gateway_inference", ProviderID: route.ProviderID, ResourceID: route.ResourceID, Protocol: gw.AnthropicEndpoint,
 	})
 	if err != nil {
+		cancel()
 		return nil, gw.ErrProxy
 	}
 	logFields := provider.UpstreamRequestLog{RequestID: input.RequestID, ProviderID: route.ProviderID, ResourceID: route.ResourceID, Protocol: input.Protocol}
@@ -172,6 +183,7 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 		requestHeaders := provider.HeadersForLog(req.Header)
 		sentHeaders.Delete(gatewaySensitiveHeaders...)
 		cleanup()
+		cancel()
 		failure := gatewayTransportFailure(provider.TransportErrorCode(ctx, err, route.Proxy != nil))
 		if failure == gw.ErrCancelled {
 			return nil, failure
@@ -185,6 +197,7 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 		provider.LogRedirectRejected(ctx, c.logger, resp.StatusCode, resp.Header.Get("Location"), requestHeaders, logFields)
 		resp.Body.Close()
 		cleanup()
+		cancel()
 		return nil, gw.ErrUpstream
 	}
 	if claudeSubscription && c.observer != nil {
@@ -197,11 +210,18 @@ func (c *GatewayClient) Open(ctx context.Context, route gw.Route, input gw.Reque
 				slog.String("request_id", input.RequestID), slog.Int64("provider_id", route.ProviderID), slog.Int64("resource_id", route.ResourceID))
 		}}
 	}
-	return &gw.Response{Status: resp.StatusCode, Headers: resp.Header, Body: &gatewayBody{ReadCloser: body, sentHeaders: sentHeaders, cleanup: cleanup}}, nil
+	return &gw.Response{Status: resp.StatusCode, Headers: resp.Header, Body: provider.NewTrackedBody(body, provider.TrackedBodyOptions{
+		SentHeaders: sentHeaders, SensitiveHeaders: gatewaySensitiveHeaders,
+		IdleTimeout: c.streamIdleTimeout, IdleError: errStreamIdleTimeout, Cancel: cancel, Cleanup: cleanup,
+	})}, nil
 }
 
 // gatewaySensitiveHeaders 是响应结束后需从已发送请求中清除的凭据 Header。
 var gatewaySensitiveHeaders = []string{"x-api-key", "Authorization"}
+
+// errStreamIdleTimeout 同时满足 errors.Is(err, gw.ErrTimeout) 与 errors.Is(err, context.DeadlineExceeded)，
+// 供上层把响应体空闲超时归类为上游超时。
+var errStreamIdleTimeout = fmt.Errorf("%w: %w", provider.ErrStreamIdleTimeout, gw.ErrTimeout)
 
 // gatewayTransportFailure 把传输错误分类码映射为网关失败类型。
 func gatewayTransportFailure(code string) *gw.Failure {
@@ -252,26 +272,6 @@ func (b *rejectedSubscriptionBody) Close() error {
 		b.log(prefix)
 	})
 	return err
-}
-
-// 请求 Header 仅保留到 HTTP 事务结束；Body 关闭后再修改，避免与 transport 并发使用。
-type gatewayBody struct {
-	io.ReadCloser
-	sentHeaders *provider.SentHeaders
-	once        sync.Once
-	err         error
-	cleanup     func()
-}
-
-func (b *gatewayBody) Close() error {
-	b.once.Do(func() {
-		b.err = b.ReadCloser.Close()
-		b.sentHeaders.Delete(gatewaySensitiveHeaders...)
-		if b.cleanup != nil {
-			b.cleanup()
-		}
-	})
-	return b.err
 }
 
 func addAnthropicBeta(header http.Header, beta string) {
