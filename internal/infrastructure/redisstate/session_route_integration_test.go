@@ -96,4 +96,8 @@ func TestSessionRouteRedisIntegration(t *testing.T) {
 	if got, err := second.Get(ctx, key); err != nil || got != other {
 		t.Fatalf("conditional Move=%d, err=%v, want=%d", got, err, other)
 	}
+	// 并发故障转移的第二个请求执行相同 Move 时，绑定已指向目标，应幂等成功。
+	if moved, err := second.Move(ctx, key, bound, other); err != nil || !moved {
+		t.Fatalf("repeated Move: moved=%t err=%v", moved, err)
+	}
 }

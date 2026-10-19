@@ -21,8 +21,10 @@ redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
 return tonumber(ARGV[1])
 `)
 
+// 绑定已指向目标资源时同样视为成功：并发故障转移的请求会先后执行相同的 Move。
 var moveSessionRouteScript = redis.NewScript(`
-if redis.call('GET', KEYS[1]) == ARGV[1] then
+local current = redis.call('GET', KEYS[1])
+if current == ARGV[1] or current == ARGV[2] then
   redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
   return 1
 end
@@ -53,7 +55,8 @@ func (s *State) Assign(ctx context.Context, key string, preferredResourceID int6
 	return assigned, s.recordFor(ctx, err)
 }
 
-// Move updates a binding only if it still points to the route that failed.
+// Move updates a binding only if it still points to the route that failed, or
+// already points to the requested target after a concurrent failover.
 func (s *State) Move(ctx context.Context, key string, fromResourceID, toResourceID int64) (bool, error) {
 	if s == nil || s.client == nil || s.redisUnavailable() {
 		return false, errors.New("redis unavailable")

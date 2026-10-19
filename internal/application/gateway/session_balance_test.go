@@ -55,7 +55,8 @@ func (s *memorySessionRoutes) Move(_ context.Context, key string, from, to int64
 	if s.moveConflict {
 		return false, nil
 	}
-	if s.routes[key] == from {
+	// 与 Redis 脚本一致：绑定已指向目标时同样视为成功。
+	if current := s.routes[key]; current == from || current == to {
 		s.routes[key] = to
 		return true, nil
 	}
@@ -261,15 +262,14 @@ func TestSessionBalanceMovesBindingWhenResourceIsNoLongerCandidate(t *testing.T)
 	_ = second.Body.Close()
 }
 
-func TestSessionRouteMoveMustSucceedBeforeDeliveringResponse(t *testing.T) {
+func TestSessionRouteMoveFailureKeepsOpenedResponse(t *testing.T) {
 	tests := []struct {
 		name     string
 		moveErr  error
 		conflict bool
-		wantErr  error
 	}{
-		{name: "storage failure", moveErr: errors.New("redis unavailable"), wantErr: ErrUnavailable},
-		{name: "concurrent binding change", conflict: true, wantErr: ErrSessionRoute},
+		{name: "storage failure", moveErr: errors.New("redis unavailable")},
+		{name: "concurrent binding change", conflict: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -292,13 +292,33 @@ func TestSessionRouteMoveMustSucceedBeforeDeliveringResponse(t *testing.T) {
 				})),
 			)
 			got, err := service.Forward(context.Background(), identity, request)
-			if got != nil || err != test.wantErr || !body.closed {
-				t.Fatalf("response=%v err=%v body closed=%t; want %v", got, err, body.closed, test.wantErr)
+			if err != nil || got == nil || got.Status != 200 || body.closed {
+				t.Fatalf("response=%v err=%v body closed=%t; want delivered response", got, err, body.closed)
 			}
 			if assigned, _ := bindings.Get(context.Background(), key); assigned != 11 {
 				t.Fatalf("binding changed to %d after failed Move", assigned)
 			}
 		})
+	}
+}
+
+func TestConcurrentSessionFailoverMovesIdempotently(t *testing.T) {
+	identity := appsec.PrincipalIdentity{ID: 1, AccessKeyID: 3}
+	request := Request{
+		Path: "/v1/responses", Protocol: OpenAIResponsesProtocol, ClientSessionID: "concurrent-session",
+		Body: []byte(`{"model":"gpt-test","input":"hi"}`),
+	}
+	key := sessionRouteKey(identity, request, "gpt-test")
+	bindings := &memorySessionRoutes{routes: map[string]int64{key: 11}}
+	// 模拟另一个并发请求已经把绑定从 11 迁移到 12。
+	if moved, err := bindings.Move(context.Background(), key, 11, 12); err != nil || !moved {
+		t.Fatalf("first move failed: moved=%v err=%v", moved, err)
+	}
+	if moved, err := bindings.Move(context.Background(), key, 11, 12); err != nil || !moved {
+		t.Fatalf("repeated move to the same target must succeed: moved=%v err=%v", moved, err)
+	}
+	if moved, _ := bindings.Move(context.Background(), key, 11, 21); moved {
+		t.Fatal("stale move to a different target succeeded")
 	}
 }
 

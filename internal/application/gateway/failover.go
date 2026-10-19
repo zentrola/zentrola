@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -18,9 +19,19 @@ import (
 const (
 	defaultRouteCooldown      = time.Minute
 	responseInspectionTimeout = 2 * time.Second
+	// 订阅刷新锁被占用时，仍可直接使用剩余有效期超过该阈值的凭据。上游适配器
+	// 会拒绝 1 分钟内过期的凭据，这里保留额外余量。
+	subscriptionCredentialMinValidity = 2 * time.Minute
+	// 凭据已过期时等待其他刷新者完成的上限与轮询间隔。
+	subscriptionRefreshLockWait = 10 * time.Second
+	subscriptionRefreshLockPoll = 200 * time.Millisecond
 )
 
 var errResponseInspectionTimeout = errors.New("upstream error response inspection timed out")
+
+// errSubscriptionRefreshBusy 表示刷新锁由其他实例或请求持有。锁竞争不代表凭据
+// 或上游异常，不能触发路由冷却。
+var errSubscriptionRefreshBusy = &SubscriptionRefreshError{Code: ErrSubscription.Code}
 
 func (s *Service) routes(ctx context.Context, identity appsec.PrincipalIdentity, model, protocol string) ([]Route, error) {
 	if store, ok := s.store.(CandidateStore); ok {
@@ -112,7 +123,7 @@ func (s *Service) forwardCandidates(ctx context.Context, identity appsec.Princip
 					s.block(ctx, identity, route, ResourceBlock{
 						Reason: subscriptionRefreshBlockReason(refreshFailure.Code), ErrorCode: refreshFailure.Code,
 					})
-				} else {
+				} else if !errors.Is(err, errSubscriptionRefreshBusy) {
 					s.cooldown(ctx, route, defaultRouteCooldown)
 				}
 				next := s.nextRetryRoute(ctx, routes, index+1, parsed)
@@ -178,9 +189,15 @@ func (s *Service) forwardCandidates(ctx context.Context, identity appsec.Princip
 				if moveErr != nil {
 					failure = ErrUnavailable
 				}
-				s.failAttempt(request.Trace, attempt, failure.Code)
-				response.Body.Close()
-				return nil, failure
+				if parsed.PreviousResponseID != "" {
+					s.failAttempt(request.Trace, attempt, failure.Code)
+					response.Body.Close()
+					return nil, failure
+				}
+				// 普通请求的会话绑定只影响后续请求的亲和性，更新失败不能丢弃已成功
+				// 打开的上游响应；下一次请求会按当前绑定重新选择并再次尝试迁移。
+				slog.WarnContext(ctx, "gateway session route binding update failed",
+					"error_code", failure.Code, "resource_id", route.ResourceID, "bound_resource_id", boundResourceID)
 			}
 		}
 		s.recordActiveRoute(ctx, selectedRoute)
@@ -222,7 +239,18 @@ func (s *Service) refreshCredential(ctx context.Context, route Route, credential
 	if s.refreshCoordinator != nil && !hasSubscriptionRefreshLease(refreshCtx) {
 		release, acquired, err := s.refreshCoordinator.AcquireSubscriptionRefreshResource(refreshCtx, route.ResourceID)
 		if err != nil || !acquired || release == nil {
-			return credential, false, ErrSubscription
+			// 其他实例或请求正在刷新同一凭据：尚未过期时继续使用当前凭据。
+			if subscriptionCredentialUsable(refresh, route, credential, time.Now().UTC()) {
+				return credential, false, nil
+			}
+			if err != nil || acquired {
+				return credential, false, errSubscriptionRefreshBusy
+			}
+			// 已过期时等待持锁者完成，随后按正常流程重新加载最新凭据。
+			release, err = s.waitSubscriptionRefreshResource(refreshCtx, route.ResourceID)
+			if err != nil {
+				return credential, false, errSubscriptionRefreshBusy
+			}
 		}
 		defer release()
 		refreshCtx = withSubscriptionRefreshLease(refreshCtx)
@@ -289,6 +317,40 @@ func (s *Service) refreshCredential(ctx context.Context, route Route, credential
 	}
 	clear(credential)
 	return updated, true, nil
+}
+
+// subscriptionCredentialUsable 判断凭据在不刷新的情况下是否仍可安全使用。
+// 优先读取凭据自身的过期时间，无法解析时回退到路由缓存的元数据。
+func subscriptionCredentialUsable(refresh SubscriptionRefresher, route Route, credential []byte, now time.Time) bool {
+	expiresAt := route.CredentialExpiresAt
+	if inspector, ok := refresh.(SubscriptionRefreshMetadataInspector); ok {
+		if _, inspected, err := inspector.CredentialRefreshMetadata(credential); err == nil && inspected != nil {
+			expiresAt = inspected
+		}
+	}
+	return expiresAt != nil && expiresAt.After(now.Add(subscriptionCredentialMinValidity))
+}
+
+// waitSubscriptionRefreshResource 在有限时间内轮询刷新锁，直到获得锁或超时。
+func (s *Service) waitSubscriptionRefreshResource(ctx context.Context, resourceID int64) (func(), error) {
+	waitCtx, cancel := context.WithTimeout(ctx, subscriptionRefreshLockWait)
+	defer cancel()
+	ticker := time.NewTicker(subscriptionRefreshLockPoll)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-waitCtx.Done():
+			return nil, waitCtx.Err()
+		case <-ticker.C:
+		}
+		release, acquired, err := s.refreshCoordinator.AcquireSubscriptionRefreshResource(waitCtx, resourceID)
+		if err != nil {
+			return nil, err
+		}
+		if acquired && release != nil {
+			return release, nil
+		}
+	}
 }
 
 func (s *Service) startAttempt(event *usage.Event, route Route) *usage.Attempt {
