@@ -33,7 +33,7 @@ curl -i http://127.0.0.1:9527/health/ready
 - `/health/live` confirms that the Backend can answer HTTP requests.
 - `/health/ready` checks PostgreSQL, the master key, and administrator initialization.
 - Readiness does not prove that a provider credential or upstream model is available.
-- Redis is intentionally not part of readiness; gateway caches and cooldown state fail open. Session affinity uses the same Redis. When it is unavailable, a continuation with `previous_response_id` returns 503 rather than sending the ID to the wrong account. A request that has switched accounts also returns 503 if its existing binding cannot be updated.
+- Redis is intentionally not part of readiness; gateway caches and cooldown state fail open. Session affinity uses the same Redis. When it is unavailable, a continuation with `previous_response_id` returns 503 rather than sending the ID to the wrong account. A request that has switched accounts also returns 503 if its existing binding cannot be updated. Subscription credential refreshes are serialized with a Redis lock shared by the gateway and the Admin API. While Redis is unavailable, OpenAI Codex subscription connection tests and reset-credit redemption return 503 instead of risking a concurrent refresh-token rotation; they return 409 if a gateway refresh still holds the lock after 10 seconds.
 
 ## Multi-instance Nginx reverse proxy example
 

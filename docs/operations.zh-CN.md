@@ -33,7 +33,7 @@ curl -i http://127.0.0.1:9527/health/ready
 - `/health/live` 表示 Backend 能够响应 HTTP 请求。
 - `/health/ready` 检查 PostgreSQL、Master Key 和管理员初始化状态。
 - Readiness 通过不代表 Provider Credential 或上游模型可用。
-- Redis 有意不纳入 readiness；缓存和路由冷却状态不可用时 Gateway 会 fail-open。会话固定路由使用同一个 Redis；Redis 不可用时，带 `previous_response_id` 的会话续传会返回 503，以免发送到错误账号。切换账号的请求若无法更新已有绑定，也会返回 503。
+- Redis 有意不纳入 readiness；缓存和路由冷却状态不可用时 Gateway 会 fail-open。会话固定路由使用同一个 Redis；Redis 不可用时，带 `previous_response_id` 的会话续传会返回 503，以免发送到错误账号。切换账号的请求若无法更新已有绑定，也会返回 503。订阅凭据刷新由 Gateway 与管理接口共用的 Redis 锁串行化；Redis 不可用时，OpenAI Codex 订阅的连接测试和重置卡兑换返回 503，避免与网关并发轮换 refresh token；网关刷新持锁超过 10 秒时返回 409。
 
 ## Nginx 多实例反向代理示例
 
