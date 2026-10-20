@@ -2,6 +2,7 @@ package redisstate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -9,7 +10,26 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/joho/godotenv"
 )
+
+// integrationRedisPassword 依次从进程环境和本地 .env 读取 REDIS_PASSWORD；都未配置时为空，
+// 对应 CI 中未开启认证的 Redis。只读取密码，避免测试依赖完整应用配置。
+func integrationRedisPassword(t *testing.T) string {
+	t.Helper()
+	if password, ok := os.LookupEnv("REDIS_PASSWORD"); ok {
+		return password
+	}
+	values, err := godotenv.Read("../../../.env")
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ""
+		}
+		t.Fatal("cannot read integration test Redis configuration")
+	}
+	return values["REDIS_PASSWORD"]
+}
 
 func TestSessionRouteRedisIntegration(t *testing.T) {
 	address := os.Getenv("ZENTROLA_TEST_REDIS_ADDR")
@@ -24,7 +44,8 @@ func TestSessionRouteRedisIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, second := New(host, port, 0, ""), New(host, port, 0, "")
+	password := integrationRedisPassword(t)
+	first, second := New(host, port, 0, password), New(host, port, 0, password)
 	defer first.Close()
 	defer second.Close()
 	ctx := context.Background()
