@@ -12,7 +12,7 @@ Zentrola is an enterprise AI coding control plane for governing and delivering m
 
 It sits between AI coding clients such as Codex and Claude Code and an organization's model subscriptions. Teams keep using their preferred clients, while administrators centrally manage providers, credentials, logical models, access policies, user and application keys, Token quotas, usage costs, and audit records.
 
-> Zentrola is under active development. The `1.2.2` release adds Anthropic official model catalog synchronization and fixes Claude subscription connection tests, building on the session-level account distribution and per-model provider priority introduced in `1.2.0`. Tool, knowledge, skill, SSO, and complete high-availability guidance remain future work.
+> Zentrola is under active development. The `1.2.2` release removes xAI model catalog synchronization; xAI models are now configured manually. `1.2.1` added Anthropic official model catalog synchronization and fixed Claude subscription connection tests, building on the session-level account distribution and per-model provider priority introduced in `1.2.0`. Tool, knowledge, skill, SSO, and complete high-availability guidance remain future work.
 
 ![Zentrola Admin Console](docs/assets/admin-console.png)
 
