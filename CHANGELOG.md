@@ -233,7 +233,7 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 
 [1.2.2]: https://github.com/zentrola/zentrola/releases/tag/1.2.2
 [1.2.1]: https://github.com/zentrola/zentrola/releases/tag/1.2.1
-[1.2.0]: https://github.com/zentrola/zentrola/releases/tag/v1.2.0
-[1.1.0]: https://github.com/zentrola/zentrola/releases/tag/v1.1.0
+[1.2.0]: https://github.com/zentrola/zentrola/releases/tag/1.2.0
+[1.1.0]: https://github.com/zentrola/zentrola/releases/tag/1.1.0
 [1.0.1]: https://github.com/zentrola/zentrola/releases/tag/v1.0.1
 [1.0.0]: https://github.com/zentrola/zentrola/releases/tag/v1.0.0
