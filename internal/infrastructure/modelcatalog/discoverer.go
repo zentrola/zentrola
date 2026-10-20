@@ -81,7 +81,6 @@ func NewDiscoverer(logger *slog.Logger) *Discoverer {
 			catalog.ZhipuOfficialCode:     zhipuAdapter{},
 			catalog.KimiOfficialCode:      moonshotAdapter{},
 			catalog.QwenOfficialCode:      qwenAdapter{},
-			catalog.XAIOfficialCode:       xAIAdapter{},
 		},
 	}
 }

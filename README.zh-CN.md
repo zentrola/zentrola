@@ -71,7 +71,7 @@ Codex / Claude Code / OpenAI 兼容客户端 / 应用
 - 用户、应用和 Group 相互独立的月度 Token 配额，包括用量等级、Gateway 准入控制、带审计的额度增加和取消限制
 - Admin Web 中英文界面
 
-模型目录同步目前为 Anthropic、OpenAI、Google、DeepSeek、智谱 AI、月之暗面、通义千问和 xAI 提供专用适配器。Anthropic 和 OpenAI 除 API Key 外，也可以分别使用 Claude Code 和 Codex 个人订阅凭证同步；同一服务商同时存在两类凭证时优先使用 API Key。其他 OpenAI 或 Anthropic 兼容服务商可以手动配置。
+模型目录同步目前为 Anthropic、OpenAI、Google、DeepSeek、智谱 AI、月之暗面和通义千问提供专用适配器。Anthropic 和 OpenAI 除 API Key 外，也可以分别使用 Claude Code 和 Codex 个人订阅凭证同步；同一服务商同时存在两类凭证时优先使用 API Key。其他 OpenAI 或 Anthropic 兼容服务商可以手动配置。
 
 ## 快速开始
 

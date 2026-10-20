@@ -310,10 +310,8 @@ func TestDiscovererReportsRegisteredProviderCapabilities(t *testing.T) {
 	if !discoverer.Supports(catalog.QwenOfficialCode) {
 		t.Fatal("Qwen model catalog adapter should be reported as supported")
 	}
-	if !discoverer.Supports(catalog.XAIOfficialCode) {
-		t.Fatal("xAI model catalog adapter should be reported as supported")
-	}
-	if discoverer.Supports("minimax-official") || discoverer.Supports("doubao-official") {
+	if discoverer.Supports(catalog.XAIOfficialCode) || discoverer.Supports("minimax-official") ||
+		discoverer.Supports("doubao-official") {
 		t.Fatal("removed model catalog adapters should not be reported as supported")
 	}
 	if discoverer.Supports("provider-custom") {

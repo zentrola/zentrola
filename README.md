@@ -71,7 +71,7 @@ The management plane and gateway plane use separate authentication domains:
 - Independent monthly Token quotas for users, applications, and Groups, with usage levels, gateway enforcement, audited quota increases, and removable limits
 - Chinese and English Admin Web localization
 
-Model-catalog synchronization currently has dedicated adapters for Anthropic, OpenAI, Google, DeepSeek, Zhipu AI, Moonshot AI, Qwen, and xAI. Besides API keys, Anthropic and OpenAI catalogs can also be synchronized with Claude Code and Codex personal subscription credentials respectively; when a provider has both credential types, API keys are preferred. Other OpenAI- or Anthropic-compatible providers can be configured manually.
+Model-catalog synchronization currently has dedicated adapters for Anthropic, OpenAI, Google, DeepSeek, Zhipu AI, Moonshot AI, and Qwen. Besides API keys, Anthropic and OpenAI catalogs can also be synchronized with Claude Code and Codex personal subscription credentials respectively; when a provider has both credential types, API keys are preferred. Other OpenAI- or Anthropic-compatible providers can be configured manually.
 
 ## Quick start
 

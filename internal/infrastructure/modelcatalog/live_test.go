@@ -51,7 +51,7 @@ func TestLiveCatalogDiscovery(t *testing.T) {
 	discoverer := NewDiscoverer(nil)
 	for _, providerCode := range []string{
 		catalog.GoogleOfficialCode, catalog.DeepSeekOfficialCode, catalog.ZhipuOfficialCode,
-		catalog.KimiOfficialCode, catalog.QwenOfficialCode, catalog.XAIOfficialCode,
+		catalog.KimiOfficialCode, catalog.QwenOfficialCode,
 	} {
 		t.Run(providerCode, func(t *testing.T) {
 			var (

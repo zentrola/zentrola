@@ -41,6 +41,7 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - Codex app-server processes only inherit an allowlist of environment variables, and app-server errors no longer block a subscription permanently.
 - Proxy connections are reused per proxy configuration, and per-request proxy logs are written at Debug level. Upstream credentials may be up to 16 KiB.
 - The Admin Web shows a UTC marker next to date ranges, shows price effective dates in UTC, and uses the same provider health rules on the home page and the provider page.
+- xAI no longer supports model catalog sync. The xAI preset provider is kept, and its models are configured manually.
 - Anthropic 用量改按 OpenAI 口径记录：输入 Token 包含缓存写入与缓存读取，缓存输入 Token 为缓存读取。月度 Token 配额因此会计入缓存提示；缓存写入按缓存写入单价核算，未配置时按输入单价核算。
 - OpenAI Chat 流式请求统一向上游请求用量（`stream_options.include_usage`）；客户端未请求时会从响应中剥离额外的用量分片。流结束仍没有用量时记为 `FAILED`（`UPSTREAM_RESPONSE_INCOMPLETE`）。
 - 生效时间早于已出账账期结束时间的订阅价格不能再新增、移动或删除，该检查会等待同一凭据进行中的订阅结算完成；只改金额仍然允许，通过调整单结算。结算读取价格后才保存的价格变更不会再让该轮结算按旧价格出账，相应账期在下一轮结算重新计算。被计费历史拒绝的模型价格变更返回 `409 CONFLICT`，不再返回 `503`。
@@ -49,6 +50,7 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - Codex app-server 子进程只继承白名单环境变量；app-server 返回的错误不再导致订阅被永久封禁。
 - 代理连接按代理配置复用，逐请求的代理日志降为 Debug 级别；上游凭据长度上限放宽到 16 KiB。
 - 管理端在日期范围旁标注 UTC，价格生效日期按 UTC 展示，首页与服务商页使用同一套服务商运行状态判定。
+- xAI 不再支持模型目录同步；xAI 预置服务商保留，模型改为手动配置。
 
 ### Fixed / 修复
 
