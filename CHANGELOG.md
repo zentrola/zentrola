@@ -6,10 +6,20 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 
 ## [1.2.2] - 2026-10-20
 
+### Added / 新增
+
+- The Anthropic-compatible gateway provides `GET /anthropic/v1/models`, listing logical models available to the authenticated member. It supports `limit` (1–1000), `before_id`, and `after_id` pagination parameters; without `limit`, it returns all available models.
+- Anthropic 兼容网关新增 `GET /anthropic/v1/models`，列出当前成员可用的逻辑模型。支持分页参数 `limit`（1–1000）、`before_id` 和 `after_id`；未传 `limit` 时返回全部可用模型。
+
 ### Changed / 变更
 
 - xAI no longer supports model catalog sync. The xAI preset provider is kept, and its models are configured manually.
 - xAI 不再支持模型目录同步；xAI 预置服务商保留，模型改为手动配置。
+
+### Fixed / 修复
+
+- Claude Desktop and other clients that discover models through `/anthropic/v1/models` no longer fail the connection test with HTTP 404.
+- 修复 Claude 桌面端等通过 `/anthropic/v1/models` 发现模型的客户端在连接测试时返回 HTTP 404 的问题。
 
 ## [1.2.1] - 2026-10-20
 
