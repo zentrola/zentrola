@@ -221,6 +221,20 @@ func TestOpenAIIntegration(t *testing.T) {
 	if discovery.Object != "list" || len(discovery.Data) != 1 || discovery.Data[0].ID != "deepseek-v4-flash" {
 		t.Fatal("model discovery leaked unauthorized models")
 	}
+	anthropicList := call("anthropic_models", "GET", "/anthropic/v1/models", "", key.Key, 200)
+	var anthropicDiscovery struct {
+		Data []struct {
+			ID          string `json:"id"`
+			DisplayName string `json:"display_name"`
+			CreatedAt   string `json:"created_at"`
+		} `json:"data"`
+		HasMore bool `json:"has_more"`
+	}
+	if err := json.Unmarshal(anthropicList, &anthropicDiscovery); err != nil || len(anthropicDiscovery.Data) != 1 ||
+		anthropicDiscovery.Data[0].ID != "deepseek-v4-flash" ||
+		anthropicDiscovery.Data[0].DisplayName != "DeepSeek V4 Flash" || anthropicDiscovery.HasMore {
+		t.Fatalf("unexpected Anthropic model discovery: %s, %v", anthropicList, err)
+	}
 	for _, tc := range []struct {
 		name, body string
 		status     int

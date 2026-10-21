@@ -127,7 +127,7 @@ func (g *GatewayHandler) serveModelList(
 	route gatewayRoute,
 	reject func(*gw.Failure),
 ) bool {
-	if !gw.IsOpenAIProtocol(route.protocol) || route.path != "/v1/models" {
+	if route.path != "/v1/models" {
 		return false
 	}
 	if r.Method != http.MethodGet {
@@ -141,6 +141,10 @@ func (g *GatewayHandler) serveModelList(
 	}
 	g.logger.InfoContext(r.Context(), "gateway model list request started",
 		"protocol", route.protocol, "principal_id", identity.ID, "access_key_id", identity.AccessKeyID)
+	if route.protocol == gw.AnthropicProtocol {
+		g.serveAnthropicModelList(w, r, identity, reject)
+		return true
+	}
 	models, err := g.service.Models(r.Context(), identity)
 	if err != nil {
 		failure := gw.ErrUnavailable
@@ -158,6 +162,38 @@ func (g *GatewayHandler) serveModelList(
 	w.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": models})
 	return true
+}
+
+func (g *GatewayHandler) serveAnthropicModelList(w http.ResponseWriter, r *http.Request, identity appsec.PrincipalIdentity, reject func(*gw.Failure)) {
+	models, err := g.service.AnthropicModels(r.Context(), identity)
+	if err != nil {
+		failure := gw.ErrUnavailable
+		var known *gw.Failure
+		if errors.As(err, &known) {
+			failure = known
+		}
+		reject(failure)
+		return
+	}
+	data := make([]AnthropicModel, 0, len(models))
+	for _, model := range models {
+		data = append(data, AnthropicModel{
+			ID: model.Code, Type: "model", DisplayName: model.DisplayName,
+			CreatedAt: model.CreatedAt.UTC().Format(time.RFC3339),
+		})
+	}
+	var firstID, lastID *string
+	if len(data) > 0 {
+		firstID, lastID = &data[0].ID, &data[len(data)-1].ID
+	}
+	g.logger.InfoContext(r.Context(), "gateway model list request completed",
+		"protocol", gw.AnthropicProtocol, "principal_id", identity.ID, "access_key_id", identity.AccessKeyID,
+		"model_count", len(data))
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(AnthropicModelsResponse{
+		Data: data, HasMore: false, FirstID: firstID, LastID: lastID,
+	})
 }
 
 type parsedGatewayRequest struct {

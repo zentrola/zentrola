@@ -9,7 +9,7 @@ Every client uses a member Virtual Key. The key identifies the member; model acc
 | Protocol             | Base URL                           | Supported paths                                                           | Authentication                        |
 | -------------------- | ---------------------------------- | ------------------------------------------------------------------------- | ------------------------------------- |
 | OpenAI compatible    | `https://<gateway-host>/v1`        | `GET /v1/models`, `POST /v1/chat/completions`, `POST /v1/responses`, `POST /v1/images/generations` | `Authorization: Bearer <virtual-key>` |
-| Anthropic compatible | `https://<gateway-host>/anthropic` | `POST /anthropic/v1/messages`, `POST /anthropic/v1/messages/count_tokens` | `x-api-key: <virtual-key>` or Bearer  |
+| Anthropic compatible | `https://<gateway-host>/anthropic` | `GET /anthropic/v1/models`, `POST /anthropic/v1/messages`, `POST /anthropic/v1/messages/count_tokens` | `x-api-key: <virtual-key>` or Bearer  |
 
 Do not send both `x-api-key` and `Authorization` to the Anthropic endpoint.
 
@@ -63,7 +63,7 @@ $env:ANTHROPIC_API_KEY = $zentrolaKey
 Remove-Variable secureKey, zentrolaKey
 ```
 
-Configure the client to use a logical-model code granted to the member. Zentrola forwards supported Messages, streaming, and tool-use traffic. `count_tokens` requires an Anthropic-compatible upstream route; Zentrola does not estimate it through an OpenAI-only upstream.
+Configure the client to use a logical-model code returned by `GET /anthropic/v1/models`. Zentrola forwards supported Messages, streaming, and tool-use traffic. `count_tokens` requires an Anthropic-compatible upstream route; Zentrola does not estimate it through an OpenAI-only upstream.
 
 ## Session and account distribution
 
@@ -80,6 +80,13 @@ List authorized models:
 ```bash
 curl https://<gateway-host>/v1/models \
   -H "Authorization: Bearer <virtual-key>"
+```
+
+List authorized Anthropic models:
+
+```bash
+curl https://<gateway-host>/anthropic/v1/models \
+  -H "x-api-key: <virtual-key>"
 ```
 
 Call Anthropic Messages:

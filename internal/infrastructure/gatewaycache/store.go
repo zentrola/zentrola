@@ -312,6 +312,14 @@ func (s *GatewayStore) Models(ctx context.Context, identity appsec.PrincipalIden
 	return loaded.([]gw.Model), nil
 }
 
+func (s *GatewayStore) AnthropicModels(ctx context.Context, identity appsec.PrincipalIdentity) ([]gw.DiscoverableModel, error) {
+	next, ok := s.next.(gw.AnthropicModelStore)
+	if !ok {
+		return nil, gw.ErrUnavailable
+	}
+	return next.AnthropicModels(ctx, identity)
+}
+
 func (s *GatewayStore) BlockResource(ctx context.Context, identity appsec.PrincipalIdentity, resourceID int64, block gw.ResourceBlock) error {
 	next, ok := s.next.(gw.ResourceBlocker)
 	if !ok {

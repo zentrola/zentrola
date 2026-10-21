@@ -393,3 +393,33 @@ func (s *GatewayStore) Models(ctx context.Context, identity appsec.PrincipalIden
 	}
 	return result, nil
 }
+
+func (s *GatewayStore) AnthropicModels(ctx context.Context, identity appsec.PrincipalIdentity) ([]gw.DiscoverableModel, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return nil, s.gatewayError(ctx, "begin_list_anthropic_models", err)
+	}
+	defer tx.Rollback(context.Background())
+	q := dbgen.New(tx)
+	active, err := q.GatewayIdentityActive(ctx, dbgen.GatewayIdentityActiveParams{AccessKeyID: identity.AccessKeyID, PrincipalID: identity.ID})
+	if err != nil {
+		return nil, s.gatewayError(ctx, "check_anthropic_models_identity", err)
+	}
+	if !active {
+		return nil, gw.ErrAuthentication
+	}
+	rows, err := q.AnthropicModels(ctx, identity.ID)
+	if err != nil {
+		return nil, s.gatewayError(ctx, "query_anthropic_models", err)
+	}
+	result := make([]gw.DiscoverableModel, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, gw.DiscoverableModel{
+			Code: row.ModelCode, DisplayName: row.DisplayName, CreatedAt: row.CreatedAt.Time.UTC(),
+		})
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, s.gatewayError(ctx, "commit_list_anthropic_models", err)
+	}
+	return result, nil
+}

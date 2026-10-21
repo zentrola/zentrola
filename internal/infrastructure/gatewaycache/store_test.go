@@ -131,6 +131,17 @@ func (s *gatewayStoreStub) ResolveCandidates(context.Context, appsec.PrincipalId
 func (s *gatewayStoreStub) Models(context.Context, appsec.PrincipalIdentity) ([]gw.Model, error) {
 	return []gw.Model{{ID: "model-a"}}, nil
 }
+func (s *gatewayStoreStub) AnthropicModels(context.Context, appsec.PrincipalIdentity) ([]gw.DiscoverableModel, error) {
+	return []gw.DiscoverableModel{{Code: "claude-sonnet", DisplayName: "Claude Sonnet"}}, nil
+}
+
+func TestGatewayStoreForwardsAnthropicModelList(t *testing.T) {
+	store := NewGatewayStore(&gatewayStoreStub{}, &cacheStub{})
+	models, err := store.AnthropicModels(context.Background(), appsec.PrincipalIdentity{ID: 42, AccessKeyID: 7})
+	if err != nil || len(models) != 1 || models[0].Code != "claude-sonnet" {
+		t.Fatalf("unexpected Anthropic models: %+v, %v", models, err)
+	}
+}
 func (s *gatewayStoreStub) BlockResource(context.Context, appsec.PrincipalIdentity, int64, gw.ResourceBlock) error {
 	s.blocks++
 	return nil

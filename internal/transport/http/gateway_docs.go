@@ -35,6 +35,16 @@ import gw "github.com/zentrola/zentrola/internal/application/gateway"
 // @Failure 400,401,403,404,413,415,429,502,503,504 {object} AnthropicErrorResponse
 // @Router /anthropic/v1/messages/count_tokens [post]
 
+// @Summary 可用的 Anthropic 逻辑模型
+// @Tags Anthropic Gateway
+// @Description 返回当前成员被授权且有可用资源的逻辑模型；不接受查询参数。
+// @Produce json
+// @Security GatewayKey
+// @Security GatewayBearer
+// @Success 200 {object} AnthropicModelsResponse
+// @Failure 400,401,503 {object} AnthropicErrorResponse
+// @Router /anthropic/v1/models [get]
+
 // @Summary OpenAI Chat Completions
 // @Tags OpenAI Gateway
 // @Description 使用成员 Access Key 的 Bearer 认证。请求体示例：{"model":"deepseek-chat","messages":[{"role":"user","content":"Hello"}],"stream":false}。model 从 GET /v1/models 获取，原生扩展字段透传；stream=true 返回 SSE，建议用 curl 或 SDK 验证流式响应。执行会调用真实上游并可能产生费用。
@@ -83,6 +93,20 @@ import gw "github.com/zentrola/zentrola/internal/application/gateway"
 type OpenAIModelsResponse struct {
 	Object string     `json:"object" example:"list"`
 	Data   []gw.Model `json:"data"`
+}
+
+type AnthropicModel struct {
+	ID          string `json:"id"`
+	Type        string `json:"type"`
+	DisplayName string `json:"display_name"`
+	CreatedAt   string `json:"created_at"`
+}
+
+type AnthropicModelsResponse struct {
+	Data    []AnthropicModel `json:"data"`
+	HasMore bool             `json:"has_more"`
+	FirstID *string          `json:"first_id"`
+	LastID  *string          `json:"last_id"`
 }
 
 type TokenCountResponse struct {

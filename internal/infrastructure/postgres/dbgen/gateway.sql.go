@@ -11,6 +11,53 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const anthropicModels = `-- name: AnthropicModels :many
+SELECT m.model_code,m.display_name,m.created_at FROM model m
+WHERE NOT m.is_deleted AND m.status='ACTIVE'
+AND EXISTS(
+    SELECT 1 FROM provider_model pm
+    JOIN provider p ON p.id=pm.provider_id AND NOT p.is_deleted AND p.status='ACTIVE'
+    JOIN provider_endpoint pe ON pe.provider_id=p.id AND pe.protocol_type IN ('OPENAI','ANTHROPIC')
+    JOIN provider_credential r ON r.provider_id=p.id AND NOT r.is_deleted AND r.runtime_status='HEALTHY'
+        AND (r.effective_at IS NULL OR r.effective_at<=now()) AND (r.expires_at IS NULL OR r.expires_at>now())
+        AND (r.auth_type='API_KEY' OR (r.auth_type='SUBSCRIPTION' AND r.auth_adapter='ANTHROPIC_CLAUDE_CODE'
+            AND (r.quota_status IN ('AVAILABLE','NEAR_LIMIT')
+                OR (r.quota_status='EXHAUSTED' AND r.quota_resets_at IS NOT NULL AND r.quota_resets_at<=now()))))
+    WHERE pm.model_id=m.id AND NOT pm.is_deleted
+)
+AND EXISTS(SELECT 1 FROM principal_group_membership pg JOIN principal_group g ON g.id=pg.group_id
+JOIN principal_group_model_permission gp ON gp.group_id=g.id
+WHERE pg.principal_id=$1
+AND NOT pg.is_deleted AND NOT g.is_deleted AND g.status='ACTIVE' AND NOT gp.is_deleted AND gp.model_id=m.id)
+ORDER BY m.model_code
+`
+
+type AnthropicModelsRow struct {
+	ModelCode   string
+	DisplayName string
+	CreatedAt   pgtype.Timestamptz
+}
+
+func (q *Queries) AnthropicModels(ctx context.Context, principalID int64) ([]AnthropicModelsRow, error) {
+	rows, err := q.db.Query(ctx, anthropicModels, principalID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AnthropicModelsRow{}
+	for rows.Next() {
+		var i AnthropicModelsRow
+		if err := rows.Scan(&i.ModelCode, &i.DisplayName, &i.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const blockGatewayResource = `-- name: BlockGatewayResource :execrows
 UPDATE provider_credential
 SET runtime_status='BLOCKED',blocked_reason=$1,blocked_at=$2,

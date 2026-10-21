@@ -326,6 +326,52 @@
                 }
             }
         },
+        "/anthropic/v1/models": {
+            "get": {
+                "security": [
+                    {
+                        "GatewayKey": []
+                    },
+                    {
+                        "GatewayBearer": []
+                    }
+                ],
+                "description": "返回当前成员被授权且有可用资源的逻辑模型；不接受查询参数。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Anthropic Gateway"
+                ],
+                "summary": "可用的 Anthropic 逻辑模型",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/http.AnthropicModelsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/http.AnthropicErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/http.AnthropicErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/http.AnthropicErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/access-keys/{id}/revoke": {
             "post": {
                 "security": [
@@ -9902,6 +9948,43 @@
                 "type": {
                     "type": "string",
                     "example": "error"
+                }
+            }
+        },
+        "http.AnthropicModel": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "http.AnthropicModelsResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/http.AnthropicModel"
+                    }
+                },
+                "first_id": {
+                    "type": "string"
+                },
+                "has_more": {
+                    "type": "boolean"
+                },
+                "last_id": {
+                    "type": "string"
                 }
             }
         },

@@ -94,6 +94,12 @@ type Model struct {
 	OwnedBy string `json:"owned_by"`
 }
 
+type DiscoverableModel struct {
+	Code        string
+	DisplayName string
+	CreatedAt   time.Time
+}
+
 type Provider struct {
 	Name string `json:"name" example:"OpenAI"`
 }
@@ -110,6 +116,10 @@ type ActiveRouteRecorder interface {
 }
 type ModelStore interface {
 	Models(context.Context, appsec.PrincipalIdentity) ([]Model, error)
+}
+
+type AnthropicModelStore interface {
+	AnthropicModels(context.Context, appsec.PrincipalIdentity) ([]DiscoverableModel, error)
 }
 type Store interface {
 	Resolve(context.Context, appsec.PrincipalIdentity, string, ...string) (Route, error)
@@ -414,6 +424,17 @@ func (s *Service) Models(ctx context.Context, identity appsec.PrincipalIdentity)
 		return nil, ErrUnavailable
 	}
 	return store.Models(ctx, identity)
+}
+
+func (s *Service) AnthropicModels(ctx context.Context, identity appsec.PrincipalIdentity) ([]DiscoverableModel, error) {
+	if identity.ID <= 0 || identity.AccessKeyID <= 0 {
+		return nil, ErrAuthentication
+	}
+	store, ok := s.store.(AnthropicModelStore)
+	if !ok {
+		return nil, ErrUnavailable
+	}
+	return store.AnthropicModels(ctx, identity)
 }
 
 // Provider 返回指定模型按当前网关路由顺序将使用的服务商。

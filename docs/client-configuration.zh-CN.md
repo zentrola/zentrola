@@ -9,7 +9,7 @@
 | 协议                 | Base URL                           | 支持的路径                                                                | 认证方式                              |
 | -------------------- | ---------------------------------- | ------------------------------------------------------------------------- | ------------------------------------- |
 | OpenAI Compatible    | `https://<gateway-host>/v1`        | `GET /v1/models`、`POST /v1/chat/completions`、`POST /v1/responses`、`POST /v1/images/generations` | `Authorization: Bearer <virtual-key>` |
-| Anthropic Compatible | `https://<gateway-host>/anthropic` | `POST /anthropic/v1/messages`、`POST /anthropic/v1/messages/count_tokens` | `x-api-key: <virtual-key>` 或 Bearer  |
+| Anthropic Compatible | `https://<gateway-host>/anthropic` | `GET /anthropic/v1/models`、`POST /anthropic/v1/messages`、`POST /anthropic/v1/messages/count_tokens` | `x-api-key: <virtual-key>` 或 Bearer  |
 
 调用 Anthropic 接口时不要同时发送 `x-api-key` 和 `Authorization`。
 
@@ -63,7 +63,7 @@ $env:ANTHROPIC_API_KEY = $zentrolaKey
 Remove-Variable secureKey, zentrolaKey
 ```
 
-将客户端模型设置为已向成员授权的逻辑模型编码。Zentrola 会转发受支持的 Messages、Streaming 和工具调用。`count_tokens` 必须路由到 Anthropic 兼容上游；Zentrola 不会通过只有 OpenAI 接口的上游生成估算值。
+将客户端模型设置为 `GET /anthropic/v1/models` 返回的逻辑模型编码。Zentrola 会转发受支持的 Messages、Streaming 和工具调用。`count_tokens` 必须路由到 Anthropic 兼容上游；Zentrola 不会通过只有 OpenAI 接口的上游生成估算值。
 
 ## 会话与账号分流
 
@@ -80,6 +80,13 @@ Remove-Variable secureKey, zentrolaKey
 ```bash
 curl https://<gateway-host>/v1/models \
   -H "Authorization: Bearer <virtual-key>"
+```
+
+查看已授权的 Anthropic 模型：
+
+```bash
+curl https://<gateway-host>/anthropic/v1/models \
+  -H "x-api-key: <virtual-key>"
 ```
 
 调用 Anthropic Messages：
