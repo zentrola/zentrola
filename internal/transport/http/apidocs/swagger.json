@@ -336,7 +336,7 @@
                         "GatewayBearer": []
                     }
                 ],
-                "description": "返回当前成员被授权且有可用资源的逻辑模型；不接受查询参数。",
+                "description": "返回当前成员被授权且有可用资源的逻辑模型，按模型 ID 排序；支持 Anthropic 官方分页参数，未传 limit 时返回全部，before_id 与 after_id 不能同时使用。",
                 "produces": [
                     "application/json"
                 ],
@@ -344,6 +344,28 @@
                     "Anthropic Gateway"
                 ],
                 "summary": "可用的 Anthropic 逻辑模型",
+                "parameters": [
+                    {
+                        "maximum": 1000,
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "每页数量",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "返回该模型 ID 之前的一页",
+                        "name": "before_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "返回该模型 ID 之后的一页",
+                        "name": "after_id",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",

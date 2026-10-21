@@ -63,7 +63,7 @@ $env:ANTHROPIC_API_KEY = $zentrolaKey
 Remove-Variable secureKey, zentrolaKey
 ```
 
-将客户端模型设置为 `GET /anthropic/v1/models` 返回的逻辑模型编码。Zentrola 会转发受支持的 Messages、Streaming 和工具调用。`count_tokens` 必须路由到 Anthropic 兼容上游；Zentrola 不会通过只有 OpenAI 接口的上游生成估算值。
+将客户端模型设置为 `GET /anthropic/v1/models` 返回的逻辑模型编码。该接口支持 Anthropic 官方分页参数 `limit`（1–1000）、`before_id`、`after_id`，未传 `limit` 时一次返回全部。Zentrola 会转发受支持的 Messages、Streaming 和工具调用。`count_tokens` 必须路由到 Anthropic 兼容上游；Zentrola 不会通过只有 OpenAI 接口的上游生成估算值。
 
 ## 会话与账号分流
 

@@ -37,8 +37,11 @@ import gw "github.com/zentrola/zentrola/internal/application/gateway"
 
 // @Summary 可用的 Anthropic 逻辑模型
 // @Tags Anthropic Gateway
-// @Description 返回当前成员被授权且有可用资源的逻辑模型；不接受查询参数。
+// @Description 返回当前成员被授权且有可用资源的逻辑模型，按模型 ID 排序；支持 Anthropic 官方分页参数，未传 limit 时返回全部，before_id 与 after_id 不能同时使用。
 // @Produce json
+// @Param limit query int false "每页数量" minimum(1) maximum(1000)
+// @Param before_id query string false "返回该模型 ID 之前的一页"
+// @Param after_id query string false "返回该模型 ID 之后的一页"
 // @Security GatewayKey
 // @Security GatewayBearer
 // @Success 200 {object} AnthropicModelsResponse

@@ -63,7 +63,7 @@ $env:ANTHROPIC_API_KEY = $zentrolaKey
 Remove-Variable secureKey, zentrolaKey
 ```
 
-Configure the client to use a logical-model code returned by `GET /anthropic/v1/models`. Zentrola forwards supported Messages, streaming, and tool-use traffic. `count_tokens` requires an Anthropic-compatible upstream route; Zentrola does not estimate it through an OpenAI-only upstream.
+Configure the client to use a logical-model code returned by `GET /anthropic/v1/models`. The endpoint accepts the official Anthropic pagination parameters `limit` (1-1000), `before_id`, and `after_id`; without `limit` it returns every model. Zentrola forwards supported Messages, streaming, and tool-use traffic. `count_tokens` requires an Anthropic-compatible upstream route; Zentrola does not estimate it through an OpenAI-only upstream.
 
 ## Session and account distribution
 

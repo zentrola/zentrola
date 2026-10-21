@@ -135,16 +135,23 @@ func (g *GatewayHandler) serveModelList(
 		reject(&gw.Failure{Code: "METHOD_NOT_ALLOWED", Type: "invalid_request_error", Message: "Method not allowed.", Status: 405})
 		return true
 	}
+	if route.protocol == gw.AnthropicProtocol {
+		page, ok := parseAnthropicModelPage(r.URL.RawQuery)
+		if !ok {
+			reject(gw.ErrInvalid)
+			return true
+		}
+		g.logger.InfoContext(r.Context(), "gateway model list request started",
+			"protocol", route.protocol, "principal_id", identity.ID, "access_key_id", identity.AccessKeyID)
+		g.serveAnthropicModelList(w, r, identity, page, reject)
+		return true
+	}
 	if r.URL.RawQuery != "" {
 		reject(gw.ErrInvalid)
 		return true
 	}
 	g.logger.InfoContext(r.Context(), "gateway model list request started",
 		"protocol", route.protocol, "principal_id", identity.ID, "access_key_id", identity.AccessKeyID)
-	if route.protocol == gw.AnthropicProtocol {
-		g.serveAnthropicModelList(w, r, identity, reject)
-		return true
-	}
 	models, err := g.service.Models(r.Context(), identity)
 	if err != nil {
 		failure := gw.ErrUnavailable
@@ -164,7 +171,67 @@ func (g *GatewayHandler) serveModelList(
 	return true
 }
 
-func (g *GatewayHandler) serveAnthropicModelList(w http.ResponseWriter, r *http.Request, identity appsec.PrincipalIdentity, reject func(*gw.Failure)) {
+// anthropicModelPage 对应 Anthropic GET /v1/models 的分页参数；limit 为 0 表示返回全部。
+type anthropicModelPage struct {
+	limit             int
+	beforeID, afterID string
+}
+
+func parseAnthropicModelPage(rawQuery string) (anthropicModelPage, bool) {
+	var page anthropicModelPage
+	query, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return page, false
+	}
+	for key, values := range query {
+		if len(values) != 1 || values[0] == "" {
+			return page, false
+		}
+		switch key {
+		case "limit":
+			limit, err := strconv.Atoi(values[0])
+			if err != nil || limit < 1 || limit > 1000 {
+				return page, false
+			}
+			page.limit = limit
+		case "before_id":
+			page.beforeID = values[0]
+		case "after_id":
+			page.afterID = values[0]
+		default:
+			return page, false
+		}
+	}
+	return page, page.beforeID == "" || page.afterID == ""
+}
+
+// apply 在按 ID 排序的模型列表上截取一页；游标 ID 不在列表中时返回 false。
+func (p anthropicModelPage) apply(data []AnthropicModel) ([]AnthropicModel, bool, bool) {
+	index := func(id string) int {
+		return slices.IndexFunc(data, func(model AnthropicModel) bool { return model.ID == id })
+	}
+	start, end := 0, len(data)
+	if p.afterID != "" {
+		if start = index(p.afterID) + 1; start == 0 {
+			return nil, false, false
+		}
+	}
+	if p.beforeID != "" {
+		if end = index(p.beforeID); end < 0 {
+			return nil, false, false
+		}
+	}
+	page := data[start:end]
+	if p.limit == 0 || len(page) <= p.limit {
+		return page, false, true
+	}
+	if p.beforeID != "" {
+		return page[len(page)-p.limit:], true, true
+	}
+	return page[:p.limit], true, true
+}
+
+func (g *GatewayHandler) serveAnthropicModelList(w http.ResponseWriter, r *http.Request, identity appsec.PrincipalIdentity, page anthropicModelPage, reject func(*gw.Failure)) {
 	models, err := g.service.AnthropicModels(r.Context(), identity)
 	if err != nil {
 		failure := gw.ErrUnavailable
@@ -182,6 +249,11 @@ func (g *GatewayHandler) serveAnthropicModelList(w http.ResponseWriter, r *http.
 			CreatedAt: model.CreatedAt.UTC().Format(time.RFC3339),
 		})
 	}
+	data, hasMore, ok := page.apply(data)
+	if !ok {
+		reject(gw.ErrInvalid)
+		return
+	}
 	var firstID, lastID *string
 	if len(data) > 0 {
 		firstID, lastID = &data[0].ID, &data[len(data)-1].ID
@@ -192,7 +264,7 @@ func (g *GatewayHandler) serveAnthropicModelList(w http.ResponseWriter, r *http.
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(w).Encode(AnthropicModelsResponse{
-		Data: data, HasMore: false, FirstID: firstID, LastID: lastID,
+		Data: data, HasMore: hasMore, FirstID: firstID, LastID: lastID,
 	})
 }
 
