@@ -478,7 +478,8 @@ export default {
     manageMembers: 'MCP member management',
     grantManagement: 'Allow member management',
     revokeManagement: 'Remove management access',
-    grantManagementQuestion: 'Allow Key “{name}” to create members and issue ordinary Keys through MCP?',
+    grantManagementQuestion:
+      'Allow Key “{name}” to create members and issue ordinary Keys through MCP?',
     managementPermissionSaved: 'Member management permission updated',
     grantUpstreamQuota: 'Allow quota view',
     revokeUpstreamQuota: 'Remove quota access',
@@ -1233,6 +1234,7 @@ export default {
     APPLICATION_KEY_REQUIRED: 'Issue an App Key before enabling the application.',
     SUBSCRIPTION_ACCOUNT_ALREADY_EXISTS:
       'A credential for this subscription account already exists. Update the existing credential.',
+    MEMBER_NAME_ALREADY_EXISTS: 'A user with this name already exists. Choose a different name.',
     PROVIDER_UNAVAILABLE: 'The upstream provider is disabled.',
     CREDENTIAL_UNRECOVERABLE: 'The credential cannot be decrypted. Enter it again.',
     CREDENTIAL_EXPORT_UNSUPPORTED: 'Only OpenAI personal subscription credentials can be exported.',

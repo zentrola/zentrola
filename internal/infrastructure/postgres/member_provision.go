@@ -33,13 +33,6 @@ func NewMemberProvisionStore(pool *pgxpool.Pool, ids interface {
 
 func (s *MemberProvisionStore) CreateMemberAndKey(ctx context.Context, actor appsec.PrincipalIdentity, memberID int64, name, remark string, groupIDs []int64, key appsec.KeyRecord, meta appsec.RequestMeta) error {
 	return s.write(ctx, actor, func(ctx context.Context, q *dbgen.Queries, tx pgx.Tx, operator string) error {
-		var exists bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM principal WHERE principal_type='MEMBER' AND NOT is_deleted AND btrim(name)=$1)`, name).Scan(&exists); err != nil {
-			return err
-		}
-		if exists {
-			return appsec.ErrMemberNameExists
-		}
 		now := time.Now().UTC()
 		if err := q.ManageCreateMember(ctx, dbgen.ManageCreateMemberParams{ID: memberID, Name: name, Remark: optional(remark, 2000), CreatedBy: operator, CreatedAt: pgTime(now)}); err != nil {
 			return err
@@ -126,7 +119,10 @@ func (s *MemberProvisionStore) write(ctx context.Context, actor appsec.Principal
 	}
 	operator := "member-key:" + strconv.FormatInt(actor.AccessKeyID, 10)
 	if err := fn(ctx, dbgen.New(tx), tx, operator); err != nil {
-		if errors.Is(err, appsec.ErrNotFound) || errors.Is(err, appsec.ErrInvalidArgument) || errors.Is(err, appsec.ErrMemberNameExists) {
+		if isMemberNameConflict(err) {
+			return appsec.ErrMemberNameExists
+		}
+		if errors.Is(err, appsec.ErrNotFound) || errors.Is(err, appsec.ErrInvalidArgument) {
 			return err
 		}
 		return diagnosePostgresError(ctx, s.log, "member_provision", "write", err, appsec.ErrUnavailable)

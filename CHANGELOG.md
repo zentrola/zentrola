@@ -15,13 +15,15 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 
 ### Changed / 变更
 
-- Creating a member through an authorized Key now rejects a name already used by an undeleted member with `MEMBER_NAME_ALREADY_EXISTS`; no member or Key is created on conflict.
-- 获授权 Key 创建普通成员时会检查未删除成员的名称；同名返回 `MEMBER_NAME_ALREADY_EXISTS`，不会创建成员或 Key。
+- Undeleted member names are now unique (ignoring leading and trailing whitespace) for both administrators and authorized Keys. Creating or renaming a member to an existing name returns `MEMBER_NAME_ALREADY_EXISTS`; no member or Key is created on conflict.
+- 未删除成员的名称（忽略首尾空白）现在全局唯一，管理员与获授权 Key 均受约束；创建或改名为已有名称时返回 `MEMBER_NAME_ALREADY_EXISTS`，不会创建成员或 Key。
 
 ### Upgrade / 升级
 
 - Database migrations `00059`–`00062` add per-Key quota and member-management authorization, associate new usage records with Access Keys, index recent Key usage, and extend audit event and operator types. Historical usage records have no Access Key association. No configuration change is required.
 - 数据库迁移 `00059`–`00062` 新增单 Key 额度与成员管理授权、为新用量记录关联 Access Key、建立最近用量索引，并扩展审计事件和操作人类型；历史用量记录没有 Access Key 关联。无需配置变更。
+- Migration `00063` adds a unique index on undeleted member names. If duplicate names exist, the migration fails without changing data and the error message includes a query that lists them; rename the duplicates and restart.
+- 迁移 `00063` 为未删除成员名称建立唯一索引。若已存在重名成员，迁移会失败且不修改数据，错误信息附带查询重名成员的 SQL；改名后重新启动即可。
 
 ## [1.2.3] - 2026-10-23
 

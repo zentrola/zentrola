@@ -80,6 +80,12 @@ func (s *ManagementStore) managementError(ctx context.Context, operation string,
 	}
 	return mapped
 }
+
+// isMemberNameConflict 识别未删除成员重名的唯一索引冲突，管理员与成员 Key 两条创建路径共用。
+func isMemberNameConflict(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "uk_principal_member_name"
+}
 func managementError(err error) error {
 	if err == nil {
 		return nil
@@ -89,6 +95,9 @@ func managementError(err error) error {
 	}
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
+		if isMemberNameConflict(pgErr) {
+			return appsec.ErrMemberNameExists
+		}
 		if pgErr.Code == "23505" && pgErr.ConstraintName == "uk_provider_credential_subscription_account" {
 			return mgmt.ErrSubscriptionAccountExists
 		}
@@ -102,7 +111,7 @@ func managementError(err error) error {
 			return appsec.ErrInvalidArgument
 		}
 	}
-	for _, known := range []error{appsec.ErrInvalidArgument, appsec.ErrUnauthenticated, appsec.ErrNotFound, appsec.ErrUnavailable} {
+	for _, known := range []error{appsec.ErrInvalidArgument, appsec.ErrUnauthenticated, appsec.ErrNotFound, appsec.ErrMemberNameExists, appsec.ErrUnavailable} {
 		if errors.Is(err, known) {
 			return known
 		}

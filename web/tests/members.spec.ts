@@ -718,6 +718,38 @@ test.describe('用户与应用', () => {
     expect(state.relationships.get('groups/52/members')?.has(longID)).toBe(false)
   })
 
+  test('创建同名用户时提示名称已存在', async ({ page }) => {
+    const state = await fixture(page)
+    state.groups.push({
+      id: '51',
+      code: 'engineering',
+      name: '研发组',
+      status: 'ACTIVE',
+      createdAt: stamp,
+    })
+    await page.route('**/api/v1/members', async (route) => {
+      if (route.request().method() !== 'POST') return route.fallback()
+      await route.fulfill({
+        status: 409,
+        json: {
+          code: 'MEMBER_NAME_ALREADY_EXISTS',
+          message: 'A member with this name already exists.',
+        },
+      })
+    })
+    const before = state.members.length
+
+    await signIn(page)
+    await page.getByRole('button', { name: '创建用户' }).click()
+    const dialog = modal(page)
+    await dialog.getByLabel('用户名', { exact: true }).fill('林知远')
+    await dialog.getByRole('checkbox', { name: '选择分组 研发组', exact: true }).check()
+    await dialog.getByRole('button', { name: '创建', exact: true }).click()
+    await expect(page.locator('.toast')).toContainText('已存在同名用户')
+    await expect(dialog).toBeVisible()
+    expect(state.members.length).toBe(before)
+  })
+
   test('没有用户分组时提示先添加分组且不打开创建用户弹窗', async ({ page }) => {
     const state = await fixture(page)
     await signIn(page)

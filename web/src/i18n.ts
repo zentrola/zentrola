@@ -1221,6 +1221,7 @@ export const i18n = createI18n({
         MEMBER_ACCESS_KEY_REQUIRED: '请先为该用户生成调用 Key，再启用用户。',
         APPLICATION_KEY_REQUIRED: '请先为该应用签发 App Key，再启用应用。',
         SUBSCRIPTION_ACCOUNT_ALREADY_EXISTS: '该服务商下已存在此订阅账号的凭证，请更新已有凭证。',
+        MEMBER_NAME_ALREADY_EXISTS: '已存在同名用户，请更换用户名称。',
         PROVIDER_UNAVAILABLE: '上游服务已停用。',
         CREDENTIAL_UNRECOVERABLE: '凭证无法解密，请重新录入。',
         CREDENTIAL_EXPORT_UNSUPPORTED: '仅 OpenAI 个人订阅凭据支持导出。',

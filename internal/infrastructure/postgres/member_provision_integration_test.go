@@ -2,8 +2,13 @@ package postgres
 
 import (
 	"errors"
+	"io/fs"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/pressly/goose/v3"
 
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	"github.com/zentrola/zentrola/internal/domain/principal"
@@ -111,6 +116,13 @@ func TestMemberProvisionIntegration(t *testing.T) {
 	if status != "ACTIVE" {
 		t.Fatal("existing member was not activated")
 	}
+	// 管理员路径同样受唯一索引约束。
+	_, err = pool.Exec(ctx, `INSERT INTO principal(id,principal_type,name,status,created_by,updated_by,created_at,updated_at)
+		VALUES(103,'MEMBER',' Ordinary ','DISABLED','system','system',now(),now())`)
+	if !isMemberNameConflict(err) || !errors.Is(managementError(err), appsec.ErrMemberNameExists) {
+		t.Fatalf("admin duplicate member name: %v", err)
+	}
+
 	if _, err := pool.Exec(ctx, `UPDATE principal_access_key SET can_manage_members=false WHERE id=101`); err != nil {
 		t.Fatal(err)
 	}
@@ -124,5 +136,38 @@ func TestMemberProvisionIntegration(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatal("unauthorized Key was inserted")
+	}
+}
+
+func TestMemberNameUniqueMigrationRejectsDuplicatesIntegration(t *testing.T) {
+	ctx, pool, _ := isolatedDatabase(t)
+	db := stdlib.OpenDBFromPool(pool)
+	defer db.Close()
+	source, err := fs.Sub(migrations, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, err := goose.NewProvider(goose.DialectPostgres, db, source, goose.WithDisableGlobalRegistry(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.UpTo(ctx, 62); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO principal(id,principal_type,name,status,is_deleted,created_by,updated_by,created_at,updated_at) VALUES
+		(1,'MEMBER','Same','ACTIVE',false,'system','system',now(),now()),
+		(2,'MEMBER','Same ','DISABLED',false,'system','system',now(),now()),
+		(3,'MEMBER','Deleted','ACTIVE',true,'system','system',now(),now()),
+		(4,'MEMBER','Deleted','ACTIVE',false,'system','system',now(),now())`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.UpTo(ctx, 63); err == nil || !strings.Contains(err.Error(), "Duplicate member names") {
+		t.Fatalf("duplicate names must block migration: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE principal SET name='Same 2' WHERE id=2`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.UpTo(ctx, 63); err != nil {
+		t.Fatal(err)
 	}
 }
