@@ -143,15 +143,10 @@ func (s *MemberProvisionStore) write(ctx context.Context, actor appsec.Principal
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(829314004)`); err != nil {
 		return diagnosePostgresError(ctx, s.log, "member_provision", "lock", err, appsec.ErrUnavailable)
 	}
-	var authorized bool
-	err = tx.QueryRow(ctx, `SELECT true FROM principal_access_key k JOIN principal p ON p.id=k.principal_id
-		WHERE k.id=$1 AND k.principal_id=$2 AND k.can_manage_members AND NOT k.is_deleted AND k.status='ACTIVE'
-		AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>now())
-		AND p.principal_type='MEMBER' AND p.status='ACTIVE' AND NOT p.is_deleted FOR SHARE OF k,p`, actor.AccessKeyID, actor.ID).Scan(&authorized)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return appsec.ErrForbidden
-	}
-	if err != nil {
+	if err := authorizeManager(ctx, tx, actor, true); err != nil {
+		if errors.Is(err, appsec.ErrForbidden) {
+			return err
+		}
 		return diagnosePostgresError(ctx, s.log, "member_provision", "authorize", err, appsec.ErrUnavailable)
 	}
 	operator := "member-key:" + strconv.FormatInt(actor.AccessKeyID, 10)
@@ -167,6 +162,53 @@ func (s *MemberProvisionStore) write(ctx context.Context, actor appsec.Principal
 		return diagnosePostgresError(ctx, s.log, "member_provision", "write", err, appsec.ErrUnavailable)
 	}
 	return diagnosePostgresError(ctx, s.log, "member_provision", "commit", tx.Commit(ctx), appsec.ErrUnavailable)
+}
+
+// ActiveGroups 返回可在创建成员时选择的启用分组，按 ID 倒序分页。
+func (s *MemberProvisionStore) ActiveGroups(ctx context.Context, actor appsec.PrincipalIdentity, after int64, limit int32) ([]appsec.ManagedGroup, int64, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return nil, 0, diagnosePostgresError(ctx, s.log, "member_provision", "begin_read", err, appsec.ErrUnavailable)
+	}
+	defer tx.Rollback(context.Background())
+	if err := authorizeManager(ctx, tx, actor, false); err != nil {
+		if errors.Is(err, appsec.ErrForbidden) {
+			return nil, 0, err
+		}
+		return nil, 0, diagnosePostgresError(ctx, s.log, "member_provision", "authorize", err, appsec.ErrUnavailable)
+	}
+	q := dbgen.New(tx)
+	rows, err := q.ManageGroups(ctx, dbgen.ManageGroupsParams{Status: "ACTIVE", AfterID: after, PageLimit: limit})
+	if err != nil {
+		return nil, 0, diagnosePostgresError(ctx, s.log, "member_provision", "groups", err, appsec.ErrUnavailable)
+	}
+	total, err := q.CountManageGroups(ctx, "ACTIVE")
+	if err != nil {
+		return nil, 0, diagnosePostgresError(ctx, s.log, "member_provision", "count_groups", err, appsec.ErrUnavailable)
+	}
+	groups := make([]appsec.ManagedGroup, 0, len(rows))
+	for _, row := range rows {
+		groups = append(groups, appsec.ManagedGroup{ID: row.ID, Code: row.GroupCode, Name: row.GroupName, Remark: row.Remark, Status: row.Status})
+	}
+	return groups, total, nil
+}
+
+// authorizeManager 在数据库中复核管理 Key 仍然有效，避免只依赖可能过期的认证缓存。
+// 写事务加共享锁，防止授权在本次写入期间被撤销；只读事务不能加锁。
+func authorizeManager(ctx context.Context, tx pgx.Tx, actor appsec.PrincipalIdentity, lock bool) error {
+	query := `SELECT true FROM principal_access_key k JOIN principal p ON p.id=k.principal_id
+		WHERE k.id=$1 AND k.principal_id=$2 AND k.can_manage_members AND NOT k.is_deleted AND k.status='ACTIVE'
+		AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>now())
+		AND p.principal_type='MEMBER' AND p.status='ACTIVE' AND NOT p.is_deleted`
+	if lock {
+		query += ` FOR SHARE OF k,p`
+	}
+	var authorized bool
+	err := tx.QueryRow(ctx, query, actor.AccessKeyID, actor.ID).Scan(&authorized)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return appsec.ErrForbidden
+	}
+	return err
 }
 
 func (s *MemberProvisionStore) insertKey(ctx context.Context, q *dbgen.Queries, key appsec.KeyRecord, operator string) error {

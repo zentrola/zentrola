@@ -49,6 +49,18 @@ func TestMemberProvisionIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	actor := appsec.PrincipalIdentity{ID: 100, AccessKeyID: 101, Type: principal.Member, CanManageMembers: true}
+	// 分组查询只返回启用分组，按 ID 倒序分页。
+	if _, err := pool.Exec(ctx, `INSERT INTO principal_group(id,group_code,group_name,status,created_by,updated_by,created_at,updated_at)
+		VALUES(202,'disabled-group','Disabled Group','DISABLED','system','system',now(),now())`); err != nil {
+		t.Fatal(err)
+	}
+	groups, total, err := store.ActiveGroups(ctx, actor, 0, 1)
+	if err != nil || total != 2 || len(groups) != 1 || groups[0].ID != 201 || groups[0].Name != "Other Group" {
+		t.Fatalf("first group page: %+v total=%d err=%v", groups, total, err)
+	}
+	if groups, _, err = store.ActiveGroups(ctx, actor, 201, 10); err != nil || len(groups) != 1 || groups[0].ID != 200 {
+		t.Fatalf("next group page: %+v err=%v", groups, err)
+	}
 	key := appsec.KeyRecord{ID: keyID, PrincipalID: memberID, PrincipalType: principal.Member, Hash: make([]byte, 32), MaskedKey: "vk-child********0001", Name: "First", CreatedAt: time.Now().UTC()}
 	if err := store.CreateMemberAndKey(ctx, actor, memberID, "Ordinary", "", []int64{200}, key, appsec.RequestMeta{}); err != nil {
 		t.Fatal(err)
@@ -242,6 +254,9 @@ func TestMemberProvisionIntegration(t *testing.T) {
 	}
 	if countKey(key.ID) != 0 {
 		t.Fatal("unauthorized Key was inserted")
+	}
+	if _, _, err := store.ActiveGroups(ctx, actor, 0, 10); !errors.Is(err, appsec.ErrForbidden) {
+		t.Fatalf("revoked permission listed groups: %v", err)
 	}
 }
 

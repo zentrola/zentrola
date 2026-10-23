@@ -12,6 +12,16 @@ type MemberProvisionStore interface {
 	CreateMemberAndKey(context.Context, PrincipalIdentity, int64, string, string, []int64, KeyRecord, RequestMeta) error
 	IssueMemberKey(context.Context, PrincipalIdentity, KeyRecord, RequestMeta) error
 	SetMemberStatus(context.Context, PrincipalIdentity, int64, string, RequestMeta) (bool, error)
+	ActiveGroups(context.Context, PrincipalIdentity, int64, int32) ([]ManagedGroup, int64, error)
+}
+
+// ManagedGroup 是管理 Key 创建成员时可选择的分组，只暴露选择所需字段。
+type ManagedGroup struct {
+	ID     int64   `json:"id,string"`
+	Code   string  `json:"code"`
+	Name   string  `json:"name"`
+	Remark *string `json:"remark"`
+	Status string  `json:"status"`
 }
 
 type MemberProvisioning struct {
@@ -45,7 +55,8 @@ func (s *MemberProvisioning) Create(ctx context.Context, actor PrincipalIdentity
 		return ProvisionedMember{}, err
 	}
 	name, remark, keyName = strings.TrimSpace(name), strings.TrimSpace(remark), strings.TrimSpace(keyName)
-	if !validProvisionText(name, 128, true) || !validProvisionText(remark, 2000, false) || !validProvisionText(keyName, 128, true) || !validGroupIDs(groupIDs) {
+	// 至少指定一个分组，否则新成员没有任何模型权限，与管理后台创建规则一致。
+	if !validProvisionText(name, 128, true) || !validProvisionText(remark, 2000, false) || !validProvisionText(keyName, 128, true) || len(groupIDs) == 0 || !validGroupIDs(groupIDs) {
 		return ProvisionedMember{}, ErrInvalidArgument
 	}
 	if s == nil || s.keys == nil || s.store == nil {
@@ -108,6 +119,20 @@ func (s *MemberProvisioning) SetStatus(ctx context.Context, actor PrincipalIdent
 		s.cache.Clear(ctx, "member_status_changed")
 	}
 	return ManagedMemberStatus{ID: memberID, Status: status}, nil
+}
+
+// Groups 分页返回启用分组；limit 由调用方决定是否多取一条用于判断下一页。
+func (s *MemberProvisioning) Groups(ctx context.Context, actor PrincipalIdentity, after int64, limit int32) ([]ManagedGroup, int64, error) {
+	if err := validateMemberManager(actor); err != nil {
+		return nil, 0, err
+	}
+	if after < 0 || limit < 1 || limit > 101 {
+		return nil, 0, ErrInvalidArgument
+	}
+	if s == nil || s.store == nil {
+		return nil, 0, ErrUnavailable
+	}
+	return s.store.ActiveGroups(ctx, actor, after, limit)
 }
 
 func validateMemberManager(actor PrincipalIdentity) error {

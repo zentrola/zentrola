@@ -188,8 +188,9 @@ func (r *UpdateKeyMemberManagementRequest) Normalize() {}
 func (r UpdateKeyMemberManagementRequest) Valid() bool { return r.CanManageMembers != nil }
 
 type CreateManagedMemberRequest struct {
-	Name     string   `json:"name"`
-	Remark   string   `json:"remark"`
+	Name   string `json:"name"`
+	Remark string `json:"remark"`
+	// GroupIDs 至少包含一个启用分组 ID，可通过 GET /api/v1/me/manage/groups 获取。
 	GroupIDs []string `json:"groupIds"`
 	KeyName  string   `json:"keyName"`
 }
@@ -199,7 +200,7 @@ func (r *CreateManagedMemberRequest) Normalize() {
 	normalizeStrings(r.GroupIDs)
 }
 func (r CreateManagedMemberRequest) Valid() bool {
-	return validRequestText(r.Name, 128, true) && validRequestText(r.Remark, 2000, false) && validRequestText(r.KeyName, 128, true) && validRequestIDs(r.GroupIDs)
+	return validRequestText(r.Name, 128, true) && validRequestText(r.Remark, 2000, false) && validRequestText(r.KeyName, 128, true) && len(r.GroupIDs) > 0 && validRequestIDs(r.GroupIDs)
 }
 
 type UpdateManagedMemberStatusRequest struct {

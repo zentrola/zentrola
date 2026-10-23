@@ -4121,6 +4121,81 @@
                 }
             }
         },
+        "/api/v1/me/manage/groups": {
+            "get": {
+                "security": [
+                    {
+                        "GatewayBearer": []
+                    }
+                ],
+                "description": "只返回启用分组，按 ID 倒序分页；将 nextCursor 作为下一次请求的 after。创建成员时从中选择至少一个分组。",
+                "tags": [
+                    "成员管理"
+                ],
+                "summary": "通过授权成员 Key 获取可选的用户分组",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "上一页 nextCursor，默认从头查询",
+                        "name": "after",
+                        "in": "query"
+                    },
+                    {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer",
+                        "default": 50,
+                        "description": "每页数量",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/http.PageResponse-security_ManagedGroup"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/me/manage/members": {
             "post": {
                 "security": [
@@ -4128,6 +4203,7 @@
                         "GatewayBearer": []
                     }
                 ],
+                "description": "groupIds 必须至少包含一个启用分组。",
                 "tags": [
                     "成员管理"
                 ],
@@ -10550,6 +10626,7 @@
             "type": "object",
             "properties": {
                 "groupIds": {
+                    "description": "GroupIDs 至少包含一个启用分组 ID，可通过 GET /api/v1/me/manage/groups 获取。",
                     "type": "array",
                     "items": {
                         "type": "string"
@@ -10984,6 +11061,23 @@
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/management.Resource"
+                    }
+                },
+                "nextCursor": {
+                    "type": "string"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "http.PageResponse-security_ManagedGroup": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/security.ManagedGroup"
                     }
                 },
                 "nextCursor": {
@@ -12294,6 +12388,27 @@
                     "type": "string"
                 },
                 "tokenType": {
+                    "type": "string"
+                }
+            }
+        },
+        "security.ManagedGroup": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "remark": {
+                    "type": "string"
+                },
+                "status": {
                     "type": "string"
                 }
             }

@@ -189,6 +189,7 @@ func (s *SecurityHandlers) mount(r chi.Router) {
 				member.Get("/me/upstream-quota", s.getMyUpstreamQuota)
 			}
 			if s.MemberProvisioning != nil {
+				member.Get("/me/manage/groups", s.listManagedGroups())
 				member.Post("/me/manage/members", s.createManagedMember)
 				member.Post("/me/manage/members/{id}/keys", s.issueManagedMemberKey)
 				member.Put("/me/manage/members/{id}/status", s.setManagedMemberStatus)

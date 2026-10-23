@@ -9,12 +9,13 @@ import (
 )
 
 type provisionStoreStub struct {
-	creates  int
-	issues   int
-	statuses int
-	changed  bool
-	key      KeyRecord
-	groups   []int64
+	creates    int
+	issues     int
+	statuses   int
+	groupReads int
+	changed    bool
+	key        KeyRecord
+	groups     []int64
 }
 type provisionIDs struct{ next int64 }
 
@@ -37,6 +38,11 @@ func (s *provisionStoreStub) IssueMemberKey(_ context.Context, _ PrincipalIdenti
 func (s *provisionStoreStub) SetMemberStatus(context.Context, PrincipalIdentity, int64, string, RequestMeta) (bool, error) {
 	s.statuses++
 	return s.changed, nil
+}
+
+func (s *provisionStoreStub) ActiveGroups(context.Context, PrincipalIdentity, int64, int32) ([]ManagedGroup, int64, error) {
+	s.groupReads++
+	return []ManagedGroup{{ID: 1, Status: "ACTIVE"}}, 1, nil
 }
 
 type provisionCacheStub struct{ clears int }
@@ -65,8 +71,37 @@ func TestMemberProvisioningRejectsInvalidGroupsBeforeWriting(t *testing.T) {
 	store := &provisionStoreStub{}
 	service := NewMemberProvisioning(NewKeys(&keyTestStore{}, &provisionIDs{next: 40}), store, nil)
 	actor := PrincipalIdentity{ID: 1, AccessKeyID: 2, Type: principal.Member, CanManageMembers: true}
-	if _, err := service.Create(context.Background(), actor, "New", "", "First", []int64{7, 7}, RequestMeta{}); !errors.Is(err, ErrInvalidArgument) || store.creates != 0 {
-		t.Fatalf("invalid groups: err=%v writes=%d", err, store.creates)
+	// 必须至少指定一个分组，且分组 ID 有效、不重复。
+	for _, groups := range [][]int64{nil, {}, {7, 7}, {0}} {
+		if _, err := service.Create(context.Background(), actor, "New", "", "First", groups, RequestMeta{}); !errors.Is(err, ErrInvalidArgument) || store.creates != 0 {
+			t.Fatalf("invalid groups %v: err=%v writes=%d", groups, err, store.creates)
+		}
+	}
+}
+
+func TestMemberProvisioningGroupsRequiresPermissionAndValidPage(t *testing.T) {
+	manager := PrincipalIdentity{ID: 1, AccessKeyID: 2, Type: principal.Member, CanManageMembers: true}
+	for _, tc := range []struct {
+		name    string
+		actor   PrincipalIdentity
+		after   int64
+		limit   int32
+		wantErr error
+		reads   int
+	}{
+		{name: "without permission", actor: PrincipalIdentity{ID: 1, AccessKeyID: 2, Type: principal.Member}, limit: 50, wantErr: ErrForbidden},
+		{name: "negative cursor", actor: manager, after: -1, limit: 50, wantErr: ErrInvalidArgument},
+		{name: "zero limit", actor: manager, limit: 0, wantErr: ErrInvalidArgument},
+		{name: "limit too large", actor: manager, limit: 102, wantErr: ErrInvalidArgument},
+		{name: "probe limit", actor: manager, limit: 101, reads: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &provisionStoreStub{}
+			service := NewMemberProvisioning(NewKeys(&keyTestStore{}, &provisionIDs{next: 40}), store, nil)
+			if _, _, err := service.Groups(context.Background(), tc.actor, tc.after, tc.limit); !errors.Is(err, tc.wantErr) || store.groupReads != tc.reads {
+				t.Fatalf("err=%v reads=%d", err, store.groupReads)
+			}
+		})
 	}
 }
 
