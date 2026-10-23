@@ -10,8 +10,8 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 
 - Member Access Keys can be individually authorized to view the saved quota snapshot of the subscription most recently used by that Key for a specified model. Members can query their current UTC-month Token usage and personal quota; model-specific remaining quota uses the smallest remaining amount across the member and applicable groups.
 - 成员 Access Key 可单独授权查看该 Key 指定模型最近使用的订阅号额度快照。成员可查询当前 UTC 月所有模型的 Token 总用量及个人额度；指定模型的剩余额度取个人与适用用户组中的最小值。
-- Authorized member Keys can create ordinary members with an active first Key or issue an ordinary Key to an existing member through MCP. Member creation, first-Key issuance, group assignment, and activation commit together. Newly issued Keys never inherit management permission.
-- 获单独授权的成员 Key 可通过 MCP 创建普通成员及已启用的首把 Key，也可为已有普通成员签发 Key 并自动启用成员。创建成员、分组分配、签发首把 Key 与启用操作在同一事务提交；新 Key 不继承管理权限。
+- Authorized member Keys can create ordinary members with an active first Key or issue an ordinary Key to an existing member through MCP. These tools cannot create administrators or issue Keys to administrator accounts. Member creation, first-Key issuance, group assignment, and activation commit together. Newly issued Keys never inherit management permission.
+- 获单独授权的成员 Key 可通过 MCP 创建普通成员及已启用的首把 Key，也可为已有普通成员签发 Key 并自动启用成员。这些工具不能创建管理员，也不能为管理员账号签发 Key。创建成员、分组分配、签发首把 Key 与启用操作在同一事务提交；新 Key 不继承管理权限。
 
 ### Changed / 变更
 
