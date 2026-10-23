@@ -87,7 +87,7 @@ func (s *SecurityHandlers) getMyUpstreamQuota(w http.ResponseWriter, r *http.Req
 		securityError(w, r, appsec.ErrInvalidArgument)
 		return
 	}
-	result, err := s.SelfQuota.Upstream(r.Context(), principalFrom(r), values.Get("model"))
+	result, err := s.SelfQuota.Upstream(r.Context(), principalFrom(r), values.Get("model"), time.Now().UTC())
 	if err != nil {
 		securityError(w, r, err)
 		return

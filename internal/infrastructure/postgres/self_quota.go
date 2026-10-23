@@ -85,16 +85,27 @@ func (s *SelfQuotaStore) QuotaUsed(ctx context.Context, scopes []quota.Scope, st
 	return s.quotas.Used(ctx, scopes, start, start.AddDate(0, 1, 0))
 }
 
+// LatestSubscriptionQuota 返回该 Key 指定模型最近一次成功请求所用订阅号的额度快照；
+// 快照时效由 application 层按调用时间判断。
 func (s *SelfQuotaStore) LatestSubscriptionQuota(ctx context.Context, principalID, accessKeyID int64, model string) (app.UpstreamQuota, error) {
 	result := app.UpstreamQuota{Status: "UNKNOWN", Model: model, Quotas: []app.UpstreamQuotaItem{}}
+	q := dbgen.New(s.pool)
+	// 先解析 model_id，使最近用量查询直接命中 ix_usage_record_key_model_recent。
+	m, err := q.GatewayModel(ctx, model)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return result, nil
+	}
+	if err != nil {
+		return result, diagnosePostgresError(ctx, s.logger, "self_quota", "model", err, appsec.ErrUnavailable)
+	}
 	var resourceID int64
 	var authType string
-	err := s.pool.QueryRow(ctx, `SELECT r.id,r.resource_name,p.provider_name,r.auth_type,u.completed_at,r.quota_checked_at
-		FROM usage_record u JOIN model m ON m.id=u.model_id
+	err = s.pool.QueryRow(ctx, `SELECT r.id,r.resource_name,p.provider_name,r.auth_type,u.completed_at,r.quota_checked_at
+		FROM usage_record u
 		JOIN provider_credential r ON r.id=u.provider_credential_id
 		JOIN provider p ON p.id=r.provider_id
-		WHERE u.principal_id=$1 AND u.access_key_id=$2 AND m.model_code=$3 AND u.status='SUCCESS'
-		ORDER BY u.completed_at DESC,u.id DESC LIMIT 1`, principalID, accessKeyID, model).Scan(
+		WHERE u.access_key_id=$1 AND u.model_id=$2 AND u.principal_id=$3 AND u.status='SUCCESS'
+		ORDER BY u.completed_at DESC,u.id DESC LIMIT 1`, accessKeyID, m.ID, principalID).Scan(
 		&resourceID, &result.SubscriptionName, &result.ProviderName, &authType, &result.LastUsedAt, &result.CheckedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return result, nil
@@ -108,10 +119,10 @@ func (s *SelfQuotaStore) LatestSubscriptionQuota(ctx context.Context, principalI
 		result.CheckedAt = nil
 		return result, nil
 	}
-	if result.CheckedAt == nil || time.Since(result.CheckedAt.UTC()) > 24*time.Hour {
+	if result.CheckedAt == nil {
 		return result, nil
 	}
-	rows, err := dbgen.New(s.pool).ManageResourceQuotas(ctx, resourceID)
+	rows, err := q.ManageResourceQuotas(ctx, resourceID)
 	if err != nil {
 		return result, diagnosePostgresError(ctx, s.logger, "self_quota", "resource_quotas", err, appsec.ErrUnavailable)
 	}

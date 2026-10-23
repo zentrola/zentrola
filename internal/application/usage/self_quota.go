@@ -3,6 +3,7 @@ package usage
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -11,6 +12,9 @@ import (
 )
 
 var ErrUpstreamQuotaForbidden = errors.New("upstream quota access forbidden")
+
+// UpstreamQuotaMaxAge 是订阅号额度快照可对外展示的最长时效，超过后只返回 UNKNOWN。
+const UpstreamQuotaMaxAge = 24 * time.Hour
 
 type UpstreamQuota struct {
 	Status           string              `json:"status"`
@@ -70,7 +74,11 @@ func (s *SelfQuotaService) Current(ctx context.Context, identity appsec.Principa
 	if err != nil {
 		return SelfQuota{}, err
 	}
-	all := append([]quota.Scope{{Type: quota.Principal, ID: identity.ID}}, scopes...)
+	// 总用量始终按个人范围统计；个人未配置额度时补一个仅用于统计的范围，避免重复查询。
+	all := scopes
+	if !slices.ContainsFunc(scopes, func(scope quota.Scope) bool { return scope.Type == quota.Principal && scope.ID == identity.ID }) {
+		all = append([]quota.Scope{{Type: quota.Principal, ID: identity.ID}}, scopes...)
+	}
 	used, err := s.store.QuotaUsed(ctx, all, start)
 	if err != nil {
 		return SelfQuota{}, err
@@ -93,7 +101,7 @@ func (s *SelfQuotaService) Current(ctx context.Context, identity appsec.Principa
 	return result, nil
 }
 
-func (s *SelfQuotaService) Upstream(ctx context.Context, identity appsec.PrincipalIdentity, model string) (UpstreamQuota, error) {
+func (s *SelfQuotaService) Upstream(ctx context.Context, identity appsec.PrincipalIdentity, model string, now time.Time) (UpstreamQuota, error) {
 	if identity.ID <= 0 {
 		return UpstreamQuota{}, appsec.ErrUnauthenticated
 	}
@@ -107,5 +115,12 @@ func (s *SelfQuotaService) Upstream(ctx context.Context, identity appsec.Princip
 	if s == nil || s.store == nil {
 		return UpstreamQuota{}, appsec.ErrUnavailable
 	}
-	return s.store.LatestSubscriptionQuota(ctx, identity.ID, identity.AccessKeyID, model)
+	result, err := s.store.LatestSubscriptionQuota(ctx, identity.ID, identity.AccessKeyID, model)
+	if err != nil {
+		return result, err
+	}
+	if result.CheckedAt == nil || now.Sub(result.CheckedAt.UTC()) > UpstreamQuotaMaxAge {
+		result.Status, result.Quotas = "UNKNOWN", []UpstreamQuotaItem{}
+	}
+	return result, nil
 }

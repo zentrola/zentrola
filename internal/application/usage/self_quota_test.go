@@ -13,17 +13,23 @@ import (
 type selfQuotaStoreStub struct {
 	scopes        []quota.Scope
 	used          map[quota.ScopeType]map[int64]int64
+	usedScopes    []quota.Scope
+	upstream      UpstreamQuota
 	upstreamCalls int
 }
 
 func (s *selfQuotaStoreStub) QuotaScopes(context.Context, int64, string) ([]quota.Scope, error) {
 	return s.scopes, nil
 }
-func (s *selfQuotaStoreStub) QuotaUsed(context.Context, []quota.Scope, time.Time) (map[quota.ScopeType]map[int64]int64, error) {
+func (s *selfQuotaStoreStub) QuotaUsed(_ context.Context, scopes []quota.Scope, _ time.Time) (map[quota.ScopeType]map[int64]int64, error) {
+	s.usedScopes = scopes
 	return s.used, nil
 }
 func (s *selfQuotaStoreStub) LatestSubscriptionQuota(_ context.Context, _, _ int64, model string) (UpstreamQuota, error) {
 	s.upstreamCalls++
+	if s.upstream.Status != "" {
+		return s.upstream, nil
+	}
 	return UpstreamQuota{Status: "UNKNOWN", Model: model}, nil
 }
 
@@ -39,6 +45,9 @@ func TestSelfQuotaUsesAllModelUsageAndMinimumApplicableRemaining(t *testing.T) {
 	if result.UsedTokens != 300 || result.PersonalRemaining == nil || *result.PersonalRemaining != 700 || result.EffectiveRemaining == nil || *result.EffectiveRemaining != 50 {
 		t.Fatalf("unexpected quota: %+v", result)
 	}
+	if len(store.usedScopes) != 2 {
+		t.Fatalf("personal scope must be queried once: %+v", store.usedScopes)
+	}
 }
 
 func TestSelfQuotaUnlimitedAndUpstreamAuthorization(t *testing.T) {
@@ -49,11 +58,36 @@ func TestSelfQuotaUnlimitedAndUpstreamAuthorization(t *testing.T) {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
 	identity := appsec.PrincipalIdentity{ID: 5, AccessKeyID: 7}
-	if _, err := service.Upstream(context.Background(), identity, "gpt-test"); !errors.Is(err, ErrUpstreamQuotaForbidden) || store.upstreamCalls != 0 {
+	if _, err := service.Upstream(context.Background(), identity, "gpt-test", time.Now().UTC()); !errors.Is(err, ErrUpstreamQuotaForbidden) || store.upstreamCalls != 0 {
 		t.Fatalf("err=%v calls=%d", err, store.upstreamCalls)
 	}
 	identity.CanViewUpstreamQuota = true
-	if _, err := service.Upstream(context.Background(), identity, "gpt-test"); err != nil || store.upstreamCalls != 1 {
+	if _, err := service.Upstream(context.Background(), identity, "gpt-test", time.Now().UTC()); err != nil || store.upstreamCalls != 1 {
 		t.Fatalf("err=%v calls=%d", err, store.upstreamCalls)
 	}
 }
+
+func TestSelfQuotaUpstreamHidesStaleSnapshot(t *testing.T) {
+	now := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
+	identity := appsec.PrincipalIdentity{ID: 5, AccessKeyID: 7, CanViewUpstreamQuota: true}
+	for _, tc := range []struct {
+		name      string
+		checkedAt *time.Time
+		want      string
+		wantItems int
+	}{
+		{name: "fresh", checkedAt: ptr(now.Add(-UpstreamQuotaMaxAge)), want: "KNOWN", wantItems: 1},
+		{name: "stale", checkedAt: ptr(now.Add(-UpstreamQuotaMaxAge - time.Second)), want: "UNKNOWN"},
+		{name: "never checked", want: "UNKNOWN"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &selfQuotaStoreStub{upstream: UpstreamQuota{Status: "KNOWN", Model: "gpt-test", CheckedAt: tc.checkedAt, Quotas: []UpstreamQuotaItem{{Code: "weekly"}}}}
+			result, err := NewSelfQuota(store).Upstream(context.Background(), identity, "gpt-test", now)
+			if err != nil || result.Status != tc.want || len(result.Quotas) != tc.wantItems || result.Quotas == nil {
+				t.Fatalf("result=%+v err=%v", result, err)
+			}
+		})
+	}
+}
+
+func ptr[T any](value T) *T { return &value }
