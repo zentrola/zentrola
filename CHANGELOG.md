@@ -4,12 +4,19 @@ All notable changes to Zentrola are documented here. Dates use UTC. The project 
 
 Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循语义化版本。
 
-## [1.2.3] - 2026-10-23
+## [1.3.0] - 2026-10-23
 
 ### Added / 新增
 
 - Member Access Keys can be individually authorized to view the saved quota snapshot of the subscription most recently used by that Key for a specified model. Members can query their current UTC-month Token usage and personal quota; model-specific remaining quota uses the smallest remaining amount across the member and applicable groups.
 - 成员 Access Key 可单独授权查看该 Key 指定模型最近使用的订阅号额度快照。成员可查询当前 UTC 月所有模型的 Token 总用量及个人额度；指定模型的剩余额度取个人与适用用户组中的最小值。
+
+### Upgrade / 升级
+
+- Database migrations `00059`–`00061` add per-Key quota authorization, associate new usage records with Access Keys, index recent Key usage, and extend audit event types. Historical usage records have no Access Key association. No configuration change is required.
+- 数据库迁移 `00059`–`00061` 新增单 Key 额度授权、为新用量记录关联 Access Key、建立最近用量索引并扩展审计类型；历史用量记录没有 Access Key 关联。无需配置变更。
+
+## [1.2.3] - 2026-10-23
 
 ### Changed / 变更
 
@@ -18,8 +25,8 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 
 ### Upgrade / 升级
 
-- Database migrations `00059`–`00061` add per-Key quota authorization, associate new usage records with Access Keys, index recent Key usage, and extend audit event types. Historical usage records have no Access Key association. No configuration change is required.
-- 数据库迁移 `00059`–`00061` 新增单 Key 额度授权、为新用量记录关联 Access Key、建立最近用量索引并扩展审计类型；历史用量记录没有 Access Key 关联。无需配置变更。
+- No database migration or configuration change is required.
+- 无需数据库迁移或配置变更。
 
 ## [1.2.2] - 2026-10-20
 
@@ -258,6 +265,7 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - 支持协议转换、流式响应、工具调用和服务商故障切换的 OpenAI/Anthropic 兼容网关。
 - 中英文管理界面、独立发布包和 Docker Compose 部署方式。
 
+[1.3.0]: https://github.com/zentrola/zentrola/releases/tag/1.3.0
 [1.2.3]: https://github.com/zentrola/zentrola/releases/tag/1.2.3
 [1.2.2]: https://github.com/zentrola/zentrola/releases/tag/1.2.2
 [1.2.1]: https://github.com/zentrola/zentrola/releases/tag/1.2.1
