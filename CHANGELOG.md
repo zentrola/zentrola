@@ -272,7 +272,7 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - 支持协议转换、流式响应、工具调用和服务商故障切换的 OpenAI/Anthropic 兼容网关。
 - 中英文管理界面、独立发布包和 Docker Compose 部署方式。
 
-[1.3.0]: https://github.com/zentrola/zentrola/releases/tag/1.3.0
+[1.3.0]: https://github.com/zentrola/zentrola/releases/tag/v1.3.0
 [1.2.3]: https://github.com/zentrola/zentrola/releases/tag/1.2.3
 [1.2.2]: https://github.com/zentrola/zentrola/releases/tag/1.2.2
 [1.2.1]: https://github.com/zentrola/zentrola/releases/tag/1.2.1
