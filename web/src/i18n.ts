@@ -485,6 +485,7 @@ export const i18n = createI18n({
         expiryDate: '过期日期',
         none: '-',
         assignKey: '密钥',
+        issueKey: '分配',
         delete: '删除',
         deleteTitle: '删除用户',
         deleteHint:
@@ -499,6 +500,7 @@ export const i18n = createI18n({
         management: '后台管理',
         managementHint: '勾选后该 Key 可查看当前使用订阅号的额度，并可通过 MCP 管理普通成员。',
         grantManagement: '授权后台管理',
+        managementSwitch: '授权后台管理',
         grant: '授权',
         revokeGrant: '取消授权',
         grantManagementQuestion:

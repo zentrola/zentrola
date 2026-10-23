@@ -462,6 +462,7 @@ export default {
     expiryDate: 'Expires',
     none: '-',
     assignKey: 'Key',
+    issueKey: 'Issue key',
     delete: 'Delete',
     deleteTitle: 'Delete user',
     deleteHint:
@@ -476,12 +477,13 @@ export default {
     keyName: 'Key name',
     management: 'Admin access',
     managementHint:
-      'This Key can view the quota of the subscription it currently uses and manage ordinary members through MCP.',
+      'Lets this key view the quota of the subscription it currently uses and manage regular members through MCP.',
     grantManagement: 'Grant admin access',
+    managementSwitch: 'Admin access',
     grant: 'Grant',
     revokeGrant: 'Remove',
     grantManagementQuestion:
-      'Allow Key “{name}” to view the quota of its current subscription and, through MCP, create, enable or disable ordinary members and issue ordinary Keys?',
+      'Allow key “{name}” to view the quota of its current subscription and, through MCP, create, enable or disable regular members and issue regular keys?',
     managementPermissionSaved: 'Admin access updated',
     expires: 'Expiry date (optional)',
     expiresHint: 'The key remains valid through the selected date in your current time zone.',

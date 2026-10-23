@@ -308,7 +308,7 @@ test.describe('布局与综合流程', () => {
       .getByRole('button', { name: '密钥', exact: true })
       .click()
     await modal(page).getByLabel('Key 名称').fill('工作站')
-    await modal(page).getByRole('button', { name: '密钥', exact: true }).click()
+    await modal(page).getByRole('button', { name: '分配', exact: true }).click()
     await expect(page.getByRole('textbox', { name: '完整 Key 仅展示这一次' })).toHaveValue(
       'vk-fixture-key-shown-once',
     )

@@ -521,7 +521,7 @@ async function copyKey() {
       </div>
       <div v-if="kind === 'member'" class="key-form-row">
         <div class="key-form-label">
-          <label for="member-key-management">{{ local('grantManagement') }}</label>
+          <label for="member-key-management">{{ local('managementSwitch') }}</label>
           <FieldHelp :text="local('managementHint')" symbol="!" />
         </div>
         <div class="key-form-switch">
@@ -534,7 +534,7 @@ async function copyKey() {
         {{ t('common.cancel') }}
       </button>
       <button type="submit" form="member-key-form" class="button primary" :disabled="busy">
-        {{ busy ? t('common.working') : local(kind === 'application' ? 'issueKey' : 'assignKey') }}
+        {{ busy ? t('common.working') : local('issueKey') }}
       </button>
     </template>
   </Modal>
@@ -567,7 +567,7 @@ async function copyKey() {
 }
 .key-form-row {
   display: grid;
-  grid-template-columns: 132px minmax(0, 1fr);
+  grid-template-columns: 150px minmax(0, 1fr);
   gap: 18px;
   align-items: center;
 }
