@@ -27,6 +27,14 @@ func TestDisabledMemberReturnsConflict(t *testing.T) {
 	}
 }
 
+func TestManagedMemberAccessKeyRequiredReturnsConflict(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	securityError(recorder, httptest.NewRequest(http.MethodPut, "/api/v1/me/manage/members/1/status", nil), appsec.ErrMemberAccessKeyRequired)
+	if recorder.Code != http.StatusConflict || !strings.Contains(recorder.Body.String(), `"code":"MEMBER_ACCESS_KEY_REQUIRED"`) {
+		t.Fatalf("missing key response = %d %s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestEveryPublicManagementErrorHasHTTPMapping(t *testing.T) {
 	publicErrors := mgmt.PublicErrors()
 	if len(publicErrors) != len(managementErrorMappings) {

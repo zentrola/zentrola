@@ -19,6 +19,8 @@ var (
 	ErrAlreadyInitialized = errors.New("administrator already initialized")
 	ErrMemberNameExists   = errors.New("member name already exists")
 	ErrMemberDisabled     = errors.New("member is disabled")
+	// ErrMemberAccessKeyRequired 表示成员没有有效 Key，不能启用。
+	ErrMemberAccessKeyRequired = errors.New("member access key required")
 )
 
 // AccountLockedError 保留服务端锁定截止时间，供登录接口返回重试提示。

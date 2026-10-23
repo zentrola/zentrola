@@ -138,52 +138,82 @@ func TestMemberProvisionIntegration(t *testing.T) {
 		return status
 	}
 
-	// 不能把新成员放进操作者本人不在的分组。
+	auth := NewSecurityStore(pool, ids)
+	canAuthenticate := func(k appsec.KeyRecord) bool {
+		t.Helper()
+		_, err := auth.Authenticate(ctx, k.Hash, time.Now().UTC())
+		if err != nil && !errors.Is(err, appsec.ErrUnauthenticated) {
+			t.Fatal(err)
+		}
+		return err == nil
+	}
+	setStatus := func(id int64, status string) (bool, error) {
+		return store.SetMemberStatus(ctx, actor, id, status, appsec.RequestMeta{})
+	}
+
+	// 管理范围是全局的：可把新成员加入操作者本人不在的启用分组。
 	outsideMemberID, err := ids.NextID(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	outsideKey := nextKey(outsideMemberID, "Outside")
-	if err := store.CreateMemberAndKey(ctx, actor, outsideMemberID, "Outside", "", []int64{201}, outsideKey, appsec.RequestMeta{}); !errors.Is(err, appsec.ErrForbidden) {
-		t.Fatalf("group outside manager scope: %v", err)
-	}
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM principal WHERE id=$1`, outsideMemberID).Scan(&duplicateRows); err != nil || duplicateRows != 0 || countKey(outsideKey.ID) != 0 {
-		t.Fatalf("member outside group scope inserted: count=%d err=%v", duplicateRows, err)
+	if err := store.CreateMemberAndKey(ctx, actor, outsideMemberID, "Outside", "", []int64{201}, nextKey(outsideMemberID, "Outside"), appsec.RequestMeta{}); err != nil {
+		t.Fatalf("global group scope: %v", err)
 	}
 
-	// 管理员创建的成员不在成员 Key 的管理范围内，也不会被启用。
+	// 停用成员禁止签发 Key；没有有效 Key 的成员也不能启用。
 	adminCreated := nextKey(102, "Admin")
-	if err := store.IssueMemberKey(ctx, actor, adminCreated, appsec.RequestMeta{}); !errors.Is(err, appsec.ErrNotFound) {
-		t.Fatalf("admin-created member: %v", err)
+	if err := store.IssueMemberKey(ctx, actor, adminCreated, appsec.RequestMeta{}); !errors.Is(err, appsec.ErrMemberDisabled) {
+		t.Fatalf("disabled member Key: %v", err)
+	}
+	if _, err := setStatus(102, "ACTIVE"); !errors.Is(err, appsec.ErrMemberAccessKeyRequired) {
+		t.Fatalf("enable member without Key: %v", err)
 	}
 	if countKey(adminCreated.ID) != 0 || memberStatus(102) != "DISABLED" {
-		t.Fatal("admin-created member was changed")
+		t.Fatal("disabled member was changed")
 	}
 
-	// 本成员 Key 创建的成员可以继续签发 Key，且状态保持不变。
 	more := nextKey(memberID, "More")
 	if err := store.IssueMemberKey(ctx, actor, more, appsec.RequestMeta{}); err != nil {
 		t.Fatal(err)
 	}
-	if countKey(more.ID) != 1 || memberStatus(memberID) != "ACTIVE" {
+	if countKey(more.ID) != 1 || memberStatus(memberID) != "ACTIVE" || !canAuthenticate(more) {
 		t.Fatal("managed member Key was not issued")
 	}
 
-	// 管理员停用后，成员 Key 不能借签发 Key 重新启用该成员。
+	// 管理员停用后不能签发 Key，但管理 Key 可以重新启用。
 	if _, err := pool.Exec(ctx, `UPDATE principal SET status='DISABLED' WHERE id=$1`, memberID); err != nil {
 		t.Fatal(err)
 	}
-	disabled := nextKey(memberID, "Disabled")
-	if err := store.IssueMemberKey(ctx, actor, disabled, appsec.RequestMeta{}); !errors.Is(err, appsec.ErrMemberDisabled) {
+	if err := store.IssueMemberKey(ctx, actor, nextKey(memberID, "Disabled"), appsec.RequestMeta{}); !errors.Is(err, appsec.ErrMemberDisabled) {
 		t.Fatalf("disabled managed member: %v", err)
 	}
-	if countKey(disabled.ID) != 0 || memberStatus(memberID) != "DISABLED" {
-		t.Fatal("disabled member was reactivated")
+	if changed, err := setStatus(memberID, "ACTIVE"); err != nil || !changed || memberStatus(memberID) != "ACTIVE" {
+		t.Fatalf("enable admin-disabled member: changed=%v err=%v", changed, err)
 	}
 
-	// 已获管理授权的成员不能被其他成员 Key 冒用。
-	if _, err := pool.Exec(ctx, `UPDATE principal SET status='ACTIVE' WHERE id=$1`, memberID); err != nil {
-		t.Fatal(err)
+	// 停用让 Key 立即无法认证但不注销；重复停用不写审计；重新启用后原 Key 恢复可用。
+	if changed, err := setStatus(memberID, "DISABLED"); err != nil || !changed || canAuthenticate(more) {
+		t.Fatalf("disable member: changed=%v err=%v", changed, err)
+	}
+	if changed, err := setStatus(memberID, "DISABLED"); err != nil || changed {
+		t.Fatalf("repeat disable: changed=%v err=%v", changed, err)
+	}
+	var keyStatus string
+	if err := pool.QueryRow(ctx, `SELECT status FROM principal_access_key WHERE id=$1`, more.ID).Scan(&keyStatus); err != nil || keyStatus != "ACTIVE" {
+		t.Fatalf("disabling a member must not revoke Keys: %s %v", keyStatus, err)
+	}
+	if changed, err := setStatus(memberID, "ACTIVE"); err != nil || !changed || !canAuthenticate(more) {
+		t.Fatalf("re-enable member: changed=%v err=%v", changed, err)
+	}
+	var statusAudits int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM operation_log WHERE operation_type='MEMBER_STATUS_CHANGE' AND target_id=$1
+		AND operator_type='MEMBER_KEY' AND operator_id=101 AND before_data IS NOT NULL`, memberID).Scan(&statusAudits); err != nil || statusAudits != 3 {
+		t.Fatalf("status audit count=%d err=%v", statusAudits, err)
+	}
+
+	// 操作者本人和持有管理授权的成员不在管理范围内。
+	if _, err := setStatus(100, "DISABLED"); !errors.Is(err, appsec.ErrNotFound) || memberStatus(100) != "ACTIVE" {
+		t.Fatalf("manager disabled itself: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `UPDATE principal_access_key SET can_manage_members=true WHERE id=$1`, more.ID); err != nil {
 		t.Fatal(err)
@@ -191,6 +221,9 @@ func TestMemberProvisionIntegration(t *testing.T) {
 	peer := nextKey(memberID, "Peer")
 	if err := store.IssueMemberKey(ctx, actor, peer, appsec.RequestMeta{}); !errors.Is(err, appsec.ErrNotFound) || countKey(peer.ID) != 0 {
 		t.Fatalf("member holding management permission: %v", err)
+	}
+	if _, err := setStatus(memberID, "DISABLED"); !errors.Is(err, appsec.ErrNotFound) || memberStatus(memberID) != "ACTIVE" {
+		t.Fatalf("disable member holding management permission: %v", err)
 	}
 
 	// 管理员路径同样受唯一索引约束。

@@ -4128,7 +4128,6 @@
                         "GatewayBearer": []
                     }
                 ],
-                "description": "groupIds 只能包含操作者本人所在的分组，否则返回 FORBIDDEN。",
                 "tags": [
                     "成员管理"
                 ],
@@ -4209,11 +4208,11 @@
                         "GatewayBearer": []
                     }
                 ],
-                "description": "仅限该成员任一 Key 创建、且未持有管理授权的成员；不改变成员状态，已停用成员返回 MEMBER_DISABLED。",
+                "description": "可为系统内任意普通成员签发，不含操作者本人和持有管理授权的成员；不改变成员状态，已停用成员返回 MEMBER_DISABLED。",
                 "tags": [
                     "成员管理"
                 ],
-                "summary": "通过授权成员 Key 为本人创建的普通成员签发 Key",
+                "summary": "通过授权成员 Key 为普通成员签发 Key",
                 "parameters": [
                     {
                         "type": "string",
@@ -4245,6 +4244,94 @@
                                     "properties": {
                                         "data": {
                                             "$ref": "#/definitions/security.CreatedKey"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/me/manage/members/{id}/status": {
+            "put": {
+                "security": [
+                    {
+                        "GatewayBearer": []
+                    }
+                ],
+                "description": "可操作系统内任意普通成员，不含操作者本人和持有管理授权的成员。停用后该成员全部 Key 立即无法认证但不注销，重新启用后恢复可用；启用要求成员至少有一把有效 Key。",
+                "tags": [
+                    "成员管理"
+                ],
+                "summary": "通过授权成员 Key 启停用普通成员",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "普通成员 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "目标状态：ACTIVE 或 DISABLED",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.UpdateManagedMemberStatusRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/security.ManagedMemberStatus"
                                         }
                                     }
                                 }
@@ -11216,6 +11303,15 @@
                 }
             }
         },
+        "http.UpdateManagedMemberStatusRequest": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "example": "DISABLED"
+                }
+            }
+        },
         "http.UpdateMemberRequest": {
             "type": "object",
             "required": [
@@ -12198,6 +12294,18 @@
                     "type": "string"
                 },
                 "tokenType": {
+                    "type": "string"
+                }
+            }
+        },
+        "security.ManagedMemberStatus": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "status": {
                     "type": "string"
                 }
             }

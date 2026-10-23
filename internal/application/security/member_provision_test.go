@@ -9,10 +9,12 @@ import (
 )
 
 type provisionStoreStub struct {
-	creates int
-	issues  int
-	key     KeyRecord
-	groups  []int64
+	creates  int
+	issues   int
+	statuses int
+	changed  bool
+	key      KeyRecord
+	groups   []int64
 }
 type provisionIDs struct{ next int64 }
 
@@ -31,6 +33,15 @@ func (s *provisionStoreStub) IssueMemberKey(_ context.Context, _ PrincipalIdenti
 	s.key = key
 	return nil
 }
+
+func (s *provisionStoreStub) SetMemberStatus(context.Context, PrincipalIdentity, int64, string, RequestMeta) (bool, error) {
+	s.statuses++
+	return s.changed, nil
+}
+
+type provisionCacheStub struct{ clears int }
+
+func (c *provisionCacheStub) Clear(context.Context, string) bool { c.clears++; return true }
 
 func TestMemberProvisioningRequiresIndividualPermissionAndIssuesOrdinaryKey(t *testing.T) {
 	store := &provisionStoreStub{}
@@ -56,5 +67,38 @@ func TestMemberProvisioningRejectsInvalidGroupsBeforeWriting(t *testing.T) {
 	actor := PrincipalIdentity{ID: 1, AccessKeyID: 2, Type: principal.Member, CanManageMembers: true}
 	if _, err := service.Create(context.Background(), actor, "New", "", "First", []int64{7, 7}, RequestMeta{}); !errors.Is(err, ErrInvalidArgument) || store.creates != 0 {
 		t.Fatalf("invalid groups: err=%v writes=%d", err, store.creates)
+	}
+}
+
+func TestMemberProvisioningSetStatus(t *testing.T) {
+	manager := PrincipalIdentity{ID: 1, AccessKeyID: 2, Type: principal.Member, CanManageMembers: true}
+	for _, tc := range []struct {
+		name       string
+		actor      PrincipalIdentity
+		memberID   int64
+		status     string
+		changed    bool
+		wantErr    error
+		wantWrites int
+		wantClears int
+	}{
+		{name: "without permission", actor: PrincipalIdentity{ID: 1, AccessKeyID: 2, Type: principal.Member}, memberID: 9, status: "DISABLED", wantErr: ErrForbidden},
+		{name: "application key", actor: PrincipalIdentity{ID: 1, AccessKeyID: 2, Type: principal.Application, CanManageMembers: true}, memberID: 9, status: "DISABLED", wantErr: ErrUnauthenticated},
+		{name: "invalid member", actor: manager, memberID: 0, status: "DISABLED", wantErr: ErrInvalidArgument},
+		{name: "invalid status", actor: manager, memberID: 9, status: "DELETED", wantErr: ErrInvalidArgument},
+		{name: "disable clears identity cache", actor: manager, memberID: 9, status: "DISABLED", changed: true, wantWrites: 1, wantClears: 1},
+		{name: "unchanged keeps cache", actor: manager, memberID: 9, status: "ACTIVE", wantWrites: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store, cache := &provisionStoreStub{changed: tc.changed}, &provisionCacheStub{}
+			service := NewMemberProvisioning(NewKeys(&keyTestStore{}, &provisionIDs{next: 40}), store, cache)
+			result, err := service.SetStatus(context.Background(), tc.actor, tc.memberID, tc.status, RequestMeta{})
+			if !errors.Is(err, tc.wantErr) || store.statuses != tc.wantWrites || cache.clears != tc.wantClears {
+				t.Fatalf("err=%v writes=%d clears=%d", err, store.statuses, cache.clears)
+			}
+			if tc.wantErr == nil && (result.ID != tc.memberID || result.Status != tc.status) {
+				t.Fatalf("result=%+v", result)
+			}
+		})
 	}
 }

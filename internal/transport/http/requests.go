@@ -202,6 +202,17 @@ func (r CreateManagedMemberRequest) Valid() bool {
 	return validRequestText(r.Name, 128, true) && validRequestText(r.Remark, 2000, false) && validRequestText(r.KeyName, 128, true) && validRequestIDs(r.GroupIDs)
 }
 
+type UpdateManagedMemberStatusRequest struct {
+	Status string `json:"status" example:"DISABLED"`
+}
+
+func (r *UpdateManagedMemberStatusRequest) Normalize() {
+	r.Status = strings.ToUpper(strings.TrimSpace(r.Status))
+}
+func (r UpdateManagedMemberStatusRequest) Valid() bool {
+	return r.Status == "ACTIVE" || r.Status == "DISABLED"
+}
+
 type IssueManagedMemberKeyRequest struct {
 	Name string `json:"name"`
 }

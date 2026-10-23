@@ -77,7 +77,9 @@ func securityError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, appsec.ErrMemberNameExists):
 		status, code, message = http.StatusConflict, "MEMBER_NAME_ALREADY_EXISTS", "A member with this name already exists."
 	case errors.Is(err, appsec.ErrMemberDisabled):
-		status, code, message = http.StatusConflict, "MEMBER_DISABLED", "The member is disabled by an administrator."
+		status, code, message = http.StatusConflict, "MEMBER_DISABLED", "The member is disabled. Enable the member before issuing a Key."
+	case errors.Is(err, appsec.ErrMemberAccessKeyRequired):
+		status, code, message = http.StatusConflict, "MEMBER_ACCESS_KEY_REQUIRED", "Create an access key before enabling the member."
 	case errors.Is(err, appsec.ErrUnauthenticated):
 		status, code, message = http.StatusUnauthorized, "UNAUTHENTICATED", "Authentication failed."
 	case errors.Is(err, appsec.ErrForbidden):

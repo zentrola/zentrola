@@ -11,6 +11,7 @@ import (
 type MemberProvisionStore interface {
 	CreateMemberAndKey(context.Context, PrincipalIdentity, int64, string, string, []int64, KeyRecord, RequestMeta) error
 	IssueMemberKey(context.Context, PrincipalIdentity, KeyRecord, RequestMeta) error
+	SetMemberStatus(context.Context, PrincipalIdentity, int64, string, RequestMeta) (bool, error)
 }
 
 type MemberProvisioning struct {
@@ -19,6 +20,11 @@ type MemberProvisioning struct {
 	cache interface {
 		Clear(context.Context, string) bool
 	}
+}
+
+type ManagedMemberStatus struct {
+	ID     int64  `json:"id,string"`
+	Status string `json:"status"`
 }
 
 type ProvisionedMember struct {
@@ -80,6 +86,28 @@ func (s *MemberProvisioning) IssueKey(ctx context.Context, actor PrincipalIdenti
 		s.cache.Clear(ctx, "member_key_issued")
 	}
 	return created, nil
+}
+
+// SetStatus 启停用普通成员。停用只让该成员的 Key 无法认证，不注销 Key；重新启用后原 Key 恢复可用。
+func (s *MemberProvisioning) SetStatus(ctx context.Context, actor PrincipalIdentity, memberID int64, status string, meta RequestMeta) (ManagedMemberStatus, error) {
+	if err := validateMemberManager(actor); err != nil {
+		return ManagedMemberStatus{}, err
+	}
+	if memberID <= 0 || (status != "ACTIVE" && status != "DISABLED") {
+		return ManagedMemberStatus{}, ErrInvalidArgument
+	}
+	if s == nil || s.store == nil {
+		return ManagedMemberStatus{}, ErrUnavailable
+	}
+	changed, err := s.store.SetMemberStatus(ctx, actor, memberID, status, meta)
+	if err != nil {
+		return ManagedMemberStatus{}, err
+	}
+	// 停用必须让已缓存的成员身份立即失效。
+	if changed && s.cache != nil {
+		s.cache.Clear(ctx, "member_status_changed")
+	}
+	return ManagedMemberStatus{ID: memberID, Status: status}, nil
 }
 
 func validateMemberManager(actor PrincipalIdentity) error {

@@ -191,6 +191,7 @@ func (s *SecurityHandlers) mount(r chi.Router) {
 			if s.MemberProvisioning != nil {
 				member.Post("/me/manage/members", s.createManagedMember)
 				member.Post("/me/manage/members/{id}/keys", s.issueManagedMemberKey)
+				member.Put("/me/manage/members/{id}/status", s.setManagedMemberStatus)
 			}
 		})
 	})
@@ -487,6 +488,7 @@ var (
 	_ requestPayload = (*UpdateKeyMemberManagementRequest)(nil)
 	_ requestPayload = (*CreateManagedMemberRequest)(nil)
 	_ requestPayload = (*IssueManagedMemberKeyRequest)(nil)
+	_ requestPayload = (*UpdateManagedMemberStatusRequest)(nil)
 	_ requestPayload = (*CreateMemberRequest)(nil)
 	_ requestPayload = (*UpdateMemberRequest)(nil)
 	_ requestPayload = (*CreateGroupRequest)(nil)
