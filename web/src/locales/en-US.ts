@@ -478,7 +478,8 @@ export default {
     managementHint:
       'This Key can view the quota of the subscription it currently uses and manage ordinary members through MCP.',
     grantManagement: 'Grant admin access',
-    revokeManagement: 'Remove admin access',
+    grant: 'Grant',
+    revokeGrant: 'Remove',
     grantManagementQuestion:
       'Allow Key “{name}” to view the quota of its current subscription and, through MCP, create, enable or disable ordinary members and issue ordinary Keys?',
     managementPermissionSaved: 'Admin access updated',

@@ -499,7 +499,8 @@ export const i18n = createI18n({
         management: '后台管理',
         managementHint: '勾选后该 Key 可查看当前使用订阅号的额度，并可通过 MCP 管理普通成员。',
         grantManagement: '授权后台管理',
-        revokeManagement: '取消后台管理',
+        grant: '授权',
+        revokeGrant: '取消授权',
         grantManagementQuestion:
           '允许 Key“{name}”查看当前使用订阅号的额度，并通过 MCP 创建、启停用普通成员和签发普通 Key？',
         managementPermissionSaved: '后台管理权限已更新',

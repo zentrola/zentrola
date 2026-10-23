@@ -291,12 +291,12 @@ test.describe('用户与应用', () => {
       'text-align',
       'center',
     )
-    await expect(modal(page).getByRole('button', { name: '授权后台管理' })).toHaveCount(1)
-    await modal(page).getByRole('button', { name: '授权后台管理' }).click()
+    await expect(modal(page).getByRole('button', { name: '授权', exact: true })).toHaveCount(1)
+    await modal(page).getByRole('button', { name: '授权', exact: true }).click()
     await page.getByRole('dialog').last().getByRole('button', { name: '授权后台管理' }).click()
     await expect(modal(page).getByRole('row').filter({ hasText: '工作站' })).toContainText('是')
     expect(state.keys[0].canManage).toBe(true)
-    await modal(page).getByRole('button', { name: '取消后台管理' }).click()
+    await modal(page).getByRole('button', { name: '取消授权' }).click()
     await expect(modal(page).getByRole('row').filter({ hasText: '工作站' })).toContainText('否')
     expect(state.keys[0].canManage).toBe(false)
     await expect(modal(page).locator('code')).toHaveText([
@@ -381,8 +381,8 @@ test.describe('用户与应用', () => {
     await expect(page.locator('.toast')).toContainText('不能早于今天')
     await expect(modal(page).locator('.alert.error')).toHaveCount(0)
     await modal(page).getByLabel('到期日期（可选）').fill('2099-12-31')
-    await expect(modal(page).getByLabel('后台管理')).not.toBeChecked()
-    await modal(page).getByLabel('后台管理').check()
+    await expect(modal(page).getByLabel('授权后台管理')).not.toBeChecked()
+    await modal(page).getByLabel('授权后台管理').check()
     await modal(page).getByRole('button', { name: '密钥', exact: true }).click()
     await modal(page).getByRole('button', { name: '复制', exact: true }).click()
     await expect(page.locator('.toast-success')).toContainText('已复制')

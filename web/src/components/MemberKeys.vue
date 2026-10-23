@@ -168,7 +168,7 @@ function saveManagement(key: AccessKey, allowed: boolean) {
                 :disabled="busy || loading"
                 @click="toggleManagement(key)"
               >
-                {{ key.canManage ? local('revokeManagement') : local('grantManagement') }}
+                {{ key.canManage ? local('revokeGrant') : local('grant') }}
               </button>
               <button
                 v-if="canRevoke(key)"

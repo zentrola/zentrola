@@ -12,6 +12,7 @@ import {
 } from '../../providerProxy'
 import Icon from '../Icon.vue'
 import FieldHelp from '../FieldHelp.vue'
+import ToggleSwitch from '../ToggleSwitch.vue'
 
 export type ProxyDraft = {
   proxyEnabled: boolean
@@ -47,8 +48,7 @@ function changeScheme(event: Event) {
   draft.value.proxyUrl = `${scheme}://${address}`
 }
 
-function toggleCredentialUpdate(event: Event) {
-  const checked = (event.target as HTMLInputElement).checked
+function toggleCredentialUpdate(checked: boolean) {
   draft.value.updateProxyCredentials = checked
   draft.value.proxyUrl = checked
     ? proxyURLWithoutCredentials(draft.value.proxyUrl)
@@ -71,18 +71,13 @@ function removeHeader(index: number) {
       t('providers.proxyEnabled')
     }}</label>
     <div class="provider-field-control proxy-switch-field">
-      <span class="proxy-switch-control">
-        <input
-          id="provider-proxy-enabled"
-          v-model="draft.proxyEnabled"
-          type="checkbox"
-          role="switch"
-          :aria-label="t('providers.proxyEnabled')"
-          :title="t('providers.proxyHint')"
-          :disabled="busy"
-        />
-        <span class="proxy-switch-track" aria-hidden="true"></span>
-      </span>
+      <ToggleSwitch
+        id="provider-proxy-enabled"
+        v-model="draft.proxyEnabled"
+        :aria-label="t('providers.proxyEnabled')"
+        :title="t('providers.proxyHint')"
+        :disabled="busy"
+      />
     </div>
   </div>
   <div v-if="draft.proxyEnabled" class="proxy-fields">
@@ -123,19 +118,14 @@ function removeHeader(index: number) {
         t('providers.proxyCredentialsUpdate')
       }}</label>
       <div class="provider-field-control proxy-switch-field">
-        <span class="proxy-switch-control">
-          <input
-            id="provider-proxy-credentials-update"
-            :checked="draft.updateProxyCredentials"
-            type="checkbox"
-            role="switch"
-            :aria-label="t('providers.proxyCredentialsUpdate')"
-            :title="t('providers.proxyCredentialsUpdateHint')"
-            :disabled="busy"
-            @change="toggleCredentialUpdate"
-          />
-          <span class="proxy-switch-track" aria-hidden="true"></span>
-        </span>
+        <ToggleSwitch
+          id="provider-proxy-credentials-update"
+          :model-value="draft.updateProxyCredentials"
+          :aria-label="t('providers.proxyCredentialsUpdate')"
+          :title="t('providers.proxyCredentialsUpdateHint')"
+          :disabled="busy"
+          @update:model-value="toggleCredentialUpdate"
+        />
       </div>
     </div>
     <p v-if="isSocksProxyURL(draft.proxyUrl)" class="proxy-socks-hint">
@@ -232,64 +222,6 @@ function removeHeader(index: number) {
   display: flex;
   align-items: center;
   min-height: 40px;
-}
-.proxy-switch-control {
-  position: relative;
-  display: inline-flex;
-  flex: none;
-  flex-direction: row;
-  width: 40px;
-  height: 22px;
-  margin: 0;
-  cursor: pointer;
-}
-.proxy-switch-control input {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  opacity: 0;
-  cursor: inherit;
-}
-.proxy-switch-track {
-  width: 100%;
-  height: 100%;
-  border: 1px solid #cbd5e1;
-  border-radius: 999px;
-  background: #cbd5e1;
-  transition:
-    border-color 0.15s,
-    background 0.15s;
-}
-.proxy-switch-track::after {
-  display: block;
-  width: 16px;
-  height: 16px;
-  margin: 2px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 1px 2px #18324738;
-  transition: transform 0.15s;
-  content: '';
-}
-.proxy-switch-control input:checked + .proxy-switch-track {
-  border-color: var(--blue);
-  background: var(--blue);
-}
-.proxy-switch-control input:checked + .proxy-switch-track::after {
-  transform: translateX(18px);
-}
-.proxy-switch-control input:focus-visible + .proxy-switch-track {
-  outline: 2px solid #bfdbfe;
-  outline-offset: 3px;
-}
-.proxy-switch-control input:focus-visible {
-  outline: 0;
-}
-.proxy-switch-control input:disabled + .proxy-switch-track {
-  opacity: 0.5;
 }
 .proxy-fields {
   display: grid;

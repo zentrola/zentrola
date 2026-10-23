@@ -14,6 +14,7 @@ import { showErrorToast, showSuccessToast } from '../toast'
 import type { Member, Group, CreatedKey } from '../types'
 import Icon from '../components/Icon.vue'
 import FieldHelp from '../components/FieldHelp.vue'
+import ToggleSwitch from '../components/ToggleSwitch.vue'
 import StatusSwitch from '../components/StatusSwitch.vue'
 import Modal from '../components/Modal.vue'
 import PageHeader from '../components/PageHeader.vue'
@@ -504,21 +505,28 @@ async function copyKey() {
     <div class="context-note" role="note">
       <Icon name="shield" :size="18" /><span>{{ local('keyHint') }}</span>
     </div>
-    <form id="member-key-form" @submit.prevent="issueKey">
-      <label
-        >{{ local('keyName') }}<input v-model="keyName" required autofocus :disabled="busy"
-      /></label>
-      <label
-        ><span class="label-with-help"
-          >{{ local('expires') }}<FieldHelp :text="local('expiresHint')" symbol="!" /></span
-        ><input v-model="expires" type="date" :disabled="busy"
-      /></label>
-      <div v-if="kind === 'member'" class="label-with-help">
-        <label class="checkbox-label">
-          <input v-model="canManage" type="checkbox" :disabled="busy" />
-          {{ local('management') }}
-        </label>
-        <FieldHelp :text="local('managementHint')" symbol="!" />
+    <form id="member-key-form" class="key-form" @submit.prevent="issueKey">
+      <div class="key-form-row">
+        <div class="key-form-label">
+          <label for="member-key-name">{{ local('keyName') }}</label>
+        </div>
+        <input id="member-key-name" v-model="keyName" required autofocus :disabled="busy" />
+      </div>
+      <div class="key-form-row">
+        <div class="key-form-label">
+          <label for="member-key-expires">{{ local('expires') }}</label>
+          <FieldHelp :text="local('expiresHint')" symbol="!" />
+        </div>
+        <input id="member-key-expires" v-model="expires" type="date" :disabled="busy" />
+      </div>
+      <div v-if="kind === 'member'" class="key-form-row">
+        <div class="key-form-label">
+          <label for="member-key-management">{{ local('grantManagement') }}</label>
+          <FieldHelp :text="local('managementHint')" symbol="!" />
+        </div>
+        <div class="key-form-switch">
+          <ToggleSwitch id="member-key-management" v-model="canManage" :disabled="busy" />
+        </div>
       </div>
     </form>
     <template #footer>
@@ -550,21 +558,43 @@ async function copyKey() {
 </template>
 
 <style scoped>
-.checkbox-label {
-  flex-direction: row;
+.key-form {
+  display: grid;
+  gap: 16px;
+}
+.key-form label {
+  margin-bottom: 0;
+}
+.key-form-row {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  gap: 18px;
   align-items: center;
-  gap: 8px;
 }
-.checkbox-label input {
-  margin: 0;
-}
-.label-with-help {
+.key-form-label {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 6px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: right;
 }
-.label-with-help > .checkbox-label {
-  margin-bottom: 0;
+.key-form-switch {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+}
+@media (max-width: 640px) {
+  .key-form-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .key-form-label {
+    justify-content: flex-start;
+    text-align: left;
+  }
 }
 .members-table {
   min-width: 1000px;
