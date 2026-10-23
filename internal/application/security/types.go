@@ -28,9 +28,10 @@ func (e *AccountLockedError) Unwrap() error { return ErrUnauthenticated }
 
 type RequestMeta struct{ RequestID, Method, Path, IP, UserAgent string }
 type PrincipalIdentity struct {
-	ID, AccessKeyID int64
-	Type            principal.Type
-	ExpiresAt       *time.Time
+	ID, AccessKeyID      int64
+	Type                 principal.Type
+	ExpiresAt            *time.Time
+	CanViewUpstreamQuota bool
 }
 
 type Passwords interface {
@@ -53,15 +54,17 @@ type AdminStore interface {
 }
 
 type KeyRecord struct {
-	ID, PrincipalID int64
-	PrincipalType   principal.Type
-	Hash            []byte
-	MaskedKey, Name string
-	ExpiresAt       *time.Time
-	CreatedAt       time.Time
+	ID, PrincipalID      int64
+	PrincipalType        principal.Type
+	Hash                 []byte
+	MaskedKey, Name      string
+	ExpiresAt            *time.Time
+	CreatedAt            time.Time
+	CanViewUpstreamQuota bool
 }
 type KeyStore interface {
 	Create(context.Context, admin.Identity, KeyRecord, RequestMeta) error
 	Revoke(context.Context, admin.Identity, int64, RequestMeta) error
+	SetUpstreamQuotaPermission(context.Context, admin.Identity, int64, bool, RequestMeta) error
 	Authenticate(context.Context, []byte, time.Time) (PrincipalIdentity, error)
 }

@@ -357,7 +357,7 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var observer *gw.UsageObserver
 	if path == inferencePath && r.Method == http.MethodPost && identity.ID > 0 {
 		traceID, spanID := traceIDs(r.Context())
-		trace = &usage.Event{PrincipalID: identity.ID, RequestID: requestIDFromContext(r.Context()), TraceID: traceID, SpanID: spanID, RequestAt: time.Now().UTC(), Status: usage.Failed, ErrorType: "INVALID_REQUEST"}
+		trace = &usage.Event{PrincipalID: identity.ID, AccessKeyID: identity.AccessKeyID, RequestID: requestIDFromContext(r.Context()), TraceID: traceID, SpanID: spanID, RequestAt: time.Now().UTC(), Status: usage.Failed, ErrorType: "INVALID_REQUEST"}
 		trace.ClientProtocol = protocol
 		defer func() {
 			trace.CompletedAt = time.Now().UTC()

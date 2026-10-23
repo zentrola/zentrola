@@ -182,10 +182,10 @@ func (s *SecurityStore) Create(ctx context.Context, actor admin.Identity, key ap
 	} else if err != nil {
 		return s.securityError(ctx, "get_principal_for_key", err)
 	}
-	if err := q.CreateAccessKey(ctx, dbgen.CreateAccessKeyParams{ID: key.ID, PrincipalID: key.PrincipalID, KeyHash: key.Hash, MaskedKey: key.MaskedKey, Name: key.Name, ExpiresAt: nullableTime(key.ExpiresAt), CreatedBy: actorRef(actor.ID), CreatedAt: pgTime(key.CreatedAt)}); err != nil {
+	if err := q.CreateAccessKey(ctx, dbgen.CreateAccessKeyParams{ID: key.ID, PrincipalID: key.PrincipalID, KeyHash: key.Hash, MaskedKey: key.MaskedKey, Name: key.Name, ExpiresAt: nullableTime(key.ExpiresAt), CanViewUpstreamQuota: key.CanViewUpstreamQuota, CreatedBy: actorRef(actor.ID), CreatedAt: pgTime(key.CreatedAt)}); err != nil {
 		return s.securityError(ctx, "create_access_key", err)
 	}
-	after, _ := json.Marshal(map[string]any{"status": "ACTIVE", "principalId": strconv.FormatInt(key.PrincipalID, 10), "maskedKey": key.MaskedKey})
+	after, _ := json.Marshal(map[string]any{"status": "ACTIVE", "principalId": strconv.FormatInt(key.PrincipalID, 10), "maskedKey": key.MaskedKey, "canViewUpstreamQuota": key.CanViewUpstreamQuota})
 	if err := s.appendLog(ctx, q, actor, "ACCESS_KEY", operation.AccessKeyCreate, "ACCESS_KEY", key.ID, key.Name, "SUCCESS", "", meta, nil, after, ""); err != nil {
 		return s.securityError(ctx, "audit_create_access_key", err)
 	}
@@ -234,6 +234,48 @@ func (s *SecurityStore) Revoke(ctx context.Context, actor admin.Identity, keyID 
 	}
 	return nil
 }
+
+func (s *SecurityStore) SetUpstreamQuotaPermission(ctx context.Context, actor admin.Identity, keyID int64, allowed bool, meta appsec.RequestMeta) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return s.securityError(ctx, "begin_key_quota_permission", err)
+	}
+	defer tx.Rollback(context.Background())
+	ctx = idgen.WithQuerier(ctx, tx)
+	q := dbgen.New(tx)
+	if err := validateActor(ctx, q, actor); err != nil {
+		if errors.Is(err, appsec.ErrUnauthenticated) {
+			return err
+		}
+		return s.securityError(ctx, "validate_key_quota_actor", err)
+	}
+	var name string
+	var old bool
+	err = tx.QueryRow(ctx, `SELECT k.name,k.can_view_upstream_quota FROM principal_access_key k JOIN principal p ON p.id=k.principal_id
+		WHERE k.id=$1 AND NOT k.is_deleted AND k.status='ACTIVE' AND k.revoked_at IS NULL
+		AND (k.expires_at IS NULL OR k.expires_at>now()) AND p.principal_type='MEMBER' AND NOT p.is_deleted FOR UPDATE OF k`, keyID).Scan(&name, &old)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return appsec.ErrNotFound
+	}
+	if err != nil {
+		return s.securityError(ctx, "get_key_quota_permission", err)
+	}
+	if old == allowed {
+		return tx.Commit(ctx)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE principal_access_key SET can_view_upstream_quota=$2,updated_by=$3,updated_at=$4 WHERE id=$1`, keyID, allowed, actorRef(actor.ID), pgTime(time.Now().UTC())); err != nil {
+		return s.securityError(ctx, "update_key_quota_permission", err)
+	}
+	before, _ := json.Marshal(map[string]bool{"canViewUpstreamQuota": old})
+	after, _ := json.Marshal(map[string]bool{"canViewUpstreamQuota": allowed})
+	if err := s.appendLog(ctx, q, actor, "ACCESS_KEY", operation.AccessKeyUpstreamQuotaUpdate, "ACCESS_KEY", keyID, name, "SUCCESS", "", meta, before, after, ""); err != nil {
+		return s.securityError(ctx, "audit_key_quota_permission", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return s.securityError(ctx, "commit_key_quota_permission", err)
+	}
+	return nil
+}
 func (s *SecurityStore) Authenticate(ctx context.Context, hash []byte, now time.Time) (appsec.PrincipalIdentity, error) {
 	row, err := dbgen.New(s.pool).AuthenticateAccessKey(ctx, dbgen.AuthenticateAccessKeyParams{KeyHash: hash, Now: pgTime(now)})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -242,7 +284,7 @@ func (s *SecurityStore) Authenticate(ctx context.Context, hash []byte, now time.
 	if err != nil {
 		return appsec.PrincipalIdentity{}, s.securityError(ctx, "authenticate_access_key", err)
 	}
-	return appsec.PrincipalIdentity{ID: row.PrincipalID, AccessKeyID: row.ID, Type: principal.Type(row.PrincipalType), ExpiresAt: timePointer(row.ExpiresAt)}, nil
+	return appsec.PrincipalIdentity{ID: row.PrincipalID, AccessKeyID: row.ID, Type: principal.Type(row.PrincipalType), ExpiresAt: timePointer(row.ExpiresAt), CanViewUpstreamQuota: row.CanViewUpstreamQuota}, nil
 }
 
 // ValidateCredentials 确认 MASTER_KEY 可以解密全部现有凭据，失败时不修改数据。

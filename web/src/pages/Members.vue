@@ -59,6 +59,7 @@ const statusTarget = ref<Member | null>(null),
   quotaTarget = ref<Member | null>(null),
   quotaRemovalTarget = ref<Member | null>(null)
 const keyName = ref(''),
+  canViewUpstreamQuota = ref(false),
   expires = ref(''),
   createdKey = ref<CreatedKey | null>(null)
 const { keyword, query, visible, search, reset, searching, searchingAll } = useListSearch(
@@ -178,6 +179,7 @@ function changeStatus(member: Member) {
 function openKeys(member: Member) {
   selected.value = member
   keyName.value = ''
+  canViewUpstreamQuota.value = false
   expires.value = ''
   actionError.value = ''
 }
@@ -208,9 +210,11 @@ function issueKey() {
     const memberID = selected.value!.id
     createdKey.value = await api<CreatedKey>(`${basePath.value}/${memberID}/keys`, 'POST', {
       name: keyName.value,
+      ...(kind === 'member' ? { canViewUpstreamQuota: canViewUpstreamQuota.value } : {}),
       ...(expiresAt ? { expiresAt: expiresAt.toISOString() } : {}),
     })
     keyName.value = ''
+    canViewUpstreamQuota.value = false
     expires.value = ''
     selected.value = null
     showSuccessToast(local('keyCreated'))
@@ -502,6 +506,10 @@ async function copyKey() {
         >{{ local('keyName') }}<input v-model="keyName" required autofocus :disabled="busy"
       /></label>
       <label>{{ local('expires') }}<input v-model="expires" type="date" :disabled="busy" /></label>
+      <label v-if="kind === 'member'" class="checkbox-label">
+        <input v-model="canViewUpstreamQuota" type="checkbox" :disabled="busy" />
+        {{ local('viewUpstreamQuota') }}
+      </label>
       <p class="muted">{{ local('expiresHint') }}</p>
     </form>
     <template #footer>
@@ -533,6 +541,14 @@ async function copyKey() {
 </template>
 
 <style scoped>
+.checkbox-label {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.checkbox-label input {
+  margin: 0;
+}
 .members-table {
   min-width: 1000px;
   table-layout: fixed;

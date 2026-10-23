@@ -29,11 +29,12 @@ type Keys struct {
 	entropy io.Reader
 }
 type CreatedKey struct {
-	ID        int64      `json:"id,string"`
-	Key       string     `json:"key"`
-	MaskedKey string     `json:"maskedKey"`
-	Name      string     `json:"name"`
-	ExpiresAt *time.Time `json:"expiresAt"`
+	ID                   int64      `json:"id,string"`
+	Key                  string     `json:"key"`
+	MaskedKey            string     `json:"maskedKey"`
+	Name                 string     `json:"name"`
+	ExpiresAt            *time.Time `json:"expiresAt"`
+	CanViewUpstreamQuota bool       `json:"canViewUpstreamQuota"`
 }
 
 func NewKeys(store KeyStore, ids shared.IDGenerator) *Keys {
@@ -41,14 +42,18 @@ func NewKeys(store KeyStore, ids shared.IDGenerator) *Keys {
 }
 
 func (s *Keys) Create(ctx context.Context, actor admin.Identity, principalID int64, name string, expires *time.Time, meta RequestMeta) (CreatedKey, error) {
-	return s.create(ctx, actor, principalID, principal.Member, name, expires, meta)
+	return s.CreateMember(ctx, actor, principalID, name, expires, false, meta)
+}
+
+func (s *Keys) CreateMember(ctx context.Context, actor admin.Identity, principalID int64, name string, expires *time.Time, canViewUpstreamQuota bool, meta RequestMeta) (CreatedKey, error) {
+	return s.create(ctx, actor, principalID, principal.Member, name, expires, canViewUpstreamQuota, meta)
 }
 
 func (s *Keys) CreateApplication(ctx context.Context, actor admin.Identity, principalID int64, name string, expires *time.Time, meta RequestMeta) (CreatedKey, error) {
-	return s.create(ctx, actor, principalID, principal.Application, name, expires, meta)
+	return s.create(ctx, actor, principalID, principal.Application, name, expires, false, meta)
 }
 
-func (s *Keys) create(ctx context.Context, actor admin.Identity, principalID int64, kind principal.Type, name string, expires *time.Time, meta RequestMeta) (CreatedKey, error) {
+func (s *Keys) create(ctx context.Context, actor admin.Identity, principalID int64, kind principal.Type, name string, expires *time.Time, canViewUpstreamQuota bool, meta RequestMeta) (CreatedKey, error) {
 	now := time.Now().UTC()
 	if principalID <= 0 || strings.TrimSpace(name) == "" || strings.ContainsRune(name, 0) || len(name) > 128 || (expires != nil && !expires.After(now)) {
 		return CreatedKey{}, ErrInvalidArgument
@@ -72,18 +77,25 @@ func (s *Keys) create(ctx context.Context, actor admin.Identity, principalID int
 		return CreatedKey{}, ErrUnavailable
 	}
 	maskedKey := full[:len(marker)+keyPrefixChars] + keyMask + full[len(full)-keySuffixChars:]
-	row := KeyRecord{ID: id, PrincipalID: principalID, PrincipalType: kind, Hash: digest[:], MaskedKey: maskedKey, Name: name, ExpiresAt: expires, CreatedAt: now}
+	row := KeyRecord{ID: id, PrincipalID: principalID, PrincipalType: kind, Hash: digest[:], MaskedKey: maskedKey, Name: name, ExpiresAt: expires, CreatedAt: now, CanViewUpstreamQuota: canViewUpstreamQuota}
 	if err := s.store.Create(ctx, actor, row, meta); err != nil {
 		return CreatedKey{}, err
 	}
 	// 完整值仅存在于本次创建返回值，不传给 Repository 或操作日志。
-	return CreatedKey{ID: id, Key: full, MaskedKey: row.MaskedKey, Name: name, ExpiresAt: expires}, nil
+	return CreatedKey{ID: id, Key: full, MaskedKey: row.MaskedKey, Name: name, ExpiresAt: expires, CanViewUpstreamQuota: canViewUpstreamQuota}, nil
 }
 func (s *Keys) Revoke(ctx context.Context, actor admin.Identity, keyID int64, meta RequestMeta) error {
 	if keyID <= 0 {
 		return ErrInvalidArgument
 	}
 	return s.store.Revoke(ctx, actor, keyID, meta)
+}
+
+func (s *Keys) SetUpstreamQuotaPermission(ctx context.Context, actor admin.Identity, keyID int64, allowed bool, meta RequestMeta) error {
+	if keyID <= 0 {
+		return ErrInvalidArgument
+	}
+	return s.store.SetUpstreamQuotaPermission(ctx, actor, keyID, allowed, meta)
 }
 func (s *Keys) Authenticate(ctx context.Context, full string) (PrincipalIdentity, error) {
 	marker := keyMarker

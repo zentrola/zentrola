@@ -10,6 +10,7 @@ import (
 	gw "github.com/zentrola/zentrola/internal/application/gateway"
 	mgmt "github.com/zentrola/zentrola/internal/application/management"
 	appsec "github.com/zentrola/zentrola/internal/application/security"
+	usageapp "github.com/zentrola/zentrola/internal/application/usage"
 )
 
 type applicationErrorMapping struct {
@@ -38,6 +39,10 @@ var managementErrorMappings = []applicationErrorMapping{
 // securityError 是管理 API 的统一应用错误出口。错误语义属于 application，
 // HTTP 状态码、稳定响应 code 与面向客户端的消息只在 transport 层维护。
 func securityError(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, usageapp.ErrUpstreamQuotaForbidden) {
+		writeJSON(w, r, http.StatusForbidden, response{Code: "FORBIDDEN", Message: "Quota access is not permitted."})
+		return
+	}
 	var gatewayFailure *gw.Failure
 	if errors.As(err, &gatewayFailure) {
 		writeJSON(w, r, gatewayFailure.Status, response{Code: gatewayFailure.Code, Message: gatewayFailure.Message})

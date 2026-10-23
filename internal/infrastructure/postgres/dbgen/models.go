@@ -244,6 +244,8 @@ type PrincipalAccessKey struct {
 	CreatedAt pgtype.Timestamptz
 	// 更新时间，UTC
 	UpdatedAt pgtype.Timestamptz
+	// 允许该成员 Key 查看自己最近实际使用的订阅号额度快照
+	CanViewUpstreamQuota bool
 }
 
 // 调用主体的 AI 使用治理分组
@@ -642,4 +644,6 @@ type UsageRecord struct {
 	QuotaGroupIds []int64
 	// 缓存写入 Token 数，包含在 input_tokens 中；NULL=上游未返回或协议不区分缓存写入，计费按 0 处理
 	CacheCreationInputTokens *int64
+	// 发起调用的 Access Key ID；历史记录为 NULL
+	AccessKeyID *int64
 }

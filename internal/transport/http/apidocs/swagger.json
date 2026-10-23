@@ -481,6 +481,57 @@
                 }
             }
         },
+        "/api/v1/access-keys/{id}/upstream-quota-permission": {
+            "put": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "tags": [
+                    "访问密钥"
+                ],
+                "summary": "设置单把成员 Access Key 的上游额度查看权限",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Access Key ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "授权状态",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.UpdateKeyQuotaPermissionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/http.UpdateKeyQuotaPermissionRequest"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/applications": {
             "get": {
                 "security": [
@@ -4129,6 +4180,101 @@
                                 "type": "string",
                                 "description": "请求追踪 ID"
                             }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/me/quota": {
+            "get": {
+                "security": [
+                    {
+                        "GatewayKey": []
+                    },
+                    {
+                        "GatewayBearer": []
+                    }
+                ],
+                "tags": [
+                    "用量配额"
+                ],
+                "summary": "查询我的月度 Token 额度",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "模型编码；指定后计算个人与适用分组中的最小剩余额度",
+                        "name": "model",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/usage.SelfQuota"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/me/upstream-quota": {
+            "get": {
+                "security": [
+                    {
+                        "GatewayKey": []
+                    },
+                    {
+                        "GatewayBearer": []
+                    }
+                ],
+                "tags": [
+                    "用量配额"
+                ],
+                "summary": "查询当前使用订阅号的额度快照",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "模型编码",
+                        "name": "model",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/usage.UpstreamQuota"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
                         }
                     }
                 }
@@ -10079,6 +10225,9 @@
                 "name"
             ],
             "properties": {
+                "canViewUpstreamQuota": {
+                    "type": "boolean"
+                },
                 "expiresAt": {
                     "description": "ExpiresAt 是以 Z 结尾的 UTC RFC3339 时间。",
                     "type": "string",
@@ -10803,6 +10952,14 @@
                 }
             }
         },
+        "http.UpdateKeyQuotaPermissionRequest": {
+            "type": "object",
+            "properties": {
+                "canViewUpstreamQuota": {
+                    "type": "boolean"
+                }
+            }
+        },
         "http.UpdateMemberRequest": {
             "type": "object",
             "required": [
@@ -10961,6 +11118,9 @@
         "management.Key": {
             "type": "object",
             "properties": {
+                "canViewUpstreamQuota": {
+                    "type": "boolean"
+                },
                 "createdAt": {
                     "type": "string"
                 },
@@ -11745,6 +11905,9 @@
         "security.CreatedKey": {
             "type": "object",
             "properties": {
+                "canViewUpstreamQuota": {
+                    "type": "boolean"
+                },
                 "expiresAt": {
                     "type": "string"
                 },
@@ -11950,6 +12113,36 @@
                 }
             }
         },
+        "usage.SelfQuota": {
+            "type": "object",
+            "properties": {
+                "effectiveRemaining": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "periodEnd": {
+                    "type": "string"
+                },
+                "periodStart": {
+                    "type": "string"
+                },
+                "personalLimit": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "personalRemaining": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "usedTokens": {
+                    "type": "string",
+                    "example": "0"
+                }
+            }
+        },
         "usage.SelfUsage": {
             "type": "object",
             "properties": {
@@ -12015,6 +12208,67 @@
                 },
                 "tokens": {
                     "type": "integer"
+                }
+            }
+        },
+        "usage.UpstreamQuota": {
+            "type": "object",
+            "properties": {
+                "checkedAt": {
+                    "type": "string"
+                },
+                "lastUsedAt": {
+                    "type": "string"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "providerName": {
+                    "type": "string"
+                },
+                "quotas": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/usage.UpstreamQuotaItem"
+                    }
+                },
+                "status": {
+                    "type": "string"
+                },
+                "subscriptionName": {
+                    "type": "string"
+                }
+            }
+        },
+        "usage.UpstreamQuotaItem": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "limitValue": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "observedAt": {
+                    "type": "string"
+                },
+                "remainingValue": {
+                    "type": "string"
+                },
+                "resetsAt": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "unit": {
+                    "type": "string"
+                },
+                "usedValue": {
+                    "type": "string"
                 }
             }
         }

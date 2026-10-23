@@ -8,6 +8,7 @@ type Event struct {
 	TraceID, SpanID        string
 	ClientProtocol         string
 	PrincipalID            int64
+	AccessKeyID            int64
 	ModelID                int64
 	RequestAt, CompletedAt time.Time
 	Status                 Status

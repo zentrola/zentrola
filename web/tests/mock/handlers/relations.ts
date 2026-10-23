@@ -110,6 +110,10 @@ export function handleRelations(ctx: MockContext): MockResult {
   if (segments[0] === 'access-keys') {
     if (flags.conflict) return reply(null, 409, 'CONFLICT')
     const row = keys.find((k) => k.id === segments[1])
+    if (segments[2] === 'upstream-quota-permission' && method === 'PUT') {
+      row.canViewUpstreamQuota = body.canViewUpstreamQuota
+      return reply({ canViewUpstreamQuota: row.canViewUpstreamQuota })
+    }
     row.status = 'REVOKED'
     row.revokedAt = stamp
     return reply({ revoked: true })

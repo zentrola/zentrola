@@ -98,6 +98,16 @@ function revoke() {
     showSuccessToast(local('revoked'))
   })
 }
+function toggleUpstreamQuota(key: AccessKey) {
+  if (!canRevoke(key) || props.kind !== 'member') return
+  void run(async () => {
+    await api(`/access-keys/${key.id}/upstream-quota-permission`, 'PUT', {
+      canViewUpstreamQuota: !key.canViewUpstreamQuota,
+    })
+    await load()
+    showSuccessToast(local('upstreamQuotaPermissionSaved'))
+  })
+}
 </script>
 
 <template>
@@ -132,6 +142,7 @@ function revoke() {
             <th>{{ local('keyDisplayName') }}</th>
             <th>{{ local('assignedKeys') }}</th>
             <th>{{ local('expiryDate') }}</th>
+            <th v-if="kind === 'member'">{{ local('viewUpstreamQuota') }}</th>
             <th class="key-action-cell">{{ t('common.actions') }}</th>
           </tr>
         </thead>
@@ -142,7 +153,22 @@ function revoke() {
               <TechnicalValue :value="key.maskedKey" :copyable="false" />
             </td>
             <td>{{ expiryDate(key) }}</td>
+            <td v-if="kind === 'member'">
+              {{ key.canViewUpstreamQuota ? t('common.yes') : t('common.no') }}
+            </td>
             <td class="key-action-cell">
+              <button
+                v-if="kind === 'member' && canRevoke(key)"
+                class="text-button"
+                :disabled="busy || loading"
+                @click="toggleUpstreamQuota(key)"
+              >
+                {{
+                  key.canViewUpstreamQuota
+                    ? local('revokeUpstreamQuota')
+                    : local('grantUpstreamQuota')
+                }}
+              </button>
               <button
                 v-if="canRevoke(key)"
                 class="text-button danger"

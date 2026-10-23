@@ -164,7 +164,8 @@ func (r LoginRequest) Valid() bool {
 }
 
 type CreateKeyRequest struct {
-	Name string `json:"name" binding:"required" example:"Claude Code"`
+	Name                 string `json:"name" binding:"required" example:"Claude Code"`
+	CanViewUpstreamQuota bool   `json:"canViewUpstreamQuota"`
 	// ExpiresAt 是以 Z 结尾的 UTC RFC3339 时间。
 	ExpiresAt *time.Time `json:"expiresAt" example:"2027-01-01T00:00:00Z"`
 }
@@ -174,6 +175,13 @@ func (r CreateKeyRequest) Valid() bool {
 	return validRequestText(r.Name, 128, true) && isUTCDateTime(r.ExpiresAt) &&
 		(r.ExpiresAt == nil || r.ExpiresAt.After(time.Now().UTC()))
 }
+
+type UpdateKeyQuotaPermissionRequest struct {
+	CanViewUpstreamQuota *bool `json:"canViewUpstreamQuota"`
+}
+
+func (r *UpdateKeyQuotaPermissionRequest) Normalize() {}
+func (r UpdateKeyQuotaPermissionRequest) Valid() bool { return r.CanViewUpstreamQuota != nil }
 
 type CreateMemberRequest struct {
 	Name     string   `json:"name" binding:"required" example:"开发者"`

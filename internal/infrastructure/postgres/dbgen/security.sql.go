@@ -68,7 +68,7 @@ func (q *Queries) AppendSecurityOperation(ctx context.Context, arg AppendSecurit
 }
 
 const authenticateAccessKey = `-- name: AuthenticateAccessKey :one
-SELECT k.id,k.principal_id,p.principal_type,k.expires_at FROM principal_access_key k
+SELECT k.id,k.principal_id,p.principal_type,k.expires_at,k.can_view_upstream_quota FROM principal_access_key k
 JOIN principal p ON p.id=k.principal_id
 WHERE k.key_hash=$1 AND k.is_deleted=false AND k.status='ACTIVE' AND k.revoked_at IS NULL
 AND (k.expires_at IS NULL OR k.expires_at > $2::timestamptz)
@@ -81,10 +81,11 @@ type AuthenticateAccessKeyParams struct {
 }
 
 type AuthenticateAccessKeyRow struct {
-	ID            int64
-	PrincipalID   int64
-	PrincipalType string
-	ExpiresAt     pgtype.Timestamptz
+	ID                   int64
+	PrincipalID          int64
+	PrincipalType        string
+	ExpiresAt            pgtype.Timestamptz
+	CanViewUpstreamQuota bool
 }
 
 func (q *Queries) AuthenticateAccessKey(ctx context.Context, arg AuthenticateAccessKeyParams) (AuthenticateAccessKeyRow, error) {
@@ -95,24 +96,26 @@ func (q *Queries) AuthenticateAccessKey(ctx context.Context, arg AuthenticateAcc
 		&i.PrincipalID,
 		&i.PrincipalType,
 		&i.ExpiresAt,
+		&i.CanViewUpstreamQuota,
 	)
 	return i, err
 }
 
 const createAccessKey = `-- name: CreateAccessKey :exec
-INSERT INTO principal_access_key (id,principal_id,key_hash,masked_key,name,status,expires_at,created_by,updated_by,created_at,updated_at)
-VALUES ($1,$2,$3,$4,$5,'ACTIVE',$6,$7,$7,$8,$8)
+INSERT INTO principal_access_key (id,principal_id,key_hash,masked_key,name,status,expires_at,can_view_upstream_quota,created_by,updated_by,created_at,updated_at)
+VALUES ($1,$2,$3,$4,$5,'ACTIVE',$6,$7,$8,$8,$9,$9)
 `
 
 type CreateAccessKeyParams struct {
-	ID          int64
-	PrincipalID int64
-	KeyHash     []byte
-	MaskedKey   string
-	Name        string
-	ExpiresAt   pgtype.Timestamptz
-	CreatedBy   string
-	CreatedAt   pgtype.Timestamptz
+	ID                   int64
+	PrincipalID          int64
+	KeyHash              []byte
+	MaskedKey            string
+	Name                 string
+	ExpiresAt            pgtype.Timestamptz
+	CanViewUpstreamQuota bool
+	CreatedBy            string
+	CreatedAt            pgtype.Timestamptz
 }
 
 func (q *Queries) CreateAccessKey(ctx context.Context, arg CreateAccessKeyParams) error {
@@ -123,6 +126,7 @@ func (q *Queries) CreateAccessKey(ctx context.Context, arg CreateAccessKeyParams
 		arg.MaskedKey,
 		arg.Name,
 		arg.ExpiresAt,
+		arg.CanViewUpstreamQuota,
 		arg.CreatedBy,
 		arg.CreatedAt,
 	)
@@ -218,7 +222,7 @@ func (q *Queries) GetAdminForLogin(ctx context.Context, username string) (AdminU
 }
 
 const getKeyForRevoke = `-- name: GetKeyForRevoke :one
-SELECT id, is_deleted, status, principal_id, key_hash, masked_key, name, expires_at, last_used_at, revoked_at, created_by, updated_by, created_at, updated_at FROM principal_access_key WHERE id=$1 AND is_deleted=false FOR UPDATE
+SELECT id, is_deleted, status, principal_id, key_hash, masked_key, name, expires_at, last_used_at, revoked_at, created_by, updated_by, created_at, updated_at, can_view_upstream_quota FROM principal_access_key WHERE id=$1 AND is_deleted=false FOR UPDATE
 `
 
 func (q *Queries) GetKeyForRevoke(ctx context.Context, id int64) (PrincipalAccessKey, error) {
@@ -239,6 +243,7 @@ func (q *Queries) GetKeyForRevoke(ctx context.Context, id int64) (PrincipalAcces
 		&i.UpdatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CanViewUpstreamQuota,
 	)
 	return i, err
 }

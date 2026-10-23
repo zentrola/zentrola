@@ -284,21 +284,20 @@ test.describe('用户与应用', () => {
       '显示名称',
       '访问密钥',
       '过期日期',
+      '允许查看当前使用订阅号的额度',
       '操作',
     ])
     await expect(modal(page).getByRole('columnheader', { name: '操作' })).toHaveCSS(
       'text-align',
       'center',
     )
-    const actionCenters = await modal(page)
-      .locator('tbody tr td:last-child > *')
-      .evaluateAll((elements) =>
-        elements.map((element) => {
-          const bounds = element.getBoundingClientRect()
-          return bounds.left + bounds.width / 2
-        }),
-      )
-    expect(Math.max(...actionCenters) - Math.min(...actionCenters)).toBeLessThan(2)
+    await expect(modal(page).getByRole('button', { name: '授权查看额度' })).toHaveCount(1)
+    await modal(page).getByRole('button', { name: '授权查看额度' }).click()
+    await expect(modal(page).getByRole('row').filter({ hasText: '工作站' })).toContainText('是')
+    expect(state.keys[0].canViewUpstreamQuota).toBe(true)
+    await modal(page).getByRole('button', { name: '取消额度授权' }).click()
+    await expect(modal(page).getByRole('row').filter({ hasText: '工作站' })).toContainText('否')
+    expect(state.keys[0].canViewUpstreamQuota).toBe(false)
     await expect(modal(page).locator('code')).toHaveText([
       'vk-revoked********1234',
       'zt_vk_temp********temp',
@@ -321,7 +320,7 @@ test.describe('用户与应用', () => {
         .getByRole('button', { name: '撤销' }),
     ).toHaveCount(0)
     await expect(
-      modal(page).getByRole('row').filter({ hasText: '临时测试' }).locator('td').nth(3),
+      modal(page).getByRole('row').filter({ hasText: '临时测试' }).locator('td').nth(4),
     ).toHaveText('-')
     const historyDialog = page.getByRole('dialog', { name: '林知远的 Key 记录', exact: true })
     const historyRevoke = historyDialog
@@ -344,7 +343,7 @@ test.describe('用户与应用', () => {
     await expect(page.locator('.toast-success')).toContainText('Key 已撤销')
     await expect(historyDialog.locator('.notice')).toHaveCount(0)
     await expect(historyRevoke).toHaveCount(0)
-    await expect(maskedKey.locator('td').nth(3)).toHaveText('-')
+    await expect(maskedKey.locator('td').nth(4)).toHaveText('-')
     expect(state.keys[0].status).toBe('REVOKED')
     expect(state.keys[1].status).toBe('ACTIVE')
     await mkdir('../.cache/web-visual', { recursive: true })

@@ -1442,7 +1442,7 @@ func (q *Queries) ManageHasUsableApplicationKey(ctx context.Context, arg ManageH
 }
 
 const manageKeys = `-- name: ManageKeys :many
-SELECT id,name,masked_key,status,expires_at,revoked_at,created_at FROM principal_access_key
+SELECT id,name,masked_key,status,expires_at,revoked_at,created_at,can_view_upstream_quota FROM principal_access_key
 WHERE principal_id=$1 AND is_deleted=false
   AND ($4::boolean OR
        (status='ACTIVE' AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>$5::timestamptz)))
@@ -1458,13 +1458,14 @@ type ManageKeysParams struct {
 }
 
 type ManageKeysRow struct {
-	ID        int64
-	Name      string
-	MaskedKey string
-	Status    string
-	ExpiresAt pgtype.Timestamptz
-	RevokedAt pgtype.Timestamptz
-	CreatedAt pgtype.Timestamptz
+	ID                   int64
+	Name                 string
+	MaskedKey            string
+	Status               string
+	ExpiresAt            pgtype.Timestamptz
+	RevokedAt            pgtype.Timestamptz
+	CreatedAt            pgtype.Timestamptz
+	CanViewUpstreamQuota bool
 }
 
 func (q *Queries) ManageKeys(ctx context.Context, arg ManageKeysParams) ([]ManageKeysRow, error) {
@@ -1490,6 +1491,7 @@ func (q *Queries) ManageKeys(ctx context.Context, arg ManageKeysParams) ([]Manag
 			&i.ExpiresAt,
 			&i.RevokedAt,
 			&i.CreatedAt,
+			&i.CanViewUpstreamQuota,
 		); err != nil {
 			return nil, err
 		}

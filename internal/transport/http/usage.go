@@ -50,6 +50,51 @@ func (s *SecurityHandlers) getMyUsage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusOK, response{Code: "OK", Data: result})
 }
 
+// getMyQuota 返回本人月度总用量和按指定模型计算的有效剩余额度。
+// @Summary 查询我的月度 Token 额度
+// @Tags 用量配额
+// @Security GatewayKey
+// @Security GatewayBearer
+// @Param model query string false "模型编码；指定后计算个人与适用分组中的最小剩余额度"
+// @Success 200 {object} response{data=app.SelfQuota}
+// @Router /api/v1/me/quota [get]
+func (s *SecurityHandlers) getMyQuota(w http.ResponseWriter, r *http.Request) {
+	values := r.URL.Query()
+	if len(values) > 1 || len(values["model"]) > 1 || (len(values) == 1 && (len(values["model"]) == 0 || strings.TrimSpace(values.Get("model")) == "")) {
+		securityError(w, r, appsec.ErrInvalidArgument)
+		return
+	}
+	result, err := s.SelfQuota.Current(r.Context(), principalFrom(r), values.Get("model"), time.Now().UTC())
+	if err != nil {
+		securityError(w, r, err)
+		return
+	}
+	writeJSON(w, r, http.StatusOK, response{Code: "OK", Data: result})
+}
+
+// getMyUpstreamQuota 只返回该 Key 指定模型最近一次成功请求使用的订阅号额度快照。
+// @Summary 查询当前使用订阅号的额度快照
+// @Tags 用量配额
+// @Security GatewayKey
+// @Security GatewayBearer
+// @Param model query string true "模型编码"
+// @Success 200 {object} response{data=app.UpstreamQuota}
+// @Failure 403 {object} response
+// @Router /api/v1/me/upstream-quota [get]
+func (s *SecurityHandlers) getMyUpstreamQuota(w http.ResponseWriter, r *http.Request) {
+	values := r.URL.Query()
+	if len(values) != 1 || len(values["model"]) != 1 || strings.TrimSpace(values.Get("model")) == "" {
+		securityError(w, r, appsec.ErrInvalidArgument)
+		return
+	}
+	result, err := s.SelfQuota.Upstream(r.Context(), principalFrom(r), values.Get("model"))
+	if err != nil {
+		securityError(w, r, err)
+		return
+	}
+	writeJSON(w, r, http.StatusOK, response{Code: "OK", Data: result})
+}
+
 func (s *SecurityHandlers) mountUsage(r chi.Router) {
 	// @Summary 首页统计
 	// @Tags 用量统计

@@ -101,6 +101,9 @@ func (*keyStoreStub) Create(context.Context, admin.Identity, appsec.KeyRecord, a
 func (*keyStoreStub) Revoke(context.Context, admin.Identity, int64, appsec.RequestMeta) error {
 	return nil
 }
+func (*keyStoreStub) SetUpstreamQuotaPermission(context.Context, admin.Identity, int64, bool, appsec.RequestMeta) error {
+	return nil
+}
 func (s *keyStoreStub) Authenticate(context.Context, []byte, time.Time) (appsec.PrincipalIdentity, error) {
 	s.authentications++
 	return s.identity, nil
