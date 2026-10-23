@@ -19,6 +19,14 @@ func TestDuplicateMemberNameReturnsConflict(t *testing.T) {
 	}
 }
 
+func TestDisabledMemberReturnsConflict(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	securityError(recorder, httptest.NewRequest(http.MethodPost, "/api/v1/me/manage/members/1/keys", nil), appsec.ErrMemberDisabled)
+	if recorder.Code != http.StatusConflict || !strings.Contains(recorder.Body.String(), `"code":"MEMBER_DISABLED"`) {
+		t.Fatalf("disabled member response = %d %s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestEveryPublicManagementErrorHasHTTPMapping(t *testing.T) {
 	publicErrors := mgmt.PublicErrors()
 	if len(publicErrors) != len(managementErrorMappings) {

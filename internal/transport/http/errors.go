@@ -76,6 +76,8 @@ func securityError(w http.ResponseWriter, r *http.Request, err error) {
 		status, code, message = http.StatusConflict, "ALREADY_INITIALIZED", "Administrator setup is already complete."
 	case errors.Is(err, appsec.ErrMemberNameExists):
 		status, code, message = http.StatusConflict, "MEMBER_NAME_ALREADY_EXISTS", "A member with this name already exists."
+	case errors.Is(err, appsec.ErrMemberDisabled):
+		status, code, message = http.StatusConflict, "MEMBER_DISABLED", "The member is disabled by an administrator."
 	case errors.Is(err, appsec.ErrUnauthenticated):
 		status, code, message = http.StatusUnauthorized, "UNAUTHENTICATED", "Authentication failed."
 	case errors.Is(err, appsec.ErrForbidden):

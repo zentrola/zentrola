@@ -38,11 +38,17 @@ func (s *MemberProvisionStore) CreateMemberAndKey(ctx context.Context, actor app
 			return err
 		}
 		for _, groupID := range groupIDs {
-			var active bool
-			if err := tx.QueryRow(ctx, `SELECT status='ACTIVE' FROM principal_group WHERE id=$1 AND NOT is_deleted FOR SHARE`, groupID).Scan(&active); errors.Is(err, pgx.ErrNoRows) {
+			// 只能分配操作者本人所在的分组，避免借新成员获得操作者没有的模型权限。
+			var active, joined bool
+			if err := tx.QueryRow(ctx, `SELECT g.status='ACTIVE',EXISTS (SELECT 1 FROM principal_group_membership m
+				WHERE m.group_id=g.id AND m.principal_id=$2 AND NOT m.is_deleted)
+				FROM principal_group g WHERE g.id=$1 AND NOT g.is_deleted FOR SHARE OF g`, groupID, actor.ID).Scan(&active, &joined); errors.Is(err, pgx.ErrNoRows) {
 				return appsec.ErrNotFound
 			} else if err != nil {
 				return err
+			}
+			if !joined {
+				return appsec.ErrForbidden
 			}
 			if !active {
 				return appsec.ErrInvalidArgument
@@ -73,24 +79,26 @@ func (s *MemberProvisionStore) CreateMemberAndKey(ctx context.Context, actor app
 
 func (s *MemberProvisionStore) IssueMemberKey(ctx context.Context, actor appsec.PrincipalIdentity, key appsec.KeyRecord, meta appsec.RequestMeta) error {
 	return s.write(ctx, actor, func(ctx context.Context, q *dbgen.Queries, tx pgx.Tx, operator string) error {
-		var name, status string
-		err := tx.QueryRow(ctx, `SELECT name,status FROM principal WHERE id=$1 AND principal_type='MEMBER' AND NOT is_deleted FOR UPDATE`, key.PrincipalID).Scan(&name, &status)
+		// 只能为本成员的 Key 创建、且未持有管理权限的成员签发 Key；不改变成员状态，
+		// 管理员停用的成员不能借签发 Key 恢复启用。
+		var status string
+		err := tx.QueryRow(ctx, `SELECT p.status FROM principal p
+			WHERE p.id=$1 AND p.id<>$2 AND p.principal_type='MEMBER' AND NOT p.is_deleted
+			AND p.created_by IN (SELECT 'member-key:' || k.id FROM principal_access_key k WHERE k.principal_id=$2)
+			AND NOT EXISTS (SELECT 1 FROM principal_access_key m WHERE m.principal_id=p.id AND m.can_manage_members
+				AND NOT m.is_deleted AND m.status='ACTIVE' AND m.revoked_at IS NULL)
+			FOR UPDATE OF p`, key.PrincipalID, actor.ID).Scan(&status)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return appsec.ErrNotFound
 		}
 		if err != nil {
 			return err
 		}
+		if status != "ACTIVE" {
+			return appsec.ErrMemberDisabled
+		}
 		if err := s.insertKey(ctx, q, key, operator); err != nil {
 			return err
-		}
-		if status != "ACTIVE" {
-			if err := q.ManageMemberStatus(ctx, dbgen.ManageMemberStatusParams{ID: key.PrincipalID, Status: "ACTIVE", UpdatedBy: operator, UpdatedAt: pgTime(time.Now().UTC())}); err != nil {
-				return err
-			}
-			if err := s.audit(ctx, q, actor, "MEMBER", operation.MemberStatusChange, "PRINCIPAL", key.PrincipalID, name, map[string]any{"status": "ACTIVE"}, meta); err != nil {
-				return err
-			}
 		}
 		return s.audit(ctx, q, actor, "ACCESS_KEY", operation.AccessKeyCreate, "ACCESS_KEY", key.ID, key.Name, map[string]any{"status": "ACTIVE", "principalId": strconv.FormatInt(key.PrincipalID, 10), "maskedKey": key.MaskedKey, "canManageMembers": false, "canViewUpstreamQuota": false}, meta)
 	})
@@ -122,8 +130,10 @@ func (s *MemberProvisionStore) write(ctx context.Context, actor appsec.Principal
 		if isMemberNameConflict(err) {
 			return appsec.ErrMemberNameExists
 		}
-		if errors.Is(err, appsec.ErrNotFound) || errors.Is(err, appsec.ErrInvalidArgument) {
-			return err
+		for _, known := range []error{appsec.ErrNotFound, appsec.ErrInvalidArgument, appsec.ErrForbidden, appsec.ErrMemberDisabled} {
+			if errors.Is(err, known) {
+				return known
+			}
 		}
 		return diagnosePostgresError(ctx, s.log, "member_provision", "write", err, appsec.ErrUnavailable)
 	}
