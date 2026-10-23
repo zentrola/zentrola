@@ -78,20 +78,12 @@ func (s *KeyStore) Revoke(ctx context.Context, actor admin.Identity, id int64, m
 	return nil
 }
 
-func (s *KeyStore) SetUpstreamQuotaPermission(ctx context.Context, actor admin.Identity, id int64, allowed bool, meta appsec.RequestMeta) (bool, error) {
-	changed, err := s.next.SetUpstreamQuotaPermission(ctx, actor, id, allowed, meta)
+func (s *KeyStore) SetManagementPermission(ctx context.Context, actor admin.Identity, id int64, allowed bool, meta appsec.RequestMeta) (bool, error) {
+	changed, err := s.next.SetManagementPermission(ctx, actor, id, allowed, meta)
 	if err != nil || !changed {
 		return changed, err
 	}
-	s.cache.Clear(ctx, "access_key_quota_permission_updated")
-	return true, nil
-}
-func (s *KeyStore) SetMemberManagementPermission(ctx context.Context, actor admin.Identity, id int64, allowed bool, meta appsec.RequestMeta) (bool, error) {
-	changed, err := s.next.SetMemberManagementPermission(ctx, actor, id, allowed, meta)
-	if err != nil || !changed {
-		return changed, err
-	}
-	s.cache.Clear(ctx, "access_key_member_management_updated")
+	s.cache.Clear(ctx, "access_key_management_updated")
 	return true, nil
 }
 

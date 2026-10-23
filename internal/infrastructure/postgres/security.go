@@ -182,10 +182,10 @@ func (s *SecurityStore) Create(ctx context.Context, actor admin.Identity, key ap
 	} else if err != nil {
 		return s.securityError(ctx, "get_principal_for_key", err)
 	}
-	if err := q.CreateAccessKey(ctx, dbgen.CreateAccessKeyParams{ID: key.ID, PrincipalID: key.PrincipalID, KeyHash: key.Hash, MaskedKey: key.MaskedKey, Name: key.Name, ExpiresAt: nullableTime(key.ExpiresAt), CanViewUpstreamQuota: key.CanViewUpstreamQuota, CreatedBy: actorRef(actor.ID), CreatedAt: pgTime(key.CreatedAt)}); err != nil {
+	if err := q.CreateAccessKey(ctx, dbgen.CreateAccessKeyParams{ID: key.ID, PrincipalID: key.PrincipalID, KeyHash: key.Hash, MaskedKey: key.MaskedKey, Name: key.Name, ExpiresAt: nullableTime(key.ExpiresAt), CanManage: key.CanManage, CreatedBy: actorRef(actor.ID), CreatedAt: pgTime(key.CreatedAt)}); err != nil {
 		return s.securityError(ctx, "create_access_key", err)
 	}
-	after, _ := json.Marshal(map[string]any{"status": "ACTIVE", "principalId": strconv.FormatInt(key.PrincipalID, 10), "maskedKey": key.MaskedKey, "canViewUpstreamQuota": key.CanViewUpstreamQuota})
+	after, _ := json.Marshal(map[string]any{"status": "ACTIVE", "principalId": strconv.FormatInt(key.PrincipalID, 10), "maskedKey": key.MaskedKey, "canManage": key.CanManage})
 	if err := s.appendLog(ctx, q, actor, "ACCESS_KEY", operation.AccessKeyCreate, "ACCESS_KEY", key.ID, key.Name, "SUCCESS", "", meta, nil, after, ""); err != nil {
 		return s.securityError(ctx, "audit_create_access_key", err)
 	}
@@ -235,28 +235,11 @@ func (s *SecurityStore) Revoke(ctx context.Context, actor admin.Identity, keyID 
 	return nil
 }
 
-func (s *SecurityStore) SetUpstreamQuotaPermission(ctx context.Context, actor admin.Identity, keyID int64, allowed bool, meta appsec.RequestMeta) (bool, error) {
-	return s.setKeyPermission(ctx, actor, keyID, keyPermissionUpstreamQuota, allowed, meta)
-}
-func (s *SecurityStore) SetMemberManagementPermission(ctx context.Context, actor admin.Identity, keyID int64, allowed bool, meta appsec.RequestMeta) (bool, error) {
-	return s.setKeyPermission(ctx, actor, keyID, keyPermissionMemberManagement, allowed, meta)
-}
-
-// keyPermission 描述成员 Key 上的单项布尔授权；column 只取自下方常量，不接收外部输入。
-type keyPermission struct {
-	column, field, operation string
-	event                    operation.Type
-}
-
-var (
-	keyPermissionUpstreamQuota    = keyPermission{column: "can_view_upstream_quota", field: "canViewUpstreamQuota", operation: "key_quota_permission", event: operation.AccessKeyUpstreamQuotaUpdate}
-	keyPermissionMemberManagement = keyPermission{column: "can_manage_members", field: "canManageMembers", operation: "key_member_management", event: operation.AccessKeyMemberManagementUpdate}
-)
-
-func (s *SecurityStore) setKeyPermission(ctx context.Context, actor admin.Identity, keyID int64, permission keyPermission, allowed bool, meta appsec.RequestMeta) (bool, error) {
+// SetManagementPermission 更新未失效成员 Key 的后台管理授权，返回授权值是否实际变化。
+func (s *SecurityStore) SetManagementPermission(ctx context.Context, actor admin.Identity, keyID int64, allowed bool, meta appsec.RequestMeta) (bool, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return false, s.securityError(ctx, "begin_"+permission.operation, err)
+		return false, s.securityError(ctx, "begin_key_management_permission", err)
 	}
 	defer tx.Rollback(context.Background())
 	ctx = idgen.WithQuerier(ctx, tx)
@@ -265,31 +248,31 @@ func (s *SecurityStore) setKeyPermission(ctx context.Context, actor admin.Identi
 		if errors.Is(err, appsec.ErrUnauthenticated) {
 			return false, err
 		}
-		return false, s.securityError(ctx, "validate_"+permission.operation+"_actor", err)
+		return false, s.securityError(ctx, "validate_key_management_permission_actor", err)
 	}
 	var name string
 	var old bool
-	err = tx.QueryRow(ctx, `SELECT k.name,k.`+permission.column+` FROM principal_access_key k JOIN principal p ON p.id=k.principal_id
+	err = tx.QueryRow(ctx, `SELECT k.name,k.can_manage FROM principal_access_key k JOIN principal p ON p.id=k.principal_id
 		WHERE k.id=$1 AND NOT k.is_deleted AND k.status='ACTIVE' AND k.revoked_at IS NULL
 		AND (k.expires_at IS NULL OR k.expires_at>now()) AND p.principal_type='MEMBER' AND NOT p.is_deleted FOR UPDATE OF k`, keyID).Scan(&name, &old)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, appsec.ErrNotFound
 	}
 	if err != nil {
-		return false, s.securityError(ctx, "get_"+permission.operation, err)
+		return false, s.securityError(ctx, "get_key_management_permission", err)
 	}
 	if old != allowed {
-		if _, err := tx.Exec(ctx, `UPDATE principal_access_key SET `+permission.column+`=$2,updated_by=$3,updated_at=$4 WHERE id=$1`, keyID, allowed, actorRef(actor.ID), pgTime(time.Now().UTC())); err != nil {
-			return false, s.securityError(ctx, "update_"+permission.operation, err)
+		if _, err := tx.Exec(ctx, `UPDATE principal_access_key SET can_manage=$2,updated_by=$3,updated_at=$4 WHERE id=$1`, keyID, allowed, actorRef(actor.ID), pgTime(time.Now().UTC())); err != nil {
+			return false, s.securityError(ctx, "update_key_management_permission", err)
 		}
-		before, _ := json.Marshal(map[string]bool{permission.field: old})
-		after, _ := json.Marshal(map[string]bool{permission.field: allowed})
-		if err := s.appendLog(ctx, q, actor, "ACCESS_KEY", permission.event, "ACCESS_KEY", keyID, name, "SUCCESS", "", meta, before, after, ""); err != nil {
-			return false, s.securityError(ctx, "audit_"+permission.operation, err)
+		before, _ := json.Marshal(map[string]bool{"canManage": old})
+		after, _ := json.Marshal(map[string]bool{"canManage": allowed})
+		if err := s.appendLog(ctx, q, actor, "ACCESS_KEY", operation.AccessKeyManagementUpdate, "ACCESS_KEY", keyID, name, "SUCCESS", "", meta, before, after, ""); err != nil {
+			return false, s.securityError(ctx, "audit_key_management_permission", err)
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return false, s.securityError(ctx, "commit_"+permission.operation, err)
+		return false, s.securityError(ctx, "commit_key_management_permission", err)
 	}
 	return old != allowed, nil
 }
@@ -301,7 +284,7 @@ func (s *SecurityStore) Authenticate(ctx context.Context, hash []byte, now time.
 	if err != nil {
 		return appsec.PrincipalIdentity{}, s.securityError(ctx, "authenticate_access_key", err)
 	}
-	return appsec.PrincipalIdentity{ID: row.PrincipalID, AccessKeyID: row.ID, Type: principal.Type(row.PrincipalType), ExpiresAt: timePointer(row.ExpiresAt), CanViewUpstreamQuota: row.CanViewUpstreamQuota, CanManageMembers: row.CanManageMembers}, nil
+	return appsec.PrincipalIdentity{ID: row.PrincipalID, AccessKeyID: row.ID, Type: principal.Type(row.PrincipalType), ExpiresAt: timePointer(row.ExpiresAt), CanManage: row.CanManage}, nil
 }
 
 // ValidateCredentials 确认 MASTER_KEY 可以解密全部现有凭据，失败时不修改数据。

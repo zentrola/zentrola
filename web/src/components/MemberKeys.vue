@@ -99,19 +99,9 @@ function revoke() {
     showSuccessToast(local('revoked'))
   })
 }
-function toggleUpstreamQuota(key: AccessKey) {
-  if (!canRevoke(key) || props.kind !== 'member') return
-  void run(async () => {
-    await api(`/access-keys/${key.id}/upstream-quota-permission`, 'PUT', {
-      canViewUpstreamQuota: !key.canViewUpstreamQuota,
-    })
-    await load()
-    showSuccessToast(local('upstreamQuotaPermissionSaved'))
-  })
-}
 function toggleManagement(key: AccessKey) {
   if (!canRevoke(key) || props.kind !== 'member') return
-  if (!key.canManageMembers) {
+  if (!key.canManage) {
     managementTarget.value = key
     return
   }
@@ -119,9 +109,7 @@ function toggleManagement(key: AccessKey) {
 }
 function saveManagement(key: AccessKey, allowed: boolean) {
   void run(async () => {
-    await api(`/access-keys/${key.id}/member-management-permission`, 'PUT', {
-      canManageMembers: allowed,
-    })
+    await api(`/access-keys/${key.id}/management-permission`, 'PUT', { canManage: allowed })
     managementTarget.value = null
     await load()
     showSuccessToast(local('managementPermissionSaved'))
@@ -161,8 +149,7 @@ function saveManagement(key: AccessKey, allowed: boolean) {
             <th>{{ local('keyDisplayName') }}</th>
             <th>{{ local('assignedKeys') }}</th>
             <th>{{ local('expiryDate') }}</th>
-            <th v-if="kind === 'member'">{{ local('viewUpstreamQuota') }}</th>
-            <th v-if="kind === 'member'">{{ local('manageMembers') }}</th>
+            <th v-if="kind === 'member'">{{ local('management') }}</th>
             <th class="key-action-cell">{{ t('common.actions') }}</th>
           </tr>
         </thead>
@@ -173,30 +160,15 @@ function saveManagement(key: AccessKey, allowed: boolean) {
               <TechnicalValue :value="key.maskedKey" :copyable="false" />
             </td>
             <td>{{ expiryDate(key) }}</td>
-            <td v-if="kind === 'member'">
-              {{ key.canViewUpstreamQuota ? t('common.yes') : t('common.no') }}
-            </td>
-            <td v-if="kind === 'member'">{{ key.canManageMembers ? t('common.yes') : t('common.no') }}</td>
+            <td v-if="kind === 'member'">{{ key.canManage ? t('common.yes') : t('common.no') }}</td>
             <td class="key-action-cell">
-              <button
-                v-if="kind === 'member' && canRevoke(key)"
-                class="text-button"
-                :disabled="busy || loading"
-                @click="toggleUpstreamQuota(key)"
-              >
-                {{
-                  key.canViewUpstreamQuota
-                    ? local('revokeUpstreamQuota')
-                    : local('grantUpstreamQuota')
-                }}
-              </button>
               <button
                 v-if="kind === 'member' && canRevoke(key)"
                 class="text-button"
                 :disabled="busy || loading"
                 @click="toggleManagement(key)"
               >
-                {{ key.canManageMembers ? local('revokeManagement') : local('grantManagement') }}
+                {{ key.canManage ? local('revokeManagement') : local('grantManagement') }}
               </button>
               <button
                 v-if="canRevoke(key)"

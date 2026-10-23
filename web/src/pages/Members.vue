@@ -59,7 +59,7 @@ const statusTarget = ref<Member | null>(null),
   quotaTarget = ref<Member | null>(null),
   quotaRemovalTarget = ref<Member | null>(null)
 const keyName = ref(''),
-  canViewUpstreamQuota = ref(false),
+  canManage = ref(false),
   expires = ref(''),
   createdKey = ref<CreatedKey | null>(null)
 const { keyword, query, visible, search, reset, searching, searchingAll } = useListSearch(
@@ -179,7 +179,7 @@ function changeStatus(member: Member) {
 function openKeys(member: Member) {
   selected.value = member
   keyName.value = ''
-  canViewUpstreamQuota.value = false
+  canManage.value = false
   expires.value = ''
   actionError.value = ''
 }
@@ -210,11 +210,11 @@ function issueKey() {
     const memberID = selected.value!.id
     createdKey.value = await api<CreatedKey>(`${basePath.value}/${memberID}/keys`, 'POST', {
       name: keyName.value,
-      ...(kind === 'member' ? { canViewUpstreamQuota: canViewUpstreamQuota.value } : {}),
+      ...(kind === 'member' ? { canManage: canManage.value } : {}),
       ...(expiresAt ? { expiresAt: expiresAt.toISOString() } : {}),
     })
     keyName.value = ''
-    canViewUpstreamQuota.value = false
+    canManage.value = false
     expires.value = ''
     selected.value = null
     showSuccessToast(local('keyCreated'))
@@ -507,9 +507,10 @@ async function copyKey() {
       /></label>
       <label>{{ local('expires') }}<input v-model="expires" type="date" :disabled="busy" /></label>
       <label v-if="kind === 'member'" class="checkbox-label">
-        <input v-model="canViewUpstreamQuota" type="checkbox" :disabled="busy" />
-        {{ local('viewUpstreamQuota') }}
+        <input v-model="canManage" type="checkbox" :disabled="busy" />
+        {{ local('management') }}
       </label>
+      <p v-if="kind === 'member'" class="muted">{{ local('managementHint') }}</p>
       <p class="muted">{{ local('expiresHint') }}</p>
     </form>
     <template #footer>

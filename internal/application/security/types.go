@@ -33,11 +33,11 @@ func (e *AccountLockedError) Unwrap() error { return ErrUnauthenticated }
 
 type RequestMeta struct{ RequestID, Method, Path, IP, UserAgent string }
 type PrincipalIdentity struct {
-	ID, AccessKeyID      int64
-	Type                 principal.Type
-	ExpiresAt            *time.Time
-	CanViewUpstreamQuota bool
-	CanManageMembers     bool
+	ID, AccessKeyID int64
+	Type            principal.Type
+	ExpiresAt       *time.Time
+	// CanManage 为后台管理授权：可查看最近使用的订阅号额度并通过 MCP 管理普通成员。
+	CanManage bool
 }
 
 type Passwords interface {
@@ -60,20 +60,18 @@ type AdminStore interface {
 }
 
 type KeyRecord struct {
-	ID, PrincipalID      int64
-	PrincipalType        principal.Type
-	Hash                 []byte
-	MaskedKey, Name      string
-	ExpiresAt            *time.Time
-	CreatedAt            time.Time
-	CanViewUpstreamQuota bool
-	CanManageMembers     bool
+	ID, PrincipalID int64
+	PrincipalType   principal.Type
+	Hash            []byte
+	MaskedKey, Name string
+	ExpiresAt       *time.Time
+	CreatedAt       time.Time
+	CanManage       bool
 }
 type KeyStore interface {
 	Create(context.Context, admin.Identity, KeyRecord, RequestMeta) error
 	Revoke(context.Context, admin.Identity, int64, RequestMeta) error
-	// SetUpstreamQuotaPermission 与 SetMemberManagementPermission 返回授权值是否实际变化。
-	SetUpstreamQuotaPermission(context.Context, admin.Identity, int64, bool, RequestMeta) (bool, error)
-	SetMemberManagementPermission(context.Context, admin.Identity, int64, bool, RequestMeta) (bool, error)
+	// SetManagementPermission 返回后台管理授权是否实际变化。
+	SetManagementPermission(context.Context, admin.Identity, int64, bool, RequestMeta) (bool, error)
 	Authenticate(context.Context, []byte, time.Time) (PrincipalIdentity, error)
 }

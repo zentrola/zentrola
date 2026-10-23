@@ -105,7 +105,7 @@ func (s *SelfQuotaService) Upstream(ctx context.Context, identity appsec.Princip
 	if identity.ID <= 0 {
 		return UpstreamQuota{}, appsec.ErrUnauthenticated
 	}
-	if !identity.CanViewUpstreamQuota {
+	if !identity.CanManage {
 		return UpstreamQuota{}, ErrUpstreamQuotaForbidden
 	}
 	model = strings.TrimSpace(model)

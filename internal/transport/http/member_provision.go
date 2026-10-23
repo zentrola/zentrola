@@ -8,30 +8,6 @@ import (
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 )
 
-// @Summary 授权单把成员 Key 通过 MCP 管理普通成员
-// @Tags 访问密钥
-// @Security AdminBearer
-// @Param id path string true "Access Key ID"
-// @Param body body UpdateKeyMemberManagementRequest true "授权状态"
-// @Success 200 {object} response{data=UpdateKeyMemberManagementRequest}
-// @Router /api/v1/access-keys/{id}/member-management-permission [put]
-func (s *SecurityHandlers) setKeyMemberManagementPermission(w http.ResponseWriter, r *http.Request) {
-	id, err := positiveID(chi.URLParam(r, "id"))
-	if err != nil {
-		securityError(w, r, err)
-		return
-	}
-	input, ok := decodeRequest[UpdateKeyMemberManagementRequest](w, r)
-	if !ok {
-		return
-	}
-	if err := s.Keys.SetMemberManagementPermission(r.Context(), adminFrom(r), id, *input.CanManageMembers, requestMeta(r)); err != nil {
-		securityError(w, r, err)
-		return
-	}
-	writeJSON(w, r, http.StatusOK, response{Code: "OK", Data: input})
-}
-
 // @Summary 通过授权成员 Key 获取可选的用户分组
 // @Description 只返回启用分组，按 ID 倒序分页；将 nextCursor 作为下一次请求的 after。创建成员时从中选择至少一个分组。
 // @Tags 成员管理

@@ -159,8 +159,7 @@ func (s *SecurityHandlers) mount(r chi.Router) {
 			// @Failure 422 {object} response
 			// @Router /api/v1/access-keys/{id}/revoke [post]
 			protected.Post("/access-keys/{id}/revoke", s.revokeKey)
-			protected.Put("/access-keys/{id}/upstream-quota-permission", s.setKeyUpstreamQuotaPermission)
-			protected.Put("/access-keys/{id}/member-management-permission", s.setKeyMemberManagementPermission)
+			protected.Put("/access-keys/{id}/management-permission", s.setKeyManagementPermission)
 			if s.Management != nil {
 				s.mountManagement(protected)
 			}
@@ -393,7 +392,7 @@ func (s *SecurityHandlers) createPrincipalKey(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
-	if application && input.CanViewUpstreamQuota {
+	if application && input.CanManage {
 		securityError(w, r, appsec.ErrInvalidArgument)
 		return
 	}
@@ -401,7 +400,7 @@ func (s *SecurityHandlers) createPrincipalKey(w http.ResponseWriter, r *http.Req
 	if application {
 		created, err = s.Keys.CreateApplication(r.Context(), adminFrom(r), id, input.Name, input.ExpiresAt, requestMeta(r))
 	} else {
-		created, err = s.Keys.CreateMember(r.Context(), adminFrom(r), id, input.Name, input.ExpiresAt, input.CanViewUpstreamQuota, requestMeta(r))
+		created, err = s.Keys.CreateMember(r.Context(), adminFrom(r), id, input.Name, input.ExpiresAt, input.CanManage, requestMeta(r))
 	}
 	if err != nil {
 		securityError(w, r, err)
@@ -422,24 +421,25 @@ func (s *SecurityHandlers) revokeKey(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusOK, response{Code: "OK", Data: RevokedResponse{Revoked: true}})
 }
 
-// @Summary 设置单把成员 Access Key 的上游额度查看权限
+// @Summary 设置单把成员 Access Key 的后台管理权限
+// @Description 后台管理权限允许该 Key 查看最近使用的订阅号额度，并通过 MCP 管理普通成员。
 // @Tags 访问密钥
 // @Security AdminBearer
 // @Param id path string true "Access Key ID"
-// @Param body body UpdateKeyQuotaPermissionRequest true "授权状态"
-// @Success 200 {object} response{data=UpdateKeyQuotaPermissionRequest}
-// @Router /api/v1/access-keys/{id}/upstream-quota-permission [put]
-func (s *SecurityHandlers) setKeyUpstreamQuotaPermission(w http.ResponseWriter, r *http.Request) {
+// @Param body body UpdateKeyManagementRequest true "授权状态"
+// @Success 200 {object} response{data=UpdateKeyManagementRequest}
+// @Router /api/v1/access-keys/{id}/management-permission [put]
+func (s *SecurityHandlers) setKeyManagementPermission(w http.ResponseWriter, r *http.Request) {
 	id, err := positiveID(chi.URLParam(r, "id"))
 	if err != nil {
 		securityError(w, r, err)
 		return
 	}
-	input, ok := decodeRequest[UpdateKeyQuotaPermissionRequest](w, r)
+	input, ok := decodeRequest[UpdateKeyManagementRequest](w, r)
 	if !ok {
 		return
 	}
-	if err := s.Keys.SetUpstreamQuotaPermission(r.Context(), adminFrom(r), id, *input.CanViewUpstreamQuota, requestMeta(r)); err != nil {
+	if err := s.Keys.SetManagementPermission(r.Context(), adminFrom(r), id, *input.CanManage, requestMeta(r)); err != nil {
 		securityError(w, r, err)
 		return
 	}
@@ -485,8 +485,7 @@ var (
 	_ requestPayload = (*ChangePasswordRequest)(nil)
 	_ requestPayload = (*LoginRequest)(nil)
 	_ requestPayload = (*CreateKeyRequest)(nil)
-	_ requestPayload = (*UpdateKeyQuotaPermissionRequest)(nil)
-	_ requestPayload = (*UpdateKeyMemberManagementRequest)(nil)
+	_ requestPayload = (*UpdateKeyManagementRequest)(nil)
 	_ requestPayload = (*CreateManagedMemberRequest)(nil)
 	_ requestPayload = (*IssueManagedMemberKeyRequest)(nil)
 	_ requestPayload = (*UpdateManagedMemberStatusRequest)(nil)

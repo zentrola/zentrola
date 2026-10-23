@@ -201,8 +201,7 @@ export interface AccessKey {
   expiresAt: string | null
   revokedAt: string | null
   createdAt: string
-  canViewUpstreamQuota: boolean
-  canManageMembers: boolean
+  canManage: boolean
 }
 export interface CreatedKey {
   id: string
@@ -210,7 +209,7 @@ export interface CreatedKey {
   maskedKey: string
   name: string
   expiresAt: string | null
-  canViewUpstreamQuota: boolean
+  canManage: boolean
 }
 export interface ConnectionResult {
   ok: boolean

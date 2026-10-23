@@ -43,7 +43,7 @@ type memberManageIDs struct{ next int64 }
 func (s *memberManageIDs) NextID(context.Context) (int64, error) { s.next++; return s.next, nil }
 
 func memberManageRouter(store *memberManageStore) http.Handler {
-	identity := appsec.PrincipalIdentity{ID: 42, AccessKeyID: 7, Type: "MEMBER", CanManageMembers: true}
+	identity := appsec.PrincipalIdentity{ID: 42, AccessKeyID: 7, Type: "MEMBER", CanManage: true}
 	keys := appsec.NewKeys(&selfUsageKeyStore{identity: identity}, &memberManageIDs{next: 100})
 	return NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), health.New(), CORSOptions{}, time.Second, "prod",
 		&SecurityHandlers{Keys: keys, MemberProvisioning: appsec.NewMemberProvisioning(keys, store, nil)})

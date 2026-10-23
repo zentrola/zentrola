@@ -35,7 +35,7 @@ func TestMemberProvisionIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = pool.Exec(ctx, `INSERT INTO principal_access_key(id,principal_id,key_hash,masked_key,name,status,can_manage_members,created_by,updated_by,created_at,updated_at)
+	_, err = pool.Exec(ctx, `INSERT INTO principal_access_key(id,principal_id,key_hash,masked_key,name,status,can_manage,created_by,updated_by,created_at,updated_at)
 		VALUES(101,100,decode(repeat('ab',32),'hex'),'vk-manager********0001','Manager Key','ACTIVE',true,'system','system',now(),now())`)
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +50,7 @@ func TestMemberProvisionIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	actor := appsec.PrincipalIdentity{ID: 100, AccessKeyID: 101, Type: principal.Member, CanManageMembers: true}
+	actor := appsec.PrincipalIdentity{ID: 100, AccessKeyID: 101, Type: principal.Member, CanManage: true}
 	// 分组查询只返回启用分组，按 ID 倒序分页。
 	if _, err := pool.Exec(ctx, `INSERT INTO principal_group(id,group_code,group_name,status,created_by,updated_by,created_at,updated_at)
 		VALUES(202,'disabled-group','Disabled Group','DISABLED','system','system',now(),now())`); err != nil {
@@ -75,7 +75,7 @@ func TestMemberProvisionIntegration(t *testing.T) {
 	if kind != "MEMBER" || status != "ACTIVE" {
 		t.Fatalf("created kind=%s status=%s", kind, status)
 	}
-	if err := pool.QueryRow(ctx, `SELECT can_manage_members FROM principal_access_key WHERE id=$1`, keyID).Scan(&inherited); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT can_manage FROM principal_access_key WHERE id=$1`, keyID).Scan(&inherited); err != nil {
 		t.Fatal(err)
 	}
 	if inherited {
@@ -267,7 +267,7 @@ func TestMemberProvisionIntegration(t *testing.T) {
 	if _, err := setStatus(100, "DISABLED"); !errors.Is(err, appsec.ErrNotFound) || memberStatus(100) != "ACTIVE" {
 		t.Fatalf("manager disabled itself: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `UPDATE principal_access_key SET can_manage_members=true WHERE id=$1`, more.ID); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE principal_access_key SET can_manage=true WHERE id=$1`, more.ID); err != nil {
 		t.Fatal(err)
 	}
 	peer := nextKey(memberID, "Peer")
@@ -285,7 +285,7 @@ func TestMemberProvisionIntegration(t *testing.T) {
 		t.Fatalf("admin duplicate member name: %v", err)
 	}
 
-	if _, err := pool.Exec(ctx, `UPDATE principal_access_key SET can_manage_members=false WHERE id=101`); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE principal_access_key SET can_manage=false WHERE id=101`); err != nil {
 		t.Fatal(err)
 	}
 	key.ID, key.Name = keyID+1000, "Denied"

@@ -71,7 +71,7 @@ func (s *MemberProvisionStore) CreateMemberAndKey(ctx context.Context, actor app
 		if err := s.audit(ctx, q, actor, "MEMBER", operation.MemberCreate, "PRINCIPAL", memberID, name, map[string]any{"status": "ACTIVE", "principalType": "MEMBER"}, meta); err != nil {
 			return err
 		}
-		return s.audit(ctx, q, actor, "ACCESS_KEY", operation.AccessKeyCreate, "ACCESS_KEY", key.ID, key.Name, map[string]any{"status": "ACTIVE", "principalId": strconv.FormatInt(memberID, 10), "maskedKey": key.MaskedKey, "canManageMembers": false, "canViewUpstreamQuota": false}, meta)
+		return s.audit(ctx, q, actor, "ACCESS_KEY", operation.AccessKeyCreate, "ACCESS_KEY", key.ID, key.Name, map[string]any{"status": "ACTIVE", "principalId": strconv.FormatInt(memberID, 10), "maskedKey": key.MaskedKey, "canManage": false}, meta)
 	})
 }
 
@@ -88,7 +88,7 @@ func (s *MemberProvisionStore) IssueMemberKey(ctx context.Context, actor appsec.
 		if err := s.insertKey(ctx, q, key, operator); err != nil {
 			return err
 		}
-		return s.audit(ctx, q, actor, "ACCESS_KEY", operation.AccessKeyCreate, "ACCESS_KEY", key.ID, key.Name, map[string]any{"status": "ACTIVE", "principalId": strconv.FormatInt(key.PrincipalID, 10), "maskedKey": key.MaskedKey, "canManageMembers": false, "canViewUpstreamQuota": false}, meta)
+		return s.audit(ctx, q, actor, "ACCESS_KEY", operation.AccessKeyCreate, "ACCESS_KEY", key.ID, key.Name, map[string]any{"status": "ACTIVE", "principalId": strconv.FormatInt(key.PrincipalID, 10), "maskedKey": key.MaskedKey, "canManage": false}, meta)
 	})
 }
 
@@ -128,7 +128,7 @@ func (s *MemberProvisionStore) SetMemberStatus(ctx context.Context, actor appsec
 func lockManagedMember(ctx context.Context, tx pgx.Tx, memberID, actorID int64) (name, status string, err error) {
 	err = tx.QueryRow(ctx, `SELECT p.name,p.status FROM principal p
 		WHERE p.id=$1 AND p.id<>$2 AND p.principal_type='MEMBER' AND NOT p.is_deleted
-		AND NOT EXISTS (SELECT 1 FROM principal_access_key m WHERE m.principal_id=p.id AND m.can_manage_members
+		AND NOT EXISTS (SELECT 1 FROM principal_access_key m WHERE m.principal_id=p.id AND m.can_manage
 			AND NOT m.is_deleted AND m.status='ACTIVE' AND m.revoked_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>now()))
 		FOR UPDATE OF p`, memberID, actorID).Scan(&name, &status)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -201,7 +201,7 @@ func (s *MemberProvisionStore) ActiveGroups(ctx context.Context, actor appsec.Pr
 // 写事务加共享锁，防止授权在本次写入期间被撤销；只读事务不能加锁。
 func authorizeManager(ctx context.Context, tx pgx.Tx, actor appsec.PrincipalIdentity, lock bool) error {
 	query := `SELECT true FROM principal_access_key k JOIN principal p ON p.id=k.principal_id
-		WHERE k.id=$1 AND k.principal_id=$2 AND k.can_manage_members AND NOT k.is_deleted AND k.status='ACTIVE'
+		WHERE k.id=$1 AND k.principal_id=$2 AND k.can_manage AND NOT k.is_deleted AND k.status='ACTIVE'
 		AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>now())
 		AND p.principal_type='MEMBER' AND p.status='ACTIVE' AND NOT p.is_deleted`
 	if lock {
@@ -216,7 +216,7 @@ func authorizeManager(ctx context.Context, tx pgx.Tx, actor appsec.PrincipalIden
 }
 
 func (s *MemberProvisionStore) insertKey(ctx context.Context, q *dbgen.Queries, key appsec.KeyRecord, operator string) error {
-	return q.CreateAccessKey(ctx, dbgen.CreateAccessKeyParams{ID: key.ID, PrincipalID: key.PrincipalID, KeyHash: key.Hash, MaskedKey: key.MaskedKey, Name: key.Name, ExpiresAt: nullableTime(key.ExpiresAt), CanViewUpstreamQuota: false, CreatedBy: operator, CreatedAt: pgTime(key.CreatedAt)})
+	return q.CreateAccessKey(ctx, dbgen.CreateAccessKeyParams{ID: key.ID, PrincipalID: key.PrincipalID, KeyHash: key.Hash, MaskedKey: key.MaskedKey, Name: key.Name, ExpiresAt: nullableTime(key.ExpiresAt), CanManage: false, CreatedBy: operator, CreatedAt: pgTime(key.CreatedAt)})
 }
 
 func (s *MemberProvisionStore) audit(ctx context.Context, q *dbgen.Queries, actor appsec.PrincipalIdentity, module string, event operation.Type, target string, targetID int64, targetName string, after any, meta appsec.RequestMeta) error {

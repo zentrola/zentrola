@@ -102,10 +102,7 @@ func (*keyStoreStub) Create(context.Context, admin.Identity, appsec.KeyRecord, a
 func (*keyStoreStub) Revoke(context.Context, admin.Identity, int64, appsec.RequestMeta) error {
 	return nil
 }
-func (s *keyStoreStub) SetUpstreamQuotaPermission(context.Context, admin.Identity, int64, bool, appsec.RequestMeta) (bool, error) {
-	return s.permissionChanged, nil
-}
-func (s *keyStoreStub) SetMemberManagementPermission(context.Context, admin.Identity, int64, bool, appsec.RequestMeta) (bool, error) {
+func (s *keyStoreStub) SetManagementPermission(context.Context, admin.Identity, int64, bool, appsec.RequestMeta) (bool, error) {
 	return s.permissionChanged, nil
 }
 func (s *keyStoreStub) Authenticate(context.Context, []byte, time.Time) (appsec.PrincipalIdentity, error) {
@@ -228,17 +225,17 @@ func TestKeyPermissionChangeInvalidatesIdentityCacheOnlyWhenChanged(t *testing.T
 		changed bool
 		set     func(*KeyStore) (bool, error)
 	}{
-		{name: "member management changed", changed: true, set: func(s *KeyStore) (bool, error) {
-			return s.SetMemberManagementPermission(context.Background(), admin.Identity{ID: 1}, 34, true, appsec.RequestMeta{})
+		{name: "grant changed", changed: true, set: func(s *KeyStore) (bool, error) {
+			return s.SetManagementPermission(context.Background(), admin.Identity{ID: 1}, 34, true, appsec.RequestMeta{})
 		}},
-		{name: "member management unchanged", set: func(s *KeyStore) (bool, error) {
-			return s.SetMemberManagementPermission(context.Background(), admin.Identity{ID: 1}, 34, true, appsec.RequestMeta{})
+		{name: "grant unchanged", set: func(s *KeyStore) (bool, error) {
+			return s.SetManagementPermission(context.Background(), admin.Identity{ID: 1}, 34, true, appsec.RequestMeta{})
 		}},
-		{name: "upstream quota changed", changed: true, set: func(s *KeyStore) (bool, error) {
-			return s.SetUpstreamQuotaPermission(context.Background(), admin.Identity{ID: 1}, 34, false, appsec.RequestMeta{})
+		{name: "revoke changed", changed: true, set: func(s *KeyStore) (bool, error) {
+			return s.SetManagementPermission(context.Background(), admin.Identity{ID: 1}, 34, false, appsec.RequestMeta{})
 		}},
-		{name: "upstream quota unchanged", set: func(s *KeyStore) (bool, error) {
-			return s.SetUpstreamQuotaPermission(context.Background(), admin.Identity{ID: 1}, 34, false, appsec.RequestMeta{})
+		{name: "revoke unchanged", set: func(s *KeyStore) (bool, error) {
+			return s.SetManagementPermission(context.Background(), admin.Identity{ID: 1}, 34, false, appsec.RequestMeta{})
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -29,13 +29,13 @@ type Keys struct {
 	entropy io.Reader
 }
 type CreatedKey struct {
-	ID                   int64      `json:"id,string"`
-	Key                  string     `json:"key"`
-	MaskedKey            string     `json:"maskedKey"`
-	Name                 string     `json:"name"`
-	ExpiresAt            *time.Time `json:"expiresAt"`
-	CanViewUpstreamQuota bool       `json:"canViewUpstreamQuota"`
-	CanManageMembers     bool       `json:"canManageMembers"`
+	ID        int64      `json:"id,string"`
+	Key       string     `json:"key"`
+	MaskedKey string     `json:"maskedKey"`
+	Name      string     `json:"name"`
+	ExpiresAt *time.Time `json:"expiresAt"`
+	// CanManage 为后台管理授权：可查看最近使用的订阅号额度并通过 MCP 管理普通成员。
+	CanManage bool `json:"canManage"`
 }
 
 func NewKeys(store KeyStore, ids shared.IDGenerator) *Keys {
@@ -46,16 +46,16 @@ func (s *Keys) Create(ctx context.Context, actor admin.Identity, principalID int
 	return s.CreateMember(ctx, actor, principalID, name, expires, false, meta)
 }
 
-func (s *Keys) CreateMember(ctx context.Context, actor admin.Identity, principalID int64, name string, expires *time.Time, canViewUpstreamQuota bool, meta RequestMeta) (CreatedKey, error) {
-	return s.create(ctx, actor, principalID, principal.Member, name, expires, canViewUpstreamQuota, meta)
+func (s *Keys) CreateMember(ctx context.Context, actor admin.Identity, principalID int64, name string, expires *time.Time, canManage bool, meta RequestMeta) (CreatedKey, error) {
+	return s.create(ctx, actor, principalID, principal.Member, name, expires, canManage, meta)
 }
 
 func (s *Keys) CreateApplication(ctx context.Context, actor admin.Identity, principalID int64, name string, expires *time.Time, meta RequestMeta) (CreatedKey, error) {
 	return s.create(ctx, actor, principalID, principal.Application, name, expires, false, meta)
 }
 
-func (s *Keys) create(ctx context.Context, actor admin.Identity, principalID int64, kind principal.Type, name string, expires *time.Time, canViewUpstreamQuota bool, meta RequestMeta) (CreatedKey, error) {
-	row, created, err := s.prepare(ctx, principalID, kind, name, expires, canViewUpstreamQuota)
+func (s *Keys) create(ctx context.Context, actor admin.Identity, principalID int64, kind principal.Type, name string, expires *time.Time, canManage bool, meta RequestMeta) (CreatedKey, error) {
+	row, created, err := s.prepare(ctx, principalID, kind, name, expires, canManage)
 	if err != nil {
 		return CreatedKey{}, err
 	}
@@ -65,7 +65,7 @@ func (s *Keys) create(ctx context.Context, actor admin.Identity, principalID int
 	return created, nil
 }
 
-func (s *Keys) prepare(ctx context.Context, principalID int64, kind principal.Type, name string, expires *time.Time, canViewUpstreamQuota bool) (KeyRecord, CreatedKey, error) {
+func (s *Keys) prepare(ctx context.Context, principalID int64, kind principal.Type, name string, expires *time.Time, canManage bool) (KeyRecord, CreatedKey, error) {
 	now := time.Now().UTC()
 	if principalID <= 0 || strings.TrimSpace(name) == "" || strings.ContainsRune(name, 0) || len(name) > 128 || (expires != nil && !expires.After(now)) {
 		return KeyRecord{}, CreatedKey{}, ErrInvalidArgument
@@ -89,9 +89,9 @@ func (s *Keys) prepare(ctx context.Context, principalID int64, kind principal.Ty
 		return KeyRecord{}, CreatedKey{}, ErrUnavailable
 	}
 	maskedKey := full[:len(marker)+keyPrefixChars] + keyMask + full[len(full)-keySuffixChars:]
-	row := KeyRecord{ID: id, PrincipalID: principalID, PrincipalType: kind, Hash: digest[:], MaskedKey: maskedKey, Name: name, ExpiresAt: expires, CreatedAt: now, CanViewUpstreamQuota: canViewUpstreamQuota}
+	row := KeyRecord{ID: id, PrincipalID: principalID, PrincipalType: kind, Hash: digest[:], MaskedKey: maskedKey, Name: name, ExpiresAt: expires, CreatedAt: now, CanManage: canManage}
 	// 完整值仅存在于本次创建返回值，不传给 Repository 或操作日志。
-	return row, CreatedKey{ID: id, Key: full, MaskedKey: row.MaskedKey, Name: name, ExpiresAt: expires, CanViewUpstreamQuota: canViewUpstreamQuota}, nil
+	return row, CreatedKey{ID: id, Key: full, MaskedKey: row.MaskedKey, Name: name, ExpiresAt: expires, CanManage: canManage}, nil
 }
 func (s *Keys) Revoke(ctx context.Context, actor admin.Identity, keyID int64, meta RequestMeta) error {
 	if keyID <= 0 {
@@ -100,18 +100,11 @@ func (s *Keys) Revoke(ctx context.Context, actor admin.Identity, keyID int64, me
 	return s.store.Revoke(ctx, actor, keyID, meta)
 }
 
-func (s *Keys) SetUpstreamQuotaPermission(ctx context.Context, actor admin.Identity, keyID int64, allowed bool, meta RequestMeta) error {
+func (s *Keys) SetManagementPermission(ctx context.Context, actor admin.Identity, keyID int64, allowed bool, meta RequestMeta) error {
 	if keyID <= 0 {
 		return ErrInvalidArgument
 	}
-	_, err := s.store.SetUpstreamQuotaPermission(ctx, actor, keyID, allowed, meta)
-	return err
-}
-func (s *Keys) SetMemberManagementPermission(ctx context.Context, actor admin.Identity, keyID int64, allowed bool, meta RequestMeta) error {
-	if keyID <= 0 {
-		return ErrInvalidArgument
-	}
-	_, err := s.store.SetMemberManagementPermission(ctx, actor, keyID, allowed, meta)
+	_, err := s.store.SetManagementPermission(ctx, actor, keyID, allowed, meta)
 	return err
 }
 func (s *Keys) Authenticate(ctx context.Context, full string) (PrincipalIdentity, error) {

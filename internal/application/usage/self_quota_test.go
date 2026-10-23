@@ -61,7 +61,7 @@ func TestSelfQuotaUnlimitedAndUpstreamAuthorization(t *testing.T) {
 	if _, err := service.Upstream(context.Background(), identity, "gpt-test", time.Now().UTC()); !errors.Is(err, ErrUpstreamQuotaForbidden) || store.upstreamCalls != 0 {
 		t.Fatalf("err=%v calls=%d", err, store.upstreamCalls)
 	}
-	identity.CanViewUpstreamQuota = true
+	identity.CanManage = true
 	if _, err := service.Upstream(context.Background(), identity, "gpt-test", time.Now().UTC()); err != nil || store.upstreamCalls != 1 {
 		t.Fatalf("err=%v calls=%d", err, store.upstreamCalls)
 	}
@@ -69,7 +69,7 @@ func TestSelfQuotaUnlimitedAndUpstreamAuthorization(t *testing.T) {
 
 func TestSelfQuotaUpstreamHidesStaleSnapshot(t *testing.T) {
 	now := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
-	identity := appsec.PrincipalIdentity{ID: 5, AccessKeyID: 7, CanViewUpstreamQuota: true}
+	identity := appsec.PrincipalIdentity{ID: 5, AccessKeyID: 7, CanManage: true}
 	for _, tc := range []struct {
 		name      string
 		checkedAt *time.Time

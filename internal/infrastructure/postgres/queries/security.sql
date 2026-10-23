@@ -31,7 +31,7 @@ SELECT * FROM principal
 WHERE id=sqlc.arg(principal_id) AND principal_type=sqlc.arg(principal_type) AND is_deleted=false FOR UPDATE;
 
 -- name: CreateAccessKey :exec
-INSERT INTO principal_access_key (id,principal_id,key_hash,masked_key,name,status,expires_at,can_view_upstream_quota,created_by,updated_by,created_at,updated_at)
+INSERT INTO principal_access_key (id,principal_id,key_hash,masked_key,name,status,expires_at,can_manage,created_by,updated_by,created_at,updated_at)
 VALUES ($1,$2,$3,$4,$5,'ACTIVE',$6,$7,$8,$8,$9,$9);
 
 -- name: GetKeyForRevoke :one
@@ -43,7 +43,7 @@ updated_by=sqlc.arg(updated_by),updated_at=sqlc.arg(revoked_at)
 WHERE id=sqlc.arg(id) AND is_deleted=false;
 
 -- name: AuthenticateAccessKey :one
-SELECT k.id,k.principal_id,p.principal_type,k.expires_at,k.can_view_upstream_quota,k.can_manage_members FROM principal_access_key k
+SELECT k.id,k.principal_id,p.principal_type,k.expires_at,k.can_manage FROM principal_access_key k
 JOIN principal p ON p.id=k.principal_id
 WHERE k.key_hash=$1 AND k.is_deleted=false AND k.status='ACTIVE' AND k.revoked_at IS NULL
 AND (k.expires_at IS NULL OR k.expires_at > sqlc.arg(now)::timestamptz)

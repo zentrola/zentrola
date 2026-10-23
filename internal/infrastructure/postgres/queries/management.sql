@@ -359,7 +359,7 @@ SET runtime_status='BLOCKED',blocked_reason=$2,blocked_at=$3,last_error_at=$3,
 WHERE id=$1 AND is_deleted=false AND version=sqlc.arg(expected_version);
 
 -- name: ManageKeys :many
-SELECT id,name,masked_key,status,expires_at,revoked_at,created_at,can_view_upstream_quota,can_manage_members FROM principal_access_key
+SELECT id,name,masked_key,status,expires_at,revoked_at,created_at,can_manage FROM principal_access_key
 WHERE principal_id=$1 AND is_deleted=false
   AND (sqlc.arg(include_expired)::boolean OR
        (status='ACTIVE' AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>sqlc.arg(at)::timestamptz)))

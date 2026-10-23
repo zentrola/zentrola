@@ -394,17 +394,18 @@
                 }
             }
         },
-        "/api/v1/access-keys/{id}/member-management-permission": {
+        "/api/v1/access-keys/{id}/management-permission": {
             "put": {
                 "security": [
                     {
                         "AdminBearer": []
                     }
                 ],
+                "description": "后台管理权限允许该 Key 查看最近使用的订阅号额度，并通过 MCP 管理普通成员。",
                 "tags": [
                     "访问密钥"
                 ],
-                "summary": "授权单把成员 Key 通过 MCP 管理普通成员",
+                "summary": "设置单把成员 Access Key 的后台管理权限",
                 "parameters": [
                     {
                         "type": "string",
@@ -419,7 +420,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/http.UpdateKeyMemberManagementRequest"
+                            "$ref": "#/definitions/http.UpdateKeyManagementRequest"
                         }
                     }
                 ],
@@ -435,7 +436,7 @@
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/http.UpdateKeyMemberManagementRequest"
+                                            "$ref": "#/definitions/http.UpdateKeyManagementRequest"
                                         }
                                     }
                                 }
@@ -527,57 +528,6 @@
                         "description": "Service Unavailable",
                         "schema": {
                             "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/access-keys/{id}/upstream-quota-permission": {
-            "put": {
-                "security": [
-                    {
-                        "AdminBearer": []
-                    }
-                ],
-                "tags": [
-                    "访问密钥"
-                ],
-                "summary": "设置单把成员 Access Key 的上游额度查看权限",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Access Key ID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "授权状态",
-                        "name": "body",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/http.UpdateKeyQuotaPermissionRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "data": {
-                                            "$ref": "#/definitions/http.UpdateKeyQuotaPermissionRequest"
-                                        }
-                                    }
-                                }
-                            ]
                         }
                     }
                 }
@@ -10608,7 +10558,8 @@
                 "name"
             ],
             "properties": {
-                "canViewUpstreamQuota": {
+                "canManage": {
+                    "description": "CanManage 授予成员 Key 后台管理权限：查看最近使用的订阅号额度并通过 MCP 管理普通成员；应用 Key 不支持。",
                     "type": "boolean"
                 },
                 "expiresAt": {
@@ -11381,18 +11332,10 @@
                 }
             }
         },
-        "http.UpdateKeyMemberManagementRequest": {
+        "http.UpdateKeyManagementRequest": {
             "type": "object",
             "properties": {
-                "canManageMembers": {
-                    "type": "boolean"
-                }
-            }
-        },
-        "http.UpdateKeyQuotaPermissionRequest": {
-            "type": "object",
-            "properties": {
-                "canViewUpstreamQuota": {
+                "canManage": {
                     "type": "boolean"
                 }
             }
@@ -11564,10 +11507,7 @@
         "management.Key": {
             "type": "object",
             "properties": {
-                "canManageMembers": {
-                    "type": "boolean"
-                },
-                "canViewUpstreamQuota": {
+                "canManage": {
                     "type": "boolean"
                 },
                 "createdAt": {
@@ -12354,10 +12294,8 @@
         "security.CreatedKey": {
             "type": "object",
             "properties": {
-                "canManageMembers": {
-                    "type": "boolean"
-                },
-                "canViewUpstreamQuota": {
+                "canManage": {
+                    "description": "CanManage 为后台管理授权：可查看最近使用的订阅号额度并通过 MCP 管理普通成员。",
                     "type": "boolean"
                 },
                 "expiresAt": {

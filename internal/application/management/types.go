@@ -339,15 +339,14 @@ type SubscriptionCredentialExporter interface {
 	ExportCredential([]byte) ([]byte, error)
 }
 type Key struct {
-	ID                   int64      `json:"id,string"`
-	Name                 string     `json:"name"`
-	MaskedKey            string     `json:"maskedKey"`
-	Status               string     `json:"status"`
-	ExpiresAt            *time.Time `json:"expiresAt"`
-	RevokedAt            *time.Time `json:"revokedAt"`
-	CreatedAt            time.Time  `json:"createdAt"`
-	CanViewUpstreamQuota bool       `json:"canViewUpstreamQuota"`
-	CanManageMembers     bool       `json:"canManageMembers"`
+	ID        int64      `json:"id,string"`
+	Name      string     `json:"name"`
+	MaskedKey string     `json:"maskedKey"`
+	Status    string     `json:"status"`
+	ExpiresAt *time.Time `json:"expiresAt"`
+	RevokedAt *time.Time `json:"revokedAt"`
+	CreatedAt time.Time  `json:"createdAt"`
+	CanManage bool       `json:"canManage"`
 }
 type Operation struct {
 	ID           int64           `json:"id,string"`

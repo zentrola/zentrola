@@ -244,10 +244,8 @@ type PrincipalAccessKey struct {
 	CreatedAt pgtype.Timestamptz
 	// 更新时间，UTC
 	UpdatedAt pgtype.Timestamptz
-	// 允许该成员 Key 查看自己最近实际使用的订阅号额度快照
-	CanViewUpstreamQuota bool
-	// 允许成员 Key 通过受限 MCP 接口创建普通成员和签发普通成员 Key
-	CanManageMembers bool
+	// 后台管理授权：允许成员 Key 查看最近使用的订阅号额度，并通过受限 MCP 接口管理普通成员
+	CanManage bool
 }
 
 // 调用主体的 AI 使用治理分组

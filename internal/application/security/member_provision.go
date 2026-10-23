@@ -133,7 +133,7 @@ func validateMemberManager(actor PrincipalIdentity) error {
 	if actor.ID <= 0 || actor.AccessKeyID <= 0 || actor.Type != principal.Member {
 		return ErrUnauthenticated
 	}
-	if !actor.CanManageMembers {
+	if !actor.CanManage {
 		return ErrForbidden
 	}
 	return nil

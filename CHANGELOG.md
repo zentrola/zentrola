@@ -8,10 +8,10 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 
 ### Added / 新增
 
-- Member Access Keys can be individually authorized to view the saved quota snapshot of the subscription most recently used by that Key for a specified model. Members can query their current UTC-month Token usage and personal quota; model-specific remaining quota uses the smallest remaining amount across the member and applicable groups.
-- 成员 Access Key 可单独授权查看该 Key 指定模型最近使用的订阅号额度快照。成员可查询当前 UTC 月所有模型的 Token 总用量及个人额度；指定模型的剩余额度取个人与适用用户组中的最小值。
-- Authorized member Keys can, through MCP, list active groups (`GET /api/v1/me/manage/groups`), create ordinary members with an active first Key in at least one active group, issue ordinary Keys to any ordinary member, and enable or disable ordinary members (`PUT /api/v1/me/manage/members/{id}/status`). The operator's own member and members holding management permission cannot be targeted. Issuing a Key never changes member status and is rejected with `MEMBER_DISABLED` for disabled members. Disabling a member blocks all of its Keys immediately without revoking them, and re-enabling restores them; enabling requires at least one valid Key. These tools cannot create administrators or issue Keys to administrator accounts. Member creation, first-Key issuance, group assignment, and activation commit together. Newly issued Keys never inherit management permission.
-- 获单独授权的成员 Key 可通过 MCP 查询启用分组（`GET /api/v1/me/manage/groups`），创建普通成员（必须指定至少一个启用分组）及已启用的首把 Key，可为任意普通成员签发普通 Key，并可启停用普通成员（`PUT /api/v1/me/manage/members/{id}/status`）。操作者本人及持有管理授权的成员不能作为操作对象。签发 Key 不改变成员状态，停用成员签发时返回 `MEMBER_DISABLED`。停用后该成员全部 Key 立即无法认证但不注销，重新启用后恢复可用；启用要求成员至少有一把有效 Key。这些工具不能创建管理员，也不能为管理员账号签发 Key。创建成员、分组分配、签发首把 Key 与启用操作在同一事务提交；新 Key 不继承管理权限。
+- Member Access Keys can be granted admin access with a single checkbox when issued, or toggled later from the Key list (`PUT /api/v1/access-keys/{id}/management-permission`). Keys without it are ordinary Keys. A Key with admin access can view the saved quota snapshot of the subscription most recently used by that Key for a specified model, and can manage ordinary members through MCP as described below. Members can query their current UTC-month Token usage and personal quota; model-specific remaining quota uses the smallest remaining amount across the member and applicable groups.
+- 成员 Access Key 签发时可勾选“后台管理”，也可在 Key 列表中随时切换（`PUT /api/v1/access-keys/{id}/management-permission`）；未勾选的是普通 Key。具备后台管理权限的 Key 可查看该 Key 指定模型最近使用的订阅号额度快照，并可按下文通过 MCP 管理普通成员。成员可查询当前 UTC 月所有模型的 Token 总用量及个人额度；指定模型的剩余额度取个人与适用用户组中的最小值。
+- Member Keys with admin access can, through MCP, list active groups (`GET /api/v1/me/manage/groups`), create ordinary members with an active first Key in at least one active group, issue ordinary Keys to any ordinary member, and enable or disable ordinary members (`PUT /api/v1/me/manage/members/{id}/status`). The operator's own member and members holding management permission cannot be targeted. Issuing a Key never changes member status and is rejected with `MEMBER_DISABLED` for disabled members. Disabling a member blocks all of its Keys immediately without revoking them, and re-enabling restores them; enabling requires at least one valid Key. These tools cannot create administrators or issue Keys to administrator accounts. Member creation, first-Key issuance, group assignment, and activation commit together. Newly issued Keys never inherit management permission.
+- 具备后台管理权限的成员 Key 可通过 MCP 查询启用分组（`GET /api/v1/me/manage/groups`），创建普通成员（必须指定至少一个启用分组）及已启用的首把 Key，可为任意普通成员签发普通 Key，并可启停用普通成员（`PUT /api/v1/me/manage/members/{id}/status`）。操作者本人及持有管理授权的成员不能作为操作对象。签发 Key 不改变成员状态，停用成员签发时返回 `MEMBER_DISABLED`。停用后该成员全部 Key 立即无法认证但不注销，重新启用后恢复可用；启用要求成员至少有一把有效 Key。这些工具不能创建管理员，也不能为管理员账号签发 Key。创建成员、分组分配、签发首把 Key 与启用操作在同一事务提交；新 Key 不继承管理权限。
 
 ### Changed / 变更
 
@@ -20,10 +20,12 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 
 ### Upgrade / 升级
 
-- Database migrations `00059`–`00062` add per-Key quota and member-management authorization, associate new usage records with Access Keys, index recent Key usage, and extend audit event and operator types. Historical usage records have no Access Key association. No configuration change is required.
-- 数据库迁移 `00059`–`00062` 新增单 Key 额度与成员管理授权、为新用量记录关联 Access Key、建立最近用量索引，并扩展审计事件和操作人类型；历史用量记录没有 Access Key 关联。无需配置变更。
+- Database migrations `00059`–`00062` add per-Key authorization columns, associate new usage records with Access Keys, index recent Key usage, and extend audit event and operator types. Historical usage records have no Access Key association. No configuration change is required.
+- 数据库迁移 `00059`–`00062` 新增单 Key 授权字段、为新用量记录关联 Access Key、建立最近用量索引，并扩展审计事件和操作人类型；历史用量记录没有 Access Key 关联。无需配置变更。
 - Migration `00063` adds a unique index on undeleted member names. If duplicate names exist, the migration fails without changing data and the error message includes a query that lists them; rename the duplicates and restart.
 - 迁移 `00063` 为未删除成员名称建立唯一索引。若已存在重名成员，迁移会失败且不修改数据，错误信息附带查询重名成员的 SQL；改名后重新启动即可。
+- Migration `00064` merges the per-Key quota and member-management columns into a single `can_manage` admin-access column. Keys that had member-management permission keep admin access; Keys that only had quota viewing become ordinary Keys and must be granted admin access again if needed.
+- 迁移 `00064` 将单 Key 的额度查看与成员管理两个授权字段合并为单一的后台管理字段 `can_manage`。原有成员管理授权的 Key 保留后台管理权限；仅有额度查看授权的 Key 变为普通 Key，如有需要请重新授权。
 
 ## [1.2.3] - 2026-10-23
 

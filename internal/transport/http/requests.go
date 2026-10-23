@@ -164,8 +164,9 @@ func (r LoginRequest) Valid() bool {
 }
 
 type CreateKeyRequest struct {
-	Name                 string `json:"name" binding:"required" example:"Claude Code"`
-	CanViewUpstreamQuota bool   `json:"canViewUpstreamQuota"`
+	Name string `json:"name" binding:"required" example:"Claude Code"`
+	// CanManage 授予成员 Key 后台管理权限：查看最近使用的订阅号额度并通过 MCP 管理普通成员；应用 Key 不支持。
+	CanManage bool `json:"canManage"`
 	// ExpiresAt 是以 Z 结尾的 UTC RFC3339 时间。
 	ExpiresAt *time.Time `json:"expiresAt" example:"2027-01-01T00:00:00Z"`
 }
@@ -176,16 +177,12 @@ func (r CreateKeyRequest) Valid() bool {
 		(r.ExpiresAt == nil || r.ExpiresAt.After(time.Now().UTC()))
 }
 
-type UpdateKeyQuotaPermissionRequest struct {
-	CanViewUpstreamQuota *bool `json:"canViewUpstreamQuota"`
+type UpdateKeyManagementRequest struct {
+	CanManage *bool `json:"canManage"`
 }
 
-type UpdateKeyMemberManagementRequest struct {
-	CanManageMembers *bool `json:"canManageMembers"`
-}
-
-func (r *UpdateKeyMemberManagementRequest) Normalize() {}
-func (r UpdateKeyMemberManagementRequest) Valid() bool { return r.CanManageMembers != nil }
+func (r *UpdateKeyManagementRequest) Normalize() {}
+func (r UpdateKeyManagementRequest) Valid() bool { return r.CanManage != nil }
 
 type CreateManagedMemberRequest struct {
 	Name   string `json:"name"`
@@ -220,9 +217,6 @@ type IssueManagedMemberKeyRequest struct {
 
 func (r *IssueManagedMemberKeyRequest) Normalize() { r.Name = strings.TrimSpace(r.Name) }
 func (r IssueManagedMemberKeyRequest) Valid() bool { return validRequestText(r.Name, 128, true) }
-
-func (r *UpdateKeyQuotaPermissionRequest) Normalize() {}
-func (r UpdateKeyQuotaPermissionRequest) Valid() bool { return r.CanViewUpstreamQuota != nil }
 
 type CreateMemberRequest struct {
 	Name     string   `json:"name" binding:"required" example:"开发者"`

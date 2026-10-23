@@ -25,10 +25,7 @@ func (s *keyTestStore) Create(_ context.Context, _ admin.Identity, row KeyRecord
 	return nil
 }
 func (s *keyTestStore) Revoke(context.Context, admin.Identity, int64, RequestMeta) error { return nil }
-func (s *keyTestStore) SetUpstreamQuotaPermission(context.Context, admin.Identity, int64, bool, RequestMeta) (bool, error) {
-	return true, nil
-}
-func (s *keyTestStore) SetMemberManagementPermission(context.Context, admin.Identity, int64, bool, RequestMeta) (bool, error) {
+func (s *keyTestStore) SetManagementPermission(context.Context, admin.Identity, int64, bool, RequestMeta) (bool, error) {
 	return true, nil
 }
 func (s *keyTestStore) Authenticate(_ context.Context, digest []byte, _ time.Time) (PrincipalIdentity, error) {
@@ -114,21 +111,21 @@ func TestCreateApplicationKeyUsesDistinctMarkerAndPrincipalType(t *testing.T) {
 	}
 }
 
-func TestMemberKeyUpstreamQuotaGrantIsIndividual(t *testing.T) {
+func TestMemberKeyManagementGrantIsIndividual(t *testing.T) {
 	store := &keyTestStore{}
 	keys := NewKeys(store, keyTestIDs{})
-	created, err := keys.CreateMember(context.Background(), admin.Identity{ID: 1}, 3, "quota viewer", nil, true, RequestMeta{})
+	created, err := keys.CreateMember(context.Background(), admin.Identity{ID: 1}, 3, "manager", nil, true, RequestMeta{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !created.CanViewUpstreamQuota || !store.row.CanViewUpstreamQuota {
+	if !created.CanManage || !store.row.CanManage {
 		t.Fatal("grant was not saved on the key")
 	}
 	app, err := keys.CreateApplication(context.Background(), admin.Identity{ID: 1}, 4, "app", nil, RequestMeta{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if app.CanViewUpstreamQuota || store.row.CanViewUpstreamQuota {
+	if app.CanManage || store.row.CanManage {
 		t.Fatal("application key inherited member grant")
 	}
 }

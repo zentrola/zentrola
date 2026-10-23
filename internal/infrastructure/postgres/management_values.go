@@ -104,7 +104,7 @@ func resourceView(r dbgen.ManageResourcesRow) mgmt.Resource {
 }
 
 func keyView(r dbgen.ManageKeysRow) mgmt.Key {
-	return mgmt.Key{ID: r.ID, Name: r.Name, MaskedKey: r.MaskedKey, Status: r.Status, ExpiresAt: timePointer(r.ExpiresAt), RevokedAt: timePointer(r.RevokedAt), CreatedAt: r.CreatedAt.Time.UTC(), CanViewUpstreamQuota: r.CanViewUpstreamQuota, CanManageMembers: r.CanManageMembers}
+	return mgmt.Key{ID: r.ID, Name: r.Name, MaskedKey: r.MaskedKey, Status: r.Status, ExpiresAt: timePointer(r.ExpiresAt), RevokedAt: timePointer(r.RevokedAt), CreatedAt: r.CreatedAt.Time.UTC(), CanManage: r.CanManage}
 }
 
 func operationView(r dbgen.ManageOperationsRow) mgmt.Operation {

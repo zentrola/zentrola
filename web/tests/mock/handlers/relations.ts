@@ -110,13 +110,9 @@ export function handleRelations(ctx: MockContext): MockResult {
   if (segments[0] === 'access-keys') {
     if (flags.conflict) return reply(null, 409, 'CONFLICT')
     const row = keys.find((k) => k.id === segments[1])
-    if (segments[2] === 'upstream-quota-permission' && method === 'PUT') {
-      row.canViewUpstreamQuota = body.canViewUpstreamQuota
-      return reply({ canViewUpstreamQuota: row.canViewUpstreamQuota })
-    }
-    if (segments[2] === 'member-management-permission' && method === 'PUT') {
-      row.canManageMembers = body.canManageMembers
-      return reply({ canManageMembers: row.canManageMembers })
+    if (segments[2] === 'management-permission' && method === 'PUT') {
+      row.canManage = body.canManage
+      return reply({ canManage: row.canManage })
     }
     row.status = 'REVOKED'
     row.revokedAt = stamp

@@ -27,10 +27,7 @@ func (*selfUsageKeyStore) Create(context.Context, admin.Identity, appsec.KeyReco
 func (*selfUsageKeyStore) Revoke(context.Context, admin.Identity, int64, appsec.RequestMeta) error {
 	return nil
 }
-func (*selfUsageKeyStore) SetUpstreamQuotaPermission(context.Context, admin.Identity, int64, bool, appsec.RequestMeta) (bool, error) {
-	return true, nil
-}
-func (*selfUsageKeyStore) SetMemberManagementPermission(context.Context, admin.Identity, int64, bool, appsec.RequestMeta) (bool, error) {
+func (*selfUsageKeyStore) SetManagementPermission(context.Context, admin.Identity, int64, bool, appsec.RequestMeta) (bool, error) {
 	return true, nil
 }
 func (s *selfUsageKeyStore) Authenticate(context.Context, []byte, time.Time) (appsec.PrincipalIdentity, error) {

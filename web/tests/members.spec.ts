@@ -284,26 +284,21 @@ test.describe('用户与应用', () => {
       '显示名称',
       '访问密钥',
       '过期日期',
-      '允许查看当前使用订阅号的额度',
-      'MCP 成员管理',
+      '后台管理',
       '操作',
     ])
     await expect(modal(page).getByRole('columnheader', { name: '操作' })).toHaveCSS(
       'text-align',
       'center',
     )
-    await expect(modal(page).getByRole('button', { name: '授权查看额度' })).toHaveCount(1)
-    await modal(page).getByRole('button', { name: '授权查看额度' }).click()
+    await expect(modal(page).getByRole('button', { name: '授权后台管理' })).toHaveCount(1)
+    await modal(page).getByRole('button', { name: '授权后台管理' }).click()
+    await page.getByRole('dialog').last().getByRole('button', { name: '授权后台管理' }).click()
     await expect(modal(page).getByRole('row').filter({ hasText: '工作站' })).toContainText('是')
-    expect(state.keys[0].canViewUpstreamQuota).toBe(true)
-    await modal(page).getByRole('button', { name: '取消额度授权' }).click()
+    expect(state.keys[0].canManage).toBe(true)
+    await modal(page).getByRole('button', { name: '取消后台管理' }).click()
     await expect(modal(page).getByRole('row').filter({ hasText: '工作站' })).toContainText('否')
-    expect(state.keys[0].canViewUpstreamQuota).toBe(false)
-    await modal(page).getByRole('button', { name: '授权成员管理' }).click()
-    await page.getByRole('dialog').last().getByRole('button', { name: '授权成员管理' }).click()
-    expect(state.keys[0].canManageMembers).toBe(true)
-    await modal(page).getByRole('button', { name: '取消管理授权' }).click()
-    expect(state.keys[0].canManageMembers).toBe(false)
+    expect(state.keys[0].canManage).toBe(false)
     await expect(modal(page).locator('code')).toHaveText([
       'vk-revoked********1234',
       'zt_vk_temp********temp',
@@ -326,7 +321,7 @@ test.describe('用户与应用', () => {
         .getByRole('button', { name: '撤销' }),
     ).toHaveCount(0)
     await expect(
-      modal(page).getByRole('row').filter({ hasText: '临时测试' }).locator('td').nth(5),
+      modal(page).getByRole('row').filter({ hasText: '临时测试' }).locator('td').nth(4),
     ).toHaveText('-')
     const historyDialog = page.getByRole('dialog', { name: '林知远的 Key 记录', exact: true })
     const historyRevoke = historyDialog
@@ -349,7 +344,7 @@ test.describe('用户与应用', () => {
     await expect(page.locator('.toast-success')).toContainText('Key 已撤销')
     await expect(historyDialog.locator('.notice')).toHaveCount(0)
     await expect(historyRevoke).toHaveCount(0)
-    await expect(maskedKey.locator('td').nth(5)).toHaveText('-')
+    await expect(maskedKey.locator('td').nth(4)).toHaveText('-')
     expect(state.keys[0].status).toBe('REVOKED')
     expect(state.keys[1].status).toBe('ACTIVE')
     await mkdir('../.cache/web-visual', { recursive: true })
@@ -386,6 +381,8 @@ test.describe('用户与应用', () => {
     await expect(page.locator('.toast')).toContainText('不能早于今天')
     await expect(modal(page).locator('.alert.error')).toHaveCount(0)
     await modal(page).getByLabel('到期日期（可选）').fill('2099-12-31')
+    await expect(modal(page).getByLabel('后台管理')).not.toBeChecked()
+    await modal(page).getByLabel('后台管理').check()
     await modal(page).getByRole('button', { name: '密钥', exact: true }).click()
     await modal(page).getByRole('button', { name: '复制', exact: true }).click()
     await expect(page.locator('.toast-success')).toContainText('已复制')
@@ -396,6 +393,7 @@ test.describe('用户与应用', () => {
     await expect(row).not.toContainText('zt_vk_temp')
     await expect(row).not.toContainText('2020年1月1日')
     expect(state.keys).toHaveLength(4)
+    expect(state.keys.at(-1).canManage).toBe(true)
     await expect(row).not.toContainText('2099年12月31日')
     expect(
       await page.evaluate((value) => {
