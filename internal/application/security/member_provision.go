@@ -73,9 +73,6 @@ func (s *MemberProvisioning) Create(ctx context.Context, actor PrincipalIdentity
 	if err := s.store.CreateMemberAndKey(ctx, actor, memberID, name, remark, groupIDs, row, meta); err != nil {
 		return ProvisionedMember{}, err
 	}
-	if s.cache != nil {
-		s.cache.Clear(ctx, "member_provisioned")
-	}
 	return ProvisionedMember{ID: memberID, Name: name, Status: "ACTIVE", Key: created}, nil
 }
 
@@ -92,9 +89,6 @@ func (s *MemberProvisioning) IssueKey(ctx context.Context, actor PrincipalIdenti
 	}
 	if err := s.store.IssueMemberKey(ctx, actor, row, meta); err != nil {
 		return CreatedKey{}, err
-	}
-	if s.cache != nil {
-		s.cache.Clear(ctx, "member_key_issued")
 	}
 	return created, nil
 }

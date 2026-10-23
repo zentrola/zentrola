@@ -53,7 +53,7 @@ func (s *SecurityHandlers) listManagedGroups() http.HandlerFunc {
 }
 
 // @Summary 通过授权成员 Key 创建普通成员并签发首把 Key
-// @Description groupIds 必须至少包含一个启用分组。
+// @Description groupIds 必须至少包含一个启用分组；分组不存在返回 NOT_FOUND，分组已停用返回 CONFLICT，与管理员创建成员一致。
 // @Tags 成员管理
 // @Security GatewayBearer
 // @Param body body CreateManagedMemberRequest true "成员与首把 Key"

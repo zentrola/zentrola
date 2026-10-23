@@ -3,6 +3,7 @@ package postgres
 import (
 	"errors"
 	"io/fs"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 
+	mgmt "github.com/zentrola/zentrola/internal/application/management"
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	"github.com/zentrola/zentrola/internal/domain/principal"
 	"github.com/zentrola/zentrola/internal/infrastructure/idgen"
@@ -92,6 +94,44 @@ func TestMemberProvisionIntegration(t *testing.T) {
 	}
 	if audited != 3 {
 		t.Fatalf("audit count=%d, want 3", audited)
+	}
+	var groupAuditName string
+	var groupBefore, groupAfter []byte
+	if err := pool.QueryRow(ctx, `SELECT target_name,before_data,after_data FROM operation_log
+		WHERE operation_type='GROUP_MEMBER_ADD' AND operator_id=101 AND target_id=200`).Scan(&groupAuditName, &groupBefore, &groupAfter); err != nil {
+		t.Fatal(err)
+	}
+	wantMember := `"memberId": "` + strconv.FormatInt(memberID, 10) + `"`
+	if groupAuditName != "Test Group" || !strings.Contains(string(groupBefore), `"included": false`) || !strings.Contains(string(groupAfter), `"included": true`) ||
+		!strings.Contains(string(groupBefore), wantMember) {
+		t.Fatalf("group audit name=%q before=%s after=%s", groupAuditName, groupBefore, groupAfter)
+	}
+
+	// 分组已停用与管理员路径一致返回冲突，分组不存在返回未找到，均不写入任何数据。
+	for _, tc := range []struct {
+		name    string
+		groupID int64
+		want    error
+	}{
+		{name: "disabled group", groupID: 202, want: mgmt.ErrConflict},
+		{name: "missing group", groupID: 999, want: appsec.ErrNotFound},
+	} {
+		groupMemberID, err := ids.NextID(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		groupKeyID, err := ids.NextID(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		groupKey := appsec.KeyRecord{ID: groupKeyID, PrincipalID: groupMemberID, PrincipalType: principal.Member, Hash: []byte(tc.name + strings.Repeat("x", 32-len(tc.name))), MaskedKey: "vk-group********0001", Name: "Group", CreatedAt: time.Now().UTC()}
+		if err := store.CreateMemberAndKey(ctx, actor, groupMemberID, "Group "+tc.name, "", []int64{tc.groupID}, groupKey, appsec.RequestMeta{}); !errors.Is(err, tc.want) {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		var rows int
+		if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM principal WHERE id=$1)+(SELECT count(*) FROM principal_access_key WHERE id=$2)`, groupMemberID, groupKeyID).Scan(&rows); err != nil || rows != 0 {
+			t.Fatalf("%s left rows=%d err=%v", tc.name, rows, err)
+		}
 	}
 	duplicateMemberID, err := ids.NextID(ctx)
 	if err != nil {

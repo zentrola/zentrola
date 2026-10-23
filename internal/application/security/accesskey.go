@@ -104,13 +104,15 @@ func (s *Keys) SetUpstreamQuotaPermission(ctx context.Context, actor admin.Ident
 	if keyID <= 0 {
 		return ErrInvalidArgument
 	}
-	return s.store.SetUpstreamQuotaPermission(ctx, actor, keyID, allowed, meta)
+	_, err := s.store.SetUpstreamQuotaPermission(ctx, actor, keyID, allowed, meta)
+	return err
 }
 func (s *Keys) SetMemberManagementPermission(ctx context.Context, actor admin.Identity, keyID int64, allowed bool, meta RequestMeta) error {
 	if keyID <= 0 {
 		return ErrInvalidArgument
 	}
-	return s.store.SetMemberManagementPermission(ctx, actor, keyID, allowed, meta)
+	_, err := s.store.SetMemberManagementPermission(ctx, actor, keyID, allowed, meta)
+	return err
 }
 func (s *Keys) Authenticate(ctx context.Context, full string) (PrincipalIdentity, error) {
 	marker := keyMarker

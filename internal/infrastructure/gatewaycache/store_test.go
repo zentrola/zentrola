@@ -91,8 +91,9 @@ func (s *cacheStub) Clear(context.Context, string) bool {
 }
 
 type keyStoreStub struct {
-	authentications int
-	identity        appsec.PrincipalIdentity
+	authentications   int
+	identity          appsec.PrincipalIdentity
+	permissionChanged bool
 }
 
 func (*keyStoreStub) Create(context.Context, admin.Identity, appsec.KeyRecord, appsec.RequestMeta) error {
@@ -101,11 +102,11 @@ func (*keyStoreStub) Create(context.Context, admin.Identity, appsec.KeyRecord, a
 func (*keyStoreStub) Revoke(context.Context, admin.Identity, int64, appsec.RequestMeta) error {
 	return nil
 }
-func (*keyStoreStub) SetUpstreamQuotaPermission(context.Context, admin.Identity, int64, bool, appsec.RequestMeta) error {
-	return nil
+func (s *keyStoreStub) SetUpstreamQuotaPermission(context.Context, admin.Identity, int64, bool, appsec.RequestMeta) (bool, error) {
+	return s.permissionChanged, nil
 }
-func (*keyStoreStub) SetMemberManagementPermission(context.Context, admin.Identity, int64, bool, appsec.RequestMeta) error {
-	return nil
+func (s *keyStoreStub) SetMemberManagementPermission(context.Context, admin.Identity, int64, bool, appsec.RequestMeta) (bool, error) {
+	return s.permissionChanged, nil
 }
 func (s *keyStoreStub) Authenticate(context.Context, []byte, time.Time) (appsec.PrincipalIdentity, error) {
 	s.authentications++
@@ -221,14 +222,36 @@ func TestKeyStoreCachesSuccessfulAuthenticationAndClearsOnRevoke(t *testing.T) {
 	}
 }
 
-func TestMemberManagementPermissionChangeInvalidatesIdentityCache(t *testing.T) {
-	cache := &cacheStub{}
-	store := NewKeyStore(&keyStoreStub{}, cache)
-	if err := store.SetMemberManagementPermission(context.Background(), admin.Identity{ID: 1}, 34, true, appsec.RequestMeta{}); err != nil {
-		t.Fatal(err)
-	}
-	if cache.clears != 1 {
-		t.Fatalf("cache clears = %d, want 1", cache.clears)
+func TestKeyPermissionChangeInvalidatesIdentityCacheOnlyWhenChanged(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		changed bool
+		set     func(*KeyStore) (bool, error)
+	}{
+		{name: "member management changed", changed: true, set: func(s *KeyStore) (bool, error) {
+			return s.SetMemberManagementPermission(context.Background(), admin.Identity{ID: 1}, 34, true, appsec.RequestMeta{})
+		}},
+		{name: "member management unchanged", set: func(s *KeyStore) (bool, error) {
+			return s.SetMemberManagementPermission(context.Background(), admin.Identity{ID: 1}, 34, true, appsec.RequestMeta{})
+		}},
+		{name: "upstream quota changed", changed: true, set: func(s *KeyStore) (bool, error) {
+			return s.SetUpstreamQuotaPermission(context.Background(), admin.Identity{ID: 1}, 34, false, appsec.RequestMeta{})
+		}},
+		{name: "upstream quota unchanged", set: func(s *KeyStore) (bool, error) {
+			return s.SetUpstreamQuotaPermission(context.Background(), admin.Identity{ID: 1}, 34, false, appsec.RequestMeta{})
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cache := &cacheStub{}
+			changed, err := tc.set(NewKeyStore(&keyStoreStub{permissionChanged: tc.changed}, cache))
+			wantClears := 0
+			if tc.changed {
+				wantClears = 1
+			}
+			if err != nil || changed != tc.changed || cache.clears != wantClears {
+				t.Fatalf("changed=%v clears=%d err=%v", changed, cache.clears, err)
+			}
+		})
 	}
 }
 

@@ -72,7 +72,8 @@ type KeyRecord struct {
 type KeyStore interface {
 	Create(context.Context, admin.Identity, KeyRecord, RequestMeta) error
 	Revoke(context.Context, admin.Identity, int64, RequestMeta) error
-	SetUpstreamQuotaPermission(context.Context, admin.Identity, int64, bool, RequestMeta) error
-	SetMemberManagementPermission(context.Context, admin.Identity, int64, bool, RequestMeta) error
+	// SetUpstreamQuotaPermission 与 SetMemberManagementPermission 返回授权值是否实际变化。
+	SetUpstreamQuotaPermission(context.Context, admin.Identity, int64, bool, RequestMeta) (bool, error)
+	SetMemberManagementPermission(context.Context, admin.Identity, int64, bool, RequestMeta) (bool, error)
 	Authenticate(context.Context, []byte, time.Time) (PrincipalIdentity, error)
 }

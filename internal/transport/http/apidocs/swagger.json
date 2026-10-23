@@ -4203,7 +4203,7 @@
                         "GatewayBearer": []
                     }
                 ],
-                "description": "groupIds 必须至少包含一个启用分组。",
+                "description": "groupIds 必须至少包含一个启用分组；分组不存在返回 NOT_FOUND，分组已停用返回 CONFLICT，与管理员创建成员一致。",
                 "tags": [
                     "成员管理"
                 ],

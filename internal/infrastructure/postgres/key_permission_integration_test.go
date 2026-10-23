@@ -35,12 +35,12 @@ func TestKeyPermissionIntegration(t *testing.T) {
 		keyID  int64
 		column string
 		event  string
-		set    func(admin.Identity, int64, bool) error
+		set    func(admin.Identity, int64, bool) (bool, error)
 	}{
-		{name: "upstream quota", keyID: 301, column: "can_view_upstream_quota", event: "ACCESS_KEY_UPSTREAM_QUOTA_UPDATE", set: func(a admin.Identity, id int64, allowed bool) error {
+		{name: "upstream quota", keyID: 301, column: "can_view_upstream_quota", event: "ACCESS_KEY_UPSTREAM_QUOTA_UPDATE", set: func(a admin.Identity, id int64, allowed bool) (bool, error) {
 			return store.SetUpstreamQuotaPermission(ctx, a, id, allowed, appsec.RequestMeta{})
 		}},
-		{name: "member management", keyID: 302, column: "can_manage_members", event: "ACCESS_KEY_MEMBER_MANAGEMENT_UPDATE", set: func(a admin.Identity, id int64, allowed bool) error {
+		{name: "member management", keyID: 302, column: "can_manage_members", event: "ACCESS_KEY_MEMBER_MANAGEMENT_UPDATE", set: func(a admin.Identity, id int64, allowed bool) (bool, error) {
 			return store.SetMemberManagementPermission(ctx, a, id, allowed, appsec.RequestMeta{})
 		}},
 	} {
@@ -50,15 +50,16 @@ func TestKeyPermissionIntegration(t *testing.T) {
 				t.Fatal(err)
 			}
 			// 管理员会话失效必须返回未认证，而不是服务不可用。
-			if err := tc.set(admin.Identity{ID: actor.ID + 999}, tc.keyID, true); !errors.Is(err, appsec.ErrUnauthenticated) {
+			if _, err := tc.set(admin.Identity{ID: actor.ID + 999}, tc.keyID, true); !errors.Is(err, appsec.ErrUnauthenticated) {
 				t.Fatalf("invalid actor: %v", err)
 			}
-			if err := tc.set(actor, tc.keyID+1000, true); !errors.Is(err, appsec.ErrNotFound) {
+			if _, err := tc.set(actor, tc.keyID+1000, true); !errors.Is(err, appsec.ErrNotFound) {
 				t.Fatalf("missing key: %v", err)
 			}
-			for range 2 {
-				if err := tc.set(actor, tc.keyID, true); err != nil {
-					t.Fatal(err)
+			// 首次设置返回已变化，重复设置返回未变化，供缓存层决定是否失效。
+			for _, wantChanged := range []bool{true, false} {
+				if changed, err := tc.set(actor, tc.keyID, true); err != nil || changed != wantChanged {
+					t.Fatalf("changed=%v want %v err=%v", changed, wantChanged, err)
 				}
 			}
 			var allowed bool

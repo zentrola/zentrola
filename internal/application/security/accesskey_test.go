@@ -25,11 +25,11 @@ func (s *keyTestStore) Create(_ context.Context, _ admin.Identity, row KeyRecord
 	return nil
 }
 func (s *keyTestStore) Revoke(context.Context, admin.Identity, int64, RequestMeta) error { return nil }
-func (s *keyTestStore) SetUpstreamQuotaPermission(context.Context, admin.Identity, int64, bool, RequestMeta) error {
-	return nil
+func (s *keyTestStore) SetUpstreamQuotaPermission(context.Context, admin.Identity, int64, bool, RequestMeta) (bool, error) {
+	return true, nil
 }
-func (s *keyTestStore) SetMemberManagementPermission(context.Context, admin.Identity, int64, bool, RequestMeta) error {
-	return nil
+func (s *keyTestStore) SetMemberManagementPermission(context.Context, admin.Identity, int64, bool, RequestMeta) (bool, error) {
+	return true, nil
 }
 func (s *keyTestStore) Authenticate(_ context.Context, digest []byte, _ time.Time) (PrincipalIdentity, error) {
 	s.lookups++

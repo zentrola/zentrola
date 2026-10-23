@@ -52,7 +52,8 @@ func (c *provisionCacheStub) Clear(context.Context, string) bool { c.clears++; r
 func TestMemberProvisioningRequiresIndividualPermissionAndIssuesOrdinaryKey(t *testing.T) {
 	store := &provisionStoreStub{}
 	keys := NewKeys(&keyTestStore{}, &provisionIDs{next: 40})
-	service := NewMemberProvisioning(keys, store, nil)
+	cache := &provisionCacheStub{}
+	service := NewMemberProvisioning(keys, store, cache)
 	actor := PrincipalIdentity{ID: 1, AccessKeyID: 2, Type: principal.Member}
 	if _, err := service.Create(context.Background(), actor, "New", "", "First", nil, RequestMeta{}); !errors.Is(err, ErrForbidden) || store.creates != 0 {
 		t.Fatalf("unauthorized create: err=%v writes=%d", err, store.creates)
@@ -64,6 +65,10 @@ func TestMemberProvisioningRequiresIndividualPermissionAndIssuesOrdinaryKey(t *t
 	}
 	if _, err := service.IssueKey(context.Background(), actor, 99, "More", RequestMeta{}); err != nil || store.issues != 1 || store.key.CanManageMembers {
 		t.Fatalf("issue err=%v writes=%d record=%+v", err, store.issues, store.key)
+	}
+	// 新成员与新 Key 不可能已在身份缓存中，无需清空网关缓存。
+	if cache.clears != 0 {
+		t.Fatalf("create and issue must not clear the gateway cache, clears=%d", cache.clears)
 	}
 }
 

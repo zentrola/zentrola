@@ -235,10 +235,10 @@ func (s *SecurityStore) Revoke(ctx context.Context, actor admin.Identity, keyID 
 	return nil
 }
 
-func (s *SecurityStore) SetUpstreamQuotaPermission(ctx context.Context, actor admin.Identity, keyID int64, allowed bool, meta appsec.RequestMeta) error {
+func (s *SecurityStore) SetUpstreamQuotaPermission(ctx context.Context, actor admin.Identity, keyID int64, allowed bool, meta appsec.RequestMeta) (bool, error) {
 	return s.setKeyPermission(ctx, actor, keyID, keyPermissionUpstreamQuota, allowed, meta)
 }
-func (s *SecurityStore) SetMemberManagementPermission(ctx context.Context, actor admin.Identity, keyID int64, allowed bool, meta appsec.RequestMeta) error {
+func (s *SecurityStore) SetMemberManagementPermission(ctx context.Context, actor admin.Identity, keyID int64, allowed bool, meta appsec.RequestMeta) (bool, error) {
 	return s.setKeyPermission(ctx, actor, keyID, keyPermissionMemberManagement, allowed, meta)
 }
 
@@ -253,19 +253,19 @@ var (
 	keyPermissionMemberManagement = keyPermission{column: "can_manage_members", field: "canManageMembers", operation: "key_member_management", event: operation.AccessKeyMemberManagementUpdate}
 )
 
-func (s *SecurityStore) setKeyPermission(ctx context.Context, actor admin.Identity, keyID int64, permission keyPermission, allowed bool, meta appsec.RequestMeta) error {
+func (s *SecurityStore) setKeyPermission(ctx context.Context, actor admin.Identity, keyID int64, permission keyPermission, allowed bool, meta appsec.RequestMeta) (bool, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return s.securityError(ctx, "begin_"+permission.operation, err)
+		return false, s.securityError(ctx, "begin_"+permission.operation, err)
 	}
 	defer tx.Rollback(context.Background())
 	ctx = idgen.WithQuerier(ctx, tx)
 	q := dbgen.New(tx)
 	if err := validateActor(ctx, q, actor); err != nil {
 		if errors.Is(err, appsec.ErrUnauthenticated) {
-			return err
+			return false, err
 		}
-		return s.securityError(ctx, "validate_"+permission.operation+"_actor", err)
+		return false, s.securityError(ctx, "validate_"+permission.operation+"_actor", err)
 	}
 	var name string
 	var old bool
@@ -273,25 +273,25 @@ func (s *SecurityStore) setKeyPermission(ctx context.Context, actor admin.Identi
 		WHERE k.id=$1 AND NOT k.is_deleted AND k.status='ACTIVE' AND k.revoked_at IS NULL
 		AND (k.expires_at IS NULL OR k.expires_at>now()) AND p.principal_type='MEMBER' AND NOT p.is_deleted FOR UPDATE OF k`, keyID).Scan(&name, &old)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return appsec.ErrNotFound
+		return false, appsec.ErrNotFound
 	}
 	if err != nil {
-		return s.securityError(ctx, "get_"+permission.operation, err)
+		return false, s.securityError(ctx, "get_"+permission.operation, err)
 	}
 	if old != allowed {
 		if _, err := tx.Exec(ctx, `UPDATE principal_access_key SET `+permission.column+`=$2,updated_by=$3,updated_at=$4 WHERE id=$1`, keyID, allowed, actorRef(actor.ID), pgTime(time.Now().UTC())); err != nil {
-			return s.securityError(ctx, "update_"+permission.operation, err)
+			return false, s.securityError(ctx, "update_"+permission.operation, err)
 		}
 		before, _ := json.Marshal(map[string]bool{permission.field: old})
 		after, _ := json.Marshal(map[string]bool{permission.field: allowed})
 		if err := s.appendLog(ctx, q, actor, "ACCESS_KEY", permission.event, "ACCESS_KEY", keyID, name, "SUCCESS", "", meta, before, after, ""); err != nil {
-			return s.securityError(ctx, "audit_"+permission.operation, err)
+			return false, s.securityError(ctx, "audit_"+permission.operation, err)
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return s.securityError(ctx, "commit_"+permission.operation, err)
+		return false, s.securityError(ctx, "commit_"+permission.operation, err)
 	}
-	return nil
+	return old != allowed, nil
 }
 func (s *SecurityStore) Authenticate(ctx context.Context, hash []byte, now time.Time) (appsec.PrincipalIdentity, error) {
 	row, err := dbgen.New(s.pool).AuthenticateAccessKey(ctx, dbgen.AuthenticateAccessKeyParams{KeyHash: hash, Now: pgTime(now)})

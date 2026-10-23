@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	mgmt "github.com/zentrola/zentrola/internal/application/management"
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	"github.com/zentrola/zentrola/internal/domain/operation"
 	"github.com/zentrola/zentrola/internal/infrastructure/idgen"
@@ -38,14 +39,16 @@ func (s *MemberProvisionStore) CreateMemberAndKey(ctx context.Context, actor app
 			return err
 		}
 		for _, groupID := range groupIDs {
+			var groupName string
 			var active bool
-			if err := tx.QueryRow(ctx, `SELECT status='ACTIVE' FROM principal_group WHERE id=$1 AND NOT is_deleted FOR SHARE`, groupID).Scan(&active); errors.Is(err, pgx.ErrNoRows) {
+			if err := tx.QueryRow(ctx, `SELECT group_name,status='ACTIVE' FROM principal_group WHERE id=$1 AND NOT is_deleted FOR SHARE`, groupID).Scan(&groupName, &active); errors.Is(err, pgx.ErrNoRows) {
 				return appsec.ErrNotFound
 			} else if err != nil {
 				return err
 			}
+			// 与管理员创建成员一致：停用分组视为状态冲突。
 			if !active {
-				return appsec.ErrInvalidArgument
+				return mgmt.ErrConflict
 			}
 			id, err := s.ids.NextID(ctx)
 			if err != nil {
@@ -54,7 +57,8 @@ func (s *MemberProvisionStore) CreateMemberAndKey(ctx context.Context, actor app
 			if err := q.ManageAddMember(ctx, dbgen.ManageAddMemberParams{ID: id, GroupID: groupID, PrincipalID: memberID, CreatedBy: operator, CreatedAt: pgTime(now)}); err != nil {
 				return err
 			}
-			if err := s.audit(ctx, q, actor, "GROUP", operation.GroupMemberAdd, "GROUP", groupID, "", map[string]any{"memberId": strconv.FormatInt(memberID, 10), "included": true}, meta); err != nil {
+			member := strconv.FormatInt(memberID, 10)
+			if err := s.auditChange(ctx, q, actor, "GROUP", operation.GroupMemberAdd, "GROUP", groupID, groupName, map[string]any{"memberId": member, "included": false}, map[string]any{"memberId": member, "included": true}, meta); err != nil {
 				return err
 			}
 		}
@@ -154,7 +158,7 @@ func (s *MemberProvisionStore) write(ctx context.Context, actor appsec.Principal
 		if isMemberNameConflict(err) {
 			return appsec.ErrMemberNameExists
 		}
-		for _, known := range []error{appsec.ErrNotFound, appsec.ErrInvalidArgument, appsec.ErrForbidden, appsec.ErrMemberDisabled, appsec.ErrMemberAccessKeyRequired} {
+		for _, known := range []error{appsec.ErrNotFound, appsec.ErrInvalidArgument, appsec.ErrForbidden, appsec.ErrMemberDisabled, appsec.ErrMemberAccessKeyRequired, mgmt.ErrConflict} {
 			if errors.Is(err, known) {
 				return known
 			}
