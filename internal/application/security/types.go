@@ -17,6 +17,7 @@ var (
 	ErrNotFound           = errors.New("object not found")
 	ErrUnavailable        = errors.New("security service unavailable")
 	ErrAlreadyInitialized = errors.New("administrator already initialized")
+	ErrMemberNameExists   = errors.New("member name already exists")
 )
 
 // AccountLockedError 保留服务端锁定截止时间，供登录接口返回重试提示。

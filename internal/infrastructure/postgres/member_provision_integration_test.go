@@ -70,10 +70,32 @@ func TestMemberProvisionIntegration(t *testing.T) {
 	if audited != 3 {
 		t.Fatalf("audit count=%d, want 3", audited)
 	}
+	duplicateMemberID, err := ids.NextID(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicateKeyID, err := ids.NextID(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicateKey := appsec.KeyRecord{ID: duplicateKeyID, PrincipalID: duplicateMemberID, PrincipalType: principal.Member, Hash: []byte("abcdefghijklmnopqrstuvwxyz123456"), MaskedKey: "vk-child********0003", Name: "Duplicate", CreatedAt: time.Now().UTC()}
+	if err := store.CreateMemberAndKey(ctx, actor, duplicateMemberID, "Ordinary", "", nil, duplicateKey, appsec.RequestMeta{}); !errors.Is(err, appsec.ErrMemberNameExists) {
+		t.Fatalf("duplicate member name: %v", err)
+	}
+	var duplicateRows int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM principal WHERE id=$1`, duplicateMemberID).Scan(&duplicateRows); err != nil || duplicateRows != 0 {
+		t.Fatalf("duplicate member inserted: count=%d err=%v", duplicateRows, err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM principal_access_key WHERE id=$1`, duplicateKeyID).Scan(&duplicateRows); err != nil || duplicateRows != 0 {
+		t.Fatalf("duplicate member Key inserted: count=%d err=%v", duplicateRows, err)
+	}
 	_, err = pool.Exec(ctx, `INSERT INTO principal(id,principal_type,name,status,created_by,updated_by,created_at,updated_at)
 		VALUES(102,'MEMBER','Disabled','DISABLED','system','system',now(),now())`)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if err := store.CreateMemberAndKey(ctx, actor, duplicateMemberID, "Disabled", "", nil, duplicateKey, appsec.RequestMeta{}); !errors.Is(err, appsec.ErrMemberNameExists) {
+		t.Fatalf("disabled member name should remain reserved: %v", err)
 	}
 	otherKeyID, err := ids.NextID(ctx)
 	if err != nil {

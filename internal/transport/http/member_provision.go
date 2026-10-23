@@ -36,7 +36,7 @@ func (s *SecurityHandlers) setKeyMemberManagementPermission(w http.ResponseWrite
 // @Security GatewayBearer
 // @Param body body CreateManagedMemberRequest true "成员与首把 Key"
 // @Success 201 {object} response{data=appsec.ProvisionedMember}
-// @Failure 400,401,403,404,503 {object} response
+// @Failure 400,401,403,404,409,503 {object} response
 // @Router /api/v1/me/manage/members [post]
 func (s *SecurityHandlers) createManagedMember(w http.ResponseWriter, r *http.Request) {
 	input, ok := decodeRequest[CreateManagedMemberRequest](w, r)

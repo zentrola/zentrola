@@ -13,6 +13,11 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - Authorized member Keys can create ordinary members with an active first Key or issue an ordinary Key to an existing member through MCP. Member creation, first-Key issuance, group assignment, and activation commit together. Newly issued Keys never inherit management permission.
 - 获单独授权的成员 Key 可通过 MCP 创建普通成员及已启用的首把 Key，也可为已有普通成员签发 Key 并自动启用成员。创建成员、分组分配、签发首把 Key 与启用操作在同一事务提交；新 Key 不继承管理权限。
 
+### Changed / 变更
+
+- Creating a member through an authorized Key now rejects a name already used by an undeleted member with `MEMBER_NAME_ALREADY_EXISTS`; no member or Key is created on conflict.
+- 获授权 Key 创建普通成员时会检查未删除成员的名称；同名返回 `MEMBER_NAME_ALREADY_EXISTS`，不会创建成员或 Key。
+
 ### Upgrade / 升级
 
 - Database migrations `00059`–`00062` add per-Key quota and member-management authorization, associate new usage records with Access Keys, index recent Key usage, and extend audit event and operator types. Historical usage records have no Access Key association. No configuration change is required.

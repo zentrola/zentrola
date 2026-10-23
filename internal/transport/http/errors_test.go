@@ -4,10 +4,20 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	mgmt "github.com/zentrola/zentrola/internal/application/management"
+	appsec "github.com/zentrola/zentrola/internal/application/security"
 )
+
+func TestDuplicateMemberNameReturnsConflict(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	securityError(recorder, httptest.NewRequest(http.MethodPost, "/api/v1/me/manage/members", nil), appsec.ErrMemberNameExists)
+	if recorder.Code != http.StatusConflict || !strings.Contains(recorder.Body.String(), `"code":"MEMBER_NAME_ALREADY_EXISTS"`) {
+		t.Fatalf("duplicate member response = %d %s", recorder.Code, recorder.Body.String())
+	}
+}
 
 func TestEveryPublicManagementErrorHasHTTPMapping(t *testing.T) {
 	publicErrors := mgmt.PublicErrors()
