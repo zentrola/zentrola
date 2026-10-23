@@ -10,6 +10,7 @@ Zentrola 由 Go 后端和 Vue 管理界面组成。程序入口位于 `cmd/serve
 - `go test ./...`：运行 Go 测试；PostgreSQL 集成测试需设置 `ZENTROLA_INTEGRATION=1`。
 - `go build ./cmd/server ./cmd/web`：编译两个 Go 程序。
 - `sqlc generate`：在迁移或查询变更后重新生成 `dbgen`；固定使用 sqlc 1.30.0。
+- `pwsh scripts/Generate-ApiDocs.ps1`：新增或修改接口及其 Swaggo 注释后重新生成 `internal/transport/http/apidocs/swagger.json`；`swagger_test` 会拒绝缺少文档的路由，不要手动修改该文件。
 - `cd web && npm ci`：按 lockfile 安装依赖；要求 Node 22.18+，推荐 Node 24 LTS。
 - `cd web && npm run dev`：在 9528 端口启动 Vite，并将 `/api` 代理到后端。
 - `cd web && npm run build`：执行类型检查并生成 `web/dist`。
@@ -29,7 +30,7 @@ Go 代码必须经过 `gofmt`；包名使用简短的小写单词，导出标识
 
 ## 测试规范
 
-验证逻辑和服务行为应编写聚焦的 Go 表驱动测试。Playwright 文件命名为 `*.spec.ts`，默认浏览器测试必须使用模拟 API。提交前运行 `go test ./...`、`npm run build` 和 `npm test`。不得将真实服务凭据写入测试数据、截图或日志。
+验证逻辑和服务行为应编写聚焦的 Go 表驱动测试。Playwright 文件命名为 `*.spec.ts`，默认浏览器测试必须使用模拟 API。提交前运行 `go test ./...`、`npm run build` 和 `npm test`；改动存储层、迁移或事务时还要运行 `ZENTROLA_INTEGRATION=1 go test ./internal/infrastructure/postgres/`，它读取根目录 `.env` 的 PostgreSQL 配置并在随机 schema 中执行。不得将真实服务凭据写入测试数据、截图或日志。
 
 ## Commit 与 Pull Request 规范
 
