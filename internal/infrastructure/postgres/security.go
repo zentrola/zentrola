@@ -236,9 +236,27 @@ func (s *SecurityStore) Revoke(ctx context.Context, actor admin.Identity, keyID 
 }
 
 func (s *SecurityStore) SetUpstreamQuotaPermission(ctx context.Context, actor admin.Identity, keyID int64, allowed bool, meta appsec.RequestMeta) error {
+	return s.setKeyPermission(ctx, actor, keyID, keyPermissionUpstreamQuota, allowed, meta)
+}
+func (s *SecurityStore) SetMemberManagementPermission(ctx context.Context, actor admin.Identity, keyID int64, allowed bool, meta appsec.RequestMeta) error {
+	return s.setKeyPermission(ctx, actor, keyID, keyPermissionMemberManagement, allowed, meta)
+}
+
+// keyPermission 描述成员 Key 上的单项布尔授权；column 只取自下方常量，不接收外部输入。
+type keyPermission struct {
+	column, field, operation string
+	event                    operation.Type
+}
+
+var (
+	keyPermissionUpstreamQuota    = keyPermission{column: "can_view_upstream_quota", field: "canViewUpstreamQuota", operation: "key_quota_permission", event: operation.AccessKeyUpstreamQuotaUpdate}
+	keyPermissionMemberManagement = keyPermission{column: "can_manage_members", field: "canManageMembers", operation: "key_member_management", event: operation.AccessKeyMemberManagementUpdate}
+)
+
+func (s *SecurityStore) setKeyPermission(ctx context.Context, actor admin.Identity, keyID int64, permission keyPermission, allowed bool, meta appsec.RequestMeta) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return s.securityError(ctx, "begin_key_quota_permission", err)
+		return s.securityError(ctx, "begin_"+permission.operation, err)
 	}
 	defer tx.Rollback(context.Background())
 	ctx = idgen.WithQuerier(ctx, tx)
@@ -247,69 +265,33 @@ func (s *SecurityStore) SetUpstreamQuotaPermission(ctx context.Context, actor ad
 		if errors.Is(err, appsec.ErrUnauthenticated) {
 			return err
 		}
-		return s.securityError(ctx, "validate_key_quota_actor", err)
+		return s.securityError(ctx, "validate_"+permission.operation+"_actor", err)
 	}
 	var name string
 	var old bool
-	err = tx.QueryRow(ctx, `SELECT k.name,k.can_view_upstream_quota FROM principal_access_key k JOIN principal p ON p.id=k.principal_id
+	err = tx.QueryRow(ctx, `SELECT k.name,k.`+permission.column+` FROM principal_access_key k JOIN principal p ON p.id=k.principal_id
 		WHERE k.id=$1 AND NOT k.is_deleted AND k.status='ACTIVE' AND k.revoked_at IS NULL
 		AND (k.expires_at IS NULL OR k.expires_at>now()) AND p.principal_type='MEMBER' AND NOT p.is_deleted FOR UPDATE OF k`, keyID).Scan(&name, &old)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return appsec.ErrNotFound
 	}
 	if err != nil {
-		return s.securityError(ctx, "get_key_quota_permission", err)
+		return s.securityError(ctx, "get_"+permission.operation, err)
 	}
-	if old == allowed {
-		return tx.Commit(ctx)
-	}
-	if _, err := tx.Exec(ctx, `UPDATE principal_access_key SET can_view_upstream_quota=$2,updated_by=$3,updated_at=$4 WHERE id=$1`, keyID, allowed, actorRef(actor.ID), pgTime(time.Now().UTC())); err != nil {
-		return s.securityError(ctx, "update_key_quota_permission", err)
-	}
-	before, _ := json.Marshal(map[string]bool{"canViewUpstreamQuota": old})
-	after, _ := json.Marshal(map[string]bool{"canViewUpstreamQuota": allowed})
-	if err := s.appendLog(ctx, q, actor, "ACCESS_KEY", operation.AccessKeyUpstreamQuotaUpdate, "ACCESS_KEY", keyID, name, "SUCCESS", "", meta, before, after, ""); err != nil {
-		return s.securityError(ctx, "audit_key_quota_permission", err)
+	if old != allowed {
+		if _, err := tx.Exec(ctx, `UPDATE principal_access_key SET `+permission.column+`=$2,updated_by=$3,updated_at=$4 WHERE id=$1`, keyID, allowed, actorRef(actor.ID), pgTime(time.Now().UTC())); err != nil {
+			return s.securityError(ctx, "update_"+permission.operation, err)
+		}
+		before, _ := json.Marshal(map[string]bool{permission.field: old})
+		after, _ := json.Marshal(map[string]bool{permission.field: allowed})
+		if err := s.appendLog(ctx, q, actor, "ACCESS_KEY", permission.event, "ACCESS_KEY", keyID, name, "SUCCESS", "", meta, before, after, ""); err != nil {
+			return s.securityError(ctx, "audit_"+permission.operation, err)
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return s.securityError(ctx, "commit_key_quota_permission", err)
+		return s.securityError(ctx, "commit_"+permission.operation, err)
 	}
 	return nil
-}
-func (s *SecurityStore) SetMemberManagementPermission(ctx context.Context, actor admin.Identity, keyID int64, allowed bool, meta appsec.RequestMeta) error {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return s.securityError(ctx, "begin_key_member_management", err)
-	}
-	defer tx.Rollback(context.Background())
-	ctx = idgen.WithQuerier(ctx, tx)
-	q := dbgen.New(tx)
-	if err := validateActor(ctx, q, actor); err != nil {
-		return s.securityError(ctx, "validate_key_member_management_actor", err)
-	}
-	var name string
-	var old bool
-	err = tx.QueryRow(ctx, `SELECT k.name,k.can_manage_members FROM principal_access_key k JOIN principal p ON p.id=k.principal_id
-		WHERE k.id=$1 AND NOT k.is_deleted AND k.status='ACTIVE' AND k.revoked_at IS NULL
-		AND (k.expires_at IS NULL OR k.expires_at>now()) AND p.principal_type='MEMBER' AND NOT p.is_deleted FOR UPDATE OF k`, keyID).Scan(&name, &old)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return appsec.ErrNotFound
-	}
-	if err != nil {
-		return s.securityError(ctx, "get_key_member_management", err)
-	}
-	if old == allowed {
-		return tx.Commit(ctx)
-	}
-	if _, err := tx.Exec(ctx, `UPDATE principal_access_key SET can_manage_members=$2,updated_by=$3,updated_at=$4 WHERE id=$1`, keyID, allowed, actorRef(actor.ID), pgTime(time.Now().UTC())); err != nil {
-		return s.securityError(ctx, "update_key_member_management", err)
-	}
-	before, _ := json.Marshal(map[string]bool{"canManageMembers": old})
-	after, _ := json.Marshal(map[string]bool{"canManageMembers": allowed})
-	if err := s.appendLog(ctx, q, actor, "ACCESS_KEY", operation.AccessKeyMemberManagementUpdate, "ACCESS_KEY", keyID, name, "SUCCESS", "", meta, before, after, ""); err != nil {
-		return s.securityError(ctx, "audit_key_member_management", err)
-	}
-	return s.securityError(ctx, "commit_key_member_management", tx.Commit(ctx))
 }
 func (s *SecurityStore) Authenticate(ctx context.Context, hash []byte, now time.Time) (appsec.PrincipalIdentity, error) {
 	row, err := dbgen.New(s.pool).AuthenticateAccessKey(ctx, dbgen.AuthenticateAccessKeyParams{KeyHash: hash, Now: pgTime(now)})
