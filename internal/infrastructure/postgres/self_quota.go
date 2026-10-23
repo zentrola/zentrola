@@ -85,57 +85,68 @@ func (s *SelfQuotaStore) QuotaUsed(ctx context.Context, scopes []quota.Scope, st
 	return s.quotas.Used(ctx, scopes, start, start.AddDate(0, 1, 0))
 }
 
-// LatestSubscriptionQuota 返回该 Key 指定模型最近一次成功请求所用订阅号的额度快照；
+// SubscriptionQuotas 返回成员有权模型可路由到的全部订阅号额度快照，每个账号一条；
 // 快照时效由 application 层按调用时间判断。
-func (s *SelfQuotaStore) LatestSubscriptionQuota(ctx context.Context, principalID, accessKeyID int64, model string) (app.UpstreamQuota, error) {
-	result := app.UpstreamQuota{Status: "UNKNOWN", Model: model, Quotas: []app.UpstreamQuotaItem{}}
-	q := dbgen.New(s.pool)
-	// 先解析 model_id，使最近用量查询直接命中 ix_usage_record_key_model_recent。
-	m, err := q.GatewayModel(ctx, model)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return result, nil
-	}
-	if err != nil {
-		return result, diagnosePostgresError(ctx, s.logger, "self_quota", "model", err, appsec.ErrUnavailable)
-	}
-	var resourceID int64
-	var authType string
-	err = s.pool.QueryRow(ctx, `SELECT r.id,r.resource_name,p.provider_name,r.auth_type,u.completed_at,r.quota_checked_at
-		FROM usage_record u
-		JOIN provider_credential r ON r.id=u.provider_credential_id
+func (s *SelfQuotaStore) SubscriptionQuotas(ctx context.Context, principalID int64) ([]app.UpstreamQuota, error) {
+	return subscriptionQuotas(ctx, s.pool, s.logger, principalID)
+}
+
+func subscriptionQuotas(ctx context.Context, db dbgen.DBTX, logger *slog.Logger, principalID int64) ([]app.UpstreamQuota, error) {
+	// 账号池与 GatewayCandidates 一致：有权模型 → 服务商模型 → 启用服务商 → 订阅号。
+	rows, err := db.Query(ctx, `SELECT r.id,p.provider_name,r.resource_name,r.quota_checked_at
+		FROM provider_credential r
 		JOIN provider p ON p.id=r.provider_id
-		WHERE u.access_key_id=$1 AND u.model_id=$2 AND u.principal_id=$3 AND u.status='SUCCESS'
-		ORDER BY u.completed_at DESC,u.id DESC LIMIT 1`, accessKeyID, m.ID, principalID).Scan(
-		&resourceID, &result.SubscriptionName, &result.ProviderName, &authType, &result.LastUsedAt, &result.CheckedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return result, nil
-	}
+		WHERE r.auth_type='SUBSCRIPTION' AND NOT r.is_deleted AND NOT p.is_deleted AND p.status='ACTIVE'
+		  AND EXISTS (
+		    SELECT 1 FROM principal pr
+		    JOIN principal_group_membership pg ON pg.principal_id=pr.id AND NOT pg.is_deleted
+		    JOIN principal_group g ON g.id=pg.group_id AND g.status='ACTIVE' AND NOT g.is_deleted
+		    JOIN principal_group_model_permission permission ON permission.group_id=g.id AND NOT permission.is_deleted
+		    JOIN model m ON m.id=permission.model_id AND m.status='ACTIVE' AND NOT m.is_deleted
+		    JOIN provider_model pm ON pm.model_id=m.id AND pm.provider_id=p.id AND NOT pm.is_deleted
+		    WHERE pr.id=$1 AND pr.principal_type IN ('MEMBER','APPLICATION') AND pr.status='ACTIVE' AND NOT pr.is_deleted)
+		ORDER BY p.provider_name,r.priority,r.id`, principalID)
 	if err != nil {
-		return result, diagnosePostgresError(ctx, s.logger, "self_quota", "latest_resource", err, appsec.ErrUnavailable)
+		return nil, diagnosePostgresError(ctx, logger, "self_quota", "subscriptions", err, appsec.ErrUnavailable)
 	}
-	if authType != "SUBSCRIPTION" {
-		result.SubscriptionName = nil
-		result.ProviderName = nil
-		result.CheckedAt = nil
-		return result, nil
+	var ids []int64
+	result := make([]app.UpstreamQuota, 0)
+	for rows.Next() {
+		var id int64
+		item := app.UpstreamQuota{Status: "UNKNOWN", Quotas: []app.UpstreamQuotaItem{}}
+		if err := rows.Scan(&id, &item.ProviderName, &item.SubscriptionName, &item.CheckedAt); err != nil {
+			rows.Close()
+			return nil, diagnosePostgresError(ctx, logger, "self_quota", "subscriptions", err, appsec.ErrUnavailable)
+		}
+		if item.CheckedAt != nil {
+			checkedAt := item.CheckedAt.UTC()
+			item.CheckedAt = &checkedAt
+		}
+		ids, result = append(ids, id), append(result, item)
 	}
-	if result.CheckedAt == nil {
-		return result, nil
+	if err := rows.Err(); err != nil {
+		return nil, diagnosePostgresError(ctx, logger, "self_quota", "subscriptions", err, appsec.ErrUnavailable)
 	}
-	rows, err := q.ManageResourceQuotas(ctx, resourceID)
-	if err != nil {
-		return result, diagnosePostgresError(ctx, s.logger, "self_quota", "resource_quotas", err, appsec.ErrUnavailable)
+	q := dbgen.New(db)
+	for i, id := range ids {
+		if result[i].CheckedAt == nil {
+			continue
+		}
+		quotas, err := q.ManageResourceQuotas(ctx, id)
+		if err != nil {
+			return nil, diagnosePostgresError(ctx, logger, "self_quota", "resource_quotas", err, appsec.ErrUnavailable)
+		}
+		for _, row := range quotas {
+			result[i].Quotas = append(result[i].Quotas, app.UpstreamQuotaItem{
+				Code: row.QuotaCode, Name: row.QuotaName, Status: row.QuotaStatus, Unit: row.QuotaUnit,
+				LimitValue: numericString(row.LimitValue), UsedValue: numericString(row.UsedValue), RemainingValue: numericString(row.RemainingValue),
+				UsedPercent: numericFloat(row.UsedPercent), WindowDurationSeconds: row.WindowDurationSeconds,
+				ResetsAt: timePointer(row.ResetsAt), ObservedAt: row.ObservedAt.Time.UTC(),
+			})
+		}
+		if len(quotas) > 0 {
+			result[i].Status = "KNOWN"
+		}
 	}
-	if len(rows) == 0 {
-		return result, nil
-	}
-	for _, row := range rows {
-		result.Quotas = append(result.Quotas, app.UpstreamQuotaItem{
-			Code: row.QuotaCode, Name: row.QuotaName, Status: row.QuotaStatus, Unit: row.QuotaUnit,
-			LimitValue: numericString(row.LimitValue), UsedValue: numericString(row.UsedValue), RemainingValue: numericString(row.RemainingValue),
-			ResetsAt: timePointer(row.ResetsAt), ObservedAt: row.ObservedAt.Time.UTC(),
-		})
-	}
-	result.Status = "KNOWN"
 	return result, nil
 }

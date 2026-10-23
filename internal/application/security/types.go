@@ -36,7 +36,7 @@ type PrincipalIdentity struct {
 	ID, AccessKeyID int64
 	Type            principal.Type
 	ExpiresAt       *time.Time
-	// CanManage 为后台管理授权：可查看最近使用的订阅号额度并通过 MCP 管理普通成员。
+	// CanManage 为后台管理授权：可查看服务商订阅号额度并通过 MCP 管理普通成员。
 	CanManage bool
 }
 

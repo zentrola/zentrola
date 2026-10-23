@@ -165,7 +165,7 @@ func (r LoginRequest) Valid() bool {
 
 type CreateKeyRequest struct {
 	Name string `json:"name" binding:"required" example:"Claude Code"`
-	// CanManage 授予成员 Key 后台管理权限：查看最近使用的订阅号额度并通过 MCP 管理普通成员；应用 Key 不支持。
+	// CanManage 授予成员 Key 后台管理权限：查看服务商订阅号额度并通过 MCP 管理普通成员；应用 Key 不支持。
 	CanManage bool `json:"canManage"`
 	// ExpiresAt 是以 Z 结尾的 UTC RFC3339 时间。
 	ExpiresAt *time.Time `json:"expiresAt" example:"2027-01-01T00:00:00Z"`

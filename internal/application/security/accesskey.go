@@ -34,7 +34,7 @@ type CreatedKey struct {
 	MaskedKey string     `json:"maskedKey"`
 	Name      string     `json:"name"`
 	ExpiresAt *time.Time `json:"expiresAt"`
-	// CanManage 为后台管理授权：可查看最近使用的订阅号额度并通过 MCP 管理普通成员。
+	// CanManage 为后台管理授权：可查看服务商订阅号额度并通过 MCP 管理普通成员。
 	CanManage bool `json:"canManage"`
 }
 

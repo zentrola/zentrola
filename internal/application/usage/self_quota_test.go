@@ -14,7 +14,7 @@ type selfQuotaStoreStub struct {
 	scopes        []quota.Scope
 	used          map[quota.ScopeType]map[int64]int64
 	usedScopes    []quota.Scope
-	upstream      UpstreamQuota
+	upstream      []UpstreamQuota
 	upstreamCalls int
 }
 
@@ -25,12 +25,9 @@ func (s *selfQuotaStoreStub) QuotaUsed(_ context.Context, scopes []quota.Scope, 
 	s.usedScopes = scopes
 	return s.used, nil
 }
-func (s *selfQuotaStoreStub) LatestSubscriptionQuota(_ context.Context, _, _ int64, model string) (UpstreamQuota, error) {
+func (s *selfQuotaStoreStub) SubscriptionQuotas(context.Context, int64) ([]UpstreamQuota, error) {
 	s.upstreamCalls++
-	if s.upstream.Status != "" {
-		return s.upstream, nil
-	}
-	return UpstreamQuota{Status: "UNKNOWN", Model: model}, nil
+	return s.upstream, nil
 }
 
 func TestSelfQuotaUsesAllModelUsageAndMinimumApplicableRemaining(t *testing.T) {
@@ -58,35 +55,38 @@ func TestSelfQuotaUnlimitedAndUpstreamAuthorization(t *testing.T) {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
 	identity := appsec.PrincipalIdentity{ID: 5, AccessKeyID: 7}
-	if _, err := service.Upstream(context.Background(), identity, "gpt-test", time.Now().UTC()); !errors.Is(err, ErrUpstreamQuotaForbidden) || store.upstreamCalls != 0 {
+	if _, err := service.Upstream(context.Background(), identity, time.Now().UTC()); !errors.Is(err, ErrUpstreamQuotaForbidden) || store.upstreamCalls != 0 {
 		t.Fatalf("err=%v calls=%d", err, store.upstreamCalls)
 	}
 	identity.CanManage = true
-	if _, err := service.Upstream(context.Background(), identity, "gpt-test", time.Now().UTC()); err != nil || store.upstreamCalls != 1 {
-		t.Fatalf("err=%v calls=%d", err, store.upstreamCalls)
+	upstream, err := service.Upstream(context.Background(), identity, time.Now().UTC())
+	if err != nil || store.upstreamCalls != 1 || upstream == nil || len(upstream) != 0 {
+		t.Fatalf("upstream=%+v err=%v calls=%d", upstream, err, store.upstreamCalls)
 	}
 }
 
-func TestSelfQuotaUpstreamHidesStaleSnapshot(t *testing.T) {
+func TestSelfQuotaUpstreamHidesStaleSnapshotPerAccount(t *testing.T) {
 	now := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
 	identity := appsec.PrincipalIdentity{ID: 5, AccessKeyID: 7, CanManage: true}
-	for _, tc := range []struct {
-		name      string
-		checkedAt *time.Time
-		want      string
-		wantItems int
-	}{
-		{name: "fresh", checkedAt: ptr(now.Add(-UpstreamQuotaMaxAge)), want: "KNOWN", wantItems: 1},
-		{name: "stale", checkedAt: ptr(now.Add(-UpstreamQuotaMaxAge - time.Second)), want: "UNKNOWN"},
-		{name: "never checked", want: "UNKNOWN"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			store := &selfQuotaStoreStub{upstream: UpstreamQuota{Status: "KNOWN", Model: "gpt-test", CheckedAt: tc.checkedAt, Quotas: []UpstreamQuotaItem{{Code: "weekly"}}}}
-			result, err := NewSelfQuota(store).Upstream(context.Background(), identity, "gpt-test", now)
-			if err != nil || result.Status != tc.want || len(result.Quotas) != tc.wantItems || result.Quotas == nil {
-				t.Fatalf("result=%+v err=%v", result, err)
-			}
-		})
+	known := func(name string, checkedAt *time.Time) UpstreamQuota {
+		return UpstreamQuota{Status: "KNOWN", ProviderName: "OpenAI", SubscriptionName: name, CheckedAt: checkedAt, Quotas: []UpstreamQuotaItem{{Code: "weekly"}}}
+	}
+	store := &selfQuotaStoreStub{upstream: []UpstreamQuota{
+		known("fresh", ptr(now.Add(-UpstreamQuotaMaxAge))),
+		known("stale", ptr(now.Add(-UpstreamQuotaMaxAge-time.Second))),
+		known("never checked", nil),
+	}}
+	result, err := NewSelfQuota(store).Upstream(context.Background(), identity, now)
+	if err != nil || len(result) != 3 {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	for i, want := range []struct {
+		status string
+		items  int
+	}{{"KNOWN", 1}, {"UNKNOWN", 0}, {"UNKNOWN", 0}} {
+		if result[i].Status != want.status || len(result[i].Quotas) != want.items || result[i].Quotas == nil {
+			t.Fatalf("account %s: %+v", result[i].SubscriptionName, result[i])
+		}
 	}
 }
 

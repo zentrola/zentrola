@@ -72,22 +72,20 @@ func (s *SecurityHandlers) getMyQuota(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusOK, response{Code: "OK", Data: result})
 }
 
-// getMyUpstreamQuota 只返回该 Key 指定模型最近一次成功请求使用的订阅号额度快照。
-// @Summary 查询当前使用订阅号的额度快照
+// getMyUpstreamQuota 返回当前成员可路由到的全部订阅号额度快照，多个账号分别返回。
+// @Summary 查询服务商订阅号额度快照
 // @Tags 用量配额
 // @Security GatewayKey
 // @Security GatewayBearer
-// @Param model query string true "模型编码"
-// @Success 200 {object} response{data=app.UpstreamQuota}
-// @Failure 403 {object} response
+// @Success 200 {object} response{data=[]app.UpstreamQuota}
+// @Failure 400,403 {object} response
 // @Router /api/v1/me/upstream-quota [get]
 func (s *SecurityHandlers) getMyUpstreamQuota(w http.ResponseWriter, r *http.Request) {
-	values := r.URL.Query()
-	if len(values) != 1 || len(values["model"]) != 1 || strings.TrimSpace(values.Get("model")) == "" {
+	if len(r.URL.Query()) != 0 {
 		securityError(w, r, appsec.ErrInvalidArgument)
 		return
 	}
-	result, err := s.SelfQuota.Upstream(r.Context(), principalFrom(r), values.Get("model"), time.Now().UTC())
+	result, err := s.SelfQuota.Upstream(r.Context(), principalFrom(r), time.Now().UTC())
 	if err != nil {
 		securityError(w, r, err)
 		return

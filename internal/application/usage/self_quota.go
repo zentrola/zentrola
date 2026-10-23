@@ -16,26 +16,28 @@ var ErrUpstreamQuotaForbidden = errors.New("upstream quota access forbidden")
 // UpstreamQuotaMaxAge 是订阅号额度快照可对外展示的最长时效，超过后只返回 UNKNOWN。
 const UpstreamQuotaMaxAge = 24 * time.Hour
 
+// UpstreamQuota 是一个订阅号的额度快照；额度属于服务商账号，与模型无关。
 type UpstreamQuota struct {
 	Status           string              `json:"status"`
-	Model            string              `json:"model"`
-	ProviderName     *string             `json:"providerName"`
-	SubscriptionName *string             `json:"subscriptionName"`
-	LastUsedAt       *time.Time          `json:"lastUsedAt"`
+	ProviderName     string              `json:"providerName"`
+	SubscriptionName string              `json:"subscriptionName"`
 	CheckedAt        *time.Time          `json:"checkedAt"`
 	Quotas           []UpstreamQuotaItem `json:"quotas"`
 }
 
 type UpstreamQuotaItem struct {
-	Code           string     `json:"code"`
-	Name           *string    `json:"name"`
-	Status         string     `json:"status"`
-	Unit           *string    `json:"unit"`
-	LimitValue     *string    `json:"limitValue"`
-	UsedValue      *string    `json:"usedValue"`
-	RemainingValue *string    `json:"remainingValue"`
-	ResetsAt       *time.Time `json:"resetsAt"`
-	ObservedAt     time.Time  `json:"observedAt"`
+	Code           string  `json:"code"`
+	Name           *string `json:"name"`
+	Status         string  `json:"status"`
+	Unit           *string `json:"unit"`
+	LimitValue     *string `json:"limitValue"`
+	UsedValue      *string `json:"usedValue"`
+	RemainingValue *string `json:"remainingValue"`
+	// UsedPercent 与 WindowDurationSeconds 描述按百分比计量的滚动窗口，如 7 天窗口已用 1%。
+	UsedPercent           *float64   `json:"usedPercent"`
+	WindowDurationSeconds *int64     `json:"windowDurationSeconds"`
+	ResetsAt              *time.Time `json:"resetsAt"`
+	ObservedAt            time.Time  `json:"observedAt"`
 }
 
 type SelfQuota struct {
@@ -51,7 +53,7 @@ type SelfQuota struct {
 type SelfQuotaStore interface {
 	QuotaScopes(context.Context, int64, string) ([]quota.Scope, error)
 	QuotaUsed(context.Context, []quota.Scope, time.Time) (map[quota.ScopeType]map[int64]int64, error)
-	LatestSubscriptionQuota(context.Context, int64, int64, string) (UpstreamQuota, error)
+	SubscriptionQuotas(context.Context, int64) ([]UpstreamQuota, error)
 }
 
 type SelfQuotaService struct{ store SelfQuotaStore }
@@ -101,26 +103,28 @@ func (s *SelfQuotaService) Current(ctx context.Context, identity appsec.Principa
 	return result, nil
 }
 
-func (s *SelfQuotaService) Upstream(ctx context.Context, identity appsec.PrincipalIdentity, model string, now time.Time) (UpstreamQuota, error) {
+// Upstream 返回当前成员可路由到的全部订阅号额度快照，多个账号分别返回。
+func (s *SelfQuotaService) Upstream(ctx context.Context, identity appsec.PrincipalIdentity, now time.Time) ([]UpstreamQuota, error) {
 	if identity.ID <= 0 {
-		return UpstreamQuota{}, appsec.ErrUnauthenticated
+		return nil, appsec.ErrUnauthenticated
 	}
 	if !identity.CanManage {
-		return UpstreamQuota{}, ErrUpstreamQuotaForbidden
-	}
-	model = strings.TrimSpace(model)
-	if model == "" || len(model) > 128 {
-		return UpstreamQuota{}, appsec.ErrInvalidArgument
+		return nil, ErrUpstreamQuotaForbidden
 	}
 	if s == nil || s.store == nil {
-		return UpstreamQuota{}, appsec.ErrUnavailable
+		return nil, appsec.ErrUnavailable
 	}
-	result, err := s.store.LatestSubscriptionQuota(ctx, identity.ID, identity.AccessKeyID, model)
+	result, err := s.store.SubscriptionQuotas(ctx, identity.ID)
 	if err != nil {
-		return result, err
+		return nil, err
 	}
-	if result.CheckedAt == nil || now.Sub(result.CheckedAt.UTC()) > UpstreamQuotaMaxAge {
-		result.Status, result.Quotas = "UNKNOWN", []UpstreamQuotaItem{}
+	if result == nil {
+		result = []UpstreamQuota{}
+	}
+	for i := range result {
+		if result[i].CheckedAt == nil || now.Sub(result[i].CheckedAt.UTC()) > UpstreamQuotaMaxAge {
+			result[i].Status, result[i].Quotas = "UNKNOWN", []UpstreamQuotaItem{}
+		}
 	}
 	return result, nil
 }

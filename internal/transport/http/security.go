@@ -422,7 +422,7 @@ func (s *SecurityHandlers) revokeKey(w http.ResponseWriter, r *http.Request) {
 }
 
 // @Summary 设置单把成员 Access Key 的后台管理权限
-// @Description 后台管理权限允许该 Key 查看最近使用的订阅号额度，并通过 MCP 管理普通成员。
+// @Description 后台管理权限允许该 Key 查看服务商订阅号额度，并通过 MCP 管理普通成员。
 // @Tags 访问密钥
 // @Security AdminBearer
 // @Param id path string true "Access Key ID"

@@ -401,7 +401,7 @@
                         "AdminBearer": []
                     }
                 ],
-                "description": "后台管理权限允许该 Key 查看最近使用的订阅号额度，并通过 MCP 管理普通成员。",
+                "description": "后台管理权限允许该 Key 查看服务商订阅号额度，并通过 MCP 管理普通成员。",
                 "tags": [
                     "访问密钥"
                 ],
@@ -4575,16 +4575,7 @@
                 "tags": [
                     "用量配额"
                 ],
-                "summary": "查询当前使用订阅号的额度快照",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "模型编码",
-                        "name": "model",
-                        "in": "query",
-                        "required": true
-                    }
-                ],
+                "summary": "查询服务商订阅号额度快照",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -4597,11 +4588,20 @@
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/usage.UpstreamQuota"
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/usage.UpstreamQuota"
+                                            }
                                         }
                                     }
                                 }
                             ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
                         }
                     },
                     "403": {
@@ -10559,7 +10559,7 @@
             ],
             "properties": {
                 "canManage": {
-                    "description": "CanManage 授予成员 Key 后台管理权限：查看最近使用的订阅号额度并通过 MCP 管理普通成员；应用 Key 不支持。",
+                    "description": "CanManage 授予成员 Key 后台管理权限：查看服务商订阅号额度并通过 MCP 管理普通成员；应用 Key 不支持。",
                     "type": "boolean"
                 },
                 "expiresAt": {
@@ -12295,7 +12295,7 @@
             "type": "object",
             "properties": {
                 "canManage": {
-                    "description": "CanManage 为后台管理授权：可查看最近使用的订阅号额度并通过 MCP 管理普通成员。",
+                    "description": "CanManage 为后台管理授权：可查看服务商订阅号额度并通过 MCP 管理普通成员。",
                     "type": "boolean"
                 },
                 "expiresAt": {
@@ -12658,12 +12658,6 @@
                 "checkedAt": {
                     "type": "string"
                 },
-                "lastUsedAt": {
-                    "type": "string"
-                },
-                "model": {
-                    "type": "string"
-                },
                 "providerName": {
                     "type": "string"
                 },
@@ -12708,8 +12702,15 @@
                 "unit": {
                     "type": "string"
                 },
+                "usedPercent": {
+                    "description": "UsedPercent 与 WindowDurationSeconds 描述按百分比计量的滚动窗口，如 7 天窗口已用 1%。",
+                    "type": "number"
+                },
                 "usedValue": {
                     "type": "string"
+                },
+                "windowDurationSeconds": {
+                    "type": "integer"
                 }
             }
         }
