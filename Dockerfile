@@ -1,4 +1,4 @@
-ARG APP_VERSION=1.2.2
+ARG APP_VERSION=1.2.3
 ARG BASE_IMAGE=longjianghu/zentrola-codex-base:0.154.0
 
 FROM ${BASE_IMAGE}

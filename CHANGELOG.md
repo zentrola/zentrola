@@ -4,6 +4,18 @@ All notable changes to Zentrola are documented here. Dates use UTC. The project 
 
 Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循语义化版本。
 
+## [1.2.3] - 2026-10-23
+
+### Changed / 变更
+
+- The Admin Web dashboard replaces the current model provider list with service health by provider and credential. Subscription and API Key tags show available, unavailable, or unverified status; hovering over a status dot shows the reason and last check time, and supported credentials can be checked on demand. Long names are truncated with the full name available on hover.
+- 管理后台首页将“当前模型服务商”替换为按服务商和凭据展示的“服务健康度”。订阅号和 API Key 标签显示可用、不可用或待验证状态；悬停状态点可查看原因及最近检查时间，支持检测的凭据可按需重新检查。长名称会截断，悬停可查看完整名称。
+
+### Upgrade / 升级
+
+- No database migration or configuration change is required.
+- 无需数据库迁移或配置变更。
+
 ## [1.2.2] - 2026-10-20
 
 ### Added / 新增
@@ -241,6 +253,7 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - 支持协议转换、流式响应、工具调用和服务商故障切换的 OpenAI/Anthropic 兼容网关。
 - 中英文管理界面、独立发布包和 Docker Compose 部署方式。
 
+[1.2.3]: https://github.com/zentrola/zentrola/releases/tag/1.2.3
 [1.2.2]: https://github.com/zentrola/zentrola/releases/tag/1.2.2
 [1.2.1]: https://github.com/zentrola/zentrola/releases/tag/1.2.1
 [1.2.0]: https://github.com/zentrola/zentrola/releases/tag/1.2.0

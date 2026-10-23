@@ -3,23 +3,24 @@ import { onMounted, ref } from 'vue'
 import { all, api, errorText } from '../api'
 import { normalizeDashboard, utcMonthRange } from '../dashboard'
 import { t } from '../i18n'
-import type { ActiveModel, Dashboard, Provider, Resource } from '../types'
+import type { ConnectionResult, Dashboard, Provider, Resource } from '../types'
 import Icon from '../components/Icon.vue'
 import InitializationGuide from '../components/InitializationGuide.vue'
 import PageHeader from '../components/PageHeader.vue'
 import AccessPanel from '../components/home/AccessPanel.vue'
 import AccessSetupModal from '../components/home/AccessSetupModal.vue'
-import ActiveModelsPanel from '../components/home/ActiveModelsPanel.vue'
+import CredentialHealthPanel from '../components/home/CredentialHealthPanel.vue'
 import HomeMetrics from '../components/home/HomeMetrics.vue'
 import HomeRankings from '../components/home/HomeRankings.vue'
 
 const summary = ref<Dashboard | null>(null)
 const healthProviders = ref<Provider[]>([])
 const healthResources = ref<Resource[]>([])
-const activeModels = ref<ActiveModel[]>([])
 const loading = ref(false)
 const error = ref('')
-const activeModelsError = ref('')
+const credentialChecks = ref<Record<string, { result: ConnectionResult; checkedAt: string }>>({})
+const checkingResourceId = ref<string | null>(null)
+const credentialCheckError = ref<Record<string, string>>({})
 const providerHealthLoading = ref(false)
 const providerHealthError = ref('')
 const initializationGuideOpen = ref(false)
@@ -44,19 +45,6 @@ async function loadDashboard(current: number) {
   }
 }
 
-async function loadActiveModels(current: number) {
-  if (current === revision) activeModelsError.value = ''
-  try {
-    const result = await api<ActiveModel[]>('/gateway/active-models')
-    if (current === revision) activeModels.value = Array.isArray(result) ? result : []
-  } catch (reason) {
-    if (current === revision) {
-      activeModels.value = []
-      activeModelsError.value = errorText(reason)
-    }
-  }
-}
-
 async function loadProviderHealth(current: number) {
   providerHealthLoading.value = true
   providerHealthError.value = ''
@@ -76,14 +64,25 @@ async function loadProviderHealth(current: number) {
   }
 }
 
+async function checkCredential(resource: Resource) {
+  if (checkingResourceId.value) return
+  checkingResourceId.value = resource.id
+  delete credentialCheckError.value[resource.id]
+  try {
+    const result = await api<ConnectionResult>(`/resources/${resource.id}/test-connection`, 'POST')
+    credentialChecks.value[resource.id] = { result, checkedAt: new Date().toISOString() }
+    await loadProviderHealth(revision)
+  } catch (reason) {
+    credentialCheckError.value[resource.id] = errorText(reason)
+  } finally {
+    checkingResourceId.value = null
+  }
+}
+
 async function load() {
   const current = ++revision
   loading.value = true
-  await Promise.all([
-    loadDashboard(current),
-    loadProviderHealth(current),
-    loadActiveModels(current),
-  ])
+  await Promise.all([loadDashboard(current), loadProviderHealth(current)])
   if (current === revision) loading.value = false
 }
 
@@ -123,10 +122,16 @@ onMounted(load)
     <AccessPanel @setup="setupOpen = true" />
   </div>
 
-  <ActiveModelsPanel
-    :models="activeModels"
-    :error="activeModelsError"
-    @retry="loadActiveModels(revision)"
+  <CredentialHealthPanel
+    :providers="healthProviders"
+    :resources="healthResources"
+    :loading="providerHealthLoading"
+    :error="providerHealthError"
+    :checks="credentialChecks"
+    :check-errors="credentialCheckError"
+    :checking-resource-id="checkingResourceId"
+    @retry="loadProviderHealth(revision)"
+    @check="checkCredential"
   />
 
   <HomeRankings :summary="summary" :loading="loading" :month="currentMonth" />

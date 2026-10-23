@@ -50,6 +50,11 @@ test.describe('仪表盘', () => {
       id: '88',
       name: 'DeepSeek Key',
       providerId: '81',
+      authType: 'API_KEY',
+      authAdapter: 'API_KEY',
+      priority: 1,
+      quotaStatus: 'UNKNOWN',
+      quotaCheckedAt: null,
       status: 'ACTIVE',
       runtimeStatus: 'HEALTHY',
       blockedReason: null,
@@ -145,20 +150,12 @@ test.describe('仪表盘', () => {
     await expect(page.getByText('用户 Token 消耗排行')).toBeVisible()
     await expect(page.getByText('模型请求排行')).toBeVisible()
     await expect(page.getByText('服务商调用排行')).toBeVisible()
-    const activeModels = page.getByRole('region', { name: '当前模型服务商' })
-    await expect(activeModels.getByText('3 个模型', { exact: true })).toBeVisible()
-    await expect(activeModels.locator('.active-model-row')).toHaveCount(3)
-    await expect(activeModels.getByText('Claude Sonnet 5', { exact: true })).toBeVisible()
-    await expect(activeModels.getByText('claude-sonnet-5', { exact: true })).toBeVisible()
-    await expect(activeModels.getByText('CC Vibe', { exact: true })).toBeVisible()
-    await expect(activeModels.getByText('LingkeAI', { exact: true })).toHaveCount(0)
-    await expect(activeModels.locator('.active-model-identity').first()).toHaveCSS(
-      'display',
-      'flex',
-    )
-    await expect(activeModels.locator('.active-model-code')).toHaveCount(3)
-    await expect(activeModels.locator('.active-provider-name')).toHaveCount(3)
-    await expect(activeModels.locator('.active-provider-tag')).toHaveCount(0)
+    const health = page.getByRole('region', { name: '服务健康度' })
+    await expect(health.locator('.credential-health-head .credential-health-legend')).toBeVisible()
+    await expect(health.getByText('DeepSeek Key')).toBeVisible()
+    await expect(health.getByText('待验证', { exact: true }).first()).toBeVisible()
+    await expect(health.locator('.credential-health-dot-button')).toHaveClass(/is-unknown/)
+    await expect(page.getByRole('region', { name: '当前模型服务商' })).toHaveCount(0)
     await expect(page.locator('.access-panel').getByText('OpenAI', { exact: true })).toBeVisible()
     await expect(
       page.locator('.access-panel').getByText('Anthropic', { exact: true }),
@@ -269,82 +266,157 @@ test.describe('仪表盘', () => {
     await page.screenshot({ path: '../.cache/web-visual/home-setup-mobile.png', fullPage: true })
   })
 
-  test('没有当前模型服务商时隐藏整个区块', async ({ page }) => {
+  test('没有启用服务商时展示健康度空状态', async ({ page }) => {
     const state = await fixture(page)
-    state.activeModelRows.splice(0)
-    const activeModelsResponse = page.waitForResponse((response) =>
-      new URL(response.url()).pathname.endsWith('/gateway/active-models'),
-    )
+    state.providers.forEach((provider) => (provider.status = 'DISABLED'))
     await signIn(page, 'home')
-    await activeModelsResponse
-
-    await expect(page.getByRole('region', { name: '当前模型服务商' })).toHaveCount(0)
+    await expect(page.getByRole('region', { name: '服务健康度' })).toContainText('暂无已启用服务商')
     await expect(page.getByRole('heading', { name: '用户 Token 消耗排行' })).toBeVisible()
   })
 
-  test('当前模型服务商加载失败时提示并允许重试', async ({ page }) => {
+  test('凭据状态加载失败时提示并允许重试', async ({ page }) => {
     await fixture(page)
     let attempts = 0
-    await page.route('**/api/v1/gateway/active-models', async (route) => {
+    await page.route('**/api/v1/resources?*', async (route) => {
       attempts++
-      await route.fulfill({
-        status: attempts === 1 ? 503 : 200,
-        json: {
-          code: attempts === 1 ? 'UNAVAILABLE' : 'OK',
-          data:
-            attempts === 1
-              ? null
-              : [{ modelCode: 'test-model', modelName: '测试模型', providerName: '测试服务商' }],
-        },
-      })
+      if (attempts === 1)
+        await route.fulfill({ status: 503, json: { code: 'UNAVAILABLE', data: null } })
+      else await route.fallback()
     })
     await signIn(page, 'home')
-    const alert = page.getByRole('alert').filter({ hasText: '当前模型服务商' })
+    const alert = page.getByRole('region', { name: '服务健康度' }).getByRole('alert')
     await expect(alert).toBeVisible()
-    await expect(page.getByRole('region', { name: '当前模型服务商' })).toHaveCount(0)
     await alert.getByRole('button', { name: '重试' }).click()
-    await expect(page.getByRole('region', { name: '当前模型服务商' })).toContainText('测试模型')
+    await expect(page.getByRole('region', { name: '服务健康度' })).toContainText('DeepSeek')
     await expect(alert).toHaveCount(0)
     expect(attempts).toBe(2)
   })
 
-  test('当前模型服务商在大量记录时限制卡片高度并内部滚动', async ({ page }) => {
+  test('服务健康度按凭据展示失败原因并可逐项检查', async ({ page }) => {
     const state = await fixture(page)
-    state.activeModelRows.splice(
-      0,
-      state.activeModelRows.length,
-      ...Array.from({ length: 100 }, (_, index) => ({
-        modelName: `Model ${index + 1}`,
-        modelCode: `model-${String(index + 1).padStart(3, '0')}`,
-        providerName: `Provider ${index + 1}`,
-      })),
+    state.resources.push(
+      {
+        id: '88',
+        name: '订阅号 A',
+        providerId: '81',
+        authType: 'SUBSCRIPTION',
+        authAdapter: 'OPENAI_CODEX',
+        priority: 1,
+        runtimeStatus: 'HEALTHY',
+        credentialConfigured: true,
+        quotaStatus: 'AVAILABLE',
+        quotaCheckedAt: new Date().toISOString(),
+        blockedReason: null,
+        lastErrorAt: null,
+        createdAt: stamp,
+        updatedAt: stamp,
+      },
+      {
+        id: '89',
+        name: 'API Key B',
+        providerId: '81',
+        authType: 'API_KEY',
+        authAdapter: 'API_KEY',
+        priority: 2,
+        runtimeStatus: 'BLOCKED',
+        credentialConfigured: true,
+        quotaStatus: 'UNKNOWN',
+        quotaCheckedAt: null,
+        blockedReason: 'AUTH',
+        lastErrorAt: stamp,
+        lastHttpStatus: 401,
+        lastErrorCode: 'UPSTREAM_AUTH_FAILED',
+        createdAt: stamp,
+        updatedAt: stamp,
+      },
     )
     await signIn(page, 'home')
-
-    const activeModels = page.getByRole('region', { name: '当前模型服务商' })
-    await expect(activeModels.getByText('100 个模型', { exact: true })).toBeVisible()
-    await expect(activeModels.locator('.active-model-row')).toHaveCount(100)
-    const dimensions = await activeModels
-      .locator('.active-models-table-wrap')
-      .evaluate((element) => {
-        const style = getComputedStyle(element)
-        return {
-          clientHeight: element.clientHeight,
-          scrollHeight: element.scrollHeight,
-          maxHeight: style.maxHeight,
-          overflowY: style.overflowY,
-          headerPosition: getComputedStyle(element.querySelector('th')!).position,
-        }
-      })
-    expect(dimensions.maxHeight).toBe('280px')
-    expect(dimensions.overflowY).toBe('auto')
-    expect(dimensions.headerPosition).toBe('sticky')
-    expect(dimensions.clientHeight).toBeLessThanOrEqual(280)
-    expect(dimensions.scrollHeight).toBeGreaterThan(dimensions.clientHeight)
+    const health = page.getByRole('region', { name: '服务健康度' })
+    await expect(health.locator('.credential-health-head .credential-health-legend')).toBeVisible()
+    await expect(health.getByText('订阅号 A')).toBeVisible()
+    await expect(health.getByText('API Key B')).toBeVisible()
+    const subscription = health.locator('.credential-health-item').filter({ hasText: '订阅号 A' })
+    const apiKey = health.locator('.credential-health-item').filter({ hasText: 'API Key B' })
+    const subscriptionTag = subscription.locator('.credential-health-tag')
+    expect(
+      await subscriptionTag.evaluate((element) =>
+        Math.round(element.getBoundingClientRect().width),
+      ),
+    ).toBeLessThan(180)
+    expect(
+      await apiKey.evaluate((element) => {
+        const previous = element.previousElementSibling!.getBoundingClientRect()
+        return element.getBoundingClientRect().left - previous.right
+      }),
+    ).toBeLessThan(12)
+    expect(
+      await subscription.evaluate((element) => {
+        const name = element.querySelector('.credential-health-name')!.getBoundingClientRect()
+        const dot = element.querySelector('.credential-health-dot-button')!.getBoundingClientRect()
+        return dot.left - name.right
+      }),
+    ).toBeLessThan(12)
+    await expect(subscription.locator('.credential-health-dot-button')).toHaveClass(/is-available/)
+    await expect(apiKey.locator('.credential-health-dot-button')).toHaveClass(/is-unavailable/)
+    await apiKey.locator('.credential-health-dot-button').hover()
+    await expect(apiKey.getByRole('tooltip')).toContainText('HTTP 401')
+    await expect(apiKey.getByRole('tooltip')).toContainText('UPSTREAM_AUTH_FAILED')
     await page.screenshot({
-      path: '../.cache/web-visual/home-active-models-100.png',
+      path: '../.cache/web-visual/home-credential-health.png',
       fullPage: true,
     })
+    await apiKey.getByRole('button', { name: '检查 API Key B 的连通性' }).click()
+    await expect(apiKey.locator('.credential-health-dot-button')).toHaveClass(/is-available/)
+    await expect(apiKey.getByRole('tooltip')).toContainText('可用')
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+      .toBe(true)
+    await page.screenshot({
+      path: '../.cache/web-visual/home-credential-health-mobile.png',
+      fullPage: true,
+    })
+  })
+
+  test('服务商和凭据名称超出固定宽度时截断并保留完整名称', async ({ page }) => {
+    const state = await fixture(page)
+    const providerName = '名称很长的服务商用于验证首页健康度列表截断'
+    const credentialName = '名称很长的个人订阅账号用于验证固定宽度截断'
+    state.providers[0].name = providerName
+    state.resources.push({
+      id: '90',
+      name: credentialName,
+      providerId: '81',
+      authType: 'SUBSCRIPTION',
+      authAdapter: 'OPENAI_CODEX',
+      priority: 1,
+      runtimeStatus: 'HEALTHY',
+      credentialConfigured: true,
+      quotaStatus: 'AVAILABLE',
+      quotaCheckedAt: new Date().toISOString(),
+      createdAt: stamp,
+      updatedAt: stamp,
+    })
+    await signIn(page, 'home')
+
+    const health = page.getByRole('region', { name: '服务健康度' })
+    const provider = health.locator('.credential-health-group h3')
+    const item = health.locator('.credential-health-item')
+    const name = item.locator('.credential-health-name')
+    await expect(provider).toHaveAttribute('title', providerName)
+    await expect(name).toHaveAttribute('title', credentialName)
+    expect(await provider.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(
+      true,
+    )
+    expect(await name.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true)
+    expect(
+      await item.evaluate((element) => Math.round(element.getBoundingClientRect().width)),
+    ).toBe(180)
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+      .toBe(true)
   })
 
   test('首页在启用服务商不可用时提醒管理员', async ({ page }) => {
