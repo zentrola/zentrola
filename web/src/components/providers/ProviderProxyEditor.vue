@@ -11,6 +11,7 @@ import {
   type ProxyScheme,
 } from '../../providerProxy'
 import Icon from '../Icon.vue'
+import FieldHelp from '../FieldHelp.vue'
 
 export type ProxyDraft = {
   proxyEnabled: boolean
@@ -88,15 +89,7 @@ function removeHeader(index: number) {
     <div class="provider-field-row proxy-url-row">
       <div class="provider-field-label proxy-url-label">
         <label for="provider-proxy-url">{{ t('providers.proxyUrl') }}</label>
-        <span
-          class="provider-field-help"
-          role="img"
-          tabindex="0"
-          :aria-label="t('providers.proxyUrlCredentialHint')"
-          :title="t('providers.proxyUrlCredentialHint')"
-          :data-tooltip="t('providers.proxyUrlCredentialHint')"
-          >i</span
-        >
+        <FieldHelp :text="t('providers.proxyUrlCredentialHint')" />
       </div>
       <div class="provider-field-control proxy-url-control">
         <select
@@ -326,55 +319,6 @@ function removeHeader(index: number) {
   display: grid;
   grid-template-columns: 124px minmax(0, 1fr);
   gap: 8px;
-}
-.provider-field-help {
-  position: relative;
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 15px;
-  height: 15px;
-  border: 1px solid #8ca0b2;
-  border-radius: 50%;
-  color: #60788d;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1;
-  cursor: help;
-}
-.provider-field-help::after {
-  position: absolute;
-  top: 50%;
-  left: calc(100% + 8px);
-  z-index: 3;
-  width: max-content;
-  max-width: 220px;
-  padding: 6px 8px;
-  border-radius: 5px;
-  background: var(--color-sidebar);
-  box-shadow: 0 4px 12px rgb(15 23 42 / 18%);
-  color: #fff;
-  content: attr(data-tooltip);
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 1.4;
-  opacity: 0;
-  pointer-events: none;
-  text-align: left;
-  transform: translate(4px, -50%);
-  transition:
-    opacity 0.15s,
-    transform 0.15s;
-}
-.provider-field-help:hover::after,
-.provider-field-help:focus-visible::after {
-  opacity: 1;
-  transform: translate(0, -50%);
-}
-.provider-field-help:focus-visible {
-  outline: 2px solid #bfdbfe;
-  outline-offset: 2px;
 }
 .proxy-headers-head {
   display: flex;

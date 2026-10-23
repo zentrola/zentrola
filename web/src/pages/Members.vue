@@ -13,6 +13,7 @@ import { t } from '../i18n'
 import { showErrorToast, showSuccessToast } from '../toast'
 import type { Member, Group, CreatedKey } from '../types'
 import Icon from '../components/Icon.vue'
+import FieldHelp from '../components/FieldHelp.vue'
 import StatusSwitch from '../components/StatusSwitch.vue'
 import Modal from '../components/Modal.vue'
 import PageHeader from '../components/PageHeader.vue'
@@ -500,18 +501,25 @@ async function copyKey() {
     :busy="busy"
     @close="selected = null"
   >
-    <p class="muted">{{ local('keyHint') }}</p>
+    <div class="context-note" role="note">
+      <Icon name="shield" :size="18" /><span>{{ local('keyHint') }}</span>
+    </div>
     <form id="member-key-form" @submit.prevent="issueKey">
       <label
         >{{ local('keyName') }}<input v-model="keyName" required autofocus :disabled="busy"
       /></label>
-      <label>{{ local('expires') }}<input v-model="expires" type="date" :disabled="busy" /></label>
-      <label v-if="kind === 'member'" class="checkbox-label">
-        <input v-model="canManage" type="checkbox" :disabled="busy" />
-        {{ local('management') }}
-      </label>
-      <p v-if="kind === 'member'" class="muted">{{ local('managementHint') }}</p>
-      <p class="muted">{{ local('expiresHint') }}</p>
+      <label
+        ><span class="label-with-help"
+          >{{ local('expires') }}<FieldHelp :text="local('expiresHint')" symbol="!" /></span
+        ><input v-model="expires" type="date" :disabled="busy"
+      /></label>
+      <div v-if="kind === 'member'" class="label-with-help">
+        <label class="checkbox-label">
+          <input v-model="canManage" type="checkbox" :disabled="busy" />
+          {{ local('management') }}
+        </label>
+        <FieldHelp :text="local('managementHint')" symbol="!" />
+      </div>
     </form>
     <template #footer>
       <button type="button" class="button" :disabled="busy" @click="selected = null">
@@ -549,6 +557,14 @@ async function copyKey() {
 }
 .checkbox-label input {
   margin: 0;
+}
+.label-with-help {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.label-with-help > .checkbox-label {
+  margin-bottom: 0;
 }
 .members-table {
   min-width: 1000px;
