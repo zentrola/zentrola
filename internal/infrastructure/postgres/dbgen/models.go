@@ -148,9 +148,9 @@ type MonthlyTokenUsage struct {
 type OperationLog struct {
 	// 主键，由应用侧生成的正数 64-bit ID
 	ID int64
-	// 操作人类型：ADMIN=管理员；SYSTEM=系统
+	// 操作人类型：ADMIN=管理员；SYSTEM=系统；MEMBER_KEY=获授权成员 Key
 	OperatorType string
-	// 管理员 ID；NULL=系统操作
+	// 管理员 ID 或成员 Key ID；系统操作为 NULL
 	OperatorID *int64
 	// 操作人名称快照
 	OperatorName string
@@ -246,6 +246,8 @@ type PrincipalAccessKey struct {
 	UpdatedAt pgtype.Timestamptz
 	// 允许该成员 Key 查看自己最近实际使用的订阅号额度快照
 	CanViewUpstreamQuota bool
+	// 允许成员 Key 通过受限 MCP 接口创建普通成员和签发普通成员 Key
+	CanManageMembers bool
 }
 
 // 调用主体的 AI 使用治理分组

@@ -202,6 +202,7 @@ export interface AccessKey {
   revokedAt: string | null
   createdAt: string
   canViewUpstreamQuota: boolean
+  canManageMembers: boolean
 }
 export interface CreatedKey {
   id: string

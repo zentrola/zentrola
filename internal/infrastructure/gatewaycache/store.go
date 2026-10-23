@@ -85,6 +85,13 @@ func (s *KeyStore) SetUpstreamQuotaPermission(ctx context.Context, actor admin.I
 	s.cache.Clear(ctx, "access_key_quota_permission_updated")
 	return nil
 }
+func (s *KeyStore) SetMemberManagementPermission(ctx context.Context, actor admin.Identity, id int64, allowed bool, meta appsec.RequestMeta) error {
+	if err := s.next.SetMemberManagementPermission(ctx, actor, id, allowed, meta); err != nil {
+		return err
+	}
+	s.cache.Clear(ctx, "access_key_member_management_updated")
+	return nil
+}
 
 func (s *KeyStore) Authenticate(ctx context.Context, hash []byte, now time.Time) (appsec.PrincipalIdentity, error) {
 	key := s.cache.IdentityKey(hash)

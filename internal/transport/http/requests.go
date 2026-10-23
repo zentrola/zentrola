@@ -180,6 +180,35 @@ type UpdateKeyQuotaPermissionRequest struct {
 	CanViewUpstreamQuota *bool `json:"canViewUpstreamQuota"`
 }
 
+type UpdateKeyMemberManagementRequest struct {
+	CanManageMembers *bool `json:"canManageMembers"`
+}
+
+func (r *UpdateKeyMemberManagementRequest) Normalize() {}
+func (r UpdateKeyMemberManagementRequest) Valid() bool { return r.CanManageMembers != nil }
+
+type CreateManagedMemberRequest struct {
+	Name     string   `json:"name"`
+	Remark   string   `json:"remark"`
+	GroupIDs []string `json:"groupIds"`
+	KeyName  string   `json:"keyName"`
+}
+
+func (r *CreateManagedMemberRequest) Normalize() {
+	r.Name, r.Remark, r.KeyName = strings.TrimSpace(r.Name), strings.TrimSpace(r.Remark), strings.TrimSpace(r.KeyName)
+	normalizeStrings(r.GroupIDs)
+}
+func (r CreateManagedMemberRequest) Valid() bool {
+	return validRequestText(r.Name, 128, true) && validRequestText(r.Remark, 2000, false) && validRequestText(r.KeyName, 128, true) && validRequestIDs(r.GroupIDs)
+}
+
+type IssueManagedMemberKeyRequest struct {
+	Name string `json:"name"`
+}
+
+func (r *IssueManagedMemberKeyRequest) Normalize() { r.Name = strings.TrimSpace(r.Name) }
+func (r IssueManagedMemberKeyRequest) Valid() bool { return validRequestText(r.Name, 128, true) }
+
 func (r *UpdateKeyQuotaPermissionRequest) Normalize() {}
 func (r UpdateKeyQuotaPermissionRequest) Valid() bool { return r.CanViewUpstreamQuota != nil }
 

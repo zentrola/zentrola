@@ -10,7 +10,7 @@ import (
 )
 
 const getAccessKeyByHash = `-- name: GetAccessKeyByHash :one
-SELECT id, is_deleted, status, principal_id, key_hash, masked_key, name, expires_at, last_used_at, revoked_at, created_by, updated_by, created_at, updated_at, can_view_upstream_quota FROM principal_access_key WHERE key_hash = $1 AND is_deleted = false
+SELECT id, is_deleted, status, principal_id, key_hash, masked_key, name, expires_at, last_used_at, revoked_at, created_by, updated_by, created_at, updated_at, can_view_upstream_quota, can_manage_members FROM principal_access_key WHERE key_hash = $1 AND is_deleted = false
 `
 
 // 这里只定位凭证；完整认证和撤销/过期判断在阶段 2/4 实现。
@@ -33,6 +33,7 @@ func (q *Queries) GetAccessKeyByHash(ctx context.Context, keyHash []byte) (Princ
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CanViewUpstreamQuota,
+		&i.CanManageMembers,
 	)
 	return i, err
 }

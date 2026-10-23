@@ -285,6 +285,7 @@ test.describe('用户与应用', () => {
       '访问密钥',
       '过期日期',
       '允许查看当前使用订阅号的额度',
+      'MCP 成员管理',
       '操作',
     ])
     await expect(modal(page).getByRole('columnheader', { name: '操作' })).toHaveCSS(
@@ -298,6 +299,11 @@ test.describe('用户与应用', () => {
     await modal(page).getByRole('button', { name: '取消额度授权' }).click()
     await expect(modal(page).getByRole('row').filter({ hasText: '工作站' })).toContainText('否')
     expect(state.keys[0].canViewUpstreamQuota).toBe(false)
+    await modal(page).getByRole('button', { name: '授权成员管理' }).click()
+    await page.getByRole('dialog').last().getByRole('button', { name: '授权成员管理' }).click()
+    expect(state.keys[0].canManageMembers).toBe(true)
+    await modal(page).getByRole('button', { name: '取消管理授权' }).click()
+    expect(state.keys[0].canManageMembers).toBe(false)
     await expect(modal(page).locator('code')).toHaveText([
       'vk-revoked********1234',
       'zt_vk_temp********temp',
@@ -320,7 +326,7 @@ test.describe('用户与应用', () => {
         .getByRole('button', { name: '撤销' }),
     ).toHaveCount(0)
     await expect(
-      modal(page).getByRole('row').filter({ hasText: '临时测试' }).locator('td').nth(4),
+      modal(page).getByRole('row').filter({ hasText: '临时测试' }).locator('td').nth(5),
     ).toHaveText('-')
     const historyDialog = page.getByRole('dialog', { name: '林知远的 Key 记录', exact: true })
     const historyRevoke = historyDialog
@@ -343,7 +349,7 @@ test.describe('用户与应用', () => {
     await expect(page.locator('.toast-success')).toContainText('Key 已撤销')
     await expect(historyDialog.locator('.notice')).toHaveCount(0)
     await expect(historyRevoke).toHaveCount(0)
-    await expect(maskedKey.locator('td').nth(4)).toHaveText('-')
+    await expect(maskedKey.locator('td').nth(5)).toHaveText('-')
     expect(state.keys[0].status).toBe('REVOKED')
     expect(state.keys[1].status).toBe('ACTIVE')
     await mkdir('../.cache/web-visual', { recursive: true })

@@ -394,6 +394,57 @@
                 }
             }
         },
+        "/api/v1/access-keys/{id}/member-management-permission": {
+            "put": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "tags": [
+                    "访问密钥"
+                ],
+                "summary": "授权单把成员 Key 通过 MCP 管理普通成员",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Access Key ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "授权状态",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.UpdateKeyMemberManagementRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/http.UpdateKeyMemberManagementRequest"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/access-keys/{id}/revoke": {
             "post": {
                 "security": [
@@ -4051,6 +4102,161 @@
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/me/manage/members": {
+            "post": {
+                "security": [
+                    {
+                        "GatewayBearer": []
+                    }
+                ],
+                "tags": [
+                    "成员管理"
+                ],
+                "summary": "通过授权成员 Key 创建普通成员并签发首把 Key",
+                "parameters": [
+                    {
+                        "description": "成员与首把 Key",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.CreateManagedMemberRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/security.ProvisionedMember"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/me/manage/members/{id}/keys": {
+            "post": {
+                "security": [
+                    {
+                        "GatewayBearer": []
+                    }
+                ],
+                "tags": [
+                    "成员管理"
+                ],
+                "summary": "通过授权成员 Key 为普通成员签发 Key 并自动启用成员",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "普通成员 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Key 名称",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.IssueManagedMemberKeyRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/security.CreatedKey"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
                         }
@@ -10239,6 +10445,26 @@
                 }
             }
         },
+        "http.CreateManagedMemberRequest": {
+            "type": "object",
+            "properties": {
+                "groupIds": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "keyName": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "remark": {
+                    "type": "string"
+                }
+            }
+        },
         "http.CreateMemberRequest": {
             "type": "object",
             "required": [
@@ -10310,6 +10536,14 @@
                 "providerId": {
                     "type": "string",
                     "example": "123456789"
+                }
+            }
+        },
+        "http.IssueManagedMemberKeyRequest": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
                 }
             }
         },
@@ -10952,6 +11186,14 @@
                 }
             }
         },
+        "http.UpdateKeyMemberManagementRequest": {
+            "type": "object",
+            "properties": {
+                "canManageMembers": {
+                    "type": "boolean"
+                }
+            }
+        },
         "http.UpdateKeyQuotaPermissionRequest": {
             "type": "object",
             "properties": {
@@ -11118,6 +11360,9 @@
         "management.Key": {
             "type": "object",
             "properties": {
+                "canManageMembers": {
+                    "type": "boolean"
+                },
                 "canViewUpstreamQuota": {
                     "type": "boolean"
                 },
@@ -11905,6 +12150,9 @@
         "security.CreatedKey": {
             "type": "object",
             "properties": {
+                "canManageMembers": {
+                    "type": "boolean"
+                },
                 "canViewUpstreamQuota": {
                     "type": "boolean"
                 },
@@ -11936,6 +12184,24 @@
                     "type": "string"
                 },
                 "tokenType": {
+                    "type": "string"
+                }
+            }
+        },
+        "security.ProvisionedMember": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "key": {
+                    "$ref": "#/definitions/security.CreatedKey"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "status": {
                     "type": "string"
                 }
             }

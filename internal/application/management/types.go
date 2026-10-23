@@ -347,6 +347,7 @@ type Key struct {
 	RevokedAt            *time.Time `json:"revokedAt"`
 	CreatedAt            time.Time  `json:"createdAt"`
 	CanViewUpstreamQuota bool       `json:"canViewUpstreamQuota"`
+	CanManageMembers     bool       `json:"canManageMembers"`
 }
 type Operation struct {
 	ID           int64           `json:"id,string"`

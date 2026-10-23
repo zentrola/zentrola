@@ -104,6 +104,9 @@ func (*keyStoreStub) Revoke(context.Context, admin.Identity, int64, appsec.Reque
 func (*keyStoreStub) SetUpstreamQuotaPermission(context.Context, admin.Identity, int64, bool, appsec.RequestMeta) error {
 	return nil
 }
+func (*keyStoreStub) SetMemberManagementPermission(context.Context, admin.Identity, int64, bool, appsec.RequestMeta) error {
+	return nil
+}
 func (s *keyStoreStub) Authenticate(context.Context, []byte, time.Time) (appsec.PrincipalIdentity, error) {
 	s.authentications++
 	return s.identity, nil
@@ -215,6 +218,17 @@ func TestKeyStoreCachesSuccessfulAuthenticationAndClearsOnRevoke(t *testing.T) {
 	}
 	if err := store.Revoke(context.Background(), admin.Identity{}, 34, appsec.RequestMeta{}); err != nil || cache.clears != 1 {
 		t.Fatal("revoke did not invalidate cache", err)
+	}
+}
+
+func TestMemberManagementPermissionChangeInvalidatesIdentityCache(t *testing.T) {
+	cache := &cacheStub{}
+	store := NewKeyStore(&keyStoreStub{}, cache)
+	if err := store.SetMemberManagementPermission(context.Background(), admin.Identity{ID: 1}, 34, true, appsec.RequestMeta{}); err != nil {
+		t.Fatal(err)
+	}
+	if cache.clears != 1 {
+		t.Fatalf("cache clears = %d, want 1", cache.clears)
 	}
 }
 

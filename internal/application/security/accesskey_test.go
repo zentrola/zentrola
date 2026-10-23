@@ -28,6 +28,9 @@ func (s *keyTestStore) Revoke(context.Context, admin.Identity, int64, RequestMet
 func (s *keyTestStore) SetUpstreamQuotaPermission(context.Context, admin.Identity, int64, bool, RequestMeta) error {
 	return nil
 }
+func (s *keyTestStore) SetMemberManagementPermission(context.Context, admin.Identity, int64, bool, RequestMeta) error {
+	return nil
+}
 func (s *keyTestStore) Authenticate(_ context.Context, digest []byte, _ time.Time) (PrincipalIdentity, error) {
 	s.lookups++
 	if !bytes.Equal(digest, s.row.Hash) {

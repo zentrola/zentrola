@@ -26,6 +26,7 @@ const { items, cursor, page, pageSize, total, loading, error, load, previous, re
   )
 const { busy, error: actionError, run } = useAction()
 const revokeTarget = ref<AccessKey | null>(null),
+  managementTarget = ref<AccessKey | null>(null),
   now = ref(Date.now())
 let timer: ReturnType<typeof setTimeout> | undefined
 function scheduleExpiryUpdate() {
@@ -108,6 +109,24 @@ function toggleUpstreamQuota(key: AccessKey) {
     showSuccessToast(local('upstreamQuotaPermissionSaved'))
   })
 }
+function toggleManagement(key: AccessKey) {
+  if (!canRevoke(key) || props.kind !== 'member') return
+  if (!key.canManageMembers) {
+    managementTarget.value = key
+    return
+  }
+  void saveManagement(key, false)
+}
+function saveManagement(key: AccessKey, allowed: boolean) {
+  void run(async () => {
+    await api(`/access-keys/${key.id}/member-management-permission`, 'PUT', {
+      canManageMembers: allowed,
+    })
+    managementTarget.value = null
+    await load()
+    showSuccessToast(local('managementPermissionSaved'))
+  })
+}
 </script>
 
 <template>
@@ -143,6 +162,7 @@ function toggleUpstreamQuota(key: AccessKey) {
             <th>{{ local('assignedKeys') }}</th>
             <th>{{ local('expiryDate') }}</th>
             <th v-if="kind === 'member'">{{ local('viewUpstreamQuota') }}</th>
+            <th v-if="kind === 'member'">{{ local('manageMembers') }}</th>
             <th class="key-action-cell">{{ t('common.actions') }}</th>
           </tr>
         </thead>
@@ -156,6 +176,7 @@ function toggleUpstreamQuota(key: AccessKey) {
             <td v-if="kind === 'member'">
               {{ key.canViewUpstreamQuota ? t('common.yes') : t('common.no') }}
             </td>
+            <td v-if="kind === 'member'">{{ key.canManageMembers ? t('common.yes') : t('common.no') }}</td>
             <td class="key-action-cell">
               <button
                 v-if="kind === 'member' && canRevoke(key)"
@@ -168,6 +189,14 @@ function toggleUpstreamQuota(key: AccessKey) {
                     ? local('revokeUpstreamQuota')
                     : local('grantUpstreamQuota')
                 }}
+              </button>
+              <button
+                v-if="kind === 'member' && canRevoke(key)"
+                class="text-button"
+                :disabled="busy || loading"
+                @click="toggleManagement(key)"
+              >
+                {{ key.canManageMembers ? local('revokeManagement') : local('grantManagement') }}
               </button>
               <button
                 v-if="canRevoke(key)"
@@ -199,6 +228,15 @@ function toggleUpstreamQuota(key: AccessKey) {
       @page-size="setPageSize"
     />
   </Modal>
+  <ConfirmDialog
+    v-if="managementTarget"
+    :title="local('grantManagement')"
+    :message="local('grantManagementQuestion', { name: managementTarget.name })"
+    :confirm-label="local('grantManagement')"
+    :busy="busy"
+    @close="managementTarget = null"
+    @confirm="saveManagement(managementTarget, true)"
+  />
   <ConfirmDialog
     v-if="revokeTarget"
     :title="local('revokeTitle')"

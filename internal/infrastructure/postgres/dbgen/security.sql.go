@@ -68,7 +68,7 @@ func (q *Queries) AppendSecurityOperation(ctx context.Context, arg AppendSecurit
 }
 
 const authenticateAccessKey = `-- name: AuthenticateAccessKey :one
-SELECT k.id,k.principal_id,p.principal_type,k.expires_at,k.can_view_upstream_quota FROM principal_access_key k
+SELECT k.id,k.principal_id,p.principal_type,k.expires_at,k.can_view_upstream_quota,k.can_manage_members FROM principal_access_key k
 JOIN principal p ON p.id=k.principal_id
 WHERE k.key_hash=$1 AND k.is_deleted=false AND k.status='ACTIVE' AND k.revoked_at IS NULL
 AND (k.expires_at IS NULL OR k.expires_at > $2::timestamptz)
@@ -86,6 +86,7 @@ type AuthenticateAccessKeyRow struct {
 	PrincipalType        string
 	ExpiresAt            pgtype.Timestamptz
 	CanViewUpstreamQuota bool
+	CanManageMembers     bool
 }
 
 func (q *Queries) AuthenticateAccessKey(ctx context.Context, arg AuthenticateAccessKeyParams) (AuthenticateAccessKeyRow, error) {
@@ -97,6 +98,7 @@ func (q *Queries) AuthenticateAccessKey(ctx context.Context, arg AuthenticateAcc
 		&i.PrincipalType,
 		&i.ExpiresAt,
 		&i.CanViewUpstreamQuota,
+		&i.CanManageMembers,
 	)
 	return i, err
 }
@@ -222,7 +224,7 @@ func (q *Queries) GetAdminForLogin(ctx context.Context, username string) (AdminU
 }
 
 const getKeyForRevoke = `-- name: GetKeyForRevoke :one
-SELECT id, is_deleted, status, principal_id, key_hash, masked_key, name, expires_at, last_used_at, revoked_at, created_by, updated_by, created_at, updated_at, can_view_upstream_quota FROM principal_access_key WHERE id=$1 AND is_deleted=false FOR UPDATE
+SELECT id, is_deleted, status, principal_id, key_hash, masked_key, name, expires_at, last_used_at, revoked_at, created_by, updated_by, created_at, updated_at, can_view_upstream_quota, can_manage_members FROM principal_access_key WHERE id=$1 AND is_deleted=false FOR UPDATE
 `
 
 func (q *Queries) GetKeyForRevoke(ctx context.Context, id int64) (PrincipalAccessKey, error) {
@@ -244,6 +246,7 @@ func (q *Queries) GetKeyForRevoke(ctx context.Context, id int64) (PrincipalAcces
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CanViewUpstreamQuota,
+		&i.CanManageMembers,
 	)
 	return i, err
 }

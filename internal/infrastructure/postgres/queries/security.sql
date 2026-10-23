@@ -43,7 +43,7 @@ updated_by=sqlc.arg(updated_by),updated_at=sqlc.arg(revoked_at)
 WHERE id=sqlc.arg(id) AND is_deleted=false;
 
 -- name: AuthenticateAccessKey :one
-SELECT k.id,k.principal_id,p.principal_type,k.expires_at,k.can_view_upstream_quota FROM principal_access_key k
+SELECT k.id,k.principal_id,p.principal_type,k.expires_at,k.can_view_upstream_quota,k.can_manage_members FROM principal_access_key k
 JOIN principal p ON p.id=k.principal_id
 WHERE k.key_hash=$1 AND k.is_deleted=false AND k.status='ACTIVE' AND k.revoked_at IS NULL
 AND (k.expires_at IS NULL OR k.expires_at > sqlc.arg(now)::timestamptz)

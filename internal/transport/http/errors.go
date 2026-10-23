@@ -76,6 +76,8 @@ func securityError(w http.ResponseWriter, r *http.Request, err error) {
 		status, code, message = http.StatusConflict, "ALREADY_INITIALIZED", "Administrator setup is already complete."
 	case errors.Is(err, appsec.ErrUnauthenticated):
 		status, code, message = http.StatusUnauthorized, "UNAUTHENTICATED", "Authentication failed."
+	case errors.Is(err, appsec.ErrForbidden):
+		status, code, message = http.StatusForbidden, "FORBIDDEN", "Permission denied."
 	case errors.Is(err, appsec.ErrInvalidArgument):
 		status, code, message = http.StatusBadRequest, "INVALID_ARGUMENT", "Invalid request parameter."
 	case errors.Is(err, appsec.ErrNotFound):

@@ -11,6 +11,7 @@ import (
 
 var (
 	ErrUnauthenticated    = errors.New("authentication failed")
+	ErrForbidden          = errors.New("permission denied")
 	ErrCurrentPassword    = errors.New("current password is incorrect")
 	ErrInvalidArgument    = errors.New("invalid argument")
 	ErrNotFound           = errors.New("object not found")
@@ -32,6 +33,7 @@ type PrincipalIdentity struct {
 	Type                 principal.Type
 	ExpiresAt            *time.Time
 	CanViewUpstreamQuota bool
+	CanManageMembers     bool
 }
 
 type Passwords interface {
@@ -61,10 +63,12 @@ type KeyRecord struct {
 	ExpiresAt            *time.Time
 	CreatedAt            time.Time
 	CanViewUpstreamQuota bool
+	CanManageMembers     bool
 }
 type KeyStore interface {
 	Create(context.Context, admin.Identity, KeyRecord, RequestMeta) error
 	Revoke(context.Context, admin.Identity, int64, RequestMeta) error
 	SetUpstreamQuotaPermission(context.Context, admin.Identity, int64, bool, RequestMeta) error
+	SetMemberManagementPermission(context.Context, admin.Identity, int64, bool, RequestMeta) error
 	Authenticate(context.Context, []byte, time.Time) (PrincipalIdentity, error)
 }

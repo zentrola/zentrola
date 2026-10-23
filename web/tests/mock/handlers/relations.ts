@@ -114,6 +114,10 @@ export function handleRelations(ctx: MockContext): MockResult {
       row.canViewUpstreamQuota = body.canViewUpstreamQuota
       return reply({ canViewUpstreamQuota: row.canViewUpstreamQuota })
     }
+    if (segments[2] === 'member-management-permission' && method === 'PUT') {
+      row.canManageMembers = body.canManageMembers
+      return reply({ canManageMembers: row.canManageMembers })
+    }
     row.status = 'REVOKED'
     row.revokedAt = stamp
     return reply({ revoked: true })

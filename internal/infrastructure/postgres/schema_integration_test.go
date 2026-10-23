@@ -271,7 +271,7 @@ ORDER BY c.relname,a.attnum`, schema)
 		"admin_user": "locked_until,last_login_at", "principal": "remark,monthly_token_limit", "principal_access_key": "expires_at,last_used_at,revoked_at",
 		"principal_group": "remark,monthly_token_limit", "provider_credential": "blocked_reason,blocked_at,last_error_at,last_http_status,last_error_code,subscription_type,plan_code,external_account_ref,effective_at,expires_at,quota_checked_at,quota_resets_at,credential_refreshed_at,credential_expires_at",
 		"provider_credential_quota":       "quota_name,quota_unit,limit_value,used_value,remaining_value,used_percent,window_duration_seconds,resets_at,reached_type",
-		"usage_record":                    "input_tokens,output_tokens,cached_input_tokens,cache_creation_input_tokens,error_type",
+		"usage_record":                    "access_key_id,input_tokens,output_tokens,cached_input_tokens,cache_creation_input_tokens,error_type",
 		"operation_log":                   "operator_id,target_id,target_name,request_id,request_method,request_path,ip_address,user_agent,error_code,before_data,after_data,remark",
 		"billing_document":                "source_id,original_document_id",
 		"billing_document_item":           "allocation_ratio",

@@ -24,21 +24,22 @@ import (
 )
 
 type SecurityHandlers struct {
-	Admin           *appsec.AdminService
-	Keys            *appsec.Keys
-	Management      *mgmt.Service
-	Applications    *mgmt.ApplicationService
-	Gateway         *GatewayHandler
-	OpenAI          *GatewayHandler
-	ActiveModels    gw.ActiveModelReader
-	Usage           *usageapp.QueryService
-	SelfQuota       *usageapp.SelfQuotaService
-	TokenQuotas     *quotaapp.Service
-	Billing         *billingapp.Service
-	BillingCosts    *billingapp.UsageCostQueryService
-	UsageWriter     *usageapp.Writer
-	BodyReadTimeout time.Duration
-	logger          *slog.Logger
+	Admin              *appsec.AdminService
+	Keys               *appsec.Keys
+	Management         *mgmt.Service
+	Applications       *mgmt.ApplicationService
+	Gateway            *GatewayHandler
+	OpenAI             *GatewayHandler
+	ActiveModels       gw.ActiveModelReader
+	Usage              *usageapp.QueryService
+	SelfQuota          *usageapp.SelfQuotaService
+	MemberProvisioning *appsec.MemberProvisioning
+	TokenQuotas        *quotaapp.Service
+	Billing            *billingapp.Service
+	BillingCosts       *billingapp.UsageCostQueryService
+	UsageWriter        *usageapp.Writer
+	BodyReadTimeout    time.Duration
+	logger             *slog.Logger
 }
 type adminIdentityKey struct{}
 type principalIdentityKey struct{}
@@ -159,6 +160,7 @@ func (s *SecurityHandlers) mount(r chi.Router) {
 			// @Router /api/v1/access-keys/{id}/revoke [post]
 			protected.Post("/access-keys/{id}/revoke", s.revokeKey)
 			protected.Put("/access-keys/{id}/upstream-quota-permission", s.setKeyUpstreamQuotaPermission)
+			protected.Put("/access-keys/{id}/member-management-permission", s.setKeyMemberManagementPermission)
 			if s.Management != nil {
 				s.mountManagement(protected)
 			}
@@ -185,6 +187,10 @@ func (s *SecurityHandlers) mount(r chi.Router) {
 			if s.SelfQuota != nil {
 				member.Get("/me/quota", s.getMyQuota)
 				member.Get("/me/upstream-quota", s.getMyUpstreamQuota)
+			}
+			if s.MemberProvisioning != nil {
+				member.Post("/me/manage/members", s.createManagedMember)
+				member.Post("/me/manage/members/{id}/keys", s.issueManagedMemberKey)
 			}
 		})
 	})
@@ -478,6 +484,9 @@ var (
 	_ requestPayload = (*LoginRequest)(nil)
 	_ requestPayload = (*CreateKeyRequest)(nil)
 	_ requestPayload = (*UpdateKeyQuotaPermissionRequest)(nil)
+	_ requestPayload = (*UpdateKeyMemberManagementRequest)(nil)
+	_ requestPayload = (*CreateManagedMemberRequest)(nil)
+	_ requestPayload = (*IssueManagedMemberKeyRequest)(nil)
 	_ requestPayload = (*CreateMemberRequest)(nil)
 	_ requestPayload = (*UpdateMemberRequest)(nil)
 	_ requestPayload = (*CreateGroupRequest)(nil)
