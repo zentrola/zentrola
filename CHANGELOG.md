@@ -8,8 +8,8 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 
 ### Added / 新增
 
-- Member Access Keys can be granted admin access with a single checkbox when issued, or toggled later from the Key list (`PUT /api/v1/access-keys/{id}/management-permission`). Keys without it are ordinary Keys. A Key with admin access can view the saved quota snapshot of the subscription most recently used by that Key for a specified model, and can manage ordinary members through MCP as described below. Members can query their current UTC-month Token usage and personal quota; model-specific remaining quota uses the smallest remaining amount across the member and applicable groups.
-- 成员 Access Key 签发时可勾选“后台管理”，也可在 Key 列表中随时切换（`PUT /api/v1/access-keys/{id}/management-permission`）；未勾选的是普通 Key。具备后台管理权限的 Key 可查看该 Key 指定模型最近使用的订阅号额度快照，并可按下文通过 MCP 管理普通成员。成员可查询当前 UTC 月所有模型的 Token 总用量及个人额度；指定模型的剩余额度取个人与适用用户组中的最小值。
+- Member Access Keys can be granted admin access with a single checkbox when issued, or toggled later from the Key list (`PUT /api/v1/access-keys/{id}/management-permission`). Keys without it are ordinary Keys. A Key with admin access can view the quota of every provider subscription account its member can be routed to, one entry per account and without specifying a model (`GET /api/v1/me/upstream-quota`), and can manage ordinary members through MCP as described below. Members can query their current UTC-month Token usage and personal quota; model-specific remaining quota uses the smallest remaining amount across the member and applicable groups.
+- 成员 Access Key 签发时可勾选“后台管理”，也可在 Key 列表中随时切换（`PUT /api/v1/access-keys/{id}/management-permission`）；未勾选的是普通 Key。具备后台管理权限的 Key 无需指定模型即可查看该成员可路由到的全部服务商订阅号额度，每个账号一条（`GET /api/v1/me/upstream-quota`），并可按下文通过 MCP 管理普通成员。成员可查询当前 UTC 月所有模型的 Token 总用量及个人额度；指定模型的剩余额度取个人与适用用户组中的最小值。
 - Member Keys with admin access can, through MCP, list active groups (`GET /api/v1/me/manage/groups`), create ordinary members with an active first Key in at least one active group, issue ordinary Keys to any ordinary member, and enable or disable ordinary members (`PUT /api/v1/me/manage/members/{id}/status`). The operator's own member and members holding management permission cannot be targeted. Issuing a Key never changes member status and is rejected with `MEMBER_DISABLED` for disabled members. Disabling a member blocks all of its Keys immediately without revoking them, and re-enabling restores them; enabling requires at least one valid Key. These tools cannot create administrators or issue Keys to administrator accounts. Member creation, first-Key issuance, group assignment, and activation commit together. Newly issued Keys never inherit management permission.
 - 具备后台管理权限的成员 Key 可通过 MCP 查询启用分组（`GET /api/v1/me/manage/groups`），创建普通成员（必须指定至少一个启用分组）及已启用的首把 Key，可为任意普通成员签发普通 Key，并可启停用普通成员（`PUT /api/v1/me/manage/members/{id}/status`）。操作者本人及持有管理授权的成员不能作为操作对象。签发 Key 不改变成员状态，停用成员签发时返回 `MEMBER_DISABLED`。停用后该成员全部 Key 立即无法认证但不注销，重新启用后恢复可用；启用要求成员至少有一把有效 Key。这些工具不能创建管理员，也不能为管理员账号签发 Key。创建成员、分组分配、签发首把 Key 与启用操作在同一事务提交；新 Key 不继承管理权限。
 
@@ -17,6 +17,10 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 
 - Undeleted member names are now unique (ignoring leading and trailing whitespace) for both administrators and authorized Keys. Creating or renaming a member to an existing name returns `MEMBER_NAME_ALREADY_EXISTS`; no member or Key is created on conflict.
 - 未删除成员的名称（忽略首尾空白）现在全局唯一，管理员与获授权 Key 均受约束；创建或改名为已有名称时返回 `MEMBER_NAME_ALREADY_EXISTS`，不会创建成员或 Key。
+- Subscription quota queries serve snapshots younger than 5 minutes as is and refresh older accounts from the upstream on demand: Claude subscriptions send one minimal 1-Token inference, and Codex subscriptions read their rate limits without inference. Concurrent queries for the same account share one refresh; after a success the account is not refreshed again for 5 minutes, and after a failure for 1 minute. A query waits at most 15 seconds. When a refresh fails, is cooling down, or times out, the previous snapshot is returned with status `STALE` and the error code in `refreshError`; accounts never checked return `UNKNOWN`. Snapshots older than 24 hours are no longer hidden. Refreshes triggered by a Key are audited as system operations named after that Key.
+- 订阅号额度查询中 5 分钟内的快照直接返回，更早的账号按需向上游刷新：Claude 订阅发送一次输出 1 个 Token 的最小推理请求，Codex 订阅只读查询额度、不消耗推理。同一账号的并发查询共享一次刷新；刷新成功后 5 分钟内、失败后 1 分钟内不再访问上游，单次查询最多等待 15 秒。刷新失败、冷却中或等待超时时返回原快照并标为 `STALE`，错误码见 `refreshError`；从未取得额度的账号返回 `UNKNOWN`。不再隐藏超过 24 小时的快照。由 Key 触发的刷新以系统操作记录审计，操作人名称为触发的 Key。
+- Manual subscription quota refresh (`POST /api/v1/resources/{id}/refresh-quota`) now also supports Codex subscriptions. It reads quota only, saves any rotated credential, and does not change credential runtime status. `QUOTA_REFRESH_UNSUPPORTED` is now returned only for non-subscription resources.
+- 手动刷新订阅额度（`POST /api/v1/resources/{id}/refresh-quota`）新增支持 Codex 订阅：只读取额度并保存上游轮换的凭据，不改变凭据运行状态。`QUOTA_REFRESH_UNSUPPORTED` 现在只对非订阅凭据返回。
 
 ### Upgrade / 升级
 
@@ -26,6 +30,8 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - 迁移 `00063` 为未删除成员名称建立唯一索引。若已存在重名成员，迁移会失败且不修改数据，错误信息附带查询重名成员的 SQL；改名后重新启动即可。
 - Migration `00064` merges the per-Key quota and member-management columns into a single `can_manage` admin-access column. Keys that had member-management permission keep admin access; Keys that only had quota viewing become ordinary Keys and must be granted admin access again if needed.
 - 迁移 `00064` 将单 Key 的额度查看与成员管理两个授权字段合并为单一的后台管理字段 `can_manage`。原有成员管理授权的 Key 保留后台管理权限；仅有额度查看授权的 Key 变为普通 Key，如有需要请重新授权。
+- The Zentrola plugin for Codex and Claude Code must be updated to `0.4.2` or later; earlier versions reject the new `STALE` subscription quota status as invalid data. Restart the client session after updating so that the MCP server reloads.
+- Codex 与 Claude Code 的 Zentrola 插件需更新到 `0.4.2` 或更高版本；更早的版本会把新增的订阅号额度状态 `STALE` 当作无效数据。更新后需重开客户端会话，使 MCP 服务重新加载。
 
 ## [1.2.3] - 2026-10-23
 
