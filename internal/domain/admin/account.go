@@ -7,6 +7,8 @@ import (
 )
 
 type Identity struct {
+	// System 标记由服务端代码发起、没有管理员账号的系统操作（ID 为 0）；只能在代码中设置，不从请求解析。
+	System            bool   `json:"-"`
 	CredentialVersion int64  `json:"-"`
 	ID                int64  `json:"id,string"`
 	Username          string `json:"username"`

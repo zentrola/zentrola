@@ -331,7 +331,12 @@ func (s *SecurityStore) appendLog(ctx context.Context, q *dbgen.Queries, actor a
 	return q.AppendSecurityOperation(ctx, dbgen.AppendSecurityOperationParams{ID: id, OperatorType: operatorType, OperatorID: operatorID, OperatorName: actor.DisplayName,
 		Module: module, OperationType: string(event), TargetType: target, TargetID: &targetID, TargetName: optional(targetName, 128), RequestID: optional(meta.RequestID, 64), RequestMethod: optional(meta.Method, 16), RequestPath: optional(meta.Path, 2048), IpAddress: ip, UserAgent: optional(meta.UserAgent, 1024), Result: result, ErrorCode: optional(code, 64), BeforeData: before, AfterData: after, Remark: optional(remark, 2000), CreatedAt: pgTime(time.Now().UTC())})
 }
-func actorRef(id int64) string              { return "admin:" + strconv.FormatInt(id, 10) }
+func actorRef(id int64) string {
+	if id == 0 {
+		return "system"
+	}
+	return "admin:" + strconv.FormatInt(id, 10)
+}
 func pgTime(t time.Time) pgtype.Timestamptz { return pgtype.Timestamptz{Time: t.UTC(), Valid: true} }
 func nullableTime(t *time.Time) pgtype.Timestamptz {
 	if t == nil {

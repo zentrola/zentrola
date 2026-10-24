@@ -63,7 +63,14 @@ func (s *ManagementStore) run(ctx context.Context, a admin.Identity, write bool,
 			return s.managementError(ctx, "acquire_management_lock", err)
 		}
 	}
-	err = validateActor(ctx, q, a)
+	// 系统操作没有管理员账号，只校验其身份形态；其余操作必须是在职管理员。
+	if a.System {
+		if a.ID != 0 {
+			err = appsec.ErrUnauthenticated
+		}
+	} else {
+		err = validateActor(ctx, q, a)
+	}
 	if err != nil {
 		return s.managementError(ctx, "validate_actor", err)
 	}

@@ -285,3 +285,40 @@ func TestRefreshResourceQuotaQueriesSubscriptionAdapter(t *testing.T) {
 		})
 	}
 }
+
+// actorRecordingStore 记录每次会话使用的操作者身份。
+type actorRecordingStore struct {
+	lockingResourceStore
+	actors *[]admin.Identity
+}
+
+func (s actorRecordingStore) Read(ctx context.Context, actor admin.Identity, fn func(Reader) error) error {
+	*s.actors = append(*s.actors, actor)
+	return s.lockingResourceStore.Read(ctx, actor, fn)
+}
+func (s actorRecordingStore) Write(ctx context.Context, actor admin.Identity, fn func(Writer) error) error {
+	*s.actors = append(*s.actors, actor)
+	return s.lockingResourceStore.Write(ctx, actor, fn)
+}
+
+func TestRefreshSubscriptionQuotaRunsAsSystemActor(t *testing.T) {
+	writer := subscriptionRefreshWriter()
+	events, actors := []string{}, []admin.Identity{}
+	reset := time.Date(2026, 10, 30, 2, 45, 0, 0, time.UTC)
+	adapter := subscriptionAdapterStub{probe: SubscriptionProbe{Quotas: []ResourceQuota{{Code: "codex.primary", Status: QuotaAvailable, ResetsAt: &reset}}}}
+	service := New(actorRecordingStore{lockingResourceStore{writer: writer, events: &events}, &actors}, nil, providerTestCipher{}, nil,
+		WithSubscriptionAdapter(adapter))
+
+	code, err := service.RefreshSubscriptionQuota(context.Background(), appsec.PrincipalIdentity{ID: 5, AccessKeyID: 7}, 48, appsec.RequestMeta{})
+	if err != nil || code != "OK" || len(actors) == 0 {
+		t.Fatalf("code=%s err=%v actors=%+v", code, err, actors)
+	}
+	for _, actor := range actors {
+		if !actor.System || actor.ID != 0 || actor.DisplayName != "Member Key #7" {
+			t.Fatalf("refresh must run as the system actor: %+v", actor)
+		}
+	}
+	if _, err := service.RefreshSubscriptionQuota(context.Background(), appsec.PrincipalIdentity{ID: 5}, 48, appsec.RequestMeta{}); !errors.Is(err, appsec.ErrUnauthenticated) {
+		t.Fatalf("missing access key must be rejected, got %v", err)
+	}
+}

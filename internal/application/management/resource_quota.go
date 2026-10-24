@@ -36,7 +36,7 @@ func (s *ResourceService) RefreshSubscriptionQuota(ctx context.Context, identity
 	if identity.ID <= 0 || identity.AccessKeyID <= 0 {
 		return "", appsec.ErrUnauthenticated
 	}
-	actor := admin.Identity{DisplayName: "Member Key #" + strconv.FormatInt(identity.AccessKeyID, 10)}
+	actor := admin.Identity{System: true, DisplayName: "Member Key #" + strconv.FormatInt(identity.AccessKeyID, 10)}
 	result, err := s.RefreshResourceQuota(ctx, actor, id, meta)
 	return result.Code, err
 }
