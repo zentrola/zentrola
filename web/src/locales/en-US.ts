@@ -1262,7 +1262,7 @@ export default {
     UPSTREAM_RATE_LIMITED: 'The upstream provider is rate-limiting requests. Try again later.',
     UPSTREAM_QUOTA_UNAVAILABLE:
       'The upstream response did not include quota data. Try again later.',
-    QUOTA_REFRESH_UNSUPPORTED: 'Only Claude subscriptions support manual quota refresh.',
+    QUOTA_REFRESH_UNSUPPORTED: 'Only subscription credentials support quota refresh.',
     SUBSCRIPTION_ADAPTER_UNAVAILABLE:
       'This provider does not support the subscription authentication.',
     UPSTREAM_MODEL_UNAVAILABLE:

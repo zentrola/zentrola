@@ -4572,10 +4572,11 @@
                         "GatewayBearer": []
                     }
                 ],
+                "description": "快照在 5 分钟内直接返回；过期账号按需向上游刷新（Claude 订阅发送一次输出 1 个 Token 的最小推理请求，Codex 订阅只读查询），同一账号同时只刷新一次。status 为 KNOWN 表示时效内额度；STALE 表示刷新失败、冷却中或等待超时，返回原快照并在 refreshError 给出错误码；UNKNOWN 表示从未取得额度。",
                 "tags": [
                     "用量配额"
                 ],
-                "summary": "查询服务商订阅号额度快照",
+                "summary": "查询服务商订阅号额度",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -8318,14 +8319,14 @@
                         "AdminBearer": []
                     }
                 ],
-                "description": "仅支持 Claude 订阅；优先使用 Haiku 系列模型映射发送一次输出 1 个 Token 的最小推理请求，只从响应头读取 5 小时、7 天统一限额并保存。会消耗极少量订阅额度，可能开启新的 5 小时窗口；不改变凭据运行状态。HTTP 200 后仍需检查 data.ok 和 data.code。",
+                "description": "仅支持订阅资源。Codex 等订阅由认证适配器只读查询额度；Claude 订阅优先使用 Haiku 系列模型映射发送一次输出 1 个 Token 的最小推理请求，只从响应头读取 5 小时、7 天统一限额并保存。会消耗极少量订阅额度，可能开启新的 5 小时窗口；不改变凭据运行状态。HTTP 200 后仍需检查 data.ok 和 data.code。",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "模型与资源"
                 ],
-                "summary": "刷新 Claude 订阅额度",
+                "summary": "刷新订阅额度",
                 "parameters": [
                     {
                         "type": "string",
@@ -12666,6 +12667,10 @@
                     "items": {
                         "$ref": "#/definitions/usage.UpstreamQuotaItem"
                     }
+                },
+                "refreshError": {
+                    "description": "RefreshError 是本次未能刷新该账号额度时的错误码；为空表示快照在时效内或刚刷新成功。",
+                    "type": "string"
                 },
                 "status": {
                     "type": "string"

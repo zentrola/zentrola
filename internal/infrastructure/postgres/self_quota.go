@@ -122,6 +122,7 @@ func subscriptionQuotas(ctx context.Context, db dbgen.DBTX, logger *slog.Logger,
 			checkedAt := item.CheckedAt.UTC()
 			item.CheckedAt = &checkedAt
 		}
+		item.ID = id
 		ids, result = append(ids, id), append(result, item)
 	}
 	if err := rows.Err(); err != nil {

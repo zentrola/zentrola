@@ -1242,7 +1242,7 @@ export const i18n = createI18n({
         UPSTREAM_ACCOUNT_SUSPENDED: '上游账号已被暂停或停用。',
         UPSTREAM_RATE_LIMITED: '上游限流，请稍后重试。',
         UPSTREAM_QUOTA_UNAVAILABLE: '上游响应未包含额度信息，请稍后重试。',
-        QUOTA_REFRESH_UNSUPPORTED: '仅 Claude 订阅支持手动刷新额度。',
+        QUOTA_REFRESH_UNSUPPORTED: '仅订阅凭据支持刷新额度。',
         SUBSCRIPTION_ADAPTER_UNAVAILABLE: '当前服务商不支持该订阅认证方式。',
         UPSTREAM_MODEL_UNAVAILABLE: '上游模型不存在或当前账号无权使用。',
         UPSTREAM_REQUEST_REJECTED: '上游拒绝了请求，请检查模型和请求参数。',

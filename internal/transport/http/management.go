@@ -755,9 +755,9 @@ func (s *SecurityHandlers) mountManagementQueryRoutes(r chi.Router) {
 		data, err := m.ResourceQuotas(req.Context(), adminFrom(req), id)
 		adminResult(w, req, 200, data, err)
 	})
-	// @Summary 刷新 Claude 订阅额度
+	// @Summary 刷新订阅额度
 	// @Tags 模型与资源
-	// @Description 仅支持 Claude 订阅；优先使用 Haiku 系列模型映射发送一次输出 1 个 Token 的最小推理请求，只从响应头读取 5 小时、7 天统一限额并保存。会消耗极少量订阅额度，可能开启新的 5 小时窗口；不改变凭据运行状态。HTTP 200 后仍需检查 data.ok 和 data.code。
+	// @Description 仅支持订阅资源。Codex 等订阅由认证适配器只读查询额度；Claude 订阅优先使用 Haiku 系列模型映射发送一次输出 1 个 Token 的最小推理请求，只从响应头读取 5 小时、7 天统一限额并保存。会消耗极少量订阅额度，可能开启新的 5 小时窗口；不改变凭据运行状态。HTTP 200 后仍需检查 data.ok 和 data.code。
 	// @Produce json
 	// @Security AdminBearer
 	// @Param id path string true "业务 ID（正整数字符串）"

@@ -2,11 +2,13 @@ package management
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"time"
 
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	"github.com/zentrola/zentrola/internal/domain/admin"
+	"github.com/zentrola/zentrola/internal/domain/catalog"
 	"github.com/zentrola/zentrola/internal/domain/operation"
 )
 
@@ -28,9 +30,20 @@ type QuotaRefreshResult struct {
 	Quotas                 []ResourceQuota `json:"quotas"`
 }
 
-// RefreshResourceQuota 向 Claude 订阅发送一次最小推理请求，只从响应头读取统一限额并保存。
-// 它只更新额度字段，不恢复或封禁凭据：凭据可用性由连接测试负责（会复核模型映射），
-// 刷新额度失败时只把错误码返回给管理员，避免一次读取额度的请求改变路由状态。
+// RefreshSubscriptionQuota 供获后台管理授权的成员 Key 按需刷新订阅额度，返回刷新结果码（成功为 OK）。
+// 以系统身份执行刷新，审计操作人名称记录触发的 Key。
+func (s *ResourceService) RefreshSubscriptionQuota(ctx context.Context, identity appsec.PrincipalIdentity, id int64, meta appsec.RequestMeta) (string, error) {
+	if identity.ID <= 0 || identity.AccessKeyID <= 0 {
+		return "", appsec.ErrUnauthenticated
+	}
+	actor := admin.Identity{DisplayName: "Member Key #" + strconv.FormatInt(identity.AccessKeyID, 10)}
+	result, err := s.RefreshResourceQuota(ctx, actor, id, meta)
+	return result.Code, err
+}
+
+// RefreshResourceQuota 主动读取订阅额度并保存：Claude 订阅发送一次最小推理请求，只从响应头读取统一限额；
+// 其他订阅（如 Codex）由认证适配器只读查询额度。它只更新额度与凭据元数据，不恢复或封禁凭据：
+// 凭据可用性由连接测试负责（会复核模型映射），刷新额度失败时只返回错误码，避免一次读取额度的请求改变路由状态。
 func (s *ResourceService) RefreshResourceQuota(ctx context.Context, actor admin.Identity, id int64, meta appsec.RequestMeta) (QuotaRefreshResult, error) {
 	if id <= 0 {
 		return QuotaRefreshResult{}, appsec.ErrInvalidArgument
@@ -39,14 +52,19 @@ func (s *ResourceService) RefreshResourceQuota(ctx context.Context, actor admin.
 	var provider Provider
 	var mapping ProviderMapping
 	var model Model
+	adapterQuery := false
 	err := s.store.ReadResource(ctx, actor, func(r ResourceReadSession) error {
 		var err error
 		resource, err = r.Resource(ctx, id)
 		if err != nil {
 			return err
 		}
-		if resource.AuthType != AuthTypeSubscription || resource.AuthAdapter != AuthAdapterClaudeCode {
+		if resource.AuthType != AuthTypeSubscription {
 			return ErrQuotaRefreshUnsupported
+		}
+		if resource.AuthAdapter != AuthAdapterClaudeCode {
+			adapterQuery = true
+			return nil
 		}
 		provider, err = r.Provider(ctx, resource.ProviderID)
 		if err != nil {
@@ -65,6 +83,9 @@ func (s *ResourceService) RefreshResourceQuota(ctx context.Context, actor admin.
 	})
 	if err != nil {
 		return QuotaRefreshResult{}, err
+	}
+	if adapterQuery {
+		return s.refreshAdapterQuota(ctx, actor, id, meta)
 	}
 	upstreamModelCode := testedMappingCode(mapping, model)
 	result := QuotaRefreshResult{Code: "PROVIDER_MODEL_MAPPING_REQUIRED"}
@@ -129,6 +150,126 @@ func (s *ResourceService) RefreshResourceQuota(ctx context.Context, actor admin.
 				return err
 			}
 			result.Quotas = observed
+		}
+		code := ""
+		if !result.OK {
+			code = result.Code
+		}
+		auditResult := result
+		auditResult.Quotas = nil
+		return w.Audit(auditCtx, Audit{
+			Event: operation.ResourceQuotaRefresh, Target: "RESOURCE", ID: id, Name: resource.Name,
+			After: map[string]any{"refresh": auditResult, "quotaStatus": current.QuotaStatus}, ErrorCode: code,
+		}, meta)
+	})
+	return result, err
+}
+
+// refreshAdapterQuota 通过认证适配器只读查询订阅额度（如 Codex App Server 的 account/rateLimits/read）。
+// 查询可能轮换 refresh token：与连接测试一样持有网关刷新锁直到结果落盘，并在加锁后重新读取最新凭据。
+func (s *ResourceService) refreshAdapterQuota(ctx context.Context, actor admin.Identity, id int64, meta appsec.RequestMeta) (QuotaRefreshResult, error) {
+	release, err := s.lockSubscriptionRefresh(ctx, id)
+	if err != nil {
+		return QuotaRefreshResult{}, err
+	}
+	defer release()
+	var resource ResourceRecord
+	var provider Provider
+	err = s.store.ReadResource(ctx, actor, func(r ResourceReadSession) error {
+		var err error
+		if resource, err = r.Resource(ctx, id); err != nil {
+			return err
+		}
+		if resource.AuthType != AuthTypeSubscription || resource.AuthAdapter == AuthAdapterClaudeCode {
+			return ErrQuotaRefreshUnsupported
+		}
+		provider, err = r.Provider(ctx, resource.ProviderID)
+		return err
+	})
+	if err != nil {
+		return QuotaRefreshResult{}, err
+	}
+	result := QuotaRefreshResult{Code: "SUBSCRIPTION_ADAPTER_UNAVAILABLE"}
+	var probe SubscriptionProbe
+	var refreshedSealed catalog.SealedCredential
+	startedAt := time.Now()
+	plain, decryptErr := s.cipher.Decrypt(resource.Sealed, owner(actor, resource.Resource))
+	if decryptErr == nil {
+		defer clear(plain)
+	}
+	subscription := s.subscriptionAdapter(resource.AuthAdapter)
+	if decryptErr != nil {
+		result.Code = "CREDENTIAL_UNRECOVERABLE"
+	} else if subscription != nil && subscription.SupportsProvider(provider) {
+		proxy, proxyErr := s.decryptedProviderProxy(provider)
+		if proxyErr != nil {
+			result.Code = "PROXY_CONFIGURATION_UNRECOVERABLE"
+		} else if probed, probeErr := subscription.Probe(ctx, plain, proxy); probeErr != nil {
+			result.Code = subscriptionConnectionCode(probeErr)
+			if sealed, inspection, ok := s.sealRotatedCredential(actor, resource.Resource, subscription, probeErr); ok {
+				refreshedSealed = sealed
+				resource.CredentialRefreshedAt = inspection.CredentialRefreshedAt
+				resource.CredentialExpiresAt = inspection.CredentialExpiresAt
+			}
+		} else {
+			probe = probed
+			normalizeSubscriptionProbe(&probe)
+			result.OK, result.Code = len(probe.Quotas) > 0, "OK"
+			if !result.OK {
+				result.Code = "UPSTREAM_QUOTA_UNAVAILABLE"
+			}
+			if len(probe.Credential) > 0 {
+				sealed, encryptErr := s.cipher.Encrypt(probe.Credential, owner(actor, resource.Resource))
+				if encryptErr != nil {
+					result.OK, result.Code = false, "CREDENTIAL_UNRECOVERABLE"
+				} else {
+					refreshedSealed = sealed
+					resource.CredentialRefreshedAt = probe.Inspection.CredentialRefreshedAt
+					resource.CredentialExpiresAt = probe.Inspection.CredentialExpiresAt
+				}
+			}
+			clear(probe.Credential)
+		}
+	}
+	result.LatencyMS = time.Since(startedAt).Milliseconds()
+	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
+	err = s.store.WriteResource(auditCtx, actor, func(w ResourceSession) error {
+		current, err := w.Resource(auditCtx, id)
+		if err != nil {
+			return err
+		}
+		if current.Version != resource.Version {
+			result.OK, result.Code = false, "RESOURCE_CHANGED"
+		}
+		now := businessTime(s.now)
+		if !result.OK {
+			// 未整体更新资源时，上游可能已轮换凭据，仍须单独保存新凭据，否则旧 refresh token 已失效。
+			if err := persistRotatedCredential(auditCtx, w, current, resource.Sealed, refreshedSealed,
+				resource.CredentialRefreshedAt, resource.CredentialExpiresAt, now); err != nil {
+				return err
+			}
+		} else {
+			current.PlanCode = stringPointer(probe.Inspection.PlanCode)
+			current.ExternalAccountRef = stringPointer(probe.Inspection.AccountRef)
+			if probe.Inspection.ExpiresAt != nil {
+				current.ExpiresAt = probe.Inspection.ExpiresAt
+			}
+			if refreshedSealed.KeyVersion != 0 {
+				current.Sealed = refreshedSealed
+				current.CredentialRefreshedAt = resource.CredentialRefreshedAt
+				current.CredentialExpiresAt = resource.CredentialExpiresAt
+			}
+			current.QuotaStatus, current.QuotaResetsAt = AggregateQuota(probe.Quotas)
+			current.QuotaCheckedAt = &now
+			current.UpdatedAt = now
+			if err := w.UpdateResource(auditCtx, current); err != nil {
+				return err
+			}
+			if err := w.ReplaceResourceQuotas(auditCtx, id, probe.Quotas); err != nil {
+				return err
+			}
+			result.Quotas = probe.Quotas
 		}
 		code := ""
 		if !result.OK {

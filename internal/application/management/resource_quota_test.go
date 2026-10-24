@@ -3,6 +3,7 @@ package management
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -135,11 +136,6 @@ func TestRefreshResourceQuota(t *testing.T) {
 			resource: Resource{ID: 48, ProviderID: 40, Version: 3, AuthType: AuthTypeAPIKey},
 			wantErr:  ErrQuotaRefreshUnsupported,
 		},
-		{
-			name: "Codex subscription resource", mappings: mappings,
-			resource: Resource{ID: 48, ProviderID: 40, Version: 3, AuthType: AuthTypeSubscription, AuthAdapter: AuthAdapterOpenAICodex},
-			wantErr:  ErrQuotaRefreshUnsupported,
-		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -198,6 +194,93 @@ func TestRefreshResourceQuota(t *testing.T) {
 				writer.resource.QuotaCheckedAt == nil || !writer.resource.QuotaCheckedAt.Equal(checkedAt) || writer.resource.QuotaCheckedAt.Location() != time.UTC ||
 				writer.resource.QuotaResetsAt == nil || !writer.resource.QuotaResetsAt.Equal(reset) || len(writer.quotas) != len(test.probe.ObservedQuotas) {
 				t.Fatalf("unexpected refresh: result=%+v resource=%+v quotas=%+v", result, writer.resource.Resource, writer.quotas)
+			}
+		})
+	}
+}
+
+func TestRefreshResourceQuotaQueriesSubscriptionAdapter(t *testing.T) {
+	reset := time.Date(2026, 10, 30, 2, 45, 0, 0, time.UTC)
+	used := 12.0
+	quotas := []ResourceQuota{{Code: "codex.primary", Status: QuotaAvailable, UsedPercent: &used, ResetsAt: &reset}}
+	tests := []struct {
+		name           string
+		probe          SubscriptionProbe
+		err            error
+		changeResource bool
+		wantOK         bool
+		wantCode       string
+		wantCiphertext string
+	}{
+		{
+			name:   "records quota and rotated credential",
+			probe:  SubscriptionProbe{Quotas: quotas, Credential: []byte("rotated-auth-cache")},
+			wantOK: true, wantCode: "OK", wantCiphertext: "rotated-auth-cache",
+		},
+		{
+			name:     "probe without quota keeps snapshot",
+			probe:    SubscriptionProbe{},
+			wantCode: "UPSTREAM_QUOTA_UNAVAILABLE", wantCiphertext: "imported-auth-cache",
+		},
+		{
+			name:     "failed probe still saves rotated credential",
+			err:      &rotatedProbeError{credential: []byte("rotated-auth-cache")},
+			wantCode: "SUBSCRIPTION_UNAVAILABLE", wantCiphertext: "rotated-auth-cache",
+		},
+		{
+			name:  "resource changed during refresh",
+			probe: SubscriptionProbe{Quotas: quotas}, changeResource: true,
+			wantCode: "RESOURCE_CHANGED", wantCiphertext: "imported-auth-cache",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			writer := subscriptionRefreshWriter()
+			writer.resource.RuntimeStatus = "BLOCKED"
+			events := []string{}
+			adapter := failingSubscriptionAdapterStub{
+				subscriptionAdapterStub: subscriptionAdapterStub{
+					probe: test.probe,
+					onProbe: func(*catalog.OutboundProxy) {
+						events = append(events, "probe")
+						if test.changeResource {
+							writer.resource.Version++
+						}
+					},
+				},
+				err: test.err,
+			}
+			var subscription SubscriptionAdapter = adapter.subscriptionAdapterStub
+			if test.err != nil {
+				subscription = adapter
+			}
+			checkedAt := time.Date(2026, 10, 24, 10, 0, 0, 0, time.FixedZone("UTC+8", 8*3600))
+			service := New(lockingResourceStore{writer: writer, events: &events}, nil, providerTestCipher{}, nil,
+				WithSubscriptionAdapter(subscription), WithClock(func() time.Time { return checkedAt }))
+
+			result, err := service.RefreshResourceQuota(context.Background(), admin.Identity{DisplayName: "Member Key #7"}, 48, appsec.RequestMeta{})
+			if err != nil || result.OK != test.wantOK || result.Code != test.wantCode {
+				t.Fatalf("result=%+v err=%v", result, err)
+			}
+			if got := strings.Join(events, ","); !strings.Contains(got, "lock,read,probe") || !strings.HasSuffix(got, "unlock") {
+				t.Fatalf("refresh must hold the subscription lock around probe and write: %s", got)
+			}
+			if got := string(writer.resource.Sealed.Ciphertext); got != test.wantCiphertext {
+				t.Fatalf("stored credential=%q; want %q", got, test.wantCiphertext)
+			}
+			// 刷新额度不恢复或封禁凭据。
+			if writer.restored || writer.resource.RuntimeStatus != "BLOCKED" || writer.audit.Event != operation.ResourceQuotaRefresh {
+				t.Fatalf("resource=%+v restored=%v audit=%+v", writer.resource.Resource, writer.restored, writer.audit)
+			}
+			if !test.wantOK {
+				if writer.resource.QuotaCheckedAt != nil || len(writer.quotas) != 0 || writer.audit.ErrorCode != test.wantCode {
+					t.Fatalf("quota must not be recorded: %+v quotas=%+v", writer.resource.Resource, writer.quotas)
+				}
+				return
+			}
+			if writer.resource.QuotaCheckedAt == nil || !writer.resource.QuotaCheckedAt.Equal(checkedAt) || writer.resource.QuotaCheckedAt.Location() != time.UTC ||
+				writer.resource.QuotaStatus != QuotaAvailable || len(writer.quotas) != 1 || len(result.Quotas) != 1 {
+				t.Fatalf("unexpected refresh: resource=%+v quotas=%+v", writer.resource.Resource, writer.quotas)
 			}
 		})
 	}

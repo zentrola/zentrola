@@ -72,8 +72,9 @@ func (s *SecurityHandlers) getMyQuota(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusOK, response{Code: "OK", Data: result})
 }
 
-// getMyUpstreamQuota 返回当前成员可路由到的全部订阅号额度快照，多个账号分别返回。
-// @Summary 查询服务商订阅号额度快照
+// getMyUpstreamQuota 返回当前成员可路由到的全部订阅号额度，多个账号分别返回；快照超过 5 分钟时按需向上游刷新。
+// @Summary 查询服务商订阅号额度
+// @Description 快照在 5 分钟内直接返回；过期账号按需向上游刷新（Claude 订阅发送一次输出 1 个 Token 的最小推理请求，Codex 订阅只读查询），同一账号同时只刷新一次。status 为 KNOWN 表示时效内额度；STALE 表示刷新失败、冷却中或等待超时，返回原快照并在 refreshError 给出错误码；UNKNOWN 表示从未取得额度。
 // @Tags 用量配额
 // @Security GatewayKey
 // @Security GatewayBearer
@@ -85,7 +86,7 @@ func (s *SecurityHandlers) getMyUpstreamQuota(w http.ResponseWriter, r *http.Req
 		securityError(w, r, appsec.ErrInvalidArgument)
 		return
 	}
-	result, err := s.SelfQuota.Upstream(r.Context(), principalFrom(r), time.Now().UTC())
+	result, err := s.SelfQuota.Upstream(r.Context(), principalFrom(r), requestMeta(r), time.Now().UTC())
 	if err != nil {
 		securityError(w, r, err)
 		return
