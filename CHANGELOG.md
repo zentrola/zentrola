@@ -12,6 +12,8 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - 成员 Access Key 签发时可勾选“后台管理”，也可在 Key 列表中随时切换（`PUT /api/v1/access-keys/{id}/management-permission`）；未勾选的是普通 Key。具备后台管理权限的 Key 无需指定模型即可查看该成员可路由到的全部服务商订阅号额度，每个账号一条（`GET /api/v1/me/upstream-quota`），并可按下文通过 MCP 管理普通成员。成员可查询当前 UTC 月所有模型的 Token 总用量及个人额度；指定模型的剩余额度取个人与适用用户组中的最小值。
 - Member Keys with admin access can, through MCP, list active groups (`GET /api/v1/me/manage/groups`), create ordinary members with an active first Key in at least one active group, issue ordinary Keys to any ordinary member, and enable or disable ordinary members (`PUT /api/v1/me/manage/members/{id}/status`). The operator's own member and members holding management permission cannot be targeted. Issuing a Key never changes member status and is rejected with `MEMBER_DISABLED` for disabled members. Disabling a member blocks all of its Keys immediately without revoking them, and re-enabling restores them; enabling requires at least one valid Key. These tools cannot create administrators or issue Keys to administrator accounts. Member creation, first-Key issuance, group assignment, and activation commit together. Newly issued Keys never inherit management permission.
 - 具备后台管理权限的成员 Key 可通过 MCP 查询启用分组（`GET /api/v1/me/manage/groups`），创建普通成员（必须指定至少一个启用分组）及已启用的首把 Key，可为任意普通成员签发普通 Key，并可启停用普通成员（`PUT /api/v1/me/manage/members/{id}/status`）。操作者本人及持有管理授权的成员不能作为操作对象。签发 Key 不改变成员状态，停用成员签发时返回 `MEMBER_DISABLED`。停用后该成员全部 Key 立即无法认证但不注销，重新启用后恢复可用；启用要求成员至少有一把有效 Key。这些工具不能创建管理员，也不能为管理员账号签发 Key。创建成员、分组分配、签发首把 Key 与启用操作在同一事务提交；新 Key 不继承管理权限。
+- The Admin Web sidebar shows the running backend version next to the brand name. Administrators can read it from `GET /api/v1/version`, which requires admin sign-in.
+- 管理后台侧边栏在品牌名旁显示当前运行的后台版本号；管理员登录后可通过 `GET /api/v1/version` 查询。
 
 ### Changed / 变更
 
@@ -32,6 +34,8 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - 迁移 `00064` 将单 Key 的额度查看与成员管理两个授权字段合并为单一的后台管理字段 `can_manage`。原有成员管理授权的 Key 保留后台管理权限；仅有额度查看授权的 Key 变为普通 Key，如有需要请重新授权。
 - The Zentrola plugin for Codex and Claude Code must be updated to `0.4.2` or later; earlier versions reject the new `STALE` subscription quota status as invalid data. Restart the client session after updating so that the MCP server reloads.
 - Codex 与 Claude Code 的 Zentrola 插件需更新到 `0.4.2` 或更高版本；更早的版本会把新增的订阅号额度状态 `STALE` 当作无效数据。更新后需重开客户端会话，使 MCP 服务重新加载。
+- Release bundles no longer include a `VERSION` file. The release version comes from `APP_VERSION` in `.env.example` and is embedded into the backend at build time; `APP_VERSION` in a local `.env` is ignored at runtime and can be removed.
+- 发布包不再包含 `VERSION` 文件。发布版本号取自 `.env.example` 的 `APP_VERSION`，在编译时嵌入后台；运行时会忽略本地 `.env` 中的 `APP_VERSION`，可以删除。
 
 ## [1.2.3] - 2026-10-23
 
