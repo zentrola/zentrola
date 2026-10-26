@@ -9,11 +9,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strings"
 
-	"github.com/joho/godotenv"
+	"github.com/zentrola/zentrola"
 )
 
 type releaseOptions struct {
@@ -52,12 +51,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	metadata, err := godotenv.Read(filepath.Join(projectRoot, ".env.example"))
-	if err != nil {
-		return fmt.Errorf("read release version from .env.example: %w", err)
-	}
-	version := strings.TrimSpace(metadata["APP_VERSION"])
-	if !regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$`).MatchString(version) {
+	if zentrola.Version() == "" {
 		return errors.New(".env.example APP_VERSION must be a semantic version")
 	}
 	target, err := resolveTarget(options)
@@ -151,7 +145,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 	if component != "web" {
 		if err := runCommand(projectRoot, buildEnv, stdout, stderr, goCommand,
-			"build", "-trimpath", "-ldflags=-s -w -X github.com/zentrola/zentrola/internal/transport/http.BackendVersion="+version,
+			"build", "-trimpath", "-ldflags=-s -w",
 			"-o", filepath.Join(stagingRoot, "zentrola"+executableSuffix), "./cmd/server"); err != nil {
 			return fmt.Errorf("backend build failed: %w", err)
 		}
