@@ -5,6 +5,18 @@ import { fixture } from './mock/fixture'
 import { signIn, modal } from './mock/helpers'
 
 test.describe('布局与综合流程', () => {
+  test('超宽屏内容区填满侧边栏右侧空间', async ({ page }) => {
+    await fixture(page)
+    await page.setViewportSize({ width: 2560, height: 900 })
+    await signIn(page)
+
+    const workspace = await page.locator('.workspace').boundingBox()
+    const content = await page.locator('.main-content').boundingBox()
+    expect(workspace && content).toBeTruthy()
+    expect(Math.abs(content!.x - workspace!.x)).toBeLessThanOrEqual(1)
+    expect(Math.abs(content!.width - workspace!.width)).toBeLessThanOrEqual(1)
+  })
+
   test('状态 switch 直接生效且危险操作仍需确认', async ({ page }) => {
     await fixture(page)
     await signIn(page)
