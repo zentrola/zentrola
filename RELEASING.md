@@ -6,7 +6,7 @@ Only maintainers should publish a release. Version tags and published artifacts 
 
 ## 1. Prepare / 准备
 
-1. Update `VERSION`, `web/package.json`, `web/package-lock.json`, `CHANGELOG.md`, image references, and user documentation to the same semantic version.
+1. Update `APP_VERSION` in `.env.example`, `ARG APP_VERSION` in `Dockerfile`, `web/package.json`, `web/package-lock.json`, `CHANGELOG.md`, and user documentation to the same semantic version. `.env.example` is the single source of the release version; it is embedded into the backend at build time and is not read at runtime.
 2. Run `scripts/Sync-ThirdPartyLicenses.ps1` and review all license changes.
 3. Confirm migrations, generated code, compatibility notes, and required configuration changes.
 4. Ensure the working tree is clean and the release commit is pushed.
@@ -27,16 +27,18 @@ npm run build
 npm test
 ```
 
-Run `sqlc generate` with sqlc 1.30.0 and confirm there is no generated diff. Verify a release bundle contains `VERSION`, `LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES.md`, and `third_party_licenses/`.
+Run `sqlc generate` with sqlc 1.30.0 and confirm there is no generated diff. Verify a release bundle contains `.env.example`, `LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES.md`, and `third_party_licenses/`, and that the Admin Web sidebar shows the release version.
 
-使用 sqlc 1.30.0 执行 `sqlc generate` 并确认没有生成差异。确认发布包包含 `VERSION`、`LICENSE`、`NOTICE`、`THIRD_PARTY_NOTICES.md` 和 `third_party_licenses/`。
+使用 sqlc 1.30.0 执行 `sqlc generate` 并确认没有生成差异。确认发布包包含 `.env.example`、`LICENSE`、`NOTICE`、`THIRD_PARTY_NOTICES.md` 和 `third_party_licenses/`，且管理后台侧边栏显示发布版本号。
 
 ## 3. Tag and release / 创建标签与发布
 
-Create an annotated tag whose value matches `VERSION`:
+Create an annotated tag `v<version>` whose version matches `APP_VERSION` in `.env.example`. The release workflow only runs for tags starting with `v`.
+
+创建与 `.env.example` 中 `APP_VERSION` 一致的附注标签 `v<版本号>`；发布工作流只响应以 `v` 开头的标签。
 
 ```powershell
-$version = (Get-Content VERSION -Raw).Trim()
+$version = (Select-String -Path .env.example -Pattern '^APP_VERSION=(.+)$').Matches[0].Groups[1].Value.Trim()
 git tag -a "v$version" -m "发布 $version"
 git push origin "v$version"
 ```
