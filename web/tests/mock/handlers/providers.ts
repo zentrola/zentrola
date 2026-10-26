@@ -131,8 +131,7 @@ export function handleProviders(ctx: MockContext): MockResult {
         proxyEnabled: false,
         proxyUrl: null,
         proxyHeaders: [],
-        modelSyncSupported:
-          code === 'deepseek-official' || code === 'qwen-official',
+        modelSyncSupported: code === 'deepseek-official' || code === 'qwen-official',
         authAdapters: code === 'openai-official' ? ['API_KEY', 'OPENAI_CODEX'] : ['API_KEY'],
         createdAt: stamp,
         updatedAt: stamp,
