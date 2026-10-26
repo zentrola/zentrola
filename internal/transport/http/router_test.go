@@ -15,6 +15,8 @@ import (
 
 	gw "github.com/zentrola/zentrola/internal/application/gateway"
 	"github.com/zentrola/zentrola/internal/application/health"
+	appsec "github.com/zentrola/zentrola/internal/application/security"
+	"github.com/zentrola/zentrola/internal/domain/admin"
 	"github.com/zentrola/zentrola/internal/infrastructure/logging"
 	"github.com/zentrola/zentrola/internal/infrastructure/telemetry"
 )
@@ -47,6 +49,65 @@ func TestAnthropicGatewayErrorIncludesActionableReasonAndStableCode(t *testing.T
 			}
 			if strings.Contains(body, `"code"`) {
 				t.Fatalf("Anthropic error contract gained a non-standard code field: %s", body)
+			}
+		})
+	}
+}
+
+type versionAdminTokens struct{}
+
+func (versionAdminTokens) Issue(admin.Identity) (string, time.Time, error) {
+	return "", time.Time{}, errors.New("not used")
+}
+
+func (versionAdminTokens) Verify(token string) (admin.Identity, error) {
+	if token != "admin-token" {
+		return admin.Identity{}, errors.New("invalid token")
+	}
+	return admin.Identity{ID: 1, CredentialVersion: 1}, nil
+}
+
+type versionAdminStore struct{ appsec.AdminStore }
+
+func (versionAdminStore) GetActive(context.Context, int64) (admin.Identity, error) {
+	return admin.Identity{ID: 1, CredentialVersion: 1, Username: "admin"}, nil
+}
+
+func TestVersionRequiresAdminAndReportsRunningBackend(t *testing.T) {
+	adminService := appsec.NewAdmin(versionAdminStore{}, nil, versionAdminTokens{}, admin.LoginPolicy{})
+	router := NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), health.New(), CORSOptions{}, time.Second, "prod", &SecurityHandlers{Admin: adminService, Version: "1.3.0"})
+	tests := []struct {
+		name   string
+		token  string
+		status int
+	}{
+		{name: "anonymous", status: http.StatusUnauthorized},
+		{name: "invalid token", token: "other", status: http.StatusUnauthorized},
+		{name: "administrator", token: "admin-token", status: http.StatusOK},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "/api/v1/version", nil)
+			if tt.token != "" {
+				request.Header.Set("Authorization", "Bearer "+tt.token)
+			}
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, request)
+			if rec.Code != tt.status || rec.Header().Get("Cache-Control") != "no-store" {
+				t.Fatalf("version response: status=%d cache=%q body=%s", rec.Code, rec.Header().Get("Cache-Control"), rec.Body)
+			}
+			var result struct {
+				Code string          `json:"code"`
+				Data VersionResponse `json:"data"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			if tt.status == http.StatusOK && (result.Code != "OK" || result.Data.Version != "1.3.0") {
+				t.Fatalf("version response = %+v, want 1.3.0", result)
+			}
+			if tt.status != http.StatusOK && result.Data.Version != "" {
+				t.Fatalf("unauthorized response leaked version %q", result.Data.Version)
 			}
 		})
 	}

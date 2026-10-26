@@ -19,6 +19,9 @@ type CORSOptions struct {
 	Origins []string
 }
 
+// BackendVersion is set by the release builder from .env.example APP_VERSION; source builds leave it empty.
+var BackendVersion string
+
 func NewRouter(logger *slog.Logger, readiness *health.Service, corsConfig CORSOptions, healthTimeout time.Duration, environment string, security ...*SecurityHandlers) http.Handler {
 	r := chi.NewRouter()
 	r.Use(otelhttp.NewMiddleware("zentrola.http.server"), requestID, accessLog(logger), recoverPanic(logger))

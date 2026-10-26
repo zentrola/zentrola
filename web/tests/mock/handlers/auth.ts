@@ -4,6 +4,7 @@ import type { MockContext, MockResult } from '../context'
 export function handleAuth(ctx: MockContext): MockResult {
   const { path, reply } = ctx
   const { models, activeModelRows, flags } = ctx.state
+  if (path === '/version') return reply({ version: '1.3.0' })
   if (path === '/auth/setup') return reply({ required: false })
   if (path === '/auth/login')
     return reply({

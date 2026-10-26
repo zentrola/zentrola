@@ -48,6 +48,15 @@ const setupRequired = ref(false),
   notice = ref('')
 const restoring = ref(true),
   restoreError = ref('')
+const backendVersion = ref('-')
+async function loadBackendVersion() {
+  try {
+    const result = await api<{ version: string }>('/version')
+    backendVersion.value = result.version || '-'
+  } catch {
+    backendVersion.value = '-'
+  }
+}
 let restoreRevision = 0
 async function initializeSession() {
   const revision = ++restoreRevision
@@ -175,6 +184,8 @@ onUnmounted(() => {
 })
 watch(identity, (value) => {
   changingPassword.value = false
+  if (value) void loadBackendVersion()
+  else backendVersion.value = '-'
   if (!value && !restoring.value) {
     notice.value = ''
     void loadSetup()
@@ -389,7 +400,13 @@ async function signOut() {
     ></button>
     <aside class="sidebar" :class="{ open: mobile, collapsed: sidebarCollapsed }">
       <RouterLink to="/" class="brand" :aria-label="t('console')" :title="t('console')"
-        ><span class="brand-mark">Z</span><span>{{ t('brand') }}</span></RouterLink
+        ><span class="brand-mark">Z</span
+        ><span class="brand-name"
+          >{{ t('brand')
+          }}<span class="backend-version" :title="t('backendVersion')">{{
+            backendVersion
+          }}</span></span
+        ></RouterLink
       >
       <button
         type="button"
@@ -417,7 +434,9 @@ async function signOut() {
               {{ t('communityRepositoryLabel') }}
               <Icon name="external" :size="12" />
             </a>
-            <template v-else>{{ t(item === 'members' ? 'governance' : 'records') }}</template>
+            <template v-if="item !== 'home'">{{
+              t(item === 'members' ? 'governance' : 'records')
+            }}</template>
           </p>
           <RouterLink
             :to="`/${item}`"

@@ -41,6 +41,10 @@ type LiveResponse struct {
 	Status string `json:"status" example:"LIVE"`
 }
 
+type VersionResponse struct {
+	Version string `json:"version" example:"1.3.0"`
+}
+
 // writeJSON 仅用于管理面及健康检查。未来 Gateway 不得复用此包装。
 func writeJSON(w http.ResponseWriter, r *http.Request, status int, body response) {
 	body.RequestID = requestIDFromContext(r.Context())

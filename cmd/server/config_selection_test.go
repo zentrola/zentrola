@@ -10,6 +10,15 @@ import (
 	"testing"
 )
 
+func TestResolveBackendVersion(t *testing.T) {
+	if got := resolveBackendVersion("2.0.0"); got != "2.0.0" {
+		t.Fatalf("embedded version = %q, want 2.0.0", got)
+	}
+	if got := resolveBackendVersion(""); got != "-" {
+		t.Fatalf("source build version = %q, want -", got)
+	}
+}
+
 func TestConfigSelectionUsesCurrentDirectoryOrExplicitFile(t *testing.T) {
 	root := t.TempDir()
 	t.Chdir(root)

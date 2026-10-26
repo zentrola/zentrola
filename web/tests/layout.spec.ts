@@ -8,8 +8,21 @@ test.describe('布局与综合流程', () => {
   test('状态 switch 直接生效且危险操作仍需确认', async ({ page }) => {
     await fixture(page)
     await signIn(page)
+    const brandName = page.locator('.sidebar .brand-name')
+    const versionBadge = brandName.locator('.backend-version')
+    await expect(versionBadge).toHaveText('1.3.0')
+    const brandBox = await brandName.boundingBox()
+    const badgeBox = await versionBadge.boundingBox()
+    expect(brandBox && badgeBox && badgeBox.x > brandBox.x + brandBox.width).toBeTruthy()
+    expect(brandBox && badgeBox && badgeBox.y < brandBox.y).toBeTruthy()
     await page.getByRole('button', { name: '界面语言', exact: true }).click()
     await page.getByRole('menuitemradio', { name: 'English', exact: true }).click()
+    expect(
+      await page
+        .locator('.sidebar .nav-section')
+        .first()
+        .evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+    ).toBe(true)
     await page.getByRole('link', { name: 'Providers', exact: true }).click()
     const row = page.getByRole('row').filter({ hasText: 'DeepSeek' })
     const status = row.getByRole('switch', { name: 'Status for DeepSeek' })

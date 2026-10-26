@@ -39,6 +39,7 @@ type SecurityHandlers struct {
 	BillingCosts       *billingapp.UsageCostQueryService
 	UsageWriter        *usageapp.Writer
 	BodyReadTimeout    time.Duration
+	Version            string
 	logger             *slog.Logger
 }
 type adminIdentityKey struct{}
@@ -83,6 +84,18 @@ func (s *SecurityHandlers) mount(r chi.Router) {
 			// @Failure 429 {object} response{data=LoginLockResponse}
 			// @Router /api/v1/auth/password [post]
 			protected.Post("/auth/password", s.changePassword)
+			// @Summary 获取当前后台版本
+			// @Tags 系统
+			// @Produce json
+			// @Security AdminBearer
+			// @Success 200 {object} response{data=VersionResponse}
+			// @Header all {string} X-Request-ID "请求追踪 ID"
+			// @Failure 401 {object} response
+			// @Failure 503 {object} response
+			// @Router /api/v1/version [get]
+			protected.Get("/version", func(w http.ResponseWriter, r *http.Request) {
+				writeJSON(w, r, http.StatusOK, response{Code: "OK", Data: VersionResponse{Version: s.Version}})
+			})
 			// @Summary 当前管理员
 			// @Tags 认证
 			// @Produce json

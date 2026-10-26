@@ -38,7 +38,7 @@ docker buildx build `
 ```powershell
 docker build `
   --build-arg BASE_IMAGE=longjianghu/zentrola-codex-base:0.154.0 `
-  --build-arg APP_VERSION=(Get-Content VERSION -Raw).Trim() `
+  --build-arg APP_VERSION=((Select-String -Path .env.example -Pattern '^APP_VERSION=(.+)$').Matches[0].Groups[1].Value.Trim()) `
   --build-arg VCS_REF=(git rev-parse HEAD) `
   --build-arg BUILD_DATE=(Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') `
   -t longjianghu/zentrola:1.0.0 .

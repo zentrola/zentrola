@@ -173,7 +173,7 @@ jobs:
           test -x dist/linux/amd64/zentrola
           test -x dist/linux/amd64/zentrola-web
           test -f dist/linux/amd64/dist/index.html
-          test -f dist/linux/amd64/VERSION
+          test -f dist/linux/amd64/.env.example
           test -f dist/linux/amd64/LICENSE
           test -f dist/linux/amd64/NOTICE
           test -f dist/linux/amd64/THIRD_PARTY_NOTICES.md
@@ -182,7 +182,7 @@ jobs:
         run: |
           docker build \
             --build-arg TARGETARCH=amd64 \
-            --build-arg APP_VERSION="$(tr -d '\r\n' < VERSION)" \
+            --build-arg APP_VERSION="$(sed -n 's/^APP_VERSION=//p' .env.example | head -n 1 | tr -d '\r')" \
             --build-arg VCS_REF="$GITHUB_SHA" \
             --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             -t zentrola:ci .

@@ -20,6 +20,13 @@ func executableRuntimeDir() (string, error) {
 	return filepath.Join(filepath.Dir(executable), "run"), nil
 }
 
+func resolveBackendVersion(embedded string) string {
+	if embedded != "" {
+		return embedded
+	}
+	return "-"
+}
+
 func requireConfigFile(path string) error {
 	info, err := os.Stat(path)
 	if err != nil || !info.Mode().IsRegular() {

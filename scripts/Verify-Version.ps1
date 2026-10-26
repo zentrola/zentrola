@@ -4,10 +4,15 @@ param()
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$version = (Get-Content -LiteralPath (Join-Path $projectRoot 'VERSION') -Raw).Trim()
+$envExample = Get-Content -LiteralPath (Join-Path $projectRoot '.env.example') -Raw
+$versionMatch = [regex]::Match($envExample, '(?m)^APP_VERSION=([^\r\n]+)\r?$')
+if (!$versionMatch.Success) {
+    throw '.env.example must declare APP_VERSION'
+}
+$version = $versionMatch.Groups[1].Value.Trim()
 
 if ($version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
-    throw "VERSION contains an invalid semantic version: $version"
+    throw ".env.example APP_VERSION contains an invalid semantic version: $version"
 }
 
 $dockerfile = Get-Content -LiteralPath (Join-Path $projectRoot 'Dockerfile') -Raw
@@ -45,14 +50,14 @@ foreach ($entry in $checks.GetEnumerator()) {
 }
 
 if ($dockerfile -notmatch "(?m)^ARG APP_VERSION=$([regex]::Escape($version))\r?$") {
-    throw "Dockerfile APP_VERSION does not match VERSION '$version'"
+    throw "Dockerfile APP_VERSION does not match .env.example APP_VERSION '$version'"
 }
 
 $composeVersions = [regex]::Matches($compose, '(?m)^\s*image:\s*longjianghu/zentrola:([^\s#]+)\s*$')
 if ($composeVersions.Count -eq 0) {
     throw 'compose.yaml does not declare a longjianghu/zentrola image'
 }
-# Compose 固定跟随 latest；VERSION、前端包和 Dockerfile 才使用发布版本号。
+# Compose 固定跟随 latest；.env.example、前端包和 Dockerfile 使用发布版本号。
 foreach ($match in $composeVersions) {
     if ($match.Groups[1].Value -ne 'latest') {
         throw "compose.yaml image tag is '$($match.Groups[1].Value)', expected 'latest'"

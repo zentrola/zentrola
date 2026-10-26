@@ -26,7 +26,6 @@ zentrola.exe          # Windows Backend
 zentrola-web          # macOS/Linux Admin Web
 zentrola-web.exe      # Windows Admin Web
 .env.example
-VERSION
 LICENSE
 NOTICE
 THIRD_PARTY_NOTICES.md

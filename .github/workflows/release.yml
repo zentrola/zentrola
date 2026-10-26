@@ -23,7 +23,7 @@ jobs:
       - id: version
         shell: bash
         run: |
-          version="$(tr -d '\r\n' < VERSION)"
+          version="$(sed -n 's/^APP_VERSION=//p' .env.example | head -n 1 | tr -d '\r')"
           tag="${GITHUB_REF_NAME#v}"
           test "$tag" = "$version"
           echo "value=$version" >> "$GITHUB_OUTPUT"

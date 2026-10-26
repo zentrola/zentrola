@@ -9,6 +9,7 @@ export default {
   console: 'Admin Console',
   communityRepositoryLabel: 'GitHub repository',
   communityRepository: 'Open the Zentrola GitHub repository in a new tab',
+  backendVersion: 'Current backend version',
   governance: 'Basic configuration',
   records: 'Records',
   admin: 'Administrator',
