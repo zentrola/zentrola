@@ -23,6 +23,8 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - 订阅号额度查询中 5 分钟内的快照直接返回，更早的账号按需向上游刷新：Claude 订阅发送一次输出 1 个 Token 的最小推理请求，Codex 订阅只读查询额度、不消耗推理。同一账号的并发查询共享一次刷新；刷新成功后 5 分钟内、失败后 1 分钟内不再访问上游，单次查询最多等待 15 秒。刷新失败、冷却中或等待超时时返回原快照并标为 `STALE`，错误码见 `refreshError`；从未取得额度的账号返回 `UNKNOWN`。不再隐藏超过 24 小时的快照。由 Key 触发的刷新以系统操作记录审计，操作人名称为触发的 Key。
 - Manual subscription quota refresh (`POST /api/v1/resources/{id}/refresh-quota`) now also supports Codex subscriptions. It reads quota only, saves any rotated credential, and does not change credential runtime status. `QUOTA_REFRESH_UNSUPPORTED` is now returned only for non-subscription resources.
 - 手动刷新订阅额度（`POST /api/v1/resources/{id}/refresh-quota`）新增支持 Codex 订阅：只读取额度并保存上游轮换的凭据，不改变凭据运行状态。`QUOTA_REFRESH_UNSUPPORTED` 现在只对非订阅凭据返回。
+- The Admin Web dashboard replaces the current model provider list with service health by provider and credential. Subscription and API Key tags show available, unavailable, or unverified status; hovering over a status dot shows the reason and last check time, and supported credentials can be checked on demand. Long names are truncated with the full name available on hover.
+- 管理后台首页将“当前模型服务商”替换为按服务商和凭据展示的“服务健康度”。订阅号和 API Key 标签显示可用、不可用或待验证状态；悬停状态点可查看原因及最近检查时间，支持检测的凭据可按需重新检查。长名称会截断，悬停可查看完整名称。
 
 ### Upgrade / 升级
 
@@ -36,18 +38,6 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - Codex 与 Claude Code 的 Zentrola 插件需更新到 `0.4.2` 或更高版本；更早的版本会把新增的订阅号额度状态 `STALE` 当作无效数据。更新后需重开客户端会话，使 MCP 服务重新加载。
 - Release bundles no longer include a `VERSION` file. The release version comes from `APP_VERSION` in `.env.example` and is embedded into the backend at build time; `APP_VERSION` in a local `.env` is ignored at runtime and can be removed.
 - 发布包不再包含 `VERSION` 文件。发布版本号取自 `.env.example` 的 `APP_VERSION`，在编译时嵌入后台；运行时会忽略本地 `.env` 中的 `APP_VERSION`，可以删除。
-
-## [1.2.3] - 2026-10-23
-
-### Changed / 变更
-
-- The Admin Web dashboard replaces the current model provider list with service health by provider and credential. Subscription and API Key tags show available, unavailable, or unverified status; hovering over a status dot shows the reason and last check time, and supported credentials can be checked on demand. Long names are truncated with the full name available on hover.
-- 管理后台首页将“当前模型服务商”替换为按服务商和凭据展示的“服务健康度”。订阅号和 API Key 标签显示可用、不可用或待验证状态；悬停状态点可查看原因及最近检查时间，支持检测的凭据可按需重新检查。长名称会截断，悬停可查看完整名称。
-
-### Upgrade / 升级
-
-- No database migration or configuration change is required.
-- 无需数据库迁移或配置变更。
 
 ## [1.2.2] - 2026-10-20
 
@@ -287,7 +277,6 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - 中英文管理界面、独立发布包和 Docker Compose 部署方式。
 
 [1.3.0]: https://github.com/zentrola/zentrola/releases/tag/v1.3.0
-[1.2.3]: https://github.com/zentrola/zentrola/releases/tag/1.2.3
 [1.2.2]: https://github.com/zentrola/zentrola/releases/tag/1.2.2
 [1.2.1]: https://github.com/zentrola/zentrola/releases/tag/1.2.1
 [1.2.0]: https://github.com/zentrola/zentrola/releases/tag/1.2.0
