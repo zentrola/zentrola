@@ -75,7 +75,7 @@ func (versionAdminStore) GetActive(context.Context, int64) (admin.Identity, erro
 
 func TestVersionRequiresAdminAndReportsRunningBackend(t *testing.T) {
 	adminService := appsec.NewAdmin(versionAdminStore{}, nil, versionAdminTokens{}, admin.LoginPolicy{})
-	router := NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), health.New(), CORSOptions{}, time.Second, "prod", &SecurityHandlers{Admin: adminService, Version: "1.3.0"})
+	router := NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)), health.New(), CORSOptions{}, time.Second, "prod", &SecurityHandlers{Admin: adminService, Version: "1.3.1"})
 	tests := []struct {
 		name   string
 		token  string
@@ -103,8 +103,8 @@ func TestVersionRequiresAdminAndReportsRunningBackend(t *testing.T) {
 			if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
 				t.Fatal(err)
 			}
-			if tt.status == http.StatusOK && (result.Code != "OK" || result.Data.Version != "1.3.0") {
-				t.Fatalf("version response = %+v, want 1.3.0", result)
+			if tt.status == http.StatusOK && (result.Code != "OK" || result.Data.Version != "1.3.1") {
+				t.Fatalf("version response = %+v, want 1.3.1", result)
 			}
 			if tt.status != http.StatusOK && result.Data.Version != "" {
 				t.Fatalf("unauthorized response leaked version %q", result.Data.Version)

@@ -308,6 +308,14 @@ func TestMissingRequiredParameterReturnsField(t *testing.T) {
 	t.Run("top level", func(t *testing.T) {
 		assertMissingParameter[UpdateStatusRequest](t, http.MethodPatch, "/api/v1/models/1/status", `{}`, "status")
 	})
+	t.Run("credential enabled", func(t *testing.T) {
+		assertMissingParameter[UpdateResourceEnabledRequest](t, http.MethodPatch, "/api/v1/resources/1/enabled", `{}`, "isEnabled")
+		request := httptest.NewRequest(http.MethodPatch, "/api/v1/resources/1/enabled", strings.NewReader(`{"isEnabled":false}`))
+		input, ok := decodeRequest[UpdateResourceEnabledRequest](httptest.NewRecorder(), request)
+		if !ok || input.IsEnabled == nil || *input.IsEnabled {
+			t.Fatalf("false isEnabled rejected: input=%+v ok=%v", input, ok)
+		}
+	})
 	t.Run("empty required collection", func(t *testing.T) {
 		assertMissingParameter[ModelRequest](t, http.MethodPost, "/api/v1/models",
 			`{"code":"model","name":"模型","inputModalities":[],"outputModalities":["TEXT"]}`,

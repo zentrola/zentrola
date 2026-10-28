@@ -295,7 +295,7 @@ func TestSetProviderStatusRequiresConfiguredCredentialWhenEnabling(t *testing.T)
 	}
 
 	writer.credentialConfigured = true
-	writer.resources = []Resource{{ID: 20, ProviderID: 8, Version: 1, AuthType: AuthTypeAPIKey, CredentialConfigured: true}}
+	writer.resources = []Resource{{ID: 20, ProviderID: 8, Version: 1, IsEnabled: true, AuthType: AuthTypeAPIKey, CredentialConfigured: true}}
 	service.ProviderService.connectionProbe = providerConnectionProbeFunc(func(_ context.Context, _ admin.Identity, id int64, _ appsec.RequestMeta) (ConnectionResult, error) {
 		if id != 20 {
 			t.Fatalf("tested resource=%d; want 20", id)
@@ -317,8 +317,8 @@ func TestSetProviderStatusRequiresSuccessfulConnectionTest(t *testing.T) {
 		models:               []Model{{ID: 1, Status: "ACTIVE"}},
 		credentialConfigured: true,
 		resources: []Resource{
-			{ID: 20, ProviderID: 8, Version: 1, AuthType: AuthTypeAPIKey, CredentialConfigured: true},
-			{ID: 21, ProviderID: 8, Version: 1, AuthType: AuthTypeAPIKey, CredentialConfigured: true},
+			{ID: 20, ProviderID: 8, Version: 1, IsEnabled: true, AuthType: AuthTypeAPIKey, CredentialConfigured: true},
+			{ID: 21, ProviderID: 8, Version: 1, IsEnabled: true, AuthType: AuthTypeAPIKey, CredentialConfigured: true},
 		},
 	}
 	service := New(providerStatusStore{writer: writer}, nil, nil, nil)
@@ -355,7 +355,7 @@ func TestActivateProviderUsesSelectedConnection(t *testing.T) {
 		},
 		models:               []Model{{ID: 1, Status: "ACTIVE"}, {ID: 2, Status: "ACTIVE"}},
 		credentialConfigured: true,
-		resources:            []Resource{{ID: 20, ProviderID: 8, Version: 1, AuthType: AuthTypeAPIKey, CredentialConfigured: true}},
+		resources:            []Resource{{ID: 20, ProviderID: 8, Version: 1, IsEnabled: true, AuthType: AuthTypeAPIKey, CredentialConfigured: true}},
 	}
 	service := New(providerStatusStore{writer: writer}, nil, nil, nil)
 	service.ProviderService.connectionProbe = providerSelectionProbeFunc(func(_ context.Context, _ admin.Identity, id int64, protocol string, mappingID int64, _ appsec.RequestMeta) (ConnectionResult, error) {
@@ -382,7 +382,7 @@ func TestActivateClaudeSubscriptionUsesSelectedModel(t *testing.T) {
 		models:               []Model{{ID: 1, Status: "ACTIVE"}, {ID: 2, Status: "ACTIVE"}},
 		credentialConfigured: true,
 		resources: []Resource{{
-			ID: 20, ProviderID: 8, Version: 1, AuthType: AuthTypeSubscription,
+			ID: 20, ProviderID: 8, Version: 1, IsEnabled: true, AuthType: AuthTypeSubscription,
 			AuthAdapter: AuthAdapterClaudeCode, CredentialConfigured: true,
 		}},
 	}
@@ -402,9 +402,9 @@ func TestActivateClaudeSubscriptionUsesSelectedModel(t *testing.T) {
 }
 
 func TestActivateProviderLeavesDisabledOnFailedTestOrChangedMapping(t *testing.T) {
-	apiKey := Resource{ID: 20, ProviderID: 8, Version: 1, AuthType: AuthTypeAPIKey, CredentialConfigured: true}
+	apiKey := Resource{ID: 20, ProviderID: 8, Version: 1, IsEnabled: true, AuthType: AuthTypeAPIKey, CredentialConfigured: true}
 	claude := Resource{
-		ID: 20, ProviderID: 8, Version: 1, AuthType: AuthTypeSubscription,
+		ID: 20, ProviderID: 8, Version: 1, IsEnabled: true, AuthType: AuthTypeSubscription,
 		AuthAdapter: AuthAdapterClaudeCode, CredentialConfigured: true,
 	}
 	for _, test := range []struct {
@@ -456,7 +456,7 @@ func TestSetProviderStatusRejectsCredentialChangedAfterConnectionTest(t *testing
 		mappings:             []ProviderMapping{{ID: 10, ProviderID: 8, ModelID: 1}},
 		models:               []Model{{ID: 1, Status: "ACTIVE"}},
 		credentialConfigured: true,
-		resources:            []Resource{{ID: 20, ProviderID: 8, Version: 1, AuthType: AuthTypeAPIKey, CredentialConfigured: true}},
+		resources:            []Resource{{ID: 20, ProviderID: 8, Version: 1, IsEnabled: true, AuthType: AuthTypeAPIKey, CredentialConfigured: true}},
 	}
 	service := New(providerStatusStore{writer: writer}, nil, nil, nil)
 	service.ProviderService.connectionProbe = providerConnectionProbeFunc(func(context.Context, admin.Identity, int64, appsec.RequestMeta) (ConnectionResult, error) {
@@ -478,7 +478,7 @@ func TestSetProviderStatusRejectsTestedModelDisabledAfterConnectionTest(t *testi
 		},
 		models:               []Model{{ID: 1, Status: "ACTIVE"}, {ID: 2, Status: "ACTIVE"}},
 		credentialConfigured: true,
-		resources:            []Resource{{ID: 20, ProviderID: 8, Version: 1, AuthType: AuthTypeAPIKey, CredentialConfigured: true}},
+		resources:            []Resource{{ID: 20, ProviderID: 8, Version: 1, IsEnabled: true, AuthType: AuthTypeAPIKey, CredentialConfigured: true}},
 	}
 	service := New(providerStatusStore{writer: writer}, nil, nil, nil)
 	service.ProviderService.connectionProbe = providerConnectionProbeFunc(func(context.Context, admin.Identity, int64, appsec.RequestMeta) (ConnectionResult, error) {
@@ -499,7 +499,7 @@ func TestSetProviderStatusDoesNotTestExpiredCredential(t *testing.T) {
 		mappings:             []ProviderMapping{{ID: 10, ProviderID: 8, ModelID: 1}},
 		models:               []Model{{ID: 1, Status: "ACTIVE"}},
 		credentialConfigured: true,
-		resources:            []Resource{{ID: 20, ProviderID: 8, Version: 1, CredentialConfigured: true, ExpiresAt: &expiredAt}},
+		resources:            []Resource{{ID: 20, ProviderID: 8, Version: 1, IsEnabled: true, CredentialConfigured: true, ExpiresAt: &expiredAt}},
 	}
 	service := New(providerStatusStore{writer: writer}, nil, nil, nil, WithClock(func() time.Time { return now }))
 	service.ProviderService.connectionProbe = providerConnectionProbeFunc(func(context.Context, admin.Identity, int64, appsec.RequestMeta) (ConnectionResult, error) {

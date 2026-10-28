@@ -317,6 +317,7 @@ export default {
     credentialLegend: 'Credential status legend',
     credentialHealthLoading: 'Loading credential status…',
     credentialHealthEmpty: 'No enabled providers.',
+    credentialDisabled: 'Credential manually disabled and excluded from routing',
     credentialMissing: 'No credentials. Configure one on the Providers page.',
     credentialNotConfigured: 'Credential is not configured',
     credentialNotEffective: 'Not effective yet',
@@ -773,7 +774,7 @@ export default {
     editCredentialFor: 'Manage credentials for {name}',
     credentialHint:
       'Add an API key or supported subscription authentication for “{name}”. Complete credentials are never shown after saving.',
-    credentialRequiredBeforeEnable: 'Configure credentials first.',
+    credentialRequiredBeforeEnable: 'Add or enable a credential first.',
     modelRequiredBeforeEnable: 'Configure a model first.',
     configurationRequiredBeforeEnable: 'Configure a model and credentials first.',
     testConnectionFor: 'Test connection for {name}',
@@ -941,6 +942,7 @@ export default {
     lastVerifiedAt: 'Last verified',
     apiKey: 'API key',
     authType: 'Authentication',
+    routingStatus: 'Routing status',
     authFile: 'Codex auth.json',
     authTypes: {
       API_KEY: 'API key',
@@ -1055,6 +1057,12 @@ export default {
     subscriptionRequired: 'Enter or upload a valid Codex auth.json no larger than 64 KiB.',
     claudeSubscriptionRequired: 'Enter a valid Claude Code OAuth token no larger than 64 KiB.',
     delete: 'Delete',
+    enable: 'Enable',
+    disable: 'Disable',
+    enableFor: 'Enable credential “{name}”',
+    disableFor: 'Disable credential “{name}”',
+    enabled: 'Credential enabled',
+    disabled: 'Credential disabled. New requests will not use this account.',
     deleteTitle: 'Delete credential',
     deleteQuestion: 'Delete “{name}”?',
     deleteConsequence:
@@ -1240,10 +1248,12 @@ export default {
     PROVIDER_UNAVAILABLE: 'The upstream provider is disabled.',
     CREDENTIAL_UNRECOVERABLE: 'The credential cannot be decrypted. Enter it again.',
     CREDENTIAL_EXPORT_UNSUPPORTED: 'Only OpenAI personal subscription credentials can be exported.',
-    PROVIDER_CREDENTIAL_REQUIRED: 'Configure a provider key before enabling the provider.',
+    PROVIDER_CREDENTIAL_REQUIRED:
+      'Add or enable a provider credential before enabling the provider.',
     PROVIDER_CONNECTION_TEST_FAILED:
       'Ensure at least one effective credential passes a connection test before enabling the provider.',
-    MODEL_SYNC_CREDENTIAL_REQUIRED: 'Configure a provider key before synchronizing models.',
+    MODEL_SYNC_CREDENTIAL_REQUIRED:
+      'Add or enable a provider credential before synchronizing models.',
     PROXY_CONFIGURATION_UNRECOVERABLE:
       'The proxy configuration cannot be decrypted. Save the provider proxy configuration again.',
     PROXY_AUTH_REJECTED:

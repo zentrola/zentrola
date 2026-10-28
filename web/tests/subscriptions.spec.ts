@@ -387,6 +387,7 @@ test.describe('个人订阅', () => {
     await expect(credentialList.getByRole('columnheader')).toHaveText([
       '认证凭据',
       '认证方式',
+      '调用状态',
       '运行状态',
       '操作',
     ])
@@ -403,7 +404,7 @@ test.describe('个人订阅', () => {
     await expect(subscriptionRow).not.toContainText('••••••••')
     await expect(subscriptionRow).toContainText('最后验证时间')
     await expect(subscriptionRow.locator('.credential-quota-reset')).toHaveText('额度重置时间 · -')
-    await expect(subscriptionRow.getByRole('cell').nth(2)).toHaveText('正常')
+    await expect(subscriptionRow.getByRole('cell').nth(3)).toHaveText('正常')
     await expect(
       subscriptionRow.getByRole('button', {
         name: '验证 OpenAI 个人订阅 · ccount 的可用性',

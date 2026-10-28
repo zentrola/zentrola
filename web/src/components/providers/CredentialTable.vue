@@ -20,6 +20,7 @@ const emit = defineEmits<{
   test: [resource: Resource]
   price: [resource: Resource]
   export: [resource: Resource]
+  status: [resource: Resource]
   delete: [resource: Resource]
 }>()
 
@@ -41,6 +42,7 @@ function verificationLabel(resource: Resource) {
       <colgroup>
         <col class="credential-name-column" />
         <col class="credential-auth-column" />
+        <col class="credential-status-column" />
         <col class="credential-runtime-column" />
         <col class="credential-operation-column" />
       </colgroup>
@@ -48,6 +50,7 @@ function verificationLabel(resource: Resource) {
         <tr>
           <th>{{ t('resources.credential') }}</th>
           <th>{{ t('resources.authType') }}</th>
+          <th>{{ t('resources.routingStatus') }}</th>
           <th>{{ t('resources.runtimeStatus') }}</th>
           <th class="credential-action-column">{{ t('common.actions') }}</th>
         </tr>
@@ -66,6 +69,24 @@ function verificationLabel(resource: Resource) {
           </td>
           <td class="credential-auth" :data-label="t('resources.authType')">
             <CredentialAuthDetails :resource="resource" :busy="busy" :quotas="quotas" />
+          </td>
+          <td :data-label="t('resources.routingStatus')">
+            <div class="credential-status-content">
+              <Status :value="resource.isEnabled ? 'ACTIVE' : 'DISABLED'" />
+              <button
+                type="button"
+                class="text-button"
+                :disabled="busy"
+                :aria-label="
+                  t(resource.isEnabled ? 'resources.disableFor' : 'resources.enableFor', {
+                    name: resource.name,
+                  })
+                "
+                @click="emit('status', resource)"
+              >
+                {{ t(resource.isEnabled ? 'resources.disable' : 'resources.enable') }}
+              </button>
+            </div>
           </td>
           <td class="credential-runtime" :data-label="t('resources.runtimeStatus')">
             <div class="credential-runtime-content">
@@ -146,16 +167,25 @@ function verificationLabel(resource: Resource) {
   white-space: normal;
 }
 .credential-name-column {
-  width: 31%;
+  width: 29%;
 }
 .credential-auth-column {
-  width: 29%;
+  width: 24%;
+}
+.credential-status-column {
+  width: 84px;
+}
+.credential-status-content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
 }
 .credential-runtime-column {
   width: auto;
 }
 .credential-operation-column {
-  width: 64px;
+  width: 90px;
 }
 .credential-list th,
 .credential-list td {
@@ -199,6 +229,11 @@ function verificationLabel(resource: Resource) {
 }
 .credential-action-column {
   text-align: right;
+}
+.credential-action-column .row-actions {
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
 }
 .credential-runtime-line {
   display: flex;
@@ -261,6 +296,8 @@ function verificationLabel(resource: Resource) {
     justify-self: start;
   }
   .credential-list .row-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
     justify-content: flex-start;
   }
 }

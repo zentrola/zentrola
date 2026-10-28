@@ -270,7 +270,7 @@ func (s *ResourceService) CreateAuthenticationResource(ctx context.Context, acto
 	}
 	now := businessTime(s.now)
 	resource := Resource{
-		ID: id, Version: 1, ProviderID: input.ProviderID, Name: input.Name,
+		ID: id, Version: 1, ProviderID: input.ProviderID, Name: input.Name, IsEnabled: true,
 		AuthType: input.AuthType, AuthAdapter: input.AuthAdapter, Priority: input.Priority,
 		EffectiveAt: input.EffectiveAt, ExpiresAt: input.ExpiresAt, QuotaStatus: QuotaUnknown,
 		RuntimeStatus: "HEALTHY", CredentialConfigured: true, CreatedAt: now, UpdatedAt: now,
@@ -498,5 +498,27 @@ func (s *ResourceService) DeleteResource(ctx context.Context, actor admin.Identi
 			return ErrConflict
 		}
 		return w.Audit(ctx, Audit{Event: operation.ResourceDelete, Target: "RESOURCE", ID: id, Name: record.Name, Before: record.Resource, After: map[string]bool{"deleted": true}}, meta)
+	})
+}
+
+// SetResourceEnabled 只控制新请求的选路资格；系统检测的故障状态独立保留。
+func (s *ResourceService) SetResourceEnabled(ctx context.Context, actor admin.Identity, id int64, enabled bool, meta appsec.RequestMeta) error {
+	if id <= 0 {
+		return appsec.ErrInvalidArgument
+	}
+	return s.store.WriteResource(ctx, actor, func(w ResourceSession) error {
+		record, err := w.Resource(ctx, id)
+		if err != nil {
+			return err
+		}
+		if record.IsEnabled == enabled {
+			return nil
+		}
+		if err := w.SetResourceEnabled(ctx, id, record.Version, enabled, businessTime(s.now)); err != nil {
+			return err
+		}
+		return w.Audit(ctx, Audit{Event: operation.ResourceStatusChange, Target: "RESOURCE", ID: id,
+			Name: record.Name, Before: map[string]bool{"isEnabled": record.IsEnabled},
+			After: map[string]bool{"isEnabled": enabled}}, meta)
 	})
 }

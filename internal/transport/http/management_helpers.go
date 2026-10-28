@@ -55,6 +55,22 @@ func statusEndpoint(update statusUpdater) http.HandlerFunc {
 	}
 }
 
+func resourceEnabledEndpoint(update func(context.Context, admin.Identity, int64, bool, appsec.RequestMeta) error) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		input, ok := decodeRequest[UpdateResourceEnabledRequest](w, r)
+		if !ok {
+			return
+		}
+		id, err := routeID(r, "id")
+		if err != nil {
+			securityError(w, r, err)
+			return
+		}
+		err = update(r.Context(), adminFrom(r), id, *input.IsEnabled, requestMeta(r))
+		adminResult(w, r, http.StatusOK, UpdatedResponse{Updated: true}, err)
+	}
+}
+
 type relationUpdater func(context.Context, admin.Identity, int64, int64, bool, appsec.RequestMeta) error
 
 func relationEndpoint(update relationUpdater, childParam string, enabled bool) http.HandlerFunc {

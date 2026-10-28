@@ -117,6 +117,7 @@ function submit() {
             <small>{{ t(`resources.authTypes.${resource.authType || 'API_KEY'}`) }}</small>
           </span>
           <span class="credential-test-option-status">
+            <Status :value="resource.isEnabled ? 'ACTIVE' : 'DISABLED'" />
             <Status :value="resource.runtimeStatus || 'HEALTHY'" />
             <Status
               v-if="resource.authType === 'SUBSCRIPTION'"

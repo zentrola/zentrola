@@ -7762,6 +7762,94 @@
                 }
             }
         },
+        "/api/v1/resources/{id}/enabled": {
+            "patch": {
+                "security": [
+                    {
+                        "AdminBearer": []
+                    }
+                ],
+                "description": "控制单条订阅或 API Key 凭据是否参与后续请求选路；停用不影响订阅认证后台刷新，也不清除系统检测的故障状态。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "模型与资源"
+                ],
+                "summary": "启用或停用上游认证凭据",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "业务 ID（正整数字符串）",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "目标启用状态",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/http.UpdateResourceEnabledRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/http.UpdatedResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_zentrola_zentrola_internal_transport_http.response"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/resources/{id}/prices": {
             "get": {
                 "security": [
@@ -11430,6 +11518,18 @@
                 }
             }
         },
+        "http.UpdateResourceEnabledRequest": {
+            "type": "object",
+            "required": [
+                "isEnabled"
+            ],
+            "properties": {
+                "isEnabled": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
         "http.UpdateStatusRequest": {
             "type": "object",
             "required": [
@@ -11460,7 +11560,7 @@
             "properties": {
                 "version": {
                     "type": "string",
-                    "example": "1.3.0"
+                    "example": "1.3.1"
                 }
             }
         },
@@ -12172,6 +12272,9 @@
                 "id": {
                     "type": "string",
                     "example": "0"
+                },
+                "isEnabled": {
+                    "type": "boolean"
                 },
                 "lastErrorAt": {
                     "type": "string"

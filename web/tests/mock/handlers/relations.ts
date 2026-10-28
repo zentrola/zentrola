@@ -44,6 +44,11 @@ export function handleRelations(ctx: MockContext): MockResult {
       testedModelCode: mapping?.upstreamModelCode || model?.code,
     })
   }
+  if (segments[0] === 'resources' && segments[2] === 'enabled') {
+    const row = resources.find((resource) => resource.id === segments[1])
+    row.isEnabled = body.isEnabled
+    return reply(row)
+  }
   if (segments[2] === 'status') {
     const list =
       segments[0] === 'members'

@@ -2,11 +2,13 @@ package management
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	appsec "github.com/zentrola/zentrola/internal/application/security"
 	"github.com/zentrola/zentrola/internal/domain/admin"
+	"github.com/zentrola/zentrola/internal/domain/operation"
 )
 
 type providerSessionStub struct {
@@ -71,10 +73,11 @@ func TestProviderCreateAndDeleteUseNarrowStore(t *testing.T) {
 
 type resourceSessionStub struct {
 	ResourceSession
-	provider Provider
-	record   *ResourceRecord
-	deleted  bool
-	audits   []Audit
+	provider      Provider
+	record        *ResourceRecord
+	deleted       bool
+	audits        []Audit
+	enabledWrites int
 }
 
 func (s *resourceSessionStub) Provider(context.Context, int64) (Provider, error) {
@@ -85,6 +88,16 @@ func (s *resourceSessionStub) Resource(context.Context, int64) (ResourceRecord, 
 }
 func (s *resourceSessionStub) CreateResource(_ context.Context, record ResourceRecord) error {
 	s.record = &record
+	return nil
+}
+func (s *resourceSessionStub) SetResourceEnabled(_ context.Context, _ int64, expectedVersion int64, enabled bool, at time.Time) error {
+	if s.record.Version != expectedVersion {
+		return ErrConflict
+	}
+	s.record.IsEnabled = enabled
+	s.record.Version++
+	s.record.UpdatedAt = at
+	s.enabledWrites++
 	return nil
 }
 func (s *resourceSessionStub) DeleteResource(context.Context, int64, time.Time) (bool, error) {
@@ -127,5 +140,39 @@ func TestResourceCreateAndDeleteUseNarrowStore(t *testing.T) {
 	}
 	if !session.deleted || len(session.audits) != 2 {
 		t.Fatalf("deleted=%v audits=%d", session.deleted, len(session.audits))
+	}
+}
+
+func TestSetResourceEnabledKeepsRuntimeStateAndSkipsNoop(t *testing.T) {
+	fixed := time.Date(2026, 10, 28, 3, 0, 0, 0, time.UTC)
+	session := &resourceSessionStub{record: &ResourceRecord{Resource: Resource{
+		ID: 41, Version: 2, ProviderID: 4, Name: "订阅号", IsEnabled: true,
+		RuntimeStatus: "BLOCKED", BlockedReason: stringPointer("BILLING"),
+	}}}
+	service := ResourceService{store: resourceStoreStub{session: session}, now: func() time.Time { return fixed }}
+	actor := admin.Identity{ID: 1}
+	ctx := context.Background()
+	if err := service.SetResourceEnabled(ctx, actor, 41, false, appsec.RequestMeta{}); err != nil {
+		t.Fatal(err)
+	}
+	if session.record.IsEnabled || session.record.RuntimeStatus != "BLOCKED" ||
+		session.record.Version != 3 || session.enabledWrites != 1 || len(session.audits) != 1 ||
+		session.audits[0].Event != operation.ResourceStatusChange {
+		t.Fatalf("unexpected disabled resource: record=%+v writes=%d audits=%+v", session.record, session.enabledWrites, session.audits)
+	}
+	if err := service.SetResourceEnabled(ctx, actor, 41, false, appsec.RequestMeta{}); err != nil {
+		t.Fatal(err)
+	}
+	if session.enabledWrites != 1 || len(session.audits) != 1 {
+		t.Fatalf("no-op wrote state: writes=%d audits=%d", session.enabledWrites, len(session.audits))
+	}
+	if err := service.SetResourceEnabled(ctx, actor, 41, true, appsec.RequestMeta{}); err != nil {
+		t.Fatal(err)
+	}
+	if !session.record.IsEnabled || session.record.RuntimeStatus != "BLOCKED" || session.enabledWrites != 2 {
+		t.Fatalf("enable cleared runtime block: %+v", session.record)
+	}
+	if err := service.SetResourceEnabled(ctx, actor, 0, false, appsec.RequestMeta{}); !errors.Is(err, appsec.ErrInvalidArgument) || session.enabledWrites != 2 {
+		t.Fatalf("invalid ID changed state: error=%v writes=%d", err, session.enabledWrites)
 	}
 }

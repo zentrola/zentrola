@@ -1746,7 +1746,7 @@ SELECT pm.id,pm.provider_id,p.provider_name,p.status AS provider_status,
        pm.model_id,pm.upstream_model_code,pm.priority,pm.updated_at,
        EXISTS(SELECT 1 FROM provider_endpoint pe WHERE pe.provider_id=p.id AND pe.protocol_type IN ('OPENAI','ANTHROPIC')) AS endpoint_configured,
        EXISTS(SELECT 1 FROM provider_credential r WHERE r.provider_id=p.id AND NOT r.is_deleted
-           AND r.runtime_status='HEALTHY'
+           AND r.is_enabled AND r.runtime_status='HEALTHY'
            AND (r.effective_at IS NULL OR r.effective_at<=now())
            AND (r.expires_at IS NULL OR r.expires_at>now())
            AND (r.auth_type='API_KEY' OR r.quota_status IN ('AVAILABLE','NEAR_LIMIT')
@@ -2021,7 +2021,7 @@ func (q *Queries) ManageProvider(ctx context.Context, id int64) (Provider, error
 
 const manageProviderActivationResourceIDs = `-- name: ManageProviderActivationResourceIDs :many
 SELECT id FROM provider_credential
-WHERE provider_id=$1 AND is_deleted=false
+WHERE provider_id=$1 AND is_deleted=false AND is_enabled
   AND (effective_at IS NULL OR effective_at<=$2::timestamptz)
   AND (expires_at IS NULL OR expires_at>$2::timestamptz)
 ORDER BY id DESC
@@ -2055,7 +2055,7 @@ func (q *Queries) ManageProviderActivationResourceIDs(ctx context.Context, arg M
 const manageProviderCredentialConfigured = `-- name: ManageProviderCredentialConfigured :one
 SELECT EXISTS(
     SELECT 1 FROM provider_credential
-    WHERE provider_id=$1 AND is_deleted=false
+    WHERE provider_id=$1 AND is_deleted=false AND is_enabled
 )
 `
 
@@ -2355,7 +2355,7 @@ func (q *Queries) ManageReplaceSubscriptionCredential(ctx context.Context, arg M
 }
 
 const manageResource = `-- name: ManageResource :one
-SELECT id, is_deleted, provider_id, resource_name, credential_ciphertext, credential_nonce, runtime_status, blocked_reason, blocked_at, last_error_at, last_http_status, last_error_code, auth_type, auth_adapter, subscription_type, plan_code, external_account_ref, priority, effective_at, expires_at, quota_status, quota_checked_at, quota_resets_at, credential_refreshed_at, credential_expires_at, key_version, created_by, updated_by, created_at, updated_at, version FROM provider_credential WHERE id=$1 AND is_deleted=false
+SELECT id, is_deleted, provider_id, resource_name, credential_ciphertext, credential_nonce, runtime_status, blocked_reason, blocked_at, last_error_at, last_http_status, last_error_code, auth_type, auth_adapter, subscription_type, plan_code, external_account_ref, priority, effective_at, expires_at, quota_status, quota_checked_at, quota_resets_at, credential_refreshed_at, credential_expires_at, key_version, created_by, updated_by, created_at, updated_at, version, is_enabled FROM provider_credential WHERE id=$1 AND is_deleted=false
 `
 
 func (q *Queries) ManageResource(ctx context.Context, id int64) (ProviderCredential, error) {
@@ -2393,6 +2393,7 @@ func (q *Queries) ManageResource(ctx context.Context, id int64) (ProviderCredent
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Version,
+		&i.IsEnabled,
 	)
 	return i, err
 }
@@ -2439,7 +2440,7 @@ func (q *Queries) ManageResourceQuotas(ctx context.Context, providerCredentialID
 }
 
 const manageResources = `-- name: ManageResources :many
-SELECT r.id,r.provider_id,r.resource_name,r.auth_type,r.auth_adapter,r.subscription_type,r.plan_code,
+SELECT r.id,r.provider_id,r.resource_name,r.is_enabled,r.auth_type,r.auth_adapter,r.subscription_type,r.plan_code,
        r.external_account_ref,r.priority,r.effective_at,r.expires_at,r.quota_status,r.quota_checked_at,
        r.quota_resets_at,r.credential_refreshed_at,r.credential_expires_at,
        r.runtime_status,r.blocked_reason,r.blocked_at,r.last_error_at,r.last_http_status,
@@ -2468,6 +2469,7 @@ type ManageResourcesRow struct {
 	ID                           int64
 	ProviderID                   int64
 	ResourceName                 string
+	IsEnabled                    bool
 	AuthType                     string
 	AuthAdapter                  string
 	SubscriptionType             *string
@@ -2509,6 +2511,7 @@ func (q *Queries) ManageResources(ctx context.Context, arg ManageResourcesParams
 			&i.ID,
 			&i.ProviderID,
 			&i.ResourceName,
+			&i.IsEnabled,
 			&i.AuthType,
 			&i.AuthAdapter,
 			&i.SubscriptionType,
@@ -2612,6 +2615,35 @@ func (q *Queries) ManageRevokeModel(ctx context.Context, arg ManageRevokeModelPa
 		arg.UpdatedAt,
 	)
 	return err
+}
+
+const manageSetResourceEnabled = `-- name: ManageSetResourceEnabled :execrows
+UPDATE provider_credential
+SET is_enabled=$1,updated_by=$2,updated_at=$3,version=version+1
+WHERE id=$4 AND is_deleted=false AND version=$5
+  AND is_enabled<>$1
+`
+
+type ManageSetResourceEnabledParams struct {
+	IsEnabled       bool
+	UpdatedBy       string
+	UpdatedAt       pgtype.Timestamptz
+	ID              int64
+	ExpectedVersion int64
+}
+
+func (q *Queries) ManageSetResourceEnabled(ctx context.Context, arg ManageSetResourceEnabledParams) (int64, error) {
+	result, err := q.db.Exec(ctx, manageSetResourceEnabled,
+		arg.IsEnabled,
+		arg.UpdatedBy,
+		arg.UpdatedAt,
+		arg.ID,
+		arg.ExpectedVersion,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const manageUpdateApplication = `-- name: ManageUpdateApplication :exec

@@ -35,6 +35,8 @@ function health(resource: Resource): {
   checkedAt: string | null
 } {
   const check = props.checks[resource.id]
+  if (!resource.isEnabled)
+    return { state: 'unavailable', reason: t('home.credentialDisabled'), checkedAt: null }
   if (!resource.credentialConfigured)
     return { state: 'unavailable', reason: t('home.credentialNotConfigured'), checkedAt: null }
   if (resource.effectiveAt && Date.parse(resource.effectiveAt) > Date.now())

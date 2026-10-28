@@ -16,8 +16,7 @@ import TableScroll from '../components/TableScroll.vue'
 type OperationFilters = { keyword: string; type: string; result: string }
 // 关键词最长 100 字符，与后端校验保持一致。
 const keywordMaxLength = 100
-// 筛选项与 internal/domain/operation/types.go 中仍会写入的类型保持一致；
-// 已停止写入的 RESOURCE_STATUS_CHANGE 只保留文案用于展示历史记录，不放进筛选。
+// 筛选项与 internal/domain/operation/types.go 中仍会写入的类型保持一致。
 const operationTypes = [
   'ADMIN_INITIALIZE',
   'ADMIN_PASSWORD_RESET',
@@ -60,6 +59,7 @@ const operationTypes = [
   'RESOURCE_CREDENTIAL_UPDATE',
   'RESOURCE_CREDENTIAL_EXPORT',
   'RESOURCE_DELETE',
+  'RESOURCE_STATUS_CHANGE',
   'RESOURCE_CONNECTION_TEST',
   'RESOURCE_RATE_LIMIT_RESET',
   'RESOURCE_QUOTA_REFRESH',

@@ -111,6 +111,7 @@ export interface Resource {
   id: string
   name: string
   providerId: string
+  isEnabled: boolean
   authType: 'API_KEY' | 'SUBSCRIPTION'
   authAdapter: 'API_KEY' | 'OPENAI_CODEX' | 'ANTHROPIC_CLAUDE_CODE'
   subscriptionType: 'PERSONAL' | 'SEAT' | null

@@ -56,6 +56,7 @@ const (
 	ResourceCredentialUpdate  Type = "RESOURCE_CREDENTIAL_UPDATE"
 	ResourceCredentialExport  Type = "RESOURCE_CREDENTIAL_EXPORT"
 	ResourceDelete            Type = "RESOURCE_DELETE"
+	ResourceStatusChange      Type = "RESOURCE_STATUS_CHANGE"
 	ResourceConnectionTest    Type = "RESOURCE_CONNECTION_TEST"
 	ResourceRateLimitReset    Type = "RESOURCE_RATE_LIMIT_RESET"
 	ResourceQuotaRefresh      Type = "RESOURCE_QUOTA_REFRESH"

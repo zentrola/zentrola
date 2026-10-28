@@ -168,7 +168,9 @@ test.describe('操作日志', () => {
 
     const typeSelect = page.getByRole('combobox', { name: '操作类型' })
     await expect(typeSelect.locator('option[value="RESOURCE_DELETE"]')).toHaveText('删除服务商凭证')
-    await expect(typeSelect.locator('option[value="RESOURCE_STATUS_CHANGE"]')).toHaveCount(0)
+    await expect(typeSelect.locator('option[value="RESOURCE_STATUS_CHANGE"]')).toHaveText(
+      '服务商凭证状态变更',
+    )
     await typeSelect.selectOption('RESOURCE_DELETE')
     await page.getByRole('button', { name: '搜索', exact: true }).click()
     await expect(page.locator('tbody tr')).toHaveCount(1)

@@ -55,6 +55,7 @@ export function handleCollections(ctx: MockContext): MockResult {
       return pageReply(
         resources.map(({ credential: _, quotaDetails: __, ...row }) => ({
           ...row,
+          isEnabled: row.isEnabled ?? true,
           subscriptionPrice: credentialPrices.get(row.id)?.subscriptionPrice ?? null,
         })),
       )

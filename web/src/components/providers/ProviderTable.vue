@@ -24,6 +24,7 @@ const props = defineProps<{
   guide: ProviderGuideTargets
   runtimeFor: (provider: Provider) => ProviderRuntime
   hasCredential: (provider: Provider) => boolean
+  hasEnabledCredential: (provider: Provider) => boolean
 }>()
 const emit = defineEmits<{
   test: [provider: Provider]
@@ -49,7 +50,7 @@ function endpointNetworkScope(provider: Provider, protocolType: ProviderProtocol
 
 function enableBlockReason(provider: Provider) {
   if (provider.status === 'ACTIVE') return undefined
-  const credentialConfigured = props.hasCredential(provider)
+  const credentialConfigured = props.hasEnabledCredential(provider)
   const modelConfigured = provider.modelCount > 0
   if (!credentialConfigured && !modelConfigured)
     return t('providers.configurationRequiredBeforeEnable')
@@ -284,7 +285,7 @@ function openRuntime(provider: Provider) {
   height: 36px;
 }
 .provider-name-column {
-  width: 252px;
+  width: 300px;
 }
 .provider-enable-column {
   width: 88px;
@@ -338,31 +339,37 @@ function openRuntime(provider: Provider) {
   height: 22px;
 }
 .provider-name-line {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  overflow: hidden;
+  display: block;
 }
 .provider-name-line strong {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: block;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.person {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  align-items: start;
 }
 .person > div {
-  flex: 1;
   min-width: 0;
 }
 .person > div > .technical-value {
   margin-top: 2px;
 }
+.person > div > .technical-value :deep(.technical-value-text) {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .provider-name-actions {
   display: inline-flex;
+  grid-column: 2;
   flex: none;
   align-items: center;
   gap: 2px;
+  margin-top: 4px;
 }
 .provider-quick-action {
   display: inline-grid;

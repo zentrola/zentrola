@@ -405,6 +405,13 @@ type UpdateStatusRequest struct {
 func (r *UpdateStatusRequest) Normalize() { r.Status = strings.TrimSpace(r.Status) }
 func (r UpdateStatusRequest) Valid() bool { return r.Status == "ACTIVE" || r.Status == "DISABLED" }
 
+type UpdateResourceEnabledRequest struct {
+	IsEnabled *bool `json:"isEnabled" binding:"required" example:"true"`
+}
+
+func (r *UpdateResourceEnabledRequest) Normalize() {}
+func (r UpdateResourceEnabledRequest) Valid() bool { return r.IsEnabled != nil }
+
 type ActivateProviderRequest struct {
 	ResourceID             string `json:"resourceId" binding:"required" example:"123"`
 	Protocol               string `json:"protocol,omitempty" enums:"ANTHROPIC,OPENAI" example:"OPENAI"`

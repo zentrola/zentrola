@@ -9,6 +9,7 @@ export type ProviderRuntimeStatus =
   | 'PENDING_ENABLE'
   | 'DEGRADED'
   | 'BLOCKED'
+  | 'UNAVAILABLE'
 
 export type ProviderRuntime = {
   status: ProviderRuntimeStatus
@@ -21,6 +22,7 @@ const abnormalStatuses: ReadonlySet<ProviderRuntimeStatus> = new Set([
   'UNCONFIGURED',
   'MISSING_MODEL',
   'BLOCKED',
+  'UNAVAILABLE',
 ])
 
 const emptyResources: Resource[] = []
@@ -48,6 +50,7 @@ function resourcePreference(resource: Resource) {
 export function preferredResource(candidates: Resource[]) {
   let selected: Resource | undefined
   for (const candidate of candidates) {
+    if (!candidate.isEnabled) continue
     if (
       !selected ||
       resourcePreference(candidate) < resourcePreference(selected) ||
@@ -88,9 +91,18 @@ export function calculateProviderRuntime(
     }
   }
 
+  const enabled = configured.filter((resource) => resource.isEnabled)
+  if (!enabled.length) {
+    return {
+      status: 'UNAVAILABLE',
+      reason: t('providers.runtimeReasons.CREDENTIAL_DISABLED'),
+      errorCode: '',
+    }
+  }
+
   let healthy = false
   let failed: Resource | undefined
-  for (const resource of configured) {
+  for (const resource of enabled) {
     if (resource.runtimeStatus !== 'BLOCKED') {
       healthy = true
       continue

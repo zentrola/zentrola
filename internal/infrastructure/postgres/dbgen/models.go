@@ -422,6 +422,8 @@ type ProviderCredential struct {
 	UpdatedAt pgtype.Timestamptz
 	// 乐观锁版本；每次资源状态、凭据或配置更新后递增
 	Version int64
+	// 管理员调用开关：TRUE=参与调用；FALSE=不参与调用
+	IsEnabled bool
 }
 
 // 按量凭证按生效时间保留的模型计价版本

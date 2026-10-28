@@ -614,7 +614,7 @@ func (s *ProviderService) ActivateProvider(ctx context.Context, actor admin.Iden
 		if err != nil {
 			return err
 		}
-		if resource.ProviderID != id || !resource.CredentialConfigured {
+		if resource.ProviderID != id || !resource.IsEnabled || !resource.CredentialConfigured {
 			return appsec.ErrInvalidArgument
 		}
 		now := businessTime(s.now)
@@ -729,7 +729,7 @@ func (s *ProviderService) setProviderStatusVerified(ctx context.Context, actor a
 				return err
 			}
 			now := businessTime(s.now)
-			if resource.ProviderID != id || resource.Version != verified.resourceVersion ||
+			if resource.ProviderID != id || !resource.IsEnabled || resource.Version != verified.resourceVersion ||
 				(resource.EffectiveAt != nil && resource.EffectiveAt.After(now)) ||
 				(resource.ExpiresAt != nil && !resource.ExpiresAt.After(now)) {
 				return ErrConflict

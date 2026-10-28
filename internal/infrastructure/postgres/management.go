@@ -410,7 +410,7 @@ func (s *managementSession) Provider(ctx context.Context, id int64) (mgmt.Provid
 func (s *managementSession) Resource(ctx context.Context, id int64) (mgmt.ResourceRecord, error) {
 	r, err := s.q.ManageResource(ctx, id)
 	return mgmt.ResourceRecord{Resource: mgmt.Resource{
-		ID: r.ID, ProviderID: r.ProviderID, Name: r.ResourceName,
+		ID: r.ID, ProviderID: r.ProviderID, Name: r.ResourceName, IsEnabled: r.IsEnabled,
 		AuthType: r.AuthType, AuthAdapter: r.AuthAdapter, SubscriptionType: r.SubscriptionType,
 		PlanCode: r.PlanCode, ExternalAccountRef: r.ExternalAccountRef, Priority: r.Priority,
 		EffectiveAt: timePointer(r.EffectiveAt), ExpiresAt: timePointer(r.ExpiresAt),
@@ -703,6 +703,19 @@ func (s *managementSession) UpdateResource(ctx context.Context, r mgmt.ResourceR
 		CredentialCiphertext: r.Sealed.Ciphertext, CredentialNonce: r.Sealed.Nonce,
 		KeyVersion: r.Sealed.KeyVersion, UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(r.UpdatedAt),
 		Version: r.Version,
+	})
+	if err != nil {
+		return err
+	}
+	if updated != 1 {
+		return mgmt.ErrConflict
+	}
+	return nil
+}
+func (s *managementSession) SetResourceEnabled(ctx context.Context, id, expectedVersion int64, enabled bool, at time.Time) error {
+	updated, err := s.q.ManageSetResourceEnabled(ctx, dbgen.ManageSetResourceEnabledParams{
+		ID: id, ExpectedVersion: expectedVersion, IsEnabled: enabled,
+		UpdatedBy: actorRef(s.actor.ID), UpdatedAt: pgTime(at),
 	})
 	if err != nil {
 		return err

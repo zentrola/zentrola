@@ -4,6 +4,27 @@ All notable changes to Zentrola are documented here. Dates use UTC. The project 
 
 Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循语义化版本。
 
+## [1.3.1] - 2026-10-28
+
+### Added / 新增
+
+- Administrators can enable or disable individual provider subscription credentials and API Keys. Disabled credentials are excluded from new gateway requests, model availability and provider activation; eligible credentials take over automatically. Manual enablement is separate from runtime health, and subscription authentication refresh continues while a credential is disabled.
+- 管理员可逐条启停服务商订阅凭据和 API Key。停用凭据不参与新网关请求、模型可用性判断和服务商启用验证，其他可用凭据自动接替。人工开关与运行故障状态独立，停用期间仍会刷新订阅认证材料。
+
+### Fixed / 修复
+
+- A provider whose credentials are all disabled still offers manual connection tests for those credentials.
+- 服务商全部凭据停用时，仍可对这些凭据手动执行连接测试。
+- Provider names and codes wrap in the Providers list instead of being truncated.
+- 服务商列表中的名称和编码改为完整换行展示，不再截断。
+
+### Migration / 迁移
+
+- Migration `00065` adds `provider_credential.is_enabled` with a default of `TRUE`. Existing credentials remain enabled. The admin API exposes `isEnabled` and `PATCH /api/v1/resources/{id}/enabled`.
+- 迁移 `00065` 新增默认值为 `TRUE` 的 `provider_credential.is_enabled`，现有凭据保持启用。管理接口新增 `isEnabled` 字段及 `PATCH /api/v1/resources/{id}/enabled`。
+- Upstream conversations continued with `previous_response_id` remain tied to their original account and cannot resume through another credential after that account is disabled; start a new conversation to use automatic routing.
+- 携带 `previous_response_id` 的上游会话仍绑定原账号；停用该账号后无法通过其他凭据续接，需开启新会话才能使用自动选路。
+
 ## [1.3.0] - 2026-10-23
 
 ### Added / 新增
@@ -276,6 +297,7 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - 支持协议转换、流式响应、工具调用和服务商故障切换的 OpenAI/Anthropic 兼容网关。
 - 中英文管理界面、独立发布包和 Docker Compose 部署方式。
 
+[1.3.1]: https://github.com/zentrola/zentrola/releases/tag/v1.3.1
 [1.3.0]: https://github.com/zentrola/zentrola/releases/tag/v1.3.0
 [1.2.2]: https://github.com/zentrola/zentrola/releases/tag/1.2.2
 [1.2.1]: https://github.com/zentrola/zentrola/releases/tag/1.2.1

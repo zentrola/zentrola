@@ -18,7 +18,7 @@ AND EXISTS(
     SELECT 1 FROM provider_model pm
     JOIN provider p ON p.id=pm.provider_id AND NOT p.is_deleted AND p.status='ACTIVE'
     JOIN provider_endpoint pe ON pe.provider_id=p.id AND pe.protocol_type IN ('OPENAI','ANTHROPIC')
-    JOIN provider_credential r ON r.provider_id=p.id AND NOT r.is_deleted AND r.runtime_status='HEALTHY'
+    JOIN provider_credential r ON r.provider_id=p.id AND NOT r.is_deleted AND r.is_enabled AND r.runtime_status='HEALTHY'
         AND (r.effective_at IS NULL OR r.effective_at<=now()) AND (r.expires_at IS NULL OR r.expires_at>now())
         AND (r.auth_type='API_KEY' OR (r.auth_type='SUBSCRIPTION' AND r.auth_adapter='ANTHROPIC_CLAUDE_CODE'
             AND (r.quota_status IN ('AVAILABLE','NEAR_LIMIT')
@@ -100,7 +100,7 @@ FROM provider_model pm
 JOIN provider p ON p.id=pm.provider_id
 JOIN provider_endpoint pe ON pe.provider_id=p.id AND pe.protocol_type IN ('OPENAI','ANTHROPIC')
 JOIN provider_credential r ON r.provider_id=p.id
-    AND NOT r.is_deleted AND r.runtime_status='HEALTHY'
+    AND NOT r.is_deleted AND r.is_enabled AND r.runtime_status='HEALTHY'
     AND (r.effective_at IS NULL OR r.effective_at<=now())
     AND (r.expires_at IS NULL OR r.expires_at>now())
     AND (r.auth_type='API_KEY' OR r.quota_status IN ('AVAILABLE','NEAR_LIMIT')
@@ -414,7 +414,7 @@ JOIN provider_model pm ON pm.model_id=m.id AND NOT pm.is_deleted
 JOIN provider p ON p.id=pm.provider_id AND NOT p.is_deleted AND p.status='ACTIVE'
 JOIN provider_endpoint pe ON pe.provider_id=p.id AND pe.protocol_type IN ('OPENAI','ANTHROPIC')
 WHERE NOT m.is_deleted AND m.status='ACTIVE'
-AND EXISTS(SELECT 1 FROM provider_credential r WHERE r.provider_id=p.id AND NOT r.is_deleted AND r.runtime_status='HEALTHY'
+AND EXISTS(SELECT 1 FROM provider_credential r WHERE r.provider_id=p.id AND NOT r.is_deleted AND r.is_enabled AND r.runtime_status='HEALTHY'
     AND (r.effective_at IS NULL OR r.effective_at<=now()) AND (r.expires_at IS NULL OR r.expires_at>now())
     AND (r.auth_type='API_KEY' OR r.quota_status IN ('AVAILABLE','NEAR_LIMIT')
          OR (r.quota_status='EXHAUSTED' AND r.quota_resets_at IS NOT NULL AND r.quota_resets_at<=now())))

@@ -42,7 +42,7 @@ type LiveResponse struct {
 }
 
 type VersionResponse struct {
-	Version string `json:"version" example:"1.3.0"`
+	Version string `json:"version" example:"1.3.1"`
 }
 
 // writeJSON 仅用于管理面及健康检查。未来 Gateway 不得复用此包装。

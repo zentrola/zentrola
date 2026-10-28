@@ -80,7 +80,7 @@ func endpointView(r dbgen.ProviderEndpoint) mgmt.ProviderEndpoint {
 
 func resourceView(r dbgen.ManageResourcesRow) mgmt.Resource {
 	resource := mgmt.Resource{
-		ID: r.ID, ProviderID: r.ProviderID, Name: r.ResourceName,
+		ID: r.ID, ProviderID: r.ProviderID, Name: r.ResourceName, IsEnabled: r.IsEnabled,
 		AuthType: r.AuthType, AuthAdapter: r.AuthAdapter, SubscriptionType: r.SubscriptionType,
 		PlanCode: r.PlanCode, ExternalAccountRef: r.ExternalAccountRef, Priority: r.Priority,
 		EffectiveAt: timePointer(r.EffectiveAt), ExpiresAt: timePointer(r.ExpiresAt),

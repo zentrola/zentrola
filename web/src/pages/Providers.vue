@@ -148,7 +148,8 @@ const guideTargets = computed(() => ({
   website: visible.value.find((provider) => provider.website)?.id ?? '',
   sync: visible.value.find((provider) => provider.modelSyncSupported)?.id ?? '',
   test:
-    visible.value.find((provider) => resourceFor(provider) && provider.modelCount > 0)?.id ?? '',
+    visible.value.find((provider) => resourcesFor(provider).length && provider.modelCount > 0)
+      ?.id ?? '',
 }))
 const providerGuideSteps = computed(() =>
   providerGuideAllSteps.filter((step) => {
@@ -162,7 +163,16 @@ const providerGuideSteps = computed(() =>
 )
 
 function hasCredential(provider: Provider) {
+  return resourcesFor(provider).length > 0
+}
+
+function hasEnabledCredential(provider: Provider) {
   return Boolean(resourceFor(provider))
+}
+
+function selectionResources(provider: Provider, mode: 'TEST' | 'ACTIVATE') {
+  const candidates = resourcesFor(provider)
+  return mode === 'ACTIVATE' ? candidates.filter((resource) => resource.isEnabled) : candidates
 }
 
 function syncRuntimeFilterQuery(value: RuntimeFilter) {
@@ -306,6 +316,15 @@ function deleteCredential() {
     delete credentialVerifiedAt[resourceID]
     credentialDeleteTarget.value = null
     await loadResources()
+  })
+}
+
+function changeCredentialStatus(resource: Resource) {
+  const isEnabled = !resource.isEnabled
+  void run(async () => {
+    await api(`/resources/${resource.id}/enabled`, 'PATCH', { isEnabled })
+    await loadResources()
+    showSuccessToast(t(isEnabled ? 'resources.enabled' : 'resources.disabled'))
   })
 }
 
@@ -456,6 +475,7 @@ onMounted(() => {
       :guide="guideTargets"
       :runtime-for="providerRuntime"
       :has-credential="hasCredential"
+      :has-enabled-credential="hasEnabledCredential"
       @test="prepareTestConnection($event)"
       @sync="syncModels"
       @change-status="changeStatus"
@@ -526,7 +546,7 @@ onMounted(() => {
     v-if="testSelectionTarget"
     :provider="testSelectionTarget.provider"
     :detail="testSelectionTarget.detail"
-    :resources="resourcesFor(testSelectionTarget.provider)"
+    :resources="selectionResources(testSelectionTarget.provider, testSelectionTarget.mode)"
     :preferred-resource-id="testSelectionTarget.resourceId"
     :mode="testSelectionTarget.mode"
     :busy="busy"
@@ -546,6 +566,7 @@ onMounted(() => {
     @test="testCredentialFromModal"
     @price="priceTarget = $event"
     @export="exportSubscription"
+    @status="changeCredentialStatus"
     @delete="credentialDeleteTarget = $event"
   />
 

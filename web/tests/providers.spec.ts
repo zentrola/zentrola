@@ -5,6 +5,80 @@ import { fixture } from './mock/fixture'
 import { signIn, modal, expectOnlyModalBodyScrolls } from './mock/helpers'
 
 test.describe('服务商', () => {
+  test('服务商名称和编码完整换行展示', async ({ page }) => {
+    const state = await fixture(page)
+    const name = 'DeepSeek 企业级研发订阅账号华东区域生产环境服务商'
+    const code = 'deepseek-enterprise-production-east-china-upstream-provider'
+    state.providers[0].name = name
+    state.providers[0].code = code
+    await signIn(page)
+    await page.getByRole('link', { name: '服务商', exact: true }).click()
+
+    for (const width of [1440, 1100]) {
+      await page.setViewportSize({ width, height: 900 })
+      const row = page.locator('.providers-table tbody tr').filter({ hasText: name })
+      const displayedName = row.locator('.provider-name-line strong')
+      const displayedCode = row.locator('.person .technical-value-text')
+      await expect(displayedName).toHaveText(name)
+      await expect(displayedCode).toHaveText(code)
+      await expect(displayedName).toHaveCSS('white-space', 'normal')
+      await expect(displayedCode).toHaveCSS('white-space', 'normal')
+      expect(
+        await displayedName.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+      ).toBe(true)
+      expect(
+        await displayedCode.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+      ).toBe(true)
+      await expect(row.locator('.provider-name-actions')).toBeVisible()
+    }
+  })
+
+  test('可逐条停用和启用上游凭据，并显示当前调用状态', async ({ page }) => {
+    const state = await fixture(page)
+    for (const [id, name] of [
+      ['88', 'DeepSeek 主 Key'],
+      ['89', 'DeepSeek 备用 Key'],
+    ])
+      state.resources.push({
+        id,
+        providerId: '81',
+        name,
+        authType: 'API_KEY',
+        authAdapter: 'API_KEY',
+        isEnabled: true,
+        runtimeStatus: 'HEALTHY',
+        priority: 100,
+        credentialConfigured: true,
+        createdAt: stamp,
+        updatedAt: stamp,
+      })
+    await signIn(page)
+    await page.getByRole('link', { name: '服务商', exact: true }).click()
+    const providerRow = page
+      .locator('.providers-table')
+      .getByRole('row')
+      .filter({ hasText: 'DeepSeek' })
+    await providerRow.getByRole('button', { name: '管理 DeepSeek 的认证凭据' }).click()
+    const dialog = modal(page)
+    const primary = dialog.getByRole('row').filter({ hasText: 'DeepSeek 主 Key' })
+    const backup = dialog.getByRole('row').filter({ hasText: 'DeepSeek 备用 Key' })
+    await primary.getByRole('button', { name: '停用凭据「DeepSeek 主 Key」' }).click()
+    await expect(primary.getByRole('cell').nth(2).getByText('停用', { exact: true })).toBeVisible()
+    expect(state.resources.find((resource) => resource.id === '88')?.isEnabled).toBe(false)
+    await expect(backup.getByRole('cell').nth(2).getByText('启用', { exact: true })).toBeVisible()
+    await expect(providerRow.getByText('正常', { exact: true })).toBeVisible()
+    await backup.getByRole('button', { name: '停用凭据「DeepSeek 备用 Key」' }).click()
+    await expect(providerRow.getByText('不可用', { exact: true })).toBeVisible()
+    await dialog.getByRole('button', { name: '关闭', exact: true }).click()
+    await providerRow.getByRole('button', { name: '测试 DeepSeek 的连接' }).click()
+    await expect(modal(page).getByText('DeepSeek 主 Key')).toBeVisible()
+    await expect(modal(page).getByText('DeepSeek 备用 Key')).toBeVisible()
+    await modal(page).getByRole('button', { name: '关闭', exact: true }).click()
+    await providerRow.getByRole('button', { name: '管理 DeepSeek 的认证凭据' }).click()
+    await primary.getByRole('button', { name: '启用凭据「DeepSeek 主 Key」' }).click()
+    await expect(providerRow.getByText('正常', { exact: true })).toBeVisible()
+  })
+
   test('凭据列表只接受最新请求结果，晚到的旧响应不会恢复已删除凭据', async ({ page }) => {
     const state = await fixture(page)
     for (const [id, name] of [
@@ -397,7 +471,7 @@ test.describe('服务商', () => {
     await expect(switchFor('仅配置凭据')).toBeDisabled()
     await expect(switchFor('仅配置凭据')).toHaveAttribute('title', '请先配置模型。')
     await expect(switchFor('仅配置模型')).toBeDisabled()
-    await expect(switchFor('仅配置模型')).toHaveAttribute('title', '请先配置凭证。')
+    await expect(switchFor('仅配置模型')).toHaveAttribute('title', '请先添加或启用凭证。')
     const configuredRow = page.getByRole('row').filter({ hasText: '配置齐全' })
     await expect(configuredRow.locator('.provider-runtime-state')).toHaveText('待启用')
     await expect(switchFor('配置齐全')).toBeEnabled()
@@ -1204,7 +1278,7 @@ test.describe('服务商', () => {
     const createdStatus = row.getByRole('switch', { name: '自定义百炼的启用状态' })
     await expect(createdStatus).toHaveText('')
     await expect(createdStatus).toBeDisabled()
-    await expect(createdStatus).toHaveAttribute('title', '请先配置凭证。')
+    await expect(createdStatus).toHaveAttribute('title', '请先添加或启用凭证。')
     const missingCredential = row.getByRole('button', {
       name: '管理 自定义百炼 的认证凭据',
       exact: true,
@@ -1381,10 +1455,11 @@ test.describe('服务商', () => {
     await expect(modal(page).getByRole('columnheader')).toHaveText([
       '认证凭据',
       '认证方式',
+      '调用状态',
       '运行状态',
       '操作',
     ])
-    const runtimeCell = credentialRow.getByRole('cell').nth(2)
+    const runtimeCell = credentialRow.getByRole('cell').nth(3)
     await expect(runtimeCell).toContainText('不可用')
     await expect(runtimeCell).toContainText('余额或计费异常 · HTTP 402')
     await expect(runtimeCell).toContainText('UPSTREAM_BILLING_BLOCKED')

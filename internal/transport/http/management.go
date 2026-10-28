@@ -1089,6 +1089,22 @@ func (s *SecurityHandlers) mountManagementCommandRoutes(r chi.Router) {
 	// @Failure 503 {object} response
 	// @Router /api/v1/resources/{id} [delete]
 	r.Delete("/resources/{id}", deleteEndpoint(m.DeleteResource))
+	// @Summary 启用或停用上游认证凭据
+	// @Tags 模型与资源
+	// @Description 控制单条订阅或 API Key 凭据是否参与后续请求选路；停用不影响订阅认证后台刷新，也不清除系统检测的故障状态。
+	// @Accept json
+	// @Produce json
+	// @Security AdminBearer
+	// @Param id path string true "业务 ID（正整数字符串）"
+	// @Param body body UpdateResourceEnabledRequest true "目标启用状态"
+	// @Success 200 {object} response{data=UpdatedResponse}
+	// @Failure 400 {object} response
+	// @Failure 401 {object} response
+	// @Failure 404 {object} response
+	// @Failure 409 {object} response
+	// @Failure 503 {object} response
+	// @Router /api/v1/resources/{id}/enabled [patch]
+	r.Patch("/resources/{id}/enabled", resourceEnabledEndpoint(m.SetResourceEnabled))
 	// @Summary 更新资源凭证
 	// @Tags 模型与资源
 	// @Produce json

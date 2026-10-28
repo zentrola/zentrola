@@ -12,7 +12,7 @@ Zentrola 是面向研发团队的企业 AI Coding 能力治理平台（AI Coding
 
 它位于 Codex、Claude Code 等 AI Coding Client 与企业模型订阅之间。研发人员继续使用熟悉的客户端，管理员则统一管理服务商、凭据、逻辑模型、访问权限、用户与应用密钥、Token 配额、用量成本和操作记录。
 
-> Zentrola 正在持续开发。`1.3.0` 新增按 Key 授权的额度查询、通过 MCP 管理普通成员和 Virtual Key 的能力，并在管理后台首页新增凭据健康度。内建的 Tool、Knowledge、Skill 治理、SSO 和完整高可用方案仍属于后续工作。
+> Zentrola 正在持续开发。`1.3.1` 支持管理员逐条启停服务商订阅凭据和 API Key，新请求会转向其他可用凭据。内建的 Tool、Knowledge、Skill 治理、SSO 和完整高可用方案仍属于后续工作。
 
 ![Zentrola 管理控制台](docs/assets/admin-console.png)
 

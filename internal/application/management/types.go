@@ -225,6 +225,7 @@ type Resource struct {
 	Version               int64                     `json:"version,string" example:"1"`
 	ProviderID            int64                     `json:"providerId,string"`
 	Name                  string                    `json:"name"`
+	IsEnabled             bool                      `json:"isEnabled"`
 	AuthType              string                    `json:"authType"`
 	AuthAdapter           string                    `json:"authAdapter"`
 	SubscriptionType      *string                   `json:"subscriptionType"`
@@ -472,6 +473,7 @@ type ProviderWriter interface {
 type ResourceWriter interface {
 	CreateResource(context.Context, ResourceRecord) error
 	UpdateResource(context.Context, ResourceRecord) error
+	SetResourceEnabled(context.Context, int64, int64, bool, time.Time) error
 	BlockResourceRuntime(context.Context, int64, int64, string, string, *int32, time.Time) error
 	RestoreResourceRuntime(context.Context, int64, int64, time.Time) error
 	DeleteResource(context.Context, int64, time.Time) (bool, error)

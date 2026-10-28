@@ -27,6 +27,7 @@ const emit = defineEmits<{
   test: [resource: Resource]
   price: [resource: Resource]
   export: [resource: Resource]
+  status: [resource: Resource]
   delete: [resource: Resource]
 }>()
 
@@ -78,6 +79,7 @@ const creating = ref(false)
         @test="emit('test', $event)"
         @price="emit('price', $event)"
         @export="emit('export', $event)"
+        @status="emit('status', $event)"
         @delete="emit('delete', $event)"
       />
       <div v-else class="credential-empty">

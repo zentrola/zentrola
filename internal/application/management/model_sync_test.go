@@ -259,7 +259,7 @@ func (s *syncState) Audit(_ context.Context, audit Audit, _ appsec.RequestMeta) 
 func TestSyncResourceModelsCreatesMissingEntriesAndKeepsExistingNames(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	state := &syncState{
-		resource: ResourceRecord{Resource: Resource{ID: 10, ProviderID: 20, Name: "Official key", AuthType: AuthTypeAPIKey, UpdatedAt: now}},
+		resource: ResourceRecord{Resource: Resource{ID: 10, ProviderID: 20, Name: "Official key", IsEnabled: true, AuthType: AuthTypeAPIKey, UpdatedAt: now}},
 		provider: Provider{ID: 20, Code: catalog.DeepSeekOfficialCode, Name: "Official", Endpoints: []ProviderEndpoint{{ProtocolType: "OPENAI", BaseURL: "https://api.example.com/v1"}}},
 		models: []Model{{
 			ID: 30, Code: "existing", Name: "管理员名称", Status: "ACTIVE",
@@ -335,12 +335,12 @@ func TestSyncProviderModelsRequiresCredential(t *testing.T) {
 }
 
 func TestSyncProviderModelsSelectsSupportedCredential(t *testing.T) {
-	claude := Resource{ID: 11, ProviderID: 20, AuthType: AuthTypeSubscription, AuthAdapter: AuthAdapterClaudeCode, Priority: 1}
-	codex := Resource{ID: 12, ProviderID: 20, AuthType: AuthTypeSubscription, AuthAdapter: AuthAdapterOpenAICodex, Priority: 0}
-	apiKey := Resource{ID: 13, ProviderID: 20, AuthType: AuthTypeAPIKey, AuthAdapter: "API_KEY", Priority: 100}
-	blockedKey := Resource{ID: 14, ProviderID: 20, AuthType: AuthTypeAPIKey, AuthAdapter: "API_KEY", Priority: 1, RuntimeStatus: "BLOCKED"}
+	claude := Resource{ID: 11, ProviderID: 20, IsEnabled: true, AuthType: AuthTypeSubscription, AuthAdapter: AuthAdapterClaudeCode, Priority: 1}
+	codex := Resource{ID: 12, ProviderID: 20, IsEnabled: true, AuthType: AuthTypeSubscription, AuthAdapter: AuthAdapterOpenAICodex, Priority: 0}
+	apiKey := Resource{ID: 13, ProviderID: 20, IsEnabled: true, AuthType: AuthTypeAPIKey, AuthAdapter: "API_KEY", Priority: 100}
+	blockedKey := Resource{ID: 14, ProviderID: 20, IsEnabled: true, AuthType: AuthTypeAPIKey, AuthAdapter: "API_KEY", Priority: 1, RuntimeStatus: "BLOCKED"}
 	blockedClaude := Resource{
-		ID: 15, ProviderID: 20, AuthType: AuthTypeSubscription, AuthAdapter: AuthAdapterClaudeCode, Priority: 1, RuntimeStatus: "BLOCKED",
+		ID: 15, ProviderID: 20, IsEnabled: true, AuthType: AuthTypeSubscription, AuthAdapter: AuthAdapterClaudeCode, Priority: 1, RuntimeStatus: "BLOCKED",
 	}
 	for _, tt := range []struct {
 		name      string

@@ -185,11 +185,11 @@ ORDER BY pm.provider_id;
 -- name: ManageProviderCredentialConfigured :one
 SELECT EXISTS(
     SELECT 1 FROM provider_credential
-    WHERE provider_id=$1 AND is_deleted=false
+    WHERE provider_id=$1 AND is_deleted=false AND is_enabled
 );
 -- name: ManageProviderActivationResourceIDs :many
 SELECT id FROM provider_credential
-WHERE provider_id=$1 AND is_deleted=false
+WHERE provider_id=$1 AND is_deleted=false AND is_enabled
   AND (effective_at IS NULL OR effective_at<=sqlc.arg(at)::timestamptz)
   AND (expires_at IS NULL OR expires_at>sqlc.arg(at)::timestamptz)
 ORDER BY id DESC;
@@ -240,7 +240,7 @@ SELECT pm.id,pm.provider_id,p.provider_name,p.status AS provider_status,
        pm.model_id,pm.upstream_model_code,pm.priority,pm.updated_at,
        EXISTS(SELECT 1 FROM provider_endpoint pe WHERE pe.provider_id=p.id AND pe.protocol_type IN ('OPENAI','ANTHROPIC')) AS endpoint_configured,
        EXISTS(SELECT 1 FROM provider_credential r WHERE r.provider_id=p.id AND NOT r.is_deleted
-           AND r.runtime_status='HEALTHY'
+           AND r.is_enabled AND r.runtime_status='HEALTHY'
            AND (r.effective_at IS NULL OR r.effective_at<=now())
            AND (r.expires_at IS NULL OR r.expires_at>now())
            AND (r.auth_type='API_KEY' OR r.quota_status IN ('AVAILABLE','NEAR_LIMIT')
@@ -269,7 +269,7 @@ SET is_deleted=true,updated_by=$3,updated_at=$4
 WHERE id=$1 AND provider_id=$2 AND is_deleted=false;
 
 -- name: ManageResources :many
-SELECT r.id,r.provider_id,r.resource_name,r.auth_type,r.auth_adapter,r.subscription_type,r.plan_code,
+SELECT r.id,r.provider_id,r.resource_name,r.is_enabled,r.auth_type,r.auth_adapter,r.subscription_type,r.plan_code,
        r.external_account_ref,r.priority,r.effective_at,r.expires_at,r.quota_status,r.quota_checked_at,
        r.quota_resets_at,r.credential_refreshed_at,r.credential_expires_at,
        r.runtime_status,r.blocked_reason,r.blocked_at,r.last_error_at,r.last_http_status,
@@ -315,6 +315,12 @@ WHERE id=$1 AND is_deleted=false AND version=$21;
 UPDATE provider_credential
 SET is_deleted=true,updated_by=$2,updated_at=$3
 WHERE id=$1 AND is_deleted=false;
+
+-- name: ManageSetResourceEnabled :execrows
+UPDATE provider_credential
+SET is_enabled=sqlc.arg(is_enabled),updated_by=sqlc.arg(updated_by),updated_at=sqlc.arg(updated_at),version=version+1
+WHERE id=sqlc.arg(id) AND is_deleted=false AND version=sqlc.arg(expected_version)
+  AND is_enabled<>sqlc.arg(is_enabled);
 
 -- name: ManageDeleteResourceQuotas :exec
 DELETE FROM provider_credential_quota WHERE provider_credential_id=$1;

@@ -61,7 +61,7 @@ func (s *ProviderService) SyncProviderModels(ctx context.Context, actor admin.Id
 				return err
 			}
 			for _, resource := range resources {
-				if resource.ProviderID != id ||
+				if resource.ProviderID != id || !resource.IsEnabled ||
 					!s.discoverer.SupportsCredential(provider.Code, resource.AuthType, resource.AuthAdapter) {
 					continue
 				}

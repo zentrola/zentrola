@@ -12,7 +12,7 @@ Zentrola is an enterprise AI coding control plane for governing and delivering m
 
 It sits between AI coding clients such as Codex and Claude Code and an organization's model subscriptions. Teams keep using their preferred clients, while administrators centrally manage providers, credentials, logical models, access policies, user and application keys, Token quotas, usage costs, and audit records.
 
-> Zentrola is under active development. Version `1.3.0` adds per-Key quota access, authorized MCP management of ordinary members and their Virtual Keys, and credential health on the Admin Web dashboard. Built-in tool, knowledge, and skill governance, SSO, and complete high-availability guidance remain future work.
+> Zentrola is under active development. Version `1.3.1` lets administrators enable or disable individual provider subscription credentials and API Keys, with new requests routed to other available credentials. Built-in tool, knowledge, and skill governance, SSO, and complete high-availability guidance remain future work.
 
 ![Zentrola Admin Console](docs/assets/admin-console.png)
 

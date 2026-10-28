@@ -374,9 +374,14 @@ ORDER BY c.relname,a.attnum`, schema)
 			present[column] = true
 		}
 		var wantPrefix []string
-		for _, column := range preferredRecordColumns {
-			if present[column] {
-				wantPrefix = append(wantPrefix, column)
+		if table == "provider_credential" {
+			// 凭据表已有多张历史与计费表引用；新增手动状态时保留既有列顺序，避免重建表及外键。
+			wantPrefix = []string{"id", "is_deleted", "provider_id"}
+		} else {
+			for _, column := range preferredRecordColumns {
+				if present[column] {
+					wantPrefix = append(wantPrefix, column)
+				}
 			}
 		}
 		if len(wantPrefix) == 0 {
