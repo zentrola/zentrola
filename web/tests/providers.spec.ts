@@ -127,8 +127,8 @@ test.describe('服务商', () => {
     await dialog.getByRole('switch', { name: '修改代理凭据', exact: true }).check()
     await proxyURL.fill('socks5://proxy-user:proxy-password@proxy.example.com:1080')
     await expect(
-      dialog.getByText('SOCKS5 使用地址中的用户名和密码认证，不支持自定义 HTTP Header。', {
-        exact: true,
+      dialog.getByRole('img', {
+        name: /SOCKS5 使用地址中的用户名和密码认证，不支持自定义 HTTP Header。/,
       }),
     ).toBeVisible()
     await expect(dialog.getByRole('button', { name: '添加 Header', exact: true })).toHaveCount(0)

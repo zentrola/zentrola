@@ -84,7 +84,13 @@ function removeHeader(index: number) {
     <div class="provider-field-row proxy-url-row">
       <div class="provider-field-label proxy-url-label">
         <label for="provider-proxy-url">{{ t('providers.proxyUrl') }}</label>
-        <FieldHelp :text="t('providers.proxyUrlCredentialHint')" />
+        <FieldHelp
+          :text="
+            isSocksProxyURL(draft.proxyUrl)
+              ? `${t('providers.proxyUrlCredentialHint')} · ${t('providers.socksProxyHint')}`
+              : t('providers.proxyUrlCredentialHint')
+          "
+        />
       </div>
       <div class="provider-field-control proxy-url-control">
         <select
@@ -128,10 +134,7 @@ function removeHeader(index: number) {
         />
       </div>
     </div>
-    <p v-if="isSocksProxyURL(draft.proxyUrl)" class="proxy-socks-hint">
-      {{ t('providers.socksProxyHint') }}
-    </p>
-    <template v-else>
+    <template v-if="!isSocksProxyURL(draft.proxyUrl)">
       <div class="proxy-headers-head">
         <div>
           <strong>{{ t('providers.proxyHeaders') }}</strong>
@@ -247,6 +250,10 @@ function removeHeader(index: number) {
   align-items: center;
   gap: 5px;
 }
+.proxy-url-label > label {
+  margin: 0;
+  font: inherit;
+}
 .proxy-url-control {
   display: grid;
   grid-template-columns: 124px minmax(0, 1fr);
@@ -258,13 +265,6 @@ function removeHeader(index: number) {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-}
-.proxy-socks-hint {
-  grid-column: 2;
-  margin: 0;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.5;
 }
 .proxy-headers-head > div {
   display: flex;
@@ -360,9 +360,6 @@ function removeHeader(index: number) {
     align-items: stretch;
     flex-direction: column;
     gap: 8px;
-  }
-  .proxy-socks-hint {
-    grid-column: 1;
   }
   .proxy-headers-head > div {
     flex-wrap: wrap;
