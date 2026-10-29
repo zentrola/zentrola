@@ -96,7 +96,7 @@ func subscriptionQuotas(ctx context.Context, db dbgen.DBTX, logger *slog.Logger,
 	rows, err := db.Query(ctx, `SELECT r.id,p.provider_name,r.resource_name,r.quota_checked_at
 		FROM provider_credential r
 		JOIN provider p ON p.id=r.provider_id
-		WHERE r.auth_type='SUBSCRIPTION' AND NOT r.is_deleted AND NOT p.is_deleted AND p.status='ACTIVE'
+		WHERE r.auth_type='SUBSCRIPTION' AND NOT r.is_deleted AND r.is_enabled AND NOT p.is_deleted AND p.status='ACTIVE'
 		  AND EXISTS (
 		    SELECT 1 FROM principal pr
 		    JOIN principal_group_membership pg ON pg.principal_id=pr.id AND NOT pg.is_deleted

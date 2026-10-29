@@ -24,6 +24,8 @@ INSERT INTO provider_credential (id,provider_id,resource_name,credential_ciphert
 VALUES (60,40,'Claude A',decode(repeat('00',32),'hex'),decode(repeat('00',12),'hex'),1,'SUBSCRIPTION','TEST','PERSONAL','2026-10-24T01:00:00Z','system','system',now(),now()),
        (62,41,'Codex A',decode(repeat('00',32),'hex'),decode(repeat('00',12),'hex'),1,'SUBSCRIPTION','TEST','PERSONAL',NULL,'system','system',now(),now()),
        (63,42,'Unauthorized',decode(repeat('00',32),'hex'),decode(repeat('00',12),'hex'),1,'SUBSCRIPTION','TEST','PERSONAL',NULL,'system','system',now(),now());
+INSERT INTO provider_credential (id,provider_id,resource_name,is_enabled,credential_ciphertext,credential_nonce,key_version,auth_type,auth_adapter,subscription_type,quota_checked_at,created_by,updated_by,created_at,updated_at)
+VALUES (64,40,'Claude Disabled',false,decode(repeat('00',32),'hex'),decode(repeat('00',12),'hex'),1,'SUBSCRIPTION','TEST','PERSONAL',NULL,'system','system',now(),now());
 INSERT INTO provider_credential (id,provider_id,resource_name,credential_ciphertext,credential_nonce,key_version,created_by,updated_by,created_at,updated_at)
 VALUES (61,40,'API Key',decode(repeat('00',32),'hex'),decode(repeat('00',12),'hex'),1,'system','system',now(),now());
 INSERT INTO provider_credential_quota (provider_credential_id,quota_code,quota_status,used_percent,window_duration_seconds,resets_at,observed_at,created_at,updated_at)
@@ -46,6 +48,11 @@ VALUES (60,'seven_day','AVAILABLE',1,604800,'2026-10-30T02:45:00Z','2026-10-24T0
 		}
 		if result[1].Status != "UNKNOWN" || result[1].CheckedAt != nil || result[1].Quotas == nil || len(result[1].Quotas) != 0 {
 			t.Fatalf("unchecked account must be unknown: %+v", result[1])
+		}
+
+		mustExec(t, ctx, tx, `UPDATE provider_credential SET is_enabled=false WHERE id=60`)
+		if result, err := subscriptionQuotas(ctx, tx, slog.Default(), 10); err != nil || len(result) != 1 || result[0].SubscriptionName != "Codex A" {
+			t.Fatalf("disabled credentials must be hidden: result=%+v err=%v", result, err)
 		}
 
 		mustExec(t, ctx, tx, `UPDATE principal_group_membership SET is_deleted=true WHERE id=80`)

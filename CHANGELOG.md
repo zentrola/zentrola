@@ -17,6 +17,8 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - 服务商全部凭据停用时，仍可对这些凭据手动执行连接测试。
 - Provider names and codes wrap in the Providers list instead of being truncated.
 - 服务商列表中的名称和编码改为完整换行展示，不再截断。
+- Subscription quota queries made with a member Key (`GET /api/v1/me/upstream-quota`) no longer list disabled credentials or refresh their quota from the upstream.
+- 成员 Key 查询订阅号额度（`GET /api/v1/me/upstream-quota`）时不再列出已停用凭据，也不再向上游刷新其额度。
 
 ### Migration / 迁移
 
