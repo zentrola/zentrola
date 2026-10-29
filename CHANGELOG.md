@@ -4,7 +4,7 @@ All notable changes to Zentrola are documented here. Dates use UTC. The project 
 
 Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循语义化版本。
 
-## [1.3.1] - 2026-10-28
+## [1.3.1] - 2026-10-29
 
 ### Added / 新增
 
