@@ -4,6 +4,13 @@ All notable changes to Zentrola are documented here. Dates use UTC. The project 
 
 Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循语义化版本。
 
+## [1.3.2] - 2026-10-29
+
+### Documentation / 文档
+
+- Reworked the project site to explain gateway requests, client-side management, and extending Zentrola through the Marketplace. Clarified Redis as a deployment requirement while retaining the documented fallback during temporary outages. Added a clearly labeled third-party referral link to the READMEs.
+- 重写项目网站，说明 Gateway 请求、客户端内管理及通过 Marketplace 扩展 Zentrola。明确 Redis 是部署要求，同时保留临时故障时的回退说明，并在 README 中明确标注第三方推荐链接。
+
 ## [1.3.1] - 2026-10-29
 
 ### Added / 新增
@@ -299,6 +306,7 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - 支持协议转换、流式响应、工具调用和服务商故障切换的 OpenAI/Anthropic 兼容网关。
 - 中英文管理界面、独立发布包和 Docker Compose 部署方式。
 
+[1.3.2]: https://github.com/zentrola/zentrola/releases/tag/v1.3.2
 [1.3.1]: https://github.com/zentrola/zentrola/releases/tag/v1.3.1
 [1.3.0]: https://github.com/zentrola/zentrola/releases/tag/v1.3.0
 [1.2.2]: https://github.com/zentrola/zentrola/releases/tag/1.2.2

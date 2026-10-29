@@ -3,16 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#102840" />
+    <meta name="theme-color" content="#f8fafc" />
     <meta
       name="description"
-      content="Zentrola is an open-source AI coding control plane for development teams. Govern model access, credentials, Token quotas, usage, and costs while developers keep using Codex, Claude Code, and their other clients."
+      content="Zentrola is an open-source AI coding gateway and plugin marketplace. Govern models, access, Token quotas, and costs, then extend team workflows in Codex and Claude Code."
     />
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="Zentrola | Govern AI coding access and see its cost" />
+    <meta property="og:title" content="Zentrola | AI coding gateway and plugin marketplace" />
     <meta
       property="og:description"
-      content="One control plane between the AI coding clients your team uses and the model providers it relies on."
+      content="Govern team model requests and extend client workflows with a Marketplace you can clone."
     />
     <meta
       property="og:image"
@@ -23,7 +23,7 @@
     <link rel="alternate" hreflang="zh-CN" href="https://zentrola.github.io/zentrola/" />
     <link rel="icon" type="image/svg+xml" href="../assets/favicon.svg" />
     <link rel="stylesheet" href="../assets/style.css" />
-    <title>Zentrola | AI coding control plane</title>
+    <title>Zentrola | AI coding gateway and plugin marketplace</title>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -34,206 +34,178 @@
           <span>Zentrola</span>
         </a>
         <nav class="header-nav" aria-label="Main navigation">
-          <a href="#how-it-works">How it works</a>
-          <a href="#capabilities">Capabilities</a>
-          <a href="https://github.com/zentrola/zentrola/blob/main/docs/getting-started.md">Docs</a>
-          <a class="language-link" href="../" lang="zh-CN" hreflang="zh-CN">简体中文</a>
+          <a href="#gateway">Gateway</a>
+          <a href="#client">Client</a>
+          <a href="#marketplace">Marketplace</a>
+          <a href="#deployment">Deploy</a>
+          <a href="https://github.com/zentrola/zentrola">GitHub</a>
+          <a href="../" lang="zh-CN" hreflang="zh-CN">中文</a>
         </nav>
       </div>
     </header>
 
     <main id="main">
-      <section class="hero">
-        <div class="shell hero-grid">
-          <div class="hero-copy">
-            <p class="hero-kicker">Open source · Built for development teams</p>
-            <h1>Govern AI coding access. See where usage goes.</h1>
-            <p class="hero-lead">
-              Zentrola sits between clients such as Codex and Claude Code and your model providers.
-              Developers keep their tools. Teams manage models, access, credentials, quotas, and
-              costs in one place.
-            </p>
-            <div class="hero-actions">
-              <a
-                class="button button-primary"
-                href="https://github.com/zentrola/zentrola/blob/main/docs/getting-started.md"
-                >Get started <span aria-hidden="true">↗</span></a
-              >
-              <a class="button button-quiet" href="https://github.com/zentrola/zentrola"
-                >View on GitHub <span aria-hidden="true">↗</span></a
-              >
-            </div>
+      <section class="hero shell" aria-labelledby="hero-heading">
+        <div class="hero-copy">
+          <p class="project-label">Open source <span>Apache-2.0</span></p>
+          <h1 id="hero-heading">One model gateway. Team operations in your client.</h1>
+          <p class="hero-lead">
+            Zentrola gives Codex, Claude Code, and applications a shared model endpoint.
+            The gateway governs credentials, access, quotas, and usage. The Marketplace brings
+            these operations into clients and gives teams a starting point for their own workflows.
+          </p>
+          <div class="hero-links">
+            <a class="primary-link" href="https://github.com/zentrola/zentrola">View source</a>
+            <a href="https://github.com/zentrola/zentrola/blob/main/docs/getting-started.md"
+              >Read deployment guide</a
+            >
           </div>
-          <div class="flow-panel" id="how-it-works" aria-label="How Zentrola works">
-            <div class="flow-source">
-              <span class="flow-caption">Tools your team already uses</span>
-              <strong>Codex <span>/</span> Claude Code <span>/</span> Apps</strong>
-              <small>Virtual Keys and App Keys</small>
-            </div>
-            <div class="flow-rail" aria-hidden="true"><span></span></div>
-            <div class="flow-center">
-              <div class="flow-center-title">
-                <span class="mini-mark">Z</span><strong>Zentrola</strong>
-              </div>
-              <div class="flow-stages">
-                <span>Identity & access</span><span>Token quotas</span><span>Logical models</span
-                ><span>Routing & records</span>
-              </div>
-            </div>
-            <div class="flow-rail" aria-hidden="true"><span></span></div>
-            <div class="flow-source flow-destination">
-              <span class="flow-caption">Your model resources</span>
-              <strong>OpenAI <span>/</span> Anthropic <span>/</span> Compatible providers</strong>
-              <small>Provider credentials stay server-side</small>
-            </div>
+        </div>
+        <div class="route-sheet" aria-label="Zentrola request path">
+          <div class="route-sheet-head">
+            <span>Request path</span>
+            <code>Gateway</code>
           </div>
+          <div class="route-step">
+            <span class="route-index">01</span>
+            <div><strong>Codex / Claude Code / apps</strong><small>Virtual Key or App Key</small></div>
+          </div>
+          <div class="route-step">
+            <span class="route-index">02</span>
+            <div><strong>Zentrola</strong><small>Identity → Group access → Token quota → logical model</small></div>
+          </div>
+          <div class="route-step">
+            <span class="route-index">03</span>
+            <div><strong>Model provider</strong><small>OpenAI / Anthropic / compatible providers</small></div>
+          </div>
+          <div class="route-sheet-foot">Upstream credentials stay server-side · usage follows identity</div>
         </div>
       </section>
 
-      <section class="section problem-section" aria-labelledby="problem-heading">
+      <section class="section ruled-section" id="gateway" aria-labelledby="gateway-heading">
         <div class="shell">
-          <div class="section-heading">
-            <h2 id="problem-heading">Connecting a model is easy. Governing its use takes more.</h2>
+          <div class="section-intro gateway-intro">
+            <p class="section-label">Gateway</p>
+            <h2 id="gateway-heading">Control requests with Keys, Groups, and logical models.</h2>
             <p>
-              Once people, apps, and providers share the same setup, access, credentials, and
-              spending need clear ownership.
+              Members receive individual Virtual Keys; applications use App Keys. Clients configure
+              a gateway endpoint and logical model code, while administrators maintain providers,
+              credentials, and model mappings in the Web console.
             </p>
           </div>
-          <div class="problem-grid">
-            <article class="problem-item">
-              <h3>Credentials spread everywhere</h3>
-              <p>
-                Real provider API keys get copied into laptops and app settings, making rotation and
-                revocation difficult.
-              </p>
-              <p class="solution">
-                Zentrola issues separate keys to users and apps while keeping upstream credentials
-                centrally.
-              </p>
-            </article>
-            <article class="problem-item">
-              <h3>Model access lacks boundaries</h3>
-              <p>
-                Teams need to know who can use each model and apply the same rules across different
-                clients.
-              </p>
-              <p class="solution">
-                Grant logical models through Groups; enforce permissions and quotas at the gateway.
-              </p>
-            </article>
-            <article class="problem-item">
-              <h3>Costs have no clear owner</h3>
-              <p>
-                A provider total alone does not show which people, apps, or models drove the usage.
-              </p>
-              <p class="solution">
-                Attribute usage to users, apps, models, and resources, with cost details and monthly
-                quotas.
-              </p>
-            </article>
-          </div>
-        </div>
-      </section>
-
-      <section
-        class="section capability-section"
-        id="capabilities"
-        aria-labelledby="capabilities-heading"
-      >
-        <div class="shell capability-layout">
-          <div class="section-heading capability-intro">
-            <h2 id="capabilities-heading">One control plane between existing tools and models.</h2>
-            <p>
-              Keep the AI coding clients your developers know. Zentrola brings the management and
-              model gateway together.
-            </p>
-          </div>
-          <div class="capability-list">
-            <div class="capability-row">
-              <strong>Connect</strong>
-              <p>
-                Serve common OpenAI and Anthropic APIs, with protocol conversion and provider
-                failover.
-              </p>
+          <div class="gateway-body">
+            <div class="detail-list">
+              <div class="detail-row">
+                <h3>Access and quotas</h3>
+                <p>Grant models to members, apps, and Groups. Enforce their separate monthly Token limits at the gateway.</p>
+              </div>
+              <div class="detail-row">
+                <h3>Model routing</h3>
+                <p>Map logical models to upstream providers and credentials. Serve OpenAI and Anthropic compatible APIs with protocol conversion and failover.</p>
+              </div>
+              <div class="detail-row">
+                <h3>Usage and costs</h3>
+                <p>Inspect usage and cost details by user, app, model, provider, or credential. Export CSV and review operation logs.</p>
+              </div>
             </div>
-            <div class="capability-row">
-              <strong>Govern</strong>
-              <p>
-                Manage providers, credentials, logical models, user and app access, and independent
-                monthly Token quotas.
-              </p>
-            </div>
-            <div class="capability-row">
-              <strong>Account</strong>
-              <p>
-                Inspect usage, operation records, and cost attribution. Filter billing details and
-                export CSV.
-              </p>
+            <div class="api-example">
+              <div class="api-example-head"><span>Try the gateway</span><code>GET /v1/models</code></div>
+              <p>After starting Zentrola locally, replace the example Key with a member Virtual Key:</p>
+              <pre><code>curl http://127.0.0.1:9527/v1/models \
+  -H "Authorization: Bearer YOUR_VIRTUAL_KEY"</code></pre>
+              <p>The endpoint returns only logical models available to that Key. Use a returned model code in client requests.</p>
             </div>
           </div>
         </div>
       </section>
 
-      <section class="section console-section" aria-labelledby="console-heading">
-        <div class="shell console-layout">
-          <div class="console-copy">
-            <h2 id="console-heading">Keep administration in one place.</h2>
+      <section class="section client-section" id="client" aria-labelledby="client-heading">
+        <div class="shell split-layout">
+          <div class="section-intro">
+            <p class="section-label">Client plugin</p>
+            <h2 id="client-heading">Use Zentrola from Codex and Claude Code.</h2>
             <p>
-              Administrators configure resources and access through a separate Web console.
-              Developers call authorized models from their own clients.
+              The plugin reuses the gateway endpoint and Access Key already configured in the
+              client. Members can check Token usage, monthly quotas, and the provider serving a
+              model. Individually authorized Keys can also inspect reachable subscription quotas.
             </p>
-            <a
-              class="text-link"
-              href="https://github.com/zentrola/zentrola/blob/main/docs/client-configuration.md"
-              >Read the client configuration guide <span aria-hidden="true">↗</span></a
-            >
+            <p>
+              With management permission, a Key can use MCP to list Groups, create regular members,
+              issue regular Keys, and enable or disable regular members. These tools cannot create
+              administrators or grant management access to newly issued Keys.
+            </p>
           </div>
-          <figure class="console-figure">
-            <img
-              src="../assets/admin-console.png"
-              alt="Sign-in screen for the Zentrola Admin Web console"
-              width="1600"
-              height="904"
-              loading="lazy"
-            />
-            <figcaption>Admin Web console</figcaption>
-          </figure>
+          <div class="command-sheet">
+            <div class="command-sheet-head">Plugin command examples</div>
+            <div class="command-line"><span>Codex</span><code>$zentrola:usage</code><small>Monthly usage</small></div>
+            <div class="command-line"><span>Codex</span><code>$zentrola:quota</code><small>Token quota</small></div>
+            <div class="command-line"><span>Claude Code</span><code>/usage</code><small>Monthly usage</small></div>
+            <div class="command-line">
+              <span>Claude Code</span><code>/member-management</code><small>Regular members</small>
+            </div>
+            <a href="https://github.com/zentrola/zentrola-marketplace">Plugin and installation guide</a>
+          </div>
         </div>
       </section>
 
-      <section class="closing-section" aria-labelledby="closing-heading">
-        <div class="shell closing-inner">
-          <div>
-            <h2 id="closing-heading">Start with one governed model route.</h2>
+      <section class="section ruled-section" id="marketplace" aria-labelledby="marketplace-heading">
+        <div class="shell">
+          <div class="section-intro marketplace-intro">
+            <p class="section-label">Zentrola Marketplace</p>
+            <h2 id="marketplace-heading">Clone the repository. Build your own client plugin.</h2>
             <p>
-              Install Zentrola, configure a provider and logical model, then issue a key to a user
-              or app.
+              The Marketplace repository includes working examples of plugin manifests, Skills,
+              Claude Code commands, and a shared MCP server. Teams can use it as a template to
+              connect internal tickets, project resources, or approvals, then distribute plugins
+              through their own Marketplace.
             </p>
           </div>
-          <div class="closing-actions">
-            <a
-              class="button button-light"
-              href="https://github.com/zentrola/zentrola/blob/main/docs/getting-started.md"
-              >Read the getting started guide <span aria-hidden="true">↗</span></a
-            >
-            <a class="button button-outline" href="https://github.com/zentrola/zentrola/releases"
-              >Download a release <span aria-hidden="true">↗</span></a
-            >
+          <ol class="build-list">
+            <li><span>01</span><div><strong>Clone the repository</strong><p>Start with the existing plugin structure and client manifests.</p></div></li>
+            <li><span>02</span><div><strong>Implement your tools</strong><p>Write Skills, commands, and MCP tools that connect your own systems.</p></div></li>
+            <li><span>03</span><div><strong>Register and distribute</strong><p>Add the plugin to a Marketplace for Codex or Claude Code users to install.</p></div></li>
+          </ol>
+          <a class="inline-link" href="https://github.com/zentrola/zentrola-marketplace"
+            >Open the Marketplace repository</a
+          >
+        </div>
+      </section>
+
+      <section class="section deployment-section" id="deployment" aria-labelledby="deployment-heading">
+        <div class="shell split-layout">
+          <div class="section-intro">
+            <p class="section-label">Deployment and status</p>
+            <h2 id="deployment-heading">Start with a release bundle or Compose.</h2>
+            <p>
+              The backend uses Go and the Admin Web uses Vue 3. Zentrola requires PostgreSQL 17
+              and Redis. Windows, macOS, and Linux bundles and a Docker Compose example
+              are available under the Apache License 2.0.
+            </p>
+            <div class="text-links">
+              <a href="https://github.com/zentrola/zentrola/releases">Download a release</a>
+              <a href="https://github.com/zentrola/zentrola/blob/main/docs/getting-started.md"
+                >Read getting started</a
+              >
+            </div>
           </div>
+          <aside class="scope-note" aria-label="Current scope">
+            <strong>Current scope</strong>
+            <p>
+              Cost data supports internal spending analysis. SSO, built-in Knowledge and Skill
+              governance, and a complete high-availability deployment remain future work.
+            </p>
+          </aside>
         </div>
       </section>
     </main>
 
     <footer class="site-footer">
       <div class="shell footer-inner">
+        <span>© 2026 Zentrola · Apache-2.0</span>
         <div>
-          <strong>Zentrola</strong>
-          <p>Open-source AI coding governance for development teams.</p>
-        </div>
-        <div class="footer-links">
-          <a href="https://github.com/zentrola/zentrola">GitHub</a>
+          <a href="https://github.com/zentrola/zentrola">Source</a>
+          <a href="https://github.com/zentrola/zentrola-marketplace">Marketplace</a>
           <a href="https://github.com/zentrola/zentrola/blob/main/docs/README.md">Docs</a>
-          <a href="https://github.com/zentrola/zentrola/blob/main/LICENSE">Apache-2.0</a>
         </div>
       </div>
     </footer>

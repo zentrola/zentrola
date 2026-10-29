@@ -12,7 +12,7 @@ Zentrola 是面向研发团队的企业 AI Coding 能力治理平台（AI Coding
 
 它位于 Codex、Claude Code 等 AI Coding Client 与企业模型订阅之间。研发人员继续使用熟悉的客户端，管理员则统一管理服务商、凭据、逻辑模型、访问权限、用户与应用密钥、Token 配额、用量成本和操作记录。
 
-> Zentrola 正在持续开发。`1.3.1` 支持管理员逐条启停服务商订阅凭据和 API Key，新请求会转向其他可用凭据。内建的 Tool、Knowledge、Skill 治理、SSO 和完整高可用方案仍属于后续工作。
+> Zentrola 正在持续开发。`1.3.2` 支持管理员逐条启停服务商订阅凭据和 API Key，新请求会转向其他可用凭据。内建的 Tool、Knowledge、Skill 治理、SSO 和完整高可用方案仍属于后续工作。
 
 ![Zentrola 管理控制台](docs/assets/admin-console.png)
 
@@ -79,7 +79,7 @@ Codex / Claude Code / OpenAI 兼容客户端 / 应用
 
 - Windows、macOS 或 Linux 主机
 - PostgreSQL 17
-- 推荐使用 Redis 保存 Gateway 缓存和路由冷却状态；Redis 暂时不可用时，Gateway 会回退到 PostgreSQL
+- Redis，用于保存 Gateway 缓存和路由冷却状态；Redis 暂时不可用时，Gateway 会回退到 PostgreSQL
 
 如果 [GitHub Releases](https://github.com/zentrola/zentrola/releases) 已提供目标操作系统和 CPU 架构的发布包，请优先使用。发布包包含 Backend、Admin Web、静态资源、`.env.example`、项目许可证和第三方许可证声明。
 
@@ -219,6 +219,10 @@ Anthropic 兼容客户端使用 `http://127.0.0.1:9527/anthropic` 作为 Base UR
 - 完整的高可用部署方案
 
 在用于正式生产环境前，请先确认当前能力和限制符合组织要求。
+
+## 第三方推荐（含邀请码）
+
+[MiyaIP](https://miyaip.com/?invitecode=7348647) 提供国内直连的纯净住宅IP服务。此链接包含邀请码，项目维护者可能获得邀请奖励。MiyaIP 是独立的第三方服务，不属于 Zentrola，也不是运行 Zentrola 的必要条件。
 
 ## 参与贡献
 

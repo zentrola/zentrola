@@ -6,7 +6,7 @@
 
 ## 1. 准备依赖
 
-Zentrola 必须使用 PostgreSQL 17。推荐使用 Redis 保存认证与路由缓存，以及服务商短期冷却状态。Redis 暂时不可用不会导致 readiness 失败，Gateway 会回退到 PostgreSQL，但生产环境仍应部署 Redis。
+Zentrola 部署时必须提供 PostgreSQL 17 和 Redis。Redis 保存认证与路由缓存，以及服务商短期冷却状态。Redis 暂时不可用不会导致 readiness 失败，Gateway 会回退到 PostgreSQL。
 
 仓库中的 Compose 文件可以启动隔离的 PostgreSQL 和 Redis 依赖。使用 Docker Compose 2.23.1 或更高版本，并直接修改 `compose.yaml` 顶部 `x-required-settings` 中的 PostgreSQL 和 Redis 密码：
 

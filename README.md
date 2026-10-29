@@ -12,7 +12,7 @@ Zentrola is an enterprise AI coding control plane for governing and delivering m
 
 It sits between AI coding clients such as Codex and Claude Code and an organization's model subscriptions. Teams keep using their preferred clients, while administrators centrally manage providers, credentials, logical models, access policies, user and application keys, Token quotas, usage costs, and audit records.
 
-> Zentrola is under active development. Version `1.3.1` lets administrators enable or disable individual provider subscription credentials and API Keys, with new requests routed to other available credentials. Built-in tool, knowledge, and skill governance, SSO, and complete high-availability guidance remain future work.
+> Zentrola is under active development. Version `1.3.2` lets administrators enable or disable individual provider subscription credentials and API Keys, with new requests routed to other available credentials. Built-in tool, knowledge, and skill governance, SSO, and complete high-availability guidance remain future work.
 
 ![Zentrola Admin Console](docs/assets/admin-console.png)
 
@@ -79,7 +79,7 @@ Model-catalog synchronization currently has dedicated adapters for Anthropic, Op
 
 - A supported Windows, macOS, or Linux host
 - PostgreSQL 17
-- Redis is recommended for gateway caches and route cooldown state; gateway routing falls back to PostgreSQL when Redis is temporarily unavailable
+- Redis for gateway caches and route cooldown state; gateway routing falls back to PostgreSQL when Redis is temporarily unavailable
 
 Use a published bundle for your operating system and architecture from [GitHub Releases](https://github.com/zentrola/zentrola/releases) when one is available. A bundle contains the Backend, Admin Web, static assets, `.env.example`, project license files, and third-party license notices.
 
@@ -221,6 +221,10 @@ The current release supports user-, application-, and Group-based model governan
 - High-availability deployment guidance
 
 Please review the current capabilities and limitations before production adoption.
+
+## Third-party recommendation (referral link)
+
+[MiyaIP](https://miyaip.com/?invitecode=7348647) offers residential IP services. This link includes an invitation code, and the project maintainer may receive a referral reward. MiyaIP is an independent third-party service; it is not part of Zentrola or required to run it.
 
 ## Contributing
 

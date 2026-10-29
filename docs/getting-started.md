@@ -6,7 +6,7 @@ This guide installs a Zentrola release bundle and completes the first administra
 
 ## 1. Prepare dependencies
 
-Zentrola requires PostgreSQL 17. Redis is recommended for authentication and route caches and for temporary provider cooldown state. A temporary Redis outage does not prevent readiness and gateway routing falls back to PostgreSQL, but production installations should still provide Redis.
+Zentrola deployments require PostgreSQL 17 and Redis. Redis stores authentication and route caches and temporary provider cooldown state. A temporary Redis outage does not prevent readiness, and gateway routing falls back to PostgreSQL.
 
 The repository's Compose file can start isolated PostgreSQL and Redis dependencies. With Docker Compose 2.23.1 or later, edit the PostgreSQL and Redis passwords under `x-required-settings` at the top of `compose.yaml`:
 
