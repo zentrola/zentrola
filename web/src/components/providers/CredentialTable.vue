@@ -7,6 +7,7 @@ import { blockedResourceReason } from '../../providerRuntime'
 import type { Provider, Resource } from '../../types'
 import Icon from '../Icon.vue'
 import Status from '../Status.vue'
+import StatusSwitch from '../StatusSwitch.vue'
 import CredentialAuthDetails from './CredentialAuthDetails.vue'
 
 const props = defineProps<{
@@ -71,22 +72,13 @@ function verificationLabel(resource: Resource) {
             <CredentialAuthDetails :resource="resource" :busy="busy" :quotas="quotas" />
           </td>
           <td :data-label="t('resources.routingStatus')">
-            <div class="credential-status-content">
-              <Status :value="resource.isEnabled ? 'ACTIVE' : 'DISABLED'" />
-              <button
-                type="button"
-                class="text-button"
-                :disabled="busy"
-                :aria-label="
-                  t(resource.isEnabled ? 'resources.disableFor' : 'resources.enableFor', {
-                    name: resource.name,
-                  })
-                "
-                @click="emit('status', resource)"
-              >
-                {{ t(resource.isEnabled ? 'resources.disable' : 'resources.enable') }}
-              </button>
-            </div>
+            <StatusSwitch
+              :value="resource.isEnabled ? 'ACTIVE' : 'DISABLED'"
+              :name="resource.name"
+              :aria-label="t('resources.routingStatusFor', { name: resource.name })"
+              :disabled="busy"
+              @change="emit('status', resource)"
+            />
           </td>
           <td class="credential-runtime" :data-label="t('resources.runtimeStatus')">
             <div class="credential-runtime-content">
@@ -174,12 +166,6 @@ function verificationLabel(resource: Resource) {
 }
 .credential-status-column {
   width: 84px;
-}
-.credential-status-content {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
 }
 .credential-runtime-column {
   width: auto;
