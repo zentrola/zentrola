@@ -8,15 +8,15 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 
 ### Added / 新增
 
-- Administrators can enable or disable individual provider subscription credentials and API Keys. Disabled credentials are excluded from new gateway requests, model availability and provider activation; eligible credentials take over automatically. Manual enablement is separate from runtime health, and subscription authentication refresh continues while a credential is disabled.
-- 管理员可逐条启停服务商订阅凭据和 API Key。停用凭据不参与新网关请求、模型可用性判断和服务商启用验证，其他可用凭据自动接替。人工开关与运行故障状态独立，停用期间仍会刷新订阅认证材料。
+- Administrators can enable or disable individual provider subscription credentials and API Keys with a routing status switch in the credential list. Disabled credentials are excluded from new gateway requests, model availability and provider activation; eligible credentials take over automatically. Manual enablement is separate from runtime health, and subscription authentication refresh continues while a credential is disabled.
+- 管理员可在凭据列表中通过“调用状态”开关逐条启停服务商订阅凭据和 API Key。停用凭据不参与新网关请求、模型可用性判断和服务商启用验证，其他可用凭据自动接替。人工开关与运行故障状态独立，停用期间仍会刷新订阅认证材料。
 
 ### Fixed / 修复
 
 - A provider whose credentials are all disabled still offers manual connection tests for those credentials.
 - 服务商全部凭据停用时，仍可对这些凭据手动执行连接测试。
-- Provider names and codes wrap in the Providers list instead of being truncated.
-- 服务商列表中的名称和编码改为完整换行展示，不再截断。
+- Provider names and codes wrap in the Providers list instead of being truncated; the quick actions stay to the right of the name.
+- 服务商列表中的名称和编码改为完整换行展示，不再截断，快捷操作图标仍位于名称右侧。
 - Subscription quota queries made with a member Key (`GET /api/v1/me/upstream-quota`) no longer list disabled credentials or refresh their quota from the upstream.
 - 成员 Key 查询订阅号额度（`GET /api/v1/me/upstream-quota`）时不再列出已停用凭据，也不再向上游刷新其额度。
 
