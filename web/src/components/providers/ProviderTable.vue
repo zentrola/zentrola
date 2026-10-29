@@ -348,8 +348,8 @@ function openRuntime(provider: Provider) {
 }
 .person {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr);
-  align-items: start;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  align-items: center;
 }
 .person > div {
   min-width: 0;
@@ -365,11 +365,9 @@ function openRuntime(provider: Provider) {
 }
 .provider-name-actions {
   display: inline-flex;
-  grid-column: 2;
   flex: none;
   align-items: center;
   gap: 2px;
-  margin-top: 4px;
 }
 .provider-quick-action {
   display: inline-grid;
