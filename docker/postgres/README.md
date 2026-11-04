@@ -34,6 +34,10 @@ docker buildx build `
 docker build -f docker/postgres/Dockerfile -t zentrola-postgres:local .
 ```
 
+## 发布要求
+
+`compose.yaml` 直接引用 `longjianghu/zentrola-postgres:17.11`，发布引用该镜像的 Zentrola 版本前，必须先推送多平台镜像，并在发布说明中记录镜像 digest。CI 集成测试不依赖镜像仓库，而是在任务中用本目录的 Dockerfile 现场构建。
+
 ## 升级扩展版本
 
 修改 Dockerfile 中的 `PGVECTOR_VERSION`/`PG_BIGM_VERSION`，并同步更新对应的 `*_SHA256`（GitHub tag 源码包的 SHA-256）。升级 PostgreSQL 小版本时修改 `POSTGRES_VERSION`，主版本升级需按 PostgreSQL 官方流程迁移数据。

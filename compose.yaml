@@ -17,7 +17,9 @@ x-logging: &default-logging
 
 services:
   postgres:
-    image: postgres:17.11-alpine
+    # 基于 postgres:17.11-alpine，额外提供 pgvector 与 pg_bigm（见 docker/postgres）；
+    # 与官方 Alpine 镜像数据卷兼容，从 postgres:17.11-alpine 升级可直接沿用 postgres_data。
+    image: longjianghu/zentrola-postgres:17.11
     ports:
       - "127.0.0.1:15432:5432"
     environment:

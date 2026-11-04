@@ -14,7 +14,7 @@ The repository's Compose file can start isolated PostgreSQL and Redis dependenci
 docker compose up -d postgres redis
 ```
 
-The example publishes PostgreSQL on `127.0.0.1:15432` and stores PostgreSQL and Redis data in named volumes. It does not start the Backend or Admin Web. To run the complete containerized stack, also set independent `ADMIN_JWT_SECRET` and `MASTER_KEY` values, then run `docker compose up -d`. Compose mounts the master key into the Backend as an inline `/app/.env` config, so no host `.env` file is required.
+The example publishes PostgreSQL on `127.0.0.1:15432` and stores PostgreSQL and Redis data in named volumes. It does not start the Backend or Admin Web. The Compose PostgreSQL service uses `longjianghu/zentrola-postgres:17.11`, which is the official `postgres:17.11-alpine` image plus pgvector and pg_bigm (see `docker/postgres/README.md`); deployments that used `postgres:17.11-alpine` can keep their existing data volume. To run the complete containerized stack, also set independent `ADMIN_JWT_SECRET` and `MASTER_KEY` values, then run `docker compose up -d`. Compose mounts the master key into the Backend as an inline `/app/.env` config, so no host `.env` file is required.
 
 ## 2. Prepare the release directory
 

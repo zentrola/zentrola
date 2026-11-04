@@ -14,7 +14,7 @@ Zentrola 部署时必须提供 PostgreSQL 17 和 Redis。Redis 保存认证与�
 docker compose up -d postgres redis
 ```
 
-该示例将 PostgreSQL 发布到 `127.0.0.1:15432`，并使用命名卷保存 PostgreSQL 和 Redis 数据；它不会启动 Backend 或 Admin Web。要运行完整容器化服务栈，请同时填写独立的 `ADMIN_JWT_SECRET` 和 `MASTER_KEY`，然后运行 `docker compose up -d`。Compose 会将 Master Key 以内联配置挂载到 Backend 的 `/app/.env`，无需在宿主机创建 `.env`。
+该示例将 PostgreSQL 发布到 `127.0.0.1:15432`，并使用命名卷保存 PostgreSQL 和 Redis 数据；它不会启动 Backend 或 Admin Web。Compose 中的 PostgreSQL 使用 `longjianghu/zentrola-postgres:17.11`，它基于官方 `postgres:17.11-alpine`，额外提供 pgvector 与 pg_bigm（见 `docker/postgres/README.md`）；原先使用 `postgres:17.11-alpine` 的部署可直接沿用原数据卷。要运行完整容器化服务栈，请同时填写独立的 `ADMIN_JWT_SECRET` 和 `MASTER_KEY`，然后运行 `docker compose up -d`。Compose 会将 Master Key 以内联配置挂载到 Backend 的 `/app/.env`，无需在宿主机创建 `.env`。
 
 ## 2. 准备发布目录
 

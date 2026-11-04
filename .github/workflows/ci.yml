@@ -62,21 +62,6 @@ jobs:
   backend-integration:
     runs-on: ubuntu-latest
     services:
-      postgres:
-        image: postgres:17.11-alpine
-        env:
-          POSTGRES_DB: zentrola
-          POSTGRES_USER: zentrola
-          POSTGRES_PASSWORD: integration-only
-          TZ: UTC
-          PGTZ: UTC
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U zentrola -d zentrola"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
       redis:
         image: redis:7.4.11-alpine
         ports:
@@ -105,6 +90,21 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      # 从仓库内 Dockerfile 构建数据库镜像，集成测试与 compose 使用相同的扩展，且不依赖镜像仓库。
+      - name: Start PostgreSQL with Zentrola extensions
+        run: |
+          docker build -f docker/postgres/Dockerfile -t zentrola-postgres:ci .
+          docker run -d --name postgres -p 5432:5432 \
+            -e POSTGRES_DB=zentrola -e POSTGRES_USER=zentrola -e POSTGRES_PASSWORD=integration-only \
+            -e TZ=UTC -e PGTZ=UTC \
+            zentrola-postgres:ci
+          for attempt in $(seq 1 30); do
+            # 通过 TCP 探测，避免把初始化阶段只监听 Unix socket 的临时实例误判为就绪。
+            docker exec postgres pg_isready -h 127.0.0.1 -U zentrola -d zentrola && exit 0
+            sleep 2
+          done
+          docker logs postgres
+          exit 1
       - name: Run PostgreSQL and Redis integration tests
         run: >-
           go test -count=1
