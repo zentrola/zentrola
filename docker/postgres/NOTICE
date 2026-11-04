@@ -1,0 +1,10 @@
+This image is based on the official PostgreSQL Docker image and redistributes
+the following PostgreSQL extensions:
+
+pgvector
+Source: https://github.com/pgvector/pgvector
+License: PostgreSQL License
+
+pg_bigm
+Source: https://github.com/pgbigm/pg_bigm
+License: PostgreSQL License
