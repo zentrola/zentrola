@@ -1,13 +1,14 @@
 # syntax=docker/dockerfile:1
 
 ARG POSTGRES_VERSION=17.11
+ARG ALPINE_VERSION=3.24
 ARG PGVECTOR_VERSION=0.8.7
 ARG PGVECTOR_SHA256=cac0b10c360f05b2d521200105ba3697e773d4cd3731f5a915a7e37ebe0bea85
 ARG PG_BIGM_VERSION=1.2-20250903
 ARG PG_BIGM_SHA256=4d4fb48161e3f9e99207851299379c83b3e5d1d3c1a07c35f6a3153d577b3142
 
 # 与运行镜像使用同一官方镜像编译，保证 PostgreSQL 主版本、头文件与 musl 一致。
-FROM postgres:${POSTGRES_VERSION}-alpine AS extension-builder
+FROM postgres:${POSTGRES_VERSION}-alpine${ALPINE_VERSION} AS extension-builder
 
 ARG PGVECTOR_VERSION
 ARG PGVECTOR_SHA256
@@ -37,17 +38,18 @@ RUN set -eux; \
     cp pgvector/LICENSE /out/usr/share/licenses/pgvector/LICENSE; \
     cp pg_bigm/LICENSE /out/usr/share/licenses/pg_bigm/LICENSE
 
-FROM postgres:${POSTGRES_VERSION}-alpine
+FROM postgres:${POSTGRES_VERSION}-alpine${ALPINE_VERSION}
 
 ARG POSTGRES_VERSION
+ARG ALPINE_VERSION
 ARG PGVECTOR_VERSION
 ARG PG_BIGM_VERSION
 ARG VCS_REF=unknown
 ARG BUILD_DATE
 
-LABEL org.opencontainers.image.title="zentrola-postgres" \
-      org.opencontainers.image.description="PostgreSQL ${POSTGRES_VERSION} (Alpine) with pgvector and pg_bigm for Zentrola" \
-      org.opencontainers.image.version="${POSTGRES_VERSION}" \
+LABEL org.opencontainers.image.title="postgres" \
+      org.opencontainers.image.description="PostgreSQL ${POSTGRES_VERSION} (Alpine ${ALPINE_VERSION}) with pgvector and pg_bigm" \
+      org.opencontainers.image.version="${POSTGRES_VERSION}-alpine${ALPINE_VERSION}" \
       org.opencontainers.image.revision="${VCS_REF}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.source="https://github.com/zentrola/zentrola" \
@@ -59,4 +61,4 @@ LABEL org.opencontainers.image.title="zentrola-postgres" \
       pg_bigm.version="${PG_BIGM_VERSION}"
 
 COPY --from=extension-builder /out/ /
-COPY docker/postgres/NOTICE /usr/share/licenses/zentrola-postgres/NOTICE
+COPY docker/postgres/NOTICE /usr/share/licenses/postgres-extensions/NOTICE
