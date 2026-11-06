@@ -79,7 +79,7 @@ jobs:
           else
             tar -C "$source" -czf "$base.tar.gz" .
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: bundle-${{ matrix.target_os }}-${{ matrix.architecture }}
           path: zentrola-${{ needs.version.outputs.value }}-${{ matrix.target_os }}-${{ matrix.architecture }}.*
