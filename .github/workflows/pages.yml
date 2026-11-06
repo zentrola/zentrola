@@ -37,7 +37,7 @@ jobs:
           test -f _site/index.html
           test -f _site/en/index.html
           test -f _site/assets/style.css
-      - uses: actions/upload-pages-artifact@v4
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: _site
       - id: deployment
