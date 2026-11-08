@@ -750,4 +750,89 @@ test.describe('个人订阅', () => {
       '额度刷新失败 · 上游响应未包含额度信息，请稍后重试。',
     )
   })
+
+  test('凭据运行状态与服务健康度一致展示额度耗尽，过了重置时间后恢复正常', async ({ page }) => {
+    const state = await fixture(page)
+    state.providers.push({
+      id: '82',
+      name: 'OpenAI',
+      code: 'openai-official',
+      type: 'OFFICIAL',
+      status: 'ACTIVE',
+      website: 'https://openai.com',
+      endpoints: [{ protocolType: 'OPENAI', baseUrl: 'https://api.openai.com/v1' }],
+      proxyEnabled: false,
+      proxyUrl: null,
+      proxyHeaders: [],
+      modelSyncSupported: false,
+      authAdapters: ['API_KEY', 'OPENAI_CODEX'],
+      createdAt: stamp,
+      updatedAt: stamp,
+    })
+    const future = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+    for (const [id, name, resetsAt] of [
+      ['89', '订阅号耗尽中', future],
+      ['90', '订阅号已重置', stamp],
+    ])
+      state.resources.push({
+        id,
+        providerId: '82',
+        name,
+        authType: 'SUBSCRIPTION',
+        authAdapter: 'OPENAI_CODEX',
+        subscriptionType: 'PERSONAL',
+        planCode: 'plus',
+        externalAccountRef: `account-${id}`,
+        priority: 100,
+        effectiveAt: null,
+        expiresAt: null,
+        quotaStatus: 'EXHAUSTED',
+        quotaCheckedAt: stamp,
+        quotaResetsAt: resetsAt,
+        runtimeStatus: 'HEALTHY',
+        blockedReason: null,
+        blockedAt: null,
+        lastErrorAt: null,
+        lastHttpStatus: null,
+        lastErrorCode: null,
+        credentialConfigured: true,
+        subscriptionPrice: null,
+        createdAt: stamp,
+        updatedAt: stamp,
+      })
+    // 自动额度刷新返回失败，保持凭据原有的额度状态。
+    await page.route('**/api/v1/resources/*/test-connection', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          code: 'OK',
+          data: { ok: false, code: 'UPSTREAM_UNAVAILABLE', httpStatus: 503, latencyMs: 1 },
+          requestId: 'req_exhausted_quota',
+        }),
+      }),
+    )
+    await signIn(page, 'home')
+
+    const health = page.getByRole('region', { name: '服务健康度' })
+    await expect(
+      health
+        .locator('.credential-health-item')
+        .filter({ hasText: '订阅号耗尽中' })
+        .locator('.credential-health-dot-button'),
+    ).toHaveClass(/is-unavailable/)
+    await expect(
+      health
+        .locator('.credential-health-item')
+        .filter({ hasText: '订阅号已重置' })
+        .locator('.credential-health-dot-button'),
+    ).not.toHaveClass(/is-unavailable/)
+
+    await page.getByRole('link', { name: '服务商', exact: true }).click()
+    await page.getByRole('button', { name: '管理 OpenAI 的认证凭据' }).click()
+    const runtime = (name: string) =>
+      modal(page).getByRole('row').filter({ hasText: name }).locator('.credential-runtime .status')
+    await expect(runtime('订阅号耗尽中')).toHaveText('额度耗尽')
+    await expect(runtime('订阅号已重置')).toHaveText('正常')
+  })
 })

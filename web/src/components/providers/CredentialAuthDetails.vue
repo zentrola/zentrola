@@ -171,6 +171,7 @@ defineProps<{ resource: Resource; busy: boolean; quotas: CredentialQuotas }>()
 .credential-reset-credits,
 .credential-quota-refresh {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -181,6 +182,10 @@ defineProps<{ resource: Resource; busy: boolean; quotas: CredentialQuotas }>()
 .credential-reset-credits .credential-detail,
 .credential-quota-refresh .credential-detail {
   margin-top: 0;
+}
+/* 列宽不足时按钮换到下一行，检查时间自身也可换行，不再截断。 */
+.credential-quota-refresh .credential-detail {
+  white-space: normal;
 }
 .credential-reset-credits .text-button,
 .credential-quota-refresh .text-button {

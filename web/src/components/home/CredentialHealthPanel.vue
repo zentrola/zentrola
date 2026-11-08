@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { date } from '../../composables'
 import { t } from '../../i18n'
-import { blockedResourceReason } from '../../providerRuntime'
+import { blockedResourceReason, resourceQuotaExhausted } from '../../providerRuntime'
 import { connectionResultMessage } from '../../providerQuotas'
 import type { ConnectionResult, Provider, Resource } from '../../types'
 
@@ -55,7 +55,7 @@ function health(resource: Resource): {
       reason: blockedResourceReason(resource),
       checkedAt: resource.lastErrorAt,
     }
-  if (resource.quotaStatus === 'EXHAUSTED')
+  if (resourceQuotaExhausted(resource))
     return {
       state: 'unavailable',
       reason: t('home.credentialQuotaExhausted'),

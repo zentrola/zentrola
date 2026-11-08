@@ -3,7 +3,7 @@ import { date } from '../../composables'
 import { t } from '../../i18n'
 import { exportableSubscription } from '../../providerCredentials'
 import type { CredentialQuotas } from '../../providerQuotas'
-import { blockedResourceReason } from '../../providerRuntime'
+import { blockedResourceReason, resourceRuntimeStatus } from '../../providerRuntime'
 import type { Provider, Resource } from '../../types'
 import Icon from '../Icon.vue'
 import Status from '../Status.vue'
@@ -83,7 +83,7 @@ function verificationLabel(resource: Resource) {
           <td class="credential-runtime" :data-label="t('resources.runtimeStatus')">
             <div class="credential-runtime-content">
               <div class="credential-runtime-line">
-                <Status :value="resource.runtimeStatus || 'HEALTHY'" />
+                <Status :value="resourceRuntimeStatus(resource)" />
                 <button
                   v-if="resource.authType === 'SUBSCRIPTION' || provider.modelCount > 0"
                   type="button"

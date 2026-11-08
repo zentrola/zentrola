@@ -951,7 +951,8 @@ tbody tr:hover {
   color: #836aa3;
   background: #f5f1f9;
 }
-.status.unavailable {
+.status.unavailable,
+.status.exhausted {
   color: #b91c1c;
   background: #fef2f2;
 }

@@ -62,6 +62,18 @@ export function preferredResource(candidates: Resource[]) {
   return selected
 }
 
+// 与网关路由条件一致：额度耗尽且尚未到重置时间的凭据不会被调度。
+export function resourceQuotaExhausted(resource: Resource, now = Date.now()) {
+  if (resource.quotaStatus !== 'EXHAUSTED') return false
+  return !resource.quotaResetsAt || Date.parse(resource.quotaResetsAt) > now
+}
+
+// 凭据行展示的运行状态：熔断优先，其次额度耗尽。
+export function resourceRuntimeStatus(resource: Resource) {
+  if (resource.runtimeStatus === 'BLOCKED') return 'BLOCKED'
+  return resourceQuotaExhausted(resource) ? 'EXHAUSTED' : 'HEALTHY'
+}
+
 export function blockedResourceReason(resource: Resource) {
   const reason = codeText(
     'resources.blockReasons',
