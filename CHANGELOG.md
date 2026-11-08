@@ -4,6 +4,20 @@ All notable changes to Zentrola are documented here. Dates use UTC. The project 
 
 Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循语义化版本。
 
+## [1.3.3] - 2026-11-08
+
+### Changed / 变更
+
+- The PostgreSQL service in `compose.yaml` now uses `longjianghu/postgres:17.11-alpine3.24`, which is built on the official `postgres:17.11-alpine3.24` and adds the pgvector and pg_bigm extensions (see `docker/postgres/README.md`). The image only ships the extension files and does not create the extensions. Data volumes created with `postgres:17.11-alpine` can be reused directly; back up with `pg_dump` before upgrading.
+- `compose.yaml` 中的 PostgreSQL 改用 `longjianghu/postgres:17.11-alpine3.24`，基于官方 `postgres:17.11-alpine3.24`，额外提供 pgvector 与 pg_bigm 扩展（见 `docker/postgres/README.md`）。镜像只提供扩展文件，不会创建扩展。原先使用 `postgres:17.11-alpine` 的数据卷可直接沿用，升级前请先用 `pg_dump` 备份。
+
+### Fixed / 修复
+
+- The runtime status of a credential in the Providers credential list shows "Exhausted" when its quota is exhausted and has not reset yet, matching the dashboard service health and gateway routing. Previously it showed "Healthy". On the dashboard, a credential whose quota reset time has passed is no longer marked unavailable.
+- 服务商凭据列表中，额度耗尽且未到重置时间的凭据，运行状态显示“额度耗尽”，与首页服务健康度及网关调度一致；此前显示“正常”。首页服务健康度不再把已过额度重置时间的凭据标为不可用。
+- The quota check time of Claude subscription credentials is no longer truncated; the refresh button moves to the next line when the column is narrow.
+- Claude 订阅凭据的额度检查时间不再被截断，列宽不足时“刷新额度”按钮换到下一行。
+
 ## [1.3.2] - 2026-10-29
 
 ### Documentation / 文档
