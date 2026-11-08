@@ -97,13 +97,29 @@ jobs:
           pattern: bundle-*
           path: artifacts
           merge-multiple: true
-      - uses: anchore/sbom-action@v0
+      - uses: actions/setup-go@v6
         with:
-          path: artifacts
-          format: cyclonedx-json
-          output-file: artifacts/zentrola-${{ needs.version.outputs.value }}-sbom.cdx.json
-          upload-artifact: false
-          upload-release-assets: false
+          go-version-file: go.mod
+          cache: false
+      # syft 经 Go 模块代理安装并固定版本，不依赖 GitHub Release 下载。
+      - name: Install syft
+        run: GOBIN="$RUNNER_TEMP/bin" go install github.com/anchore/syft/cmd/syft@v1.57.0
+      # syft 不解压发布包，因此先解开 linux/amd64 发布包：Go 二进制的 buildinfo
+      # 提供后端模块，web 锁文件提供打包进 dist/ 的前端运行时依赖。
+      - name: Generate SBOM
+        shell: bash
+        run: |
+          version="${{ needs.version.outputs.value }}"
+          source="$RUNNER_TEMP/sbom-source"
+          mkdir -p "$source/web"
+          tar -xzf "artifacts/zentrola-$version-linux-amd64.tar.gz" -C "$source"
+          cp web/package.json web/package-lock.json "$source/web/"
+          "$RUNNER_TEMP/bin/syft" scan "dir:$source" \
+            --source-name zentrola --source-version "$version" \
+            -o "cyclonedx-json=artifacts/zentrola-$version-sbom.cdx.json"
+          count="$(jq '.components | length' "artifacts/zentrola-$version-sbom.cdx.json")"
+          echo "SBOM components: $count"
+          test "$count" -gt 0
       - name: Create checksums
         working-directory: artifacts
         run: sha256sum zentrola-* > SHA256SUMS
