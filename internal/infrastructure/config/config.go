@@ -310,7 +310,7 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 			RatingPageSize:     int32(integer("BILLING_API_KEY_RATING_PAGE_SIZE", "500", 5000)),
 		},
 		Gateway: Gateway{
-			MaxBodyBytes:                         int64(integer("GATEWAY_MAX_BODY_BYTES", "33554432", 128<<20)),
+			MaxBodyBytes:                         int64(integer("GATEWAY_MAX_BODY_BYTES", "67108864", 128<<20)),
 			RequestTimeout:                       duration("GATEWAY_REQUEST_TIMEOUT", "15m"),
 			HeaderTimeout:                        duration("GATEWAY_HEADER_TIMEOUT", "120s"),
 			StreamIdleTimeout:                    durationAllowZero("GATEWAY_STREAM_IDLE_TIMEOUT", "300s"),

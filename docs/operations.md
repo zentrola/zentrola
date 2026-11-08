@@ -39,7 +39,7 @@ curl -i http://127.0.0.1:9527/health/ready
 
 See [`nginx-multi-instance.conf`](nginx-multi-instance.conf). It routes two Backend and two Admin Web instances behind one public hostname, splitting `/v1/`, `/anthropic/`, and `/api/` from the Web routes. Replace the example hostname, certificate paths, and private instance addresses, then run `nginx -t` before reloading Nginx.
 
-The example uses `client_max_body_size 64m`; set `GATEWAY_MAX_BODY_BYTES=67108864` on every Backend instance. Change both limits together if you choose another size. Response buffering is disabled for model routes, and the 16-minute read timeout accommodates the default 15-minute Gateway request timeout and SSE streams.
+The example uses `client_max_body_size 64m`, which matches the default `GATEWAY_MAX_BODY_BYTES=67108864` (64 MiB). Change both limits together if you choose another size, and make sure no Backend instance still sets the former `33554432` explicitly. Response buffering is disabled for model routes, and the 16-minute read timeout accommodates the default 15-minute Gateway request timeout and SSE streams.
 
 All Backend instances must share PostgreSQL, Redis, `MASTER_KEY`, and `ADMIN_JWT_SECRET`. Set both `WEB_API_BASE_URL` and `WEB_GATEWAY_BASE_URL` for each Admin Web instance to the public HTTPS hostname in the example. Sticky sessions are unnecessary; each SSE connection remains on the instance that accepted it. This Nginx Open Source configuration only performs passive failure detection; use each instance's `/health/ready` on the private network in the deployment system before routing traffic to it. During rolling updates, stop assigning new requests to the old instance and let active streams finish.
 

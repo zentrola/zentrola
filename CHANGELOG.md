@@ -10,6 +10,8 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 
 - The PostgreSQL service in `compose.yaml` now uses `longjianghu/postgres:17.11-alpine3.24`, which is built on the official `postgres:17.11-alpine3.24` and adds the pgvector and pg_bigm extensions (see `docker/postgres/README.md`). The image only ships the extension files and does not create the extensions. Data volumes created with `postgres:17.11-alpine` can be reused directly; back up with `pg_dump` before upgrading.
 - `compose.yaml` 中的 PostgreSQL 改用 `longjianghu/postgres:17.11-alpine3.24`，基于官方 `postgres:17.11-alpine3.24`，额外提供 pgvector 与 pg_bigm 扩展（见 `docker/postgres/README.md`）。镜像只提供扩展文件，不会创建扩展。原先使用 `postgres:17.11-alpine` 的数据卷可直接沿用，升级前请先用 `pg_dump` 备份。
+- The default Gateway request body limit `GATEWAY_MAX_BODY_BYTES` is raised from 32 MiB (`33554432`) to 64 MiB (`67108864`), matching `client_max_body_size 64m` in the Nginx example. Codex resends earlier generated images in every request of a conversation, so image generation could exceed 32 MiB and fail with `413 REQUEST_TOO_LARGE`. Requests below the limit are unaffected; each large request in flight is held in memory, so plan memory for concurrent large requests. Instances that set `33554432` explicitly, for example copied from an older `.env.example`, keep the old limit until the value is updated.
+- 网关请求体默认上限 `GATEWAY_MAX_BODY_BYTES` 由 32 MiB（`33554432`）提高到 64 MiB（`67108864`），与 Nginx 示例的 `client_max_body_size 64m` 一致。Codex 会在同一会话的每次请求中重发此前生成的图片，生图时请求可能超过 32 MiB 并返回 `413 REQUEST_TOO_LARGE`。未超过上限的请求不受影响；处理中的大请求会整体占用内存，请按并发大请求数量预留内存。显式设置了 `33554432` 的实例（如从旧版 `.env.example` 复制）需修改该值后才会生效。
 
 ### Fixed / 修复
 

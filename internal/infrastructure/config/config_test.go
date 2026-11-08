@@ -94,6 +94,22 @@ func TestHTTPBodyReadTimeoutDefault(t *testing.T) {
 	}
 }
 
+// 默认请求体上限需与 docs/nginx-multi-instance.conf 的 client_max_body_size 64m 保持一致。
+func TestGatewayMaxBodyBytesDefault(t *testing.T) {
+	cfg, err := parse(func(key string) (string, bool) {
+		if key == "POSTGRES_PASSWORD" {
+			return "test-only", true
+		}
+		return "", false
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Gateway.MaxBodyBytes != 64<<20 {
+		t.Fatalf("gateway max body bytes = %d, want %d", cfg.Gateway.MaxBodyBytes, 64<<20)
+	}
+}
+
 func TestSubscriptionRefreshDefaults(t *testing.T) {
 	cfg, err := parse(func(key string) (string, bool) {
 		if key == "POSTGRES_PASSWORD" {
