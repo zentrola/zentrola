@@ -68,6 +68,17 @@ npm run dev
 
 The defaults are Backend `http://127.0.0.1:9527` and Admin Web `http://127.0.0.1:9528`.
 
+On Windows, `scripts/Dev.ps1` starts both services in the background instead, after `npm ci` has been run in `web`. It builds the Backend to `.cache/dev/zentrola.exe`, runs it with the repository root `.env`, and points the Admin Web proxy at it. Logs are written to `.cache/dev/run/server.log` and `.cache/dev/web.log`. The script does not start PostgreSQL or Redis.
+
+```shell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Dev.ps1 start
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Dev.ps1 status
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Dev.ps1 restart
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Dev.ps1 stop
+```
+
+Use `-BackendPort` and `-WebPort` to run on other ports, for example when a Backend started from an IDE already uses `9527`.
+
 ## Build a release bundle
 
 Build Backend, Admin Web, static assets, and the configuration template into `dist/<os>/<architecture>`:

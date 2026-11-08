@@ -68,6 +68,17 @@ npm run dev
 
 默认 Backend 地址为 `http://127.0.0.1:9527`，Admin Web 地址为 `http://127.0.0.1:9528`。
 
+在 Windows 上，也可以在 `web` 目录执行过 `npm ci` 后，用 `scripts/Dev.ps1` 在后台同时启动两个服务。脚本将 Backend 编译到 `.cache/dev/zentrola.exe`，使用仓库根目录的 `.env` 运行，并让 Admin Web 代理指向该 Backend。日志分别写入 `.cache/dev/run/server.log` 和 `.cache/dev/web.log`。脚本不会启动 PostgreSQL 或 Redis。
+
+```shell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Dev.ps1 start
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Dev.ps1 status
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Dev.ps1 restart
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Dev.ps1 stop
+```
+
+如果 `9527` 已被 IDE 中启动的 Backend 占用，可通过 `-BackendPort` 和 `-WebPort` 改用其他端口。
+
 ## 构建发布包
 
 将 Backend、Admin Web、静态资源和配置模板构建到 `dist/<os>/<architecture>`：

@@ -13,6 +13,7 @@ Zentrola 由 Go 后端和 Vue 管理界面组成。程序入口位于 `cmd/serve
 - `pwsh scripts/Generate-ApiDocs.ps1`：新增或修改接口及其 Swaggo 注释后重新生成 `internal/transport/http/apidocs/swagger.json`；`swagger_test` 会拒绝缺少文档的路由，不要手动修改该文件。
 - `cd web && npm ci`：按 lockfile 安装依赖；要求 Node 22.18+，推荐 Node 24 LTS。
 - `cd web && npm run dev`：在 9528 端口启动 Vite，并将 `/api` 代理到后端。
+- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Dev.ps1 start|stop|restart|status`：在 Windows 上后台启停本地 Backend 与 Admin Web，日志位于 `.cache/dev/`；不管理 PostgreSQL 和 Redis。
 - `cd web && npm run build`：执行类型检查并生成 `web/dist`。
 - `cd web && npm test`：运行使用模拟 API 的 Playwright 测试。
 
