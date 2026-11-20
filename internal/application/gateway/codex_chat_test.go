@@ -158,7 +158,8 @@ func TestCodexChatConversionStageDoesNotExposeRequestContent(t *testing.T) {
 		name, body, stage string
 	}{
 		{"unsupported field", `{"model":"gpt-test","messages":[{"role":"user","content":"private prompt"}],"stop":"private prompt"}`, "unsupported_field"},
-		{"message", `{"model":"gpt-test","messages":[{"role":"user","content":[{"type":"future","text":"private prompt"}]}]}`, "message"},
+		{"message content", `{"model":"gpt-test","messages":[{"role":"user","content":[{"type":"future","text":"private prompt"}]}]}`, "content_part_type"},
+		{"message field", `{"model":"gpt-test","messages":[{"role":"user","content":"private prompt","name":"example"}]}`, "message_field"},
 		{"tools", `{"model":"gpt-test","messages":[{"role":"user","content":"private prompt"}],"tools":[{"type":"future"}]}`, "tools"},
 		{"options", `{"model":"gpt-test","messages":[{"role":"user","content":"private prompt"}],"temperature":0.7}`, "options"},
 	} {

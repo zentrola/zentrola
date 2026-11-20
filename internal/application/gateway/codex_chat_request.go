@@ -104,7 +104,10 @@ func codexChatToResponses(request Request) (Request, bool, error) {
 		}
 		items, convertErr := codexChatMessage(message)
 		if convertErr != nil {
-			return Request{}, false, codexChatStage("message", convertErr)
+			if CodexChatConversionStage(convertErr) == "" {
+				convertErr = codexChatStage("message", convertErr)
+			}
+			return Request{}, false, convertErr
 		}
 		input = append(input, items...)
 	}
@@ -166,20 +169,20 @@ func codexChatMessage(message map[string]any) ([]any, error) {
 	role := stringValue(message["role"])
 	if role == "tool" {
 		if len(message) != 3 || stringValue(message["tool_call_id"]) == "" {
-			return nil, ErrInvalid
+			return nil, codexChatStage("tool_message_shape", ErrInvalid)
 		}
 		content, ok := message["content"].(string)
 		if !ok {
-			return nil, ErrInvalid
+			return nil, codexChatStage("tool_message_content", ErrInvalid)
 		}
 		return []any{map[string]any{"type": "function_call_output", "call_id": message["tool_call_id"], "output": content}}, nil
 	}
 	if role != "system" && role != "developer" && role != "user" && role != "assistant" {
-		return nil, ErrInvalid
+		return nil, codexChatStage("message_role", ErrInvalid)
 	}
 	for field := range message {
 		if field != "role" && field != "content" && field != "tool_calls" {
-			return nil, ErrInvalid
+			return nil, codexChatStage("message_field", ErrInvalid)
 		}
 	}
 	parts := make([]any, 0)
@@ -187,6 +190,9 @@ func codexChatMessage(message map[string]any) ([]any, error) {
 		var err error
 		parts, err = codexChatContent(content, role)
 		if err != nil {
+			if CodexChatConversionStage(err) == "" {
+				err = codexChatStage("message_content", err)
+			}
 			return nil, err
 		}
 	}
@@ -194,20 +200,20 @@ func codexChatMessage(message map[string]any) ([]any, error) {
 	if len(parts) > 0 {
 		result = append(result, map[string]any{"type": "message", "role": role, "content": parts})
 	} else if role != "assistant" {
-		return nil, ErrInvalid
+		return nil, codexChatStage("message_content_missing", ErrInvalid)
 	}
 	if rawCalls, ok := message["tool_calls"]; ok {
 		if role != "assistant" || len(anySlice(rawCalls)) == 0 {
-			return nil, ErrInvalid
+			return nil, codexChatStage("assistant_tool_calls", ErrInvalid)
 		}
 		for _, raw := range anySlice(rawCalls) {
 			call, ok := raw.(map[string]any)
 			if !ok || len(call) != 3 || stringValue(call["type"]) != "function" || stringValue(call["id"]) == "" {
-				return nil, ErrInvalid
+				return nil, codexChatStage("assistant_tool_call_shape", ErrInvalid)
 			}
 			function, ok := call["function"].(map[string]any)
 			if !ok || len(function) != 2 || stringValue(function["name"]) == "" || !json.Valid([]byte(stringValue(function["arguments"]))) {
-				return nil, ErrInvalid
+				return nil, codexChatStage("assistant_tool_call_function", ErrInvalid)
 			}
 			result = append(result, map[string]any{
 				"type": "function_call", "call_id": call["id"],
@@ -231,35 +237,35 @@ func codexChatContent(content any, role string) ([]any, error) {
 	}
 	items := anySlice(content)
 	if len(items) == 0 {
-		return nil, ErrInvalid
+		return nil, codexChatStage("content_type", ErrInvalid)
 	}
 	parts := make([]any, 0, len(items))
 	for _, raw := range items {
 		part, ok := raw.(map[string]any)
 		if !ok {
-			return nil, ErrInvalid
+			return nil, codexChatStage("content_part_shape", ErrInvalid)
 		}
 		switch stringValue(part["type"]) {
 		case "text":
 			if _, ok := part["text"].(string); !ok || len(part) != 2 {
-				return nil, ErrInvalid
+				return nil, codexChatStage("text_part_shape", ErrInvalid)
 			}
 			parts = append(parts, map[string]any{"type": textType, "text": part["text"]})
 		case "image_url":
 			image, ok := part["image_url"].(map[string]any)
 			if !ok || role != "user" || len(part) != 2 || stringValue(image["url"]) == "" {
-				return nil, ErrInvalid
+				return nil, codexChatStage("image_part_shape", ErrInvalid)
 			}
 			converted := map[string]any{"type": "input_image", "image_url": image["url"]}
 			for field := range image {
 				if field != "url" && field != "detail" {
-					return nil, ErrInvalid
+					return nil, codexChatStage("image_part_field", ErrInvalid)
 				}
 			}
 			copyFields(converted, image, "detail")
 			parts = append(parts, converted)
 		default:
-			return nil, ErrInvalid
+			return nil, codexChatStage("content_part_type", ErrInvalid)
 		}
 	}
 	return parts, nil
