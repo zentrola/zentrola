@@ -482,6 +482,9 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"principal_id", identity.ID, "access_key_id", identity.AccessKeyID,
 		}
 		if g.cfg.Development {
+			if stage := gw.CodexChatConversionStage(err); stage != "" {
+				attributes = append(attributes, "conversion_stage", stage)
+			}
 			parse := gw.Parse
 			if gw.IsOpenAIProtocol(protocol) {
 				parse = gw.ParseOpenAI

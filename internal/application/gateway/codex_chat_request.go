@@ -2,7 +2,29 @@ package gateway
 
 import (
 	"encoding/json"
+	"errors"
 )
+
+type codexChatConversionError struct {
+	stage string
+	cause error
+}
+
+func (e *codexChatConversionError) Error() string { return e.cause.Error() }
+func (e *codexChatConversionError) Unwrap() error { return e.cause }
+
+func codexChatStage(stage string, err error) error {
+	return &codexChatConversionError{stage: stage, cause: err}
+}
+
+// CodexChatConversionStage returns a fixed diagnostic label without request content.
+func CodexChatConversionStage(err error) string {
+	var conversion *codexChatConversionError
+	if errors.As(err, &conversion) {
+		return conversion.stage
+	}
+	return ""
+}
 
 // codexChatToResponses converts the Chat Completions subset supported by the
 // Codex subscription endpoint. Unknown fields fail closed instead of silently
@@ -10,7 +32,7 @@ import (
 func codexChatToResponses(request Request) (Request, bool, error) {
 	source, err := decodeJSONObject(request.Body)
 	if err != nil {
-		return Request{}, false, err
+		return Request{}, false, codexChatStage("json", err)
 	}
 	allowed := map[string]bool{
 		"model": true, "messages": true, "stream": true, "stream_options": true,
@@ -20,7 +42,7 @@ func codexChatToResponses(request Request) (Request, bool, error) {
 	}
 	for field := range source {
 		if !allowed[field] {
-			return Request{}, false, ErrInvalid
+			return Request{}, false, codexChatStage("unsupported_field", ErrInvalid)
 		}
 	}
 	model := stringValue(source["model"])
@@ -82,7 +104,7 @@ func codexChatToResponses(request Request) (Request, bool, error) {
 		}
 		items, convertErr := codexChatMessage(message)
 		if convertErr != nil {
-			return Request{}, false, convertErr
+			return Request{}, false, codexChatStage("message", convertErr)
 		}
 		input = append(input, items...)
 	}
@@ -104,14 +126,14 @@ func codexChatToResponses(request Request) (Request, bool, error) {
 	if raw, ok := source["tools"]; ok {
 		tools, convertErr := codexChatTools(raw)
 		if convertErr != nil {
-			return Request{}, false, convertErr
+			return Request{}, false, codexChatStage("tools", convertErr)
 		}
 		target["tools"] = tools
 	}
 	if raw, ok := source["tool_choice"]; ok {
 		choice, convertErr := codexChatToolChoice(raw)
 		if convertErr != nil {
-			return Request{}, false, convertErr
+			return Request{}, false, codexChatStage("tool_choice", convertErr)
 		}
 		target["tool_choice"] = choice
 	}

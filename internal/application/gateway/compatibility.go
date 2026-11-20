@@ -31,6 +31,9 @@ func (u *CompatibleUpstream) Open(ctx context.Context, route Route, request Requ
 		}
 		adapted, clientStream, err := codexChatToResponses(request)
 		if err != nil {
+			if CodexChatConversionStage(err) == "" {
+				err = codexChatStage("options", err)
+			}
 			return nil, err
 		}
 		response, err := u.openAI.Open(ctx, route, adapted, credential)

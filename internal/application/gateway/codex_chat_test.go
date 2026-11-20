@@ -149,6 +149,29 @@ func TestCodexChatSubscriptionRejectsUnsupportedRequest(t *testing.T) {
 	}
 }
 
+func TestCodexChatConversionStageDoesNotExposeRequestContent(t *testing.T) {
+	upstream := compatibilityUpstreamFunc(func(context.Context, Route, Request, []byte) (*Response, error) {
+		t.Fatal("invalid request reached upstream")
+		return nil, nil
+	})
+	for _, test := range []struct {
+		name, body, stage string
+	}{
+		{"unsupported field", `{"model":"gpt-test","messages":[{"role":"user","content":"private prompt"}],"stop":"private prompt"}`, "unsupported_field"},
+		{"message", `{"model":"gpt-test","messages":[{"role":"user","content":[{"type":"future","text":"private prompt"}]}]}`, "message"},
+		{"tools", `{"model":"gpt-test","messages":[{"role":"user","content":"private prompt"}],"tools":[{"type":"future"}]}`, "tools"},
+		{"options", `{"model":"gpt-test","messages":[{"role":"user","content":"private prompt"}],"temperature":0.7}`, "options"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := Request{Protocol: OpenAIProtocol, Body: []byte(test.body)}
+			_, err := NewCompatibleUpstream(nil, upstream).Open(context.Background(), Route{AuthType: "SUBSCRIPTION", AuthAdapter: "OPENAI_CODEX"}, request, nil)
+			if !errors.Is(err, ErrInvalid) || CodexChatConversionStage(err) != test.stage || strings.Contains(err.Error(), "private prompt") {
+				t.Fatalf("unexpected conversion error: stage=%q err=%v", CodexChatConversionStage(err), err)
+			}
+		})
+	}
+}
+
 func TestCodexChatSubscriptionOmitsDefaultSamplingOptions(t *testing.T) {
 	request := Request{Protocol: OpenAIProtocol, Path: "/v1/chat/completions", Body: []byte(`{"model":"gpt-test","messages":[{"role":"user","content":"Hi"}],"temperature":1,"top_p":1.0}`)}
 	converted, _, err := codexChatToResponses(request)
