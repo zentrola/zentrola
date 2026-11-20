@@ -80,7 +80,10 @@ func CodexChatUnknownMessageFields(body []byte) []string {
 		}
 		for field := range message {
 			switch field {
-			case "role", "content", "tool_calls", "skipRun", "conversationRequestId", "startsNewUserRequest":
+			case "role", "content", "tool_calls", "tool_call_id", "skipRun", "conversationRequestId", "startsNewUserRequest":
+				continue
+			}
+			if isWorkBuddyMessageMetadata(field) {
 				continue
 			}
 			if safe := safeCodexChatField(field); safe != "" {
@@ -199,6 +202,11 @@ func codexChatToResponses(request Request) (Request, bool, error) {
 			}
 			delete(message, "startsNewUserRequest")
 		}
+		for field := range message {
+			if isWorkBuddyMessageMetadata(field) {
+				delete(message, field)
+			}
+		}
 		items, convertErr := codexChatMessage(message)
 		if convertErr != nil {
 			if CodexChatConversionStage(convertErr) == "" {
@@ -246,6 +254,16 @@ func codexChatToResponses(request Request) (Request, bool, error) {
 	}
 	request.Protocol, request.Path, request.Body = OpenAIResponsesProtocol, "/v1/responses", body
 	return request, clientStream, nil
+}
+
+func isWorkBuddyMessageMetadata(field string) bool {
+	switch field {
+	case "agent", "argumentsDisplayText", "messageId", "model", "rawUsage", "reasoning",
+		"requestModelId", "requestModelName", "stepSeq", "traceId", "usage":
+		return true
+	default:
+		return false
+	}
 }
 
 // Codex subscriptions require at least 16 output tokens. Clients commonly use

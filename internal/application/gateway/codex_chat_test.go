@@ -22,7 +22,9 @@ func TestCodexChatSubscriptionConvertsHistoryAndNonStreamResponse(t *testing.T) 
 		input := anySlice(body["input"])
 		if len(input) != 6 || input[0].(map[string]any)["role"] != "system" ||
 			input[3].(map[string]any)["type"] != "function_call" ||
-			input[4].(map[string]any)["type"] != "function_call_output" {
+			input[4].(map[string]any)["type"] != "function_call_output" ||
+			strings.Contains(string(request.Body), "internal reasoning") ||
+			strings.Contains(string(request.Body), "internal display") {
 			t.Fatalf("history was not preserved: %s", request.Body)
 		}
 		tools := anySlice(body["tools"])
@@ -43,10 +45,10 @@ data: {"response":{"id":"resp_1","model":"gpt-test","output":[{"type":"message",
 	request := Request{Protocol: OpenAIProtocol, Path: "/v1/chat/completions", Body: []byte(`{
 "model":"gpt-test","stream":false,
 "messages":[
- {"role":"system","content":"简洁回答"},
+ {"role":"system","content":"简洁回答","messageId":"msg_1","agent":"workbuddy","model":"other-model","rawUsage":{"input":99},"reasoning":"internal reasoning","requestModelId":"model_1","requestModelName":"model name","stepSeq":1,"traceId":"trace_1","usage":{"output":10},"argumentsDisplayText":"internal display"},
  {"role":"user","content":"天气怎样"},
  {"role":"assistant","content":"我来查","tool_calls":[{"id":"call_1","type":"function","function":{"name":"weather","arguments":"{\"city\":\"杭州\"}"}}]},
- {"role":"tool","tool_call_id":"call_1","content":"晴天"},
+ {"role":"tool","tool_call_id":"call_1","content":"晴天","messageId":"msg_2","traceId":"trace_2"},
  {"role":"user","content":"总结一下"}
 ],
 "tools":[{"type":"function","function":{"name":"weather","description":"查询天气","parameters":{"type":"object"}}}],
