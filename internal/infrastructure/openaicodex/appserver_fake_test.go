@@ -19,9 +19,6 @@ const fakeChildArgument = "fake-codex-child"
 func TestMain(m *testing.M) {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
-		case "--version":
-			fmt.Println("codex-cli 0.172.0-alpha.2")
-			os.Exit(0)
 		case "app-server":
 			runFakeAppServer()
 			os.Exit(0)

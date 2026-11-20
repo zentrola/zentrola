@@ -16,8 +16,8 @@ import (
 	"github.com/joho/godotenv"
 )
 
-// claudeCodeVersionPattern 与 anthropicclaude.ValidClaudeCodeVersion 保持一致，只接受 x.y.z 形式的版本号。
-var claudeCodeVersionPattern = regexp.MustCompile(`^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}$`)
+// clientVersionPattern 只接受 x.y.z 形式，与 anthropicclaude.ValidClaudeCodeVersion 保持一致。
+var clientVersionPattern = regexp.MustCompile(`^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}$`)
 
 type Config struct {
 	Environment          string
@@ -64,6 +64,8 @@ type Gateway struct {
 	SubscriptionRefreshAhead, SubscriptionRefreshInterval, SubscriptionRunTimeout time.Duration
 	SubscriptionRefreshCredentialTimeout                                          time.Duration
 	SubscriptionRefreshConcurrency                                                int
+	// CodexClientVersion 是订阅模型目录的兼容版本；为空时使用内置默认版本。
+	CodexClientVersion string
 	// ClaudeCodeVersion 是 Claude 订阅请求声明的 Claude Code 版本；为空时使用内置默认版本。
 	ClaudeCodeVersion string
 	Development       bool
@@ -319,6 +321,7 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 			IdentityCacheTTL:                     duration("GATEWAY_IDENTITY_CACHE_TTL", "10m"),
 			RouteCacheTTL:                        duration("GATEWAY_ROUTE_CACHE_TTL", "1m"),
 			CodexExecutable:                      strings.TrimSpace(get("CODEX_EXECUTABLE", "codex")),
+			CodexClientVersion:                   strings.TrimSpace(get("CODEX_CLIENT_VERSION", "")),
 			SubscriptionRefreshAhead:             duration("CODEX_SUBSCRIPTION_REFRESH_AHEAD", "30m"),
 			SubscriptionRefreshInterval:          duration("CODEX_SUBSCRIPTION_REFRESH_INTERVAL", "1m"),
 			SubscriptionRunTimeout:               duration("CODEX_SUBSCRIPTION_REFRESH_RUN_TIMEOUT", "4m"),
@@ -345,7 +348,10 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 	if cfg.Gateway.SubscriptionRefreshCredentialTimeout >= 60*time.Second {
 		problems = append(problems, errors.New("CODEX_SUBSCRIPTION_REFRESH_CREDENTIAL_TIMEOUT must be less than 60s"))
 	}
-	if cfg.Gateway.ClaudeCodeVersion != "" && !claudeCodeVersionPattern.MatchString(cfg.Gateway.ClaudeCodeVersion) {
+	if cfg.Gateway.CodexClientVersion != "" && !clientVersionPattern.MatchString(cfg.Gateway.CodexClientVersion) {
+		problems = append(problems, errors.New("CODEX_CLIENT_VERSION must be a version such as 0.171.0"))
+	}
+	if cfg.Gateway.ClaudeCodeVersion != "" && !clientVersionPattern.MatchString(cfg.Gateway.ClaudeCodeVersion) {
 		problems = append(problems, errors.New("CLAUDE_CODE_VERSION must be a version such as 2.1.293"))
 	}
 	_, port, err := net.SplitHostPort(cfg.HTTPAddr)

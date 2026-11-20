@@ -67,6 +67,8 @@ MASTER_KEY=请替换为另一组32个随机字节的Base64字符串
 
 `MASTER_KEY` 用于加密 Provider Credential，必须是 32 个随机字节的 Base64，并且只从所选通用配置文件（默认 `.env`）读取。系统环境变量和 `.env.{APP_ENV}` 都不能覆盖它。Compose 会把 `compose.yaml` 中的内联配置挂载为容器内的 `/app/.env`。缺失或无法解密已有凭据时 Backend 会拒绝启动；该值必须与数据库一起备份。
 
+订阅模型同步通过 `.env` 中的 `CODEX_CLIENT_VERSION=0.171.0` 设置上游目录的兼容版本，无需安装 Codex CLI。只接受 `x.y.z`，留空或不配置时使用内置默认值 `0.171.0`；修改后重启 Backend。该值与应用 `VERSION` 独立，可能影响上游返回的模型列表，应验证新版本后再更新。Compose 部署修改后执行 `docker compose up -d backend`，使环境配置生效。
+
 ## 4. 配置 Admin Web
 
 ```dotenv

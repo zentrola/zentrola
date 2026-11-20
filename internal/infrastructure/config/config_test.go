@@ -37,6 +37,10 @@ func TestConfigValidation(t *testing.T) {
 		{"subscription credential timeout exceeds lock TTL", "CODEX_SUBSCRIPTION_REFRESH_CREDENTIAL_TIMEOUT", "60s", "CODEX_SUBSCRIPTION_REFRESH_CREDENTIAL_TIMEOUT"},
 		{"invalid subscription concurrency", "CODEX_SUBSCRIPTION_REFRESH_CONCURRENCY", "0", "CODEX_SUBSCRIPTION_REFRESH_CONCURRENCY"},
 		{"invalid Claude Code version", "CLAUDE_CODE_VERSION", "latest", "CLAUDE_CODE_VERSION"},
+		{"invalid Codex version", "CODEX_CLIENT_VERSION", "latest", "CODEX_CLIENT_VERSION"},
+		{"Codex version with prefix", "CODEX_CLIENT_VERSION", "v0.171.0", "CODEX_CLIENT_VERSION"},
+		{"Codex prerelease version", "CODEX_CLIENT_VERSION", "0.171.0-alpha.1", "CODEX_CLIENT_VERSION"},
+		{"Codex version query injection", "CODEX_CLIENT_VERSION", "0.171.0&extra=true", "CODEX_CLIENT_VERSION"},
 		{"Claude Code version with prefix", "CLAUDE_CODE_VERSION", "v2.1.293", "CLAUDE_CODE_VERSION"},
 		{"oversized body limit", "GATEWAY_MAX_BODY_BYTES", "2147483647", "GATEWAY_MAX_BODY_BYTES"},
 		{"empty usage queue", "USAGE_QUEUE_SIZE", "0", "USAGE_QUEUE_SIZE"},
@@ -425,6 +429,22 @@ func TestGatewayStreamIdleTimeoutConfiguration(t *testing.T) {
 }
 
 func stringPointer(value string) *string { return &value }
+
+func TestCodexClientVersionConfiguration(t *testing.T) {
+	for _, tt := range []struct{ name, value, want string }{
+		{"default", "", ""},
+		{"configured", "0.172.0", "0.172.0"},
+		{"trimmed", " 0.172.0 ", "0.172.0"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			values := map[string]string{"POSTGRES_PASSWORD": "test-only", "CODEX_CLIENT_VERSION": tt.value}
+			cfg, err := parse(func(key string) (string, bool) { value, ok := values[key]; return value, ok })
+			if err != nil || cfg.Gateway.CodexClientVersion != tt.want {
+				t.Fatalf("CodexClientVersion = %q, err=%v; want %q", cfg.Gateway.CodexClientVersion, err, tt.want)
+			}
+		})
+	}
+}
 
 func TestClaudeCodeVersionConfiguration(t *testing.T) {
 	for _, tt := range []struct{ name, value, want string }{

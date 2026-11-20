@@ -319,7 +319,7 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 	postgresManagementStore := postgres.NewManagementStore(pool, ids, logger)
 	managementStore := gatewaycache.NewManagementStore(postgresManagementStore, gatewayCache, logger)
 	modelDiscoverer := modelcatalog.NewDiscoverer(logger)
-	modelDiscoverer.UseCodexExecutable(startup, cfg.Gateway.CodexExecutable)
+	modelDiscoverer.UseCodexClientVersion(startup, cfg.Gateway.CodexClientVersion)
 	managementService := management.New(
 		managementStore, ids, credentials, connectionTester,
 		management.WithModelDiscoverer(modelDiscoverer),

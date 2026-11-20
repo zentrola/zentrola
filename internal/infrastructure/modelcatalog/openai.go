@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -29,12 +30,13 @@ const (
 // Codex 订阅使用 ChatGPT Codex 目录，并与网关转发保持相同的账号请求头。
 type openAIAdapter struct{ clientVersion string }
 
-// UseCodexExecutable 在服务启动、首次同步前读取一次版本；同步过程中复用已选版本。
-func (d *Discoverer) UseCodexExecutable(ctx context.Context, executable string) {
-	version, err := openaicodex.ClientVersion(ctx, executable)
-	source := "executable"
-	if err != nil {
-		version, source = defaultCodexClientVersion, "fallback"
+// UseCodexClientVersion 在服务启动、首次同步前设置目录兼容版本，不依赖本机 Codex CLI。
+// version 由配置层校验；留空使用经过验证的内置版本。
+func (d *Discoverer) UseCodexClientVersion(ctx context.Context, version string) {
+	version = strings.TrimSpace(version)
+	source := "configured"
+	if version == "" {
+		version, source = defaultCodexClientVersion, "default"
 	}
 	d.adapters[catalog.OpenAIOfficialCode] = openAIAdapter{clientVersion: version}
 	d.logger.InfoContext(ctx, "Codex model catalog client version selected",
@@ -50,7 +52,7 @@ func (a openAIAdapter) Request(source mgmt.ModelDiscoverySource, _ int, _ string
 			version = defaultCodexClientVersion
 		}
 		return catalogRequest{
-			URL: codexCatalogBaseURL + "?client_version=" + version, Bearer: true, AccountIDHeader: "ChatGPT-Account-Id",
+			URL: codexCatalogBaseURL + "?client_version=" + url.QueryEscape(version), Bearer: true, AccountIDHeader: "ChatGPT-Account-Id",
 			Headers: map[string]string{"Originator": "zentrola"},
 		}, nil
 	}

@@ -67,6 +67,8 @@ Use `POSTGRES_PORT=15432` with the repository's Compose example. Use TLS and `PO
 
 `MASTER_KEY` encrypts provider credentials. It must contain 32 random bytes encoded as Base64 and is read only from the selected common configuration file (`.env` by default); neither system environment variables nor `.env.{APP_ENV}` can override it. Compose mounts the inline value from `compose.yaml` as `/app/.env` inside the container. The Backend refuses to start when the value is missing or cannot decrypt existing credentials. Back it up together with the database.
 
+Set `CODEX_CLIENT_VERSION=0.171.0` in `.env` to select the upstream compatibility version for subscription model synchronization; no Codex CLI installation is required. Only `x.y.z` is accepted. An empty or unset value uses the built-in default `0.171.0`. Restart Backend after changing it. This value is independent of the application `VERSION` and can affect the returned model catalog, so verify a new version before adopting it. For Compose deployments, run `docker compose up -d backend` after changing the value to apply the environment configuration.
+
 ## 4. Configure Admin Web
 
 ```dotenv
