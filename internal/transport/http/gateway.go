@@ -488,6 +488,11 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if field := gw.CodexChatConversionField(err); field != "" {
 				attributes = append(attributes, "conversion_field", field)
 			}
+			if gw.CodexChatConversionStage(err) == "message_field" {
+				if fields := gw.CodexChatUnknownMessageFields(body); len(fields) > 0 {
+					attributes = append(attributes, "conversion_fields", fields)
+				}
+			}
 			parse := gw.Parse
 			if gw.IsOpenAIProtocol(protocol) {
 				parse = gw.ParseOpenAI

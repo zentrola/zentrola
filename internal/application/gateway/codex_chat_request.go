@@ -3,6 +3,7 @@ package gateway
 import (
 	"encoding/json"
 	"errors"
+	"sort"
 	"strings"
 )
 
@@ -59,6 +60,43 @@ func safeCodexChatField(field string) string {
 		}
 	}
 	return field
+}
+
+// CodexChatUnknownMessageFields lists bounded, filtered field names for dev diagnostics.
+func CodexChatUnknownMessageFields(body []byte) []string {
+	source, err := decodeJSONObject(body)
+	if err != nil {
+		return nil
+	}
+	seen := make(map[string]bool)
+	for _, raw := range anySlice(source["messages"]) {
+		message, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		skip, _ := message["skipRun"].(bool)
+		if skip {
+			continue
+		}
+		for field := range message {
+			switch field {
+			case "role", "content", "tool_calls", "skipRun", "conversationRequestId", "startsNewUserRequest":
+				continue
+			}
+			if safe := safeCodexChatField(field); safe != "" {
+				seen[safe] = true
+			}
+		}
+	}
+	fields := make([]string, 0, len(seen))
+	for field := range seen {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+	if len(fields) > 16 {
+		fields = fields[:16]
+	}
+	return fields
 }
 
 // codexChatToResponses converts the Chat Completions subset supported by the
@@ -154,6 +192,12 @@ func codexChatToResponses(request Request) (Request, bool, error) {
 				}
 			}
 			delete(message, "conversationRequestId")
+		}
+		if starts, exists := message["startsNewUserRequest"]; exists {
+			if _, ok := starts.(bool); !ok {
+				return Request{}, false, codexChatStage("message_starts_new_user_request", ErrInvalid)
+			}
+			delete(message, "startsNewUserRequest")
 		}
 		items, convertErr := codexChatMessage(message)
 		if convertErr != nil {
