@@ -147,6 +147,14 @@ func codexChatToResponses(request Request) (Request, bool, error) {
 			}
 			delete(message, "skipRun")
 		}
+		if requestID, exists := message["conversationRequestId"]; exists {
+			if requestID != nil {
+				if _, ok := requestID.(string); !ok {
+					return Request{}, false, codexChatStage("message_conversation_request_id", ErrInvalid)
+				}
+			}
+			delete(message, "conversationRequestId")
+		}
 		items, convertErr := codexChatMessage(message)
 		if convertErr != nil {
 			if CodexChatConversionStage(convertErr) == "" {
