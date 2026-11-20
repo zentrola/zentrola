@@ -165,10 +165,10 @@ func (s *ResourceService) RefreshResourceQuota(ctx context.Context, actor admin.
 	return result, err
 }
 
-// refreshAdapterQuota 通过认证适配器只读查询订阅额度（如 Codex App Server 的 account/rateLimits/read）。
+// refreshAdapterQuota 通过认证适配器查询订阅额度。
 // 查询可能轮换 refresh token：与连接测试一样持有网关刷新锁直到结果落盘，并在加锁后重新读取最新凭据。
 func (s *ResourceService) refreshAdapterQuota(ctx context.Context, actor admin.Identity, id int64, meta appsec.RequestMeta) (QuotaRefreshResult, error) {
-	release, err := s.lockSubscriptionRefresh(ctx, id)
+	ctx, release, err := s.beginSubscriptionOperation(ctx, id)
 	if err != nil {
 		return QuotaRefreshResult{}, err
 	}

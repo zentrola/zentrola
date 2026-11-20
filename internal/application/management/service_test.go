@@ -60,8 +60,48 @@ func TestSubscriptionConnectionCodeAllowsOnlyKnownSafeCodes(t *testing.T) {
 	if code := subscriptionConnectionCode(subscriptionConnectionErrorStub("UPSTREAM_AUTH_FAILED")); code != "UPSTREAM_AUTH_FAILED" {
 		t.Fatalf("unexpected Anthropic authentication code: %s", code)
 	}
+	if code := subscriptionConnectionCode(subscriptionConnectionErrorStub("CREDENTIAL_REVOKED")); code != "CREDENTIAL_REVOKED" {
+		t.Fatalf("unexpected revoked credential code: %s", code)
+	}
 	if code := subscriptionConnectionCode(subscriptionConnectionErrorStub("UNSAFE_INTERNAL_DETAIL")); code != "SUBSCRIPTION_UNAVAILABLE" {
 		t.Fatalf("unexpected fallback connection code: %s", code)
+	}
+}
+
+func TestRevokedSubscriptionCredentialPreservesCodeAndRuntimePolicy(t *testing.T) {
+	for _, quotaOnly := range []bool{false, true} {
+		name := "connection test blocks revoked credential"
+		if quotaOnly {
+			name = "quota refresh leaves runtime unchanged"
+		}
+		t.Run(name, func(t *testing.T) {
+			writer := subscriptionRefreshWriter()
+			adapter := failingSubscriptionAdapterStub{err: subscriptionConnectionErrorStub("CREDENTIAL_REVOKED")}
+			service := New(resourceTestStore{writer: writer}, nil, providerTestCipher{}, nil,
+				WithSubscriptionAdapter(adapter))
+			var code string
+			var ok bool
+			var err error
+			if quotaOnly {
+				result, callErr := service.RefreshResourceQuota(context.Background(), admin.Identity{ID: 1}, 48, appsec.RequestMeta{})
+				code, ok, err = result.Code, result.OK, callErr
+			} else {
+				result, callErr := service.TestResource(context.Background(), admin.Identity{ID: 1}, 48, appsec.RequestMeta{})
+				code, ok, err = result.Code, result.OK, callErr
+			}
+			if err != nil || ok || code != "CREDENTIAL_REVOKED" {
+				t.Fatalf("ok=%v code=%s err=%v", ok, code, err)
+			}
+			if quotaOnly {
+				if writer.resource.RuntimeStatus != "HEALTHY" || writer.resource.BlockedReason != nil {
+					t.Fatalf("quota refresh changed runtime: %+v", writer.resource.Resource)
+				}
+			} else if writer.resource.RuntimeStatus != "BLOCKED" || writer.resource.BlockedReason == nil ||
+				*writer.resource.BlockedReason != "CREDENTIAL_REVOKED" || writer.resource.LastErrorCode == nil ||
+				*writer.resource.LastErrorCode != "CREDENTIAL_REVOKED" {
+				t.Fatalf("revoked credential was not blocked: %+v", writer.resource.Resource)
+			}
+		})
 	}
 }
 

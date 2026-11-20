@@ -88,7 +88,7 @@ test.describe('个人订阅', () => {
     expect(testRequests).toEqual(['89', '90', '89'])
   })
 
-  test('个人订阅额度刷新失败时展示 Codex 可执行文件配置项', async ({ page }) => {
+  test('个人订阅额度刷新失败时展示对应错误，凭证撤销提示支持中英文', async ({ page }) => {
     const state = await fixture(page)
     state.providers.push({
       id: '82',
@@ -132,6 +132,7 @@ test.describe('个人订阅', () => {
       createdAt: stamp,
       updatedAt: stamp,
     })
+    let errorCode = 'CODEX_APP_SERVER_UNAVAILABLE'
     await page.route('**/api/v1/resources/89/test-connection', (route) =>
       route.fulfill({
         status: 200,
@@ -140,11 +141,11 @@ test.describe('个人订阅', () => {
           code: 'OK',
           data: {
             ok: false,
-            code: 'CODEX_APP_SERVER_UNAVAILABLE',
+            code: errorCode,
             httpStatus: null,
             latencyMs: 0,
           },
-          requestId: 'req_codex_app_server_unavailable',
+          requestId: 'req_subscription_error',
         }),
       }),
     )
@@ -160,6 +161,21 @@ test.describe('个人订阅', () => {
     const subscriptionRow = modal(page).getByRole('row').filter({ hasText: '个人订阅' })
     await expect(subscriptionRow.locator('.credential-quota-feedback')).toHaveText(
       '额度刷新失败 · Codex App Server 无法启动，请检查 Codex 可执行文件配置（CODEX_EXECUTABLE）并重启后端。',
+    )
+
+    await modal(page).getByRole('button', { name: '关闭', exact: true }).click()
+    errorCode = 'CREDENTIAL_REVOKED'
+    await page.getByRole('button', { name: '管理 OpenAI 的认证凭据', exact: true }).click()
+    await expect(subscriptionRow.locator('.credential-quota-feedback')).toHaveText(
+      '额度刷新失败 · 凭证已撤销，请重新登录并导入新的凭证。',
+    )
+
+    await modal(page).getByRole('button', { name: '关闭', exact: true }).click()
+    await page.getByRole('button', { name: '界面语言' }).click()
+    await page.getByRole('menuitemradio', { name: 'English' }).click()
+    await page.getByRole('button', { name: 'Manage credentials for OpenAI', exact: true }).click()
+    await expect(subscriptionRow.locator('.credential-quota-feedback')).toContainText(
+      'The credential has been revoked. Sign in again and import new credentials.',
     )
   })
 

@@ -289,7 +289,7 @@ func (a *Adapter) accountRequest(ctx context.Context, credential []byte, proxy *
 
 func classifyAccountRejection(status int) error {
 	switch status {
-	case http.StatusUnauthorized, http.StatusForbidden:
+	case http.StatusUnauthorized:
 		return refreshFailure("UPSTREAM_AUTH_FAILED", "Codex account request was rejected")
 	case http.StatusTooManyRequests:
 		return refreshFailure("UPSTREAM_RATE_LIMITED", "Codex account request was rate limited")

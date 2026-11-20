@@ -1265,6 +1265,7 @@ export const i18n = createI18n({
         MODEL_CATALOG_UNSUPPORTED: '该服务商暂不支持同步官方模型目录。',
         UPSTREAM_URL_REJECTED: '上游地址不符合允许规则。',
         CREDENTIAL_INVALID: '凭证格式不正确。',
+        CREDENTIAL_REVOKED: '凭证已撤销，请重新登录并导入新的凭证。',
         REQUEST_CANCELLED: '请求已取消。',
         RESOURCE_CHANGED: '测试期间服务商凭证已变化，请重新测试。',
         PROVIDER_MODEL_MAPPING_REQUIRED: '请先为该服务商配置至少一个已启用模型的映射。',

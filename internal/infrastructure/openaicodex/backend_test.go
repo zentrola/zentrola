@@ -138,7 +138,7 @@ func TestAccountHTTPClassifiesRejections(t *testing.T) {
 		status int
 		want   string
 	}{
-		{401, "UPSTREAM_AUTH_FAILED"}, {429, "UPSTREAM_RATE_LIMITED"}, {503, "UPSTREAM_UNAVAILABLE"},
+		{401, "UPSTREAM_AUTH_FAILED"}, {403, "SUBSCRIPTION_UNAVAILABLE"}, {429, "UPSTREAM_RATE_LIMITED"}, {503, "UPSTREAM_UNAVAILABLE"},
 	} {
 		t.Run(strconv.Itoa(tt.status), func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(tt.status) }))

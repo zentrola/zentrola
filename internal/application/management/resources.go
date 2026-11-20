@@ -60,6 +60,8 @@ const (
 	// 管理端等待网关释放刷新锁的上限与轮询间隔；超时后返回冲突，由管理员稍后重试。
 	subscriptionRefreshLockWait = 10 * time.Second
 	subscriptionRefreshLockPoll = 200 * time.Millisecond
+	// 为凭据轮换及后续查询设总时限，并为落盘预留时间；整体短于刷新锁的 60 秒租期。
+	subscriptionOperationTimeout = 45 * time.Second
 )
 
 // SubscriptionCredentialReplacer 由写事务实现：仅当库中密文仍等于 expected 时保存新凭据，
@@ -101,6 +103,24 @@ func (s *ResourceService) lockSubscriptionRefresh(ctx context.Context, id int64)
 		return locker.LockSubscriptionRefresh(ctx, id)
 	}
 	return func() {}, nil
+}
+
+// beginSubscriptionOperation 等锁时遵循调用方取消，持锁后独立完成账号操作及凭据保存。
+// 上游可能在客户端断开前已轮换 Token，不能因请求取消而丢弃尚未读到的新凭据。
+func (s *ResourceService) beginSubscriptionOperation(ctx context.Context, id int64) (context.Context, func(), error) {
+	release, err := s.lockSubscriptionRefresh(ctx, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		release()
+		return nil, nil, err
+	}
+	operationCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), subscriptionOperationTimeout)
+	return operationCtx, func() {
+		cancel()
+		release()
+	}, nil
 }
 
 // acquireSubscriptionRefresh 在有限时间内轮询协调器的刷新锁。协调后端不可用时失败关闭：

@@ -111,11 +111,12 @@ func (s *ResourceService) TestResourceSelection(ctx context.Context, actor admin
 	if resource.AuthType == AuthTypeSubscription && resource.AuthAdapter != AuthAdapterClaudeCode {
 		// 订阅探测可能轮换 refresh token：持有与网关相同的刷新锁直到结果落盘，
 		// 并在加锁后重新读取，确保使用网关刚刷新过的最新凭据。
-		release, lockErr := s.lockSubscriptionRefresh(ctx, id)
+		operationCtx, release, lockErr := s.beginSubscriptionOperation(ctx, id)
 		if lockErr != nil {
 			return ConnectionResult{}, lockErr
 		}
 		defer release()
+		ctx = operationCtx
 		if err = s.store.ReadResource(ctx, actor, readResource); err != nil {
 			return ConnectionResult{}, err
 		}
@@ -359,7 +360,7 @@ func subscriptionConnectionCode(err error) string {
 	var connectionError SubscriptionConnectionError
 	if errors.As(err, &connectionError) {
 		switch connectionError.ConnectionCode() {
-		case "CREDENTIAL_INVALID", "CODEX_APP_SERVER_UNAVAILABLE", "SUBSCRIPTION_CHECK_BUSY", "UPSTREAM_AUTH_FAILED",
+		case "CREDENTIAL_INVALID", "CREDENTIAL_REVOKED", "CODEX_APP_SERVER_UNAVAILABLE", "SUBSCRIPTION_CHECK_BUSY", "UPSTREAM_AUTH_FAILED",
 			"UPSTREAM_BILLING_BLOCKED", "UPSTREAM_RATE_LIMITED", "UPSTREAM_TIMEOUT", "PROXY_AUTH_REJECTED", "PROXY_SERVER_UNAVAILABLE",
 			"UPSTREAM_UNAVAILABLE", "UPSTREAM_INVALID_RESPONSE":
 			return connectionError.ConnectionCode()
@@ -375,7 +376,7 @@ func (s *ResourceService) ConsumeResourceResetCredit(ctx context.Context, actor 
 		return ResetCreditConsumeResult{}, appsec.ErrInvalidArgument
 	}
 	// 兑换会返回轮换后的凭据：在读取凭据前持有与网关相同的刷新锁，直到结果落盘。
-	release, err := s.lockSubscriptionRefresh(ctx, id)
+	ctx, release, err := s.beginSubscriptionOperation(ctx, id)
 	if err != nil {
 		return ResetCreditConsumeResult{}, err
 	}
@@ -412,7 +413,7 @@ func (s *ResourceService) ConsumeResourceResetCredit(ctx context.Context, actor 
 	}
 	consumed, err := consumer.ConsumeResetCredit(ctx, plain, proxy, idempotencyKey, creditID)
 	if err != nil {
-		// 兑换失败前 app-server 可能已轮换 refresh token，旧 token 随即失效：仍须条件保存新凭据。
+		// 兑换失败前上游可能已轮换 refresh token，旧 token 随即失效：仍须条件保存新凭据。
 		if sealed, inspection, ok := s.sealRotatedCredential(actor, resource.Resource, adapter, err); ok {
 			auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 			defer cancel()
@@ -505,6 +506,8 @@ func connectionBlockReason(code string) string {
 		return "AUTHENTICATION"
 	case "CREDENTIAL_UNRECOVERABLE":
 		return "CREDENTIAL_UNRECOVERABLE"
+	case "CREDENTIAL_REVOKED":
+		return "CREDENTIAL_REVOKED"
 	default:
 		return ""
 	}

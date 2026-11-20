@@ -75,11 +75,24 @@ func TestRefreshRejectsOAuthErrorsWithoutChangingCredential(t *testing.T) {
 	}{
 		{"expired", 401, `{"error":{"code":"token_expired"}}`, "CREDENTIAL_INVALID", true},
 		{"invalid grant", 400, `{"error":{"code":"invalid_grant"}}`, "CREDENTIAL_INVALID", true},
+		{"standard invalid grant", 400, `{"error":"invalid_grant","error_description":"rejected"}`, "CREDENTIAL_INVALID", true},
+		{"top level expired", 400, `{"code":"refresh_token_expired"}`, "CREDENTIAL_INVALID", true},
+		{"invalidated", 400, `{"error":{"code":"refresh_token_invalidated"}}`, "CREDENTIAL_REVOKED", true},
+		{"normalized invalidated", 400, `{"error":" REFRESH_TOKEN_INVALIDATED "}`, "CREDENTIAL_REVOKED", true},
 		{"reused", 401, `{"error":{"code":"refresh_token_reused"}}`, "CREDENTIAL_REVOKED", true},
 		{"rate limited", 429, `{"error":{"code":"rate_limit_exceeded"}}`, "UPSTREAM_RATE_LIMITED", false},
 		{"unknown unauthorized", 401, `{"error":{"code":"other"}}`, "UPSTREAM_AUTH_FAILED", true},
+		{"edge forbidden", 403, `<html>Access denied</html>`, "SUBSCRIPTION_REFRESH_FAILED", false},
+		{"unknown forbidden", 403, `{"error":{"code":"other"}}`, "SUBSCRIPTION_REFRESH_FAILED", false},
+		{"explicit revoked forbidden", 403, `{"error":"refresh_token_invalidated"}`, "CREDENTIAL_REVOKED", true},
+		{"invalid grant server error", 503, `{"error":"invalid_grant"}`, "SUBSCRIPTION_REFRESH_FAILED", false},
+		{"malformed error", 400, `{`, "SUBSCRIPTION_REFRESH_FAILED", false},
 		{"server error", 500, `{"error":{"code":"unavailable"}}`, "SUBSCRIPTION_REFRESH_FAILED", false},
-		{"incomplete success", 200, `{"access_token":"new-access","refresh_token":"new-refresh"}`, "UPSTREAM_INVALID_RESPONSE", false},
+		{"empty success", 200, `{}`, "UPSTREAM_INVALID_RESPONSE", false},
+		{"null success", 200, `null`, "UPSTREAM_INVALID_RESPONSE", false},
+		{"null tokens", 200, `{"id_token":null,"access_token":null,"refresh_token":null}`, "UPSTREAM_INVALID_RESPONSE", false},
+		{"empty token", 200, `{"access_token":""}`, "UPSTREAM_INVALID_RESPONSE", false},
+		{"wrong token type", 200, `{"access_token":123}`, "UPSTREAM_INVALID_RESPONSE", false},
 		{"malformed success", 200, `{`, "UPSTREAM_INVALID_RESPONSE", false},
 	}
 	for _, tt := range tests {
@@ -98,6 +111,44 @@ func TestRefreshRejectsOAuthErrorsWithoutChangingCredential(t *testing.T) {
 			}
 			if code, permanent := adapter.ClassifyRefreshError(err); code != tt.wantCode || permanent != tt.permanent {
 				t.Fatalf("code=%s permanent=%v, want %s %v", code, permanent, tt.wantCode, tt.permanent)
+			}
+		})
+	}
+}
+
+func TestRefreshMergesOptionalTokenFields(t *testing.T) {
+	for _, tt := range []struct {
+		name, body, id, access, refresh string
+	}{
+		{"omitted ID token", `{"access_token":"new-access","refresh_token":"new-refresh"}`, "old-id", "new-access", "new-refresh"},
+		{"omitted refresh token", `{"id_token":"new-id","access_token":"new-access"}`, "new-id", "new-access", "old-refresh"},
+		{"access token only", `{"access_token":"new-access"}`, "old-id", "new-access", "old-refresh"},
+		{"refresh token only", `{"refresh_token":"new-refresh"}`, "old-id", "old-access", "new-refresh"},
+		{"ID token only", `{"id_token":"new-id"}`, "new-id", "old-access", "old-refresh"},
+		{"null fields preserve originals", `{"id_token":null,"access_token":"new-access","refresh_token":null}`, "old-id", "new-access", "old-refresh"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = io.WriteString(w, tt.body)
+			}))
+			defer server.Close()
+			adapter := New("")
+			adapter.refreshURL, adapter.refreshHTTP = server.URL, server.Client()
+			raw := []byte(refreshTestCredential)
+			updated, changed, err := adapter.RefreshIfNeeded(context.Background(), raw, nil)
+			if err != nil || !changed {
+				t.Fatalf("changed=%v error=%v", changed, err)
+			}
+			defer clear(updated)
+			cache, err := parseCredential(updated)
+			if err != nil || cache.Tokens.IDToken != tt.id || cache.Tokens.AccessToken != tt.access || cache.Tokens.RefreshToken != tt.refresh {
+				t.Fatal("optional token fields were not merged correctly")
+			}
+			if cache.Tokens.AccountID != "account-1" || string(raw) != refreshTestCredential {
+				t.Fatal("refresh changed the account or the caller's original credential")
+			}
+			if _, ok := parseRefreshTime(cache.LastRefresh); !ok {
+				t.Fatal("refresh time was not saved")
 			}
 		})
 	}

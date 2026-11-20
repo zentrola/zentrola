@@ -1293,6 +1293,8 @@ export default {
       'Official model catalog sync is not supported for this provider yet.',
     UPSTREAM_URL_REJECTED: 'The upstream URL is not allowed.',
     CREDENTIAL_INVALID: 'The credential format is invalid.',
+    CREDENTIAL_REVOKED:
+      'The credential has been revoked. Sign in again and import new credentials.',
     REQUEST_CANCELLED: 'The request was cancelled.',
     RESOURCE_CHANGED: 'The provider credential changed during testing. Test it again.',
     PROVIDER_MODEL_MAPPING_REQUIRED:

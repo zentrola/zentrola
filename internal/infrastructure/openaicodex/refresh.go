@@ -22,9 +22,23 @@ const (
 )
 
 type refreshReply struct {
-	IDToken      string `json:"id_token"`
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
+	IDToken      *string `json:"id_token"`
+	AccessToken  *string `json:"access_token"`
+	RefreshToken *string `json:"refresh_token"`
+}
+
+// 刷新可以只返回部分 Token；缺省或 null 保留原值，但不能接受空响应或显式空 Token。
+func (r refreshReply) valid() bool {
+	present := false
+	for _, value := range []*string{r.IDToken, r.AccessToken, r.RefreshToken} {
+		if value != nil {
+			if strings.TrimSpace(*value) == "" {
+				return false
+			}
+			present = true
+		}
+	}
+	return present
 }
 
 func newRefreshHTTPClient() *http.Client {
@@ -79,8 +93,8 @@ func (a *Adapter) refreshToken(ctx context.Context, raw []byte, proxy *catalog.O
 		return nil, classifyTokenRejection(response.StatusCode, body)
 	}
 	var tokens refreshReply
-	if json.Unmarshal(body, &tokens) != nil || tokens.IDToken == "" || tokens.AccessToken == "" || tokens.RefreshToken == "" {
-		return nil, refreshFailure("UPSTREAM_INVALID_RESPONSE", "Codex token refresh response is incomplete")
+	if json.Unmarshal(body, &tokens) != nil || !tokens.valid() {
+		return nil, refreshFailure("UPSTREAM_INVALID_RESPONSE", "invalid Codex token refresh response")
 	}
 	updated, err := replaceAuthTokens(raw, tokens, time.Now().UTC())
 	if err != nil {
@@ -94,27 +108,50 @@ func refreshFailure(code, message string) error {
 }
 
 func classifyTokenRejection(status int, body []byte) error {
-	var reply struct {
-		Error struct {
-			Code string `json:"code"`
-		} `json:"error"`
-	}
-	_ = json.Unmarshal(body, &reply)
-	code := strings.ToLower(reply.Error.Code)
+	code := oauthErrorCode(body)
 	switch code {
-	case "token_expired", "refresh_token_expired", "invalid_grant":
+	case "token_expired", "refresh_token_expired":
 		return refreshFailure("CREDENTIAL_INVALID", "Codex refresh token expired or invalid")
-	case "refresh_token_reused", "refresh_token_revoked", "token_revoked":
+	case "refresh_token_reused", "refresh_token_revoked", "refresh_token_invalidated", "token_revoked":
 		return refreshFailure("CREDENTIAL_REVOKED", "Codex refresh token was reused or revoked")
+	case "invalid_grant":
+		if status == http.StatusBadRequest {
+			return refreshFailure("CREDENTIAL_INVALID", "Codex refresh token expired or invalid")
+		}
 	}
 	switch status {
 	case http.StatusTooManyRequests:
 		return refreshFailure("UPSTREAM_RATE_LIMITED", "Codex token refresh was rate limited")
-	case http.StatusUnauthorized, http.StatusForbidden:
+	case http.StatusUnauthorized:
 		return refreshFailure("UPSTREAM_AUTH_FAILED", "Codex token refresh was rejected")
 	default:
 		return refreshFailure("SUBSCRIPTION_REFRESH_FAILED", "Codex token refresh was rejected")
 	}
+}
+
+// oauthErrorCode 兼容标准 OAuth error 字符串、嵌套 error.code 和顶层 code。
+// 原始错误内容可能包含凭据，只返回用于分类的错误码，不把响应正文交给日志或调用方。
+func oauthErrorCode(body []byte) string {
+	var reply struct {
+		Error json.RawMessage `json:"error"`
+		Code  string          `json:"code"`
+	}
+	if json.Unmarshal(body, &reply) != nil {
+		return ""
+	}
+	var code string
+	if json.Unmarshal(reply.Error, &code) != nil {
+		var nested struct {
+			Code string `json:"code"`
+		}
+		if json.Unmarshal(reply.Error, &nested) == nil {
+			code = nested.Code
+		}
+	}
+	if strings.TrimSpace(code) == "" {
+		code = reply.Code
+	}
+	return strings.ToLower(strings.TrimSpace(code))
 }
 
 func replaceAuthTokens(raw []byte, tokens refreshReply, refreshedAt time.Time) ([]byte, error) {
@@ -126,10 +163,13 @@ func replaceAuthTokens(raw []byte, tokens refreshReply, refreshedAt time.Time) (
 	if err := json.Unmarshal(document["tokens"], &saved); err != nil {
 		return nil, err
 	}
-	for key, value := range map[string]string{
+	for key, value := range map[string]*string{
 		"id_token": tokens.IDToken, "access_token": tokens.AccessToken, "refresh_token": tokens.RefreshToken,
 	} {
-		encoded, err := json.Marshal(value)
+		if value == nil {
+			continue
+		}
+		encoded, err := json.Marshal(*value)
 		if err != nil {
 			return nil, err
 		}
