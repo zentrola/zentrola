@@ -267,6 +267,36 @@ func TestCodexChatSubscriptionOmitsDefaultSamplingOptions(t *testing.T) {
 	}
 }
 
+func TestCodexChatSubscriptionAcceptsDisabledStoreOnly(t *testing.T) {
+	base := `{"model":"gpt-test","messages":[{"role":"user","content":"Hi"}],"store":`
+	for _, test := range []struct {
+		name, value string
+		wantStage   string
+	}{
+		{"false", "false", ""},
+		{"null", "null", ""},
+		{"true", "true", "store"},
+		{"string", `"false"`, "store"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			converted, _, err := codexChatToResponses(Request{Protocol: OpenAIProtocol, Body: []byte(base + test.value + `}`)})
+			if test.wantStage != "" {
+				if !errors.Is(err, ErrInvalid) || CodexChatConversionStage(err) != test.wantStage {
+					t.Fatalf("stage=%q err=%v", CodexChatConversionStage(err), err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			object, err := decodeJSONObject(converted.Body)
+			if err != nil || object["store"] != false {
+				t.Fatalf("converted store value=%v err=%v", object["store"], err)
+			}
+		})
+	}
+}
+
 func TestCodexChatSubscriptionRaisesSubMinimumOutputLimit(t *testing.T) {
 	for _, test := range []struct {
 		field string

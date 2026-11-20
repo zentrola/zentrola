@@ -126,7 +126,7 @@ func CodexChatUnknownTopLevelFields(body []byte) []string {
 func isCodexChatSupportedField(field string) bool {
 	switch field {
 	case "model", "messages", "stream", "stream_options", "temperature", "top_p", "max_tokens",
-		"max_completion_tokens", "tools", "tool_choice", "parallel_tool_calls", "n":
+		"max_completion_tokens", "tools", "tool_choice", "parallel_tool_calls", "n", "store":
 		return true
 	default:
 		return false
@@ -174,6 +174,12 @@ func codexChatToResponses(request Request) (Request, bool, error) {
 		number, numberOK := n.(json.Number)
 		if !numberOK || number.String() != "1" {
 			return Request{}, false, ErrInvalid
+		}
+	}
+	if store, exists := source["store"]; exists && store != nil {
+		stored, ok := store.(bool)
+		if !ok || stored {
+			return Request{}, false, codexChatStage("store", ErrInvalid)
 		}
 	}
 	if _, first := source["max_tokens"]; first {
