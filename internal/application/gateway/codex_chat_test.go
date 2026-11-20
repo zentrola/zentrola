@@ -134,6 +134,10 @@ func TestCodexChatSubscriptionRejectsUnsupportedRequest(t *testing.T) {
 		`{"model":"gpt-test","messages":[{"role":"user","content":"hello"}],"stop":["END"]}`,
 		`{"model":"gpt-test","stream":true,"stream_options":{"future":true},"messages":[{"role":"user","content":"hello"}]}`,
 		`{"model":"gpt-test","stream":false,"stream_options":{"include_usage":true},"messages":[{"role":"user","content":"hello"}]}`,
+		`{"model":"gpt-test","messages":[{"role":"user","content":"hello"}],"max_tokens":0}`,
+		`{"model":"gpt-test","messages":[{"role":"user","content":"hello"}],"max_tokens":1.5}`,
+		`{"model":"gpt-test","messages":[{"role":"user","content":"hello"}],"temperature":0.7}`,
+		`{"model":"gpt-test","messages":[{"role":"user","content":"hello"}],"top_p":0.9}`,
 	} {
 		request := Request{Protocol: OpenAIProtocol, Path: "/v1/chat/completions", Body: []byte(body)}
 		_, err := NewCompatibleUpstream(nil, upstream).Open(context.Background(), Route{
@@ -141,6 +145,51 @@ func TestCodexChatSubscriptionRejectsUnsupportedRequest(t *testing.T) {
 		}, request, nil)
 		if !errors.Is(err, ErrInvalid) {
 			t.Fatalf("unexpected error for %s: %v", body, err)
+		}
+	}
+}
+
+func TestCodexChatSubscriptionOmitsDefaultSamplingOptions(t *testing.T) {
+	request := Request{Protocol: OpenAIProtocol, Path: "/v1/chat/completions", Body: []byte(`{"model":"gpt-test","messages":[{"role":"user","content":"Hi"}],"temperature":1,"top_p":1.0}`)}
+	converted, _, err := codexChatToResponses(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := decodeJSONObject(converted.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := payload["temperature"]; exists {
+		t.Fatalf("unsupported temperature was forwarded: %s", converted.Body)
+	}
+	if _, exists := payload["top_p"]; exists {
+		t.Fatalf("unsupported top_p was forwarded: %s", converted.Body)
+	}
+}
+
+func TestCodexChatSubscriptionRaisesSubMinimumOutputLimit(t *testing.T) {
+	for _, test := range []struct {
+		field string
+		value string
+		want  string
+	}{
+		{"max_tokens", "1", "16"},
+		{"max_completion_tokens", "15", "16"},
+		{"max_tokens", "16", "16"},
+		{"max_completion_tokens", "32", "32"},
+	} {
+		body := []byte(`{"model":"gpt-test","messages":[{"role":"user","content":"Hi"}],"` + test.field + `":` + test.value + `}`)
+		converted, _, err := codexChatToResponses(Request{Protocol: OpenAIProtocol, Path: "/v1/chat/completions", Body: body})
+		if err != nil {
+			t.Fatalf("%s=%s: %v", test.field, test.value, err)
+		}
+		payload, err := decodeJSONObject(converted.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, ok := payload["max_output_tokens"].(json.Number)
+		if !ok || string(got) != test.want {
+			t.Fatalf("%s=%s: max_output_tokens=%v, want %s", test.field, test.value, payload["max_output_tokens"], test.want)
 		}
 	}
 }

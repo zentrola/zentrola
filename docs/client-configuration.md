@@ -40,7 +40,7 @@ Remove-Variable secureKey, zentrolaKey
 
 Select one of the logical-model codes returned by `GET /v1/models`. Client-specific configuration files and supported environment variables can change between client releases; prefer the client's current official documentation when persistent configuration is required.
 
-For Codex personal subscriptions, `/v1/responses` is the native path. The gateway can also convert text, image, and function-tool requests from `/v1/chat/completions` to Responses and convert streaming or non-streaming results back to Chat Completions. Unsupported Chat fields return `400 INVALID_REQUEST` instead of being silently discarded. The subscription upstream always receives a streaming request; the gateway assembles a non-streaming Chat response after upstream completion.
+For Codex personal subscriptions, `/v1/responses` is the native path. The gateway can also convert text, image, and function-tool requests from `/v1/chat/completions` to Responses and convert streaming or non-streaming results back to Chat Completions. Unsupported Chat fields return `400 INVALID_REQUEST` instead of being silently discarded. Codex subscriptions require an output limit of at least 16 tokens, so Chat `max_tokens` or `max_completion_tokens` values from 1 to 15 are raised to 16 during conversion; the actual output may exceed the client's requested limit. The subscription upstream rejects `temperature` and `top_p`: explicit default values of 1 are omitted, while other values return `400 INVALID_REQUEST`. The subscription upstream always receives a streaming request; the gateway assembles a non-streaming Chat response after upstream completion.
 
 ## Claude Code and Anthropic-compatible clients
 

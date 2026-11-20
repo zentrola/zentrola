@@ -58,6 +58,18 @@ func codexChatToResponses(request Request) (Request, bool, error) {
 			return Request{}, false, ErrInvalid
 		}
 	}
+	for _, field := range []string{"temperature", "top_p"} {
+		if value, exists := source[field]; exists && value != nil {
+			number, ok := value.(json.Number)
+			if !ok {
+				return Request{}, false, ErrInvalid
+			}
+			defaultValue, err := number.Float64()
+			if err != nil || defaultValue != 1 {
+				return Request{}, false, ErrInvalid
+			}
+		}
+	}
 	input := make([]any, 0)
 	messages := anySlice(source["messages"])
 	if len(messages) == 0 {
@@ -75,11 +87,19 @@ func codexChatToResponses(request Request) (Request, bool, error) {
 		input = append(input, items...)
 	}
 	target := map[string]any{"model": model, "input": input, "stream": true, "store": false}
-	copyFields(target, source, "temperature", "top_p", "parallel_tool_calls")
+	copyFields(target, source, "parallel_tool_calls")
 	if value, ok := source["max_tokens"]; ok {
-		target["max_output_tokens"] = value
+		limit, err := codexChatOutputLimit(value)
+		if err != nil {
+			return Request{}, false, err
+		}
+		target["max_output_tokens"] = limit
 	} else if value, ok := source["max_completion_tokens"]; ok {
-		target["max_output_tokens"] = value
+		limit, err := codexChatOutputLimit(value)
+		if err != nil {
+			return Request{}, false, err
+		}
+		target["max_output_tokens"] = limit
 	}
 	if raw, ok := source["tools"]; ok {
 		tools, convertErr := codexChatTools(raw)
@@ -101,6 +121,23 @@ func codexChatToResponses(request Request) (Request, bool, error) {
 	}
 	request.Protocol, request.Path, request.Body = OpenAIResponsesProtocol, "/v1/responses", body
 	return request, clientStream, nil
+}
+
+// Codex subscriptions require at least 16 output tokens. Clients commonly use
+// a one-token request to test connectivity; raise only sub-minimum limits.
+func codexChatOutputLimit(value any) (json.Number, error) {
+	number, ok := value.(json.Number)
+	if !ok {
+		return "", ErrInvalid
+	}
+	limit, err := number.Int64()
+	if err != nil || limit <= 0 {
+		return "", ErrInvalid
+	}
+	if limit < 16 {
+		return json.Number("16"), nil
+	}
+	return number, nil
 }
 
 func codexChatMessage(message map[string]any) ([]any, error) {

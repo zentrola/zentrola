@@ -40,7 +40,7 @@ Remove-Variable secureKey, zentrolaKey
 
 从 `GET /v1/models` 返回结果中选择一个逻辑模型编码。客户端配置文件及支持的环境变量可能随客户端版本变化；需要持久化配置时，以客户端当前官方文档为准。
 
-使用 Codex 个人订阅时，`/v1/responses` 是原生路径。网关也可将 `/v1/chat/completions` 的文本、图片及函数工具请求转换为 Responses，并将流式或非流式结果转回 Chat Completions；不支持的 Chat 字段返回 `400 INVALID_REQUEST`，不会被静默丢弃。订阅上游始终使用流式请求，非流式 Chat 响应由网关在上游完成后组装。
+使用 Codex 个人订阅时，`/v1/responses` 是原生路径。网关也可将 `/v1/chat/completions` 的文本、图片及函数工具请求转换为 Responses，并将流式或非流式结果转回 Chat Completions；不支持的 Chat 字段返回 `400 INVALID_REQUEST`，不会被静默丢弃。Codex 订阅要求输出上限至少为 16 Token，转换时会将 Chat 请求中 1–15 的 `max_tokens` 或 `max_completion_tokens` 提升到 16，实际输出可能超过客户端请求的上限。订阅上游不接受 `temperature` 和 `top_p`：显式默认值 1 会被省略，其他值返回 `400 INVALID_REQUEST`。订阅上游始终使用流式请求，非流式 Chat 响应由网关在上游完成后组装。
 
 ## Claude Code 和 Anthropic 兼容客户端
 
