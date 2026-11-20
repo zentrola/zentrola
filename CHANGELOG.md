@@ -13,6 +13,14 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 
 ### Fixed / 修复
 
+- Refresh Codex subscription tokens and access quota and reset-credit endpoints over HTTP without starting Codex app-server. Rotated tokens continue to use the Redis lock and conditional credential update. These Codex endpoints are not documented stable third-party APIs.
+- Codex 订阅令牌刷新、额度查询及重置卡兑换改为直接调用 HTTP 接口，不再启动 Codex app-server；轮换令牌仍通过现有 Redis 锁与凭据条件更新保存。这些 Codex 接口不是公开承诺稳定的第三方 API。
+- Build the application image from Alpine without bundling Codex CLI. The separate Codex base image remains available for other uses; model catalog synchronization falls back to the verified client version when CLI is absent.
+- 主应用镜像改为从 Alpine 构建，不再打包 Codex CLI。独立 Codex 基础镜像仍可用于其他场景；未安装 CLI 时，模型目录同步使用已验证的内置客户端版本。
+- Upgrade the optional standalone Codex CLI image from `0.154.0` to `0.171.0` and remove voice resources, the code-mode host, and file search tools from its runtime layer.
+- 可选的独立 Codex CLI 镜像从 `0.154.0` 升级至 `0.171.0`，并从其运行层裁剪语音资源、code-mode 辅助程序和文件搜索工具。
+- Detect the Codex CLI version from `CODEX_EXECUTABLE` at startup and reuse its base version for subscription model synchronization. If detection fails, use the verified fallback `0.171.0`. Upstream catalog contents depend on this version; `0.171.0` includes `gpt-6.2-sol` and `gpt-6.2-astra` when available to the account.
+- 启动时从 `CODEX_EXECUTABLE` 检测 Codex CLI 版本，并在订阅模型同步中复用其基础版本；检测失败时使用已验证的 `0.171.0`。上游目录随客户端版本变化，使用 `0.171.0` 可获取账号有权使用的 `gpt-6.2-sol` 和 `gpt-6.2-astra`。
 - Accept matching `Authorization` and `X-Api-Key` headers from WorkBuddy, handle its message metadata, and accept DeepSeek Harness requests with `store: false`. Streaming usage is emitted only when `stream_options.include_usage` is true.
 - 接受 WorkBuddy 同时发送且值一致的 `Authorization` 与 `X-Api-Key`，处理其消息元数据，并兼容 DeepSeek Harness 的 `store: false` 请求。仅在 `stream_options.include_usage` 为 true 时输出流式用量信息。
 

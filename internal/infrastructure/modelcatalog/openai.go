@@ -1,6 +1,7 @@
 package modelcatalog
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"sort"
@@ -18,20 +19,38 @@ const (
 	openAICatalogURL         = "https://api.openai.com/v1/models"
 	codexAutoReviewModelCode = "codex-auto-review"
 	// ChatGPT 订阅 Token 缺少 api.model.read 权限，无法读取公共模型目录，只能读取 Codex 客户端目录。
-	// 该目录要求 client_version，并按客户端版本返回可用模型；版本号取已验证可用的 Codex 版本。
-	codexCatalogURL = "https://chatgpt.com/backend-api/codex/models?client_version=0.162.0"
+	// 该目录要求 client_version，并按客户端版本返回可用模型。
+	defaultCodexClientVersion = "0.171.0"
+	codexCatalogBaseURL       = "https://chatgpt.com/backend-api/codex/models"
+	codexCatalogURL           = codexCatalogBaseURL + "?client_version=" + defaultCodexClientVersion
 )
 
 // openAIAdapter 读取 OpenAI 官方模型目录。API Key 使用公共 /v1/models；
 // Codex 订阅使用 ChatGPT Codex 目录，并与网关转发保持相同的账号请求头。
-type openAIAdapter struct{}
+type openAIAdapter struct{ clientVersion string }
+
+// UseCodexExecutable 在服务启动、首次同步前读取一次版本；同步过程中复用已选版本。
+func (d *Discoverer) UseCodexExecutable(ctx context.Context, executable string) {
+	version, err := openaicodex.ClientVersion(ctx, executable)
+	source := "executable"
+	if err != nil {
+		version, source = defaultCodexClientVersion, "fallback"
+	}
+	d.adapters[catalog.OpenAIOfficialCode] = openAIAdapter{clientVersion: version}
+	d.logger.InfoContext(ctx, "Codex model catalog client version selected",
+		"client_version", version, "version_source", source)
+}
 
 func (openAIAdapter) Name() string { return "openai" }
 
-func (openAIAdapter) Request(source mgmt.ModelDiscoverySource, _ int, _ string) (catalogRequest, error) {
+func (a openAIAdapter) Request(source mgmt.ModelDiscoverySource, _ int, _ string) (catalogRequest, error) {
 	if source.AuthType == mgmt.AuthTypeSubscription {
+		version := a.clientVersion
+		if version == "" {
+			version = defaultCodexClientVersion
+		}
 		return catalogRequest{
-			URL: codexCatalogURL, Bearer: true, AccountIDHeader: "ChatGPT-Account-Id",
+			URL: codexCatalogBaseURL + "?client_version=" + version, Bearer: true, AccountIDHeader: "ChatGPT-Account-Id",
 			Headers: map[string]string{"Originator": "zentrola"},
 		}, nil
 	}

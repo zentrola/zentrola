@@ -15,8 +15,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	mgmt "github.com/zentrola/zentrola/internal/application/management"
 )
 
 // fakeAccountID 读取 runAccountSession 暂存在 CODEX_HOME 中的凭据账号，用于选择模拟行为。
@@ -72,12 +70,11 @@ func TestAppServerTimeoutTerminatesProcessTree(t *testing.T) {
 		name string
 		run  func(context.Context, *Adapter, []byte) error
 	}{
-		{name: "probe", run: func(ctx context.Context, adapter *Adapter, raw []byte) error {
-			_, err := adapter.Probe(ctx, raw, nil)
-			return err
-		}},
-		{name: "refresh", run: func(ctx context.Context, adapter *Adapter, raw []byte) error {
-			_, _, err := adapter.RefreshIfNeeded(ctx, raw, nil)
+		{name: "app-server session", run: func(ctx context.Context, adapter *Adapter, raw []byte) error {
+			_, _, err := adapter.runIsolatedSession(ctx, raw, nil, func(client accountRPC) error {
+				var account accountResponse
+				return client.call(ctx, 2, "account/read", map[string]bool{"refreshToken": true}, &account)
+			})
 			return err
 		}},
 	}
@@ -94,10 +91,6 @@ func TestAppServerTimeoutTerminatesProcessTree(t *testing.T) {
 			}
 			if !errors.Is(err, context.DeadlineExceeded) {
 				t.Fatalf("err=%v, want context deadline", err)
-			}
-			var connectionError mgmt.SubscriptionConnectionError
-			if !errors.As(err, &connectionError) || connectionError.ConnectionCode() != "UPSTREAM_TIMEOUT" {
-				t.Fatalf("unexpected connection code: %v", err)
 			}
 			if code, permanent := adapter.ClassifyRefreshError(err); code != "UPSTREAM_TIMEOUT" || permanent {
 				t.Fatalf("classified as %q permanent=%v", code, permanent)
@@ -127,7 +120,7 @@ func TestAppServerTimeoutTerminatesProcessTree(t *testing.T) {
 	}
 }
 
-func TestRefreshReadsCredentialAfterAppServerExits(t *testing.T) {
+func TestAccountSessionReadsCredentialAfterAppServerExits(t *testing.T) {
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -139,14 +132,16 @@ func TestRefreshReadsCredentialAfterAppServerExits(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// access token 不含过期时间，刷新路径会认为需要刷新。
 			raw := []byte(`{"auth_mode":"chatgpt","tokens":{"id_token":"id","access_token":"access","refresh_token":"refresh","account_id":"` + tt.account + `"}}`)
 			adapter := New(executable, WithLogger(slog.New(slog.NewJSONHandler(io.Discard, nil))))
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			updated, changed, err := adapter.RefreshIfNeeded(ctx, raw, nil)
-			if err != nil || !changed {
-				t.Fatalf("changed=%v err=%v", changed, err)
+			updated, _, err := adapter.runIsolatedSession(ctx, raw, nil, func(client accountRPC) error {
+				var account accountResponse
+				return client.call(ctx, 2, "account/read", map[string]bool{"refreshToken": true}, &account)
+			})
+			if err != nil {
+				t.Fatal(err)
 			}
 			cache, err := parseCredential(updated)
 			if err != nil {

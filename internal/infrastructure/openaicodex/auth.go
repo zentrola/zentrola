@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -60,6 +61,9 @@ func (e *connectionFailure) ConnectionCode() string { return e.code }
 type Adapter struct {
 	executable   string
 	refreshAhead time.Duration
+	refreshURL   string
+	backendURL   string
+	refreshHTTP  *http.Client
 	runSession   accountSessionRunner
 	sessionSlot  chan struct{}
 	logger       *slog.Logger
@@ -96,7 +100,7 @@ func New(executable string, options ...Option) *Adapter {
 	}
 	adapter := &Adapter{
 		executable: executable, refreshAhead: defaultRefreshAhead, sessionSlot: make(chan struct{}, 1),
-		logger: slog.Default(),
+		refreshURL: codexRefreshURL, backendURL: codexBackendURL, refreshHTTP: newRefreshHTTPClient(), logger: slog.Default(),
 	}
 	adapter.runSession = adapter.runAccountSession
 	for _, option := range options {
@@ -281,16 +285,13 @@ func claimUnix(claims map[string]any, key string) (time.Time, bool) {
 }
 
 func (a *Adapter) Probe(ctx context.Context, raw []byte, proxy *catalog.OutboundProxy) (mgmt.SubscriptionProbe, error) {
-	var limits rateLimitsResponse
-	credential, inspection, err := a.tryRunIsolatedSession(ctx, raw, proxy, func(client accountRPC) error {
-		return client.call(ctx, 2, "account/rateLimits/read", nil, &limits)
-	})
+	credential, inspection, rotated, err := a.prepareAccountCredential(ctx, raw, proxy)
 	if err != nil {
-		code := subscriptionErrorCode(err)
-		a.logSessionFailure(ctx, "subscription_probe", "codex subscription probe failed", code, err)
-		return mgmt.SubscriptionProbe{}, &connectionFailure{
-			code: code, cause: fmt.Errorf("cannot read Codex ChatGPT rate limits: %w", err),
-		}
+		return mgmt.SubscriptionProbe{}, err
+	}
+	limits, err := a.readAccountLimits(ctx, credential, proxy)
+	if err != nil {
+		return mgmt.SubscriptionProbe{}, preserveRotatedCredential(err, credential, rotated)
 	}
 	if plan := limits.planType(); plan != "" {
 		inspection.PlanCode = plan
@@ -304,7 +305,7 @@ func (a *Adapter) Probe(ctx context.Context, raw []byte, proxy *catalog.Outbound
 	}, nil
 }
 
-// logSessionFailure 记录 app-server 会话失败的脱敏原因。额度检测与凭据刷新只向调用方返回错误码，
+// logSessionFailure 记录 app-server 会话失败的脱敏原因。额度检测只向调用方返回错误码，
 // 兜底码的具体原因只能从这里的 app-server 错误和标准错误摘要中排查。
 func (a *Adapter) logSessionFailure(ctx context.Context, operation, message, code string, err error) {
 	args := []any{
@@ -333,35 +334,6 @@ func subscriptionErrorCode(err error) string {
 	default:
 		return "SUBSCRIPTION_UNAVAILABLE"
 	}
-}
-
-func (a *Adapter) refreshCredential(ctx context.Context, raw []byte, proxy *catalog.OutboundProxy) ([]byte, mgmt.SubscriptionInspection, error) {
-	var account accountResponse
-	updated, inspection, err := a.runIsolatedSession(ctx, raw, proxy, func(client accountRPC) error {
-		return client.call(ctx, 2, "account/read", map[string]bool{"refreshToken": true}, &account)
-	})
-	if err != nil {
-		code, _ := a.ClassifyRefreshError(err)
-		a.logSessionFailure(ctx, "subscription_refresh", "codex subscription refresh failed", code, err)
-		return nil, mgmt.SubscriptionInspection{}, &connectionFailure{
-			code: code, cause: fmt.Errorf("codex ChatGPT credential refresh failed: %w", err),
-		}
-	}
-	if account.Account == nil || account.Account.Type != "chatgpt" {
-		// 响应结构不符可能来自 app-server 版本不兼容或暂时异常，不能据此判定凭据失效，按可重试处理。
-		var cause error = &connectionFailure{
-			code: "UPSTREAM_INVALID_RESPONSE", cause: errors.New("codex app-server returned an unexpected account response"),
-		}
-		if credentialRotated(raw, updated) {
-			return nil, mgmt.SubscriptionInspection{}, &sessionFailure{cause: cause, credential: updated}
-		}
-		clear(updated)
-		return nil, mgmt.SubscriptionInspection{}, cause
-	}
-	if account.Account.PlanType != "" {
-		inspection.PlanCode = account.Account.PlanType
-	}
-	return updated, inspection, nil
 }
 
 func (a *Adapter) runAccountSession(ctx context.Context, raw []byte, proxy *catalog.OutboundProxy, action func(accountRPC) error) ([]byte, mgmt.SubscriptionInspection, error) {
@@ -425,8 +397,8 @@ func (a *Adapter) runAccountSession(ctx context.Context, raw []byte, proxy *cata
 	return updated, inspection, nil
 }
 
-// 同一个适配器实例同时服务后台刷新和管理员检测；限制 Codex App Server 会话并发，
-// 避免多个订阅在同一后端进程内同时读取账号额度或刷新认证。
+// 限制 Codex App Server 会话并发，避免多个订阅在同一后端进程内
+// 同时读取账号额度或兑换重置卡；OAuth 认证刷新不占用此会话槽。
 func (a *Adapter) runIsolatedSession(ctx context.Context, raw []byte, proxy *catalog.OutboundProxy, action func(accountRPC) error) ([]byte, mgmt.SubscriptionInspection, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, mgmt.SubscriptionInspection{}, err
@@ -457,32 +429,23 @@ func (a *Adapter) ConsumeResetCredit(ctx context.Context, raw []byte, proxy *cat
 	if strings.TrimSpace(idempotencyKey) == "" || strings.TrimSpace(creditID) != creditID {
 		return mgmt.ResetCreditConsume{}, errors.New("invalid rate-limit reset request")
 	}
-	params := map[string]string{"idempotencyKey": idempotencyKey}
-	if creditID != "" {
-		params["creditId"] = creditID
-	}
-	var consumed struct {
-		Outcome string `json:"outcome"`
-	}
-	var limits rateLimitsResponse
-	credential, inspection, err := a.runIsolatedSession(ctx, raw, proxy, func(client accountRPC) error {
-		if err := client.call(ctx, 2, "account/rateLimitResetCredit/consume", params, &consumed); err != nil {
-			return err
-		}
-		return client.call(ctx, 3, "account/rateLimits/read", nil, &limits)
-	})
+	credential, inspection, rotated, err := a.prepareAccountCredential(ctx, raw, proxy)
 	if err != nil {
-		return mgmt.ResetCreditConsume{}, fmt.Errorf("cannot consume Codex ChatGPT rate-limit reset: %w", err)
+		return mgmt.ResetCreditConsume{}, err
 	}
-	if consumed.Outcome != "reset" && consumed.Outcome != "alreadyRedeemed" && consumed.Outcome != "nothingToReset" && consumed.Outcome != "noCredit" {
-		clear(credential)
-		return mgmt.ResetCreditConsume{}, errors.New("invalid Codex ChatGPT rate-limit reset response")
+	outcome, err := a.consumeAccountResetCredit(ctx, credential, proxy, idempotencyKey, creditID)
+	if err != nil {
+		return mgmt.ResetCreditConsume{}, preserveRotatedCredential(err, credential, rotated)
+	}
+	limits, err := a.readAccountLimits(ctx, credential, proxy)
+	if err != nil {
+		return mgmt.ResetCreditConsume{}, preserveRotatedCredential(err, credential, rotated)
 	}
 	if plan := limits.planType(); plan != "" {
 		inspection.PlanCode = plan
 	}
 	observedAt := time.Now().UTC().Truncate(time.Microsecond)
-	return mgmt.ResetCreditConsume{Outcome: consumed.Outcome, Probe: mgmt.SubscriptionProbe{
+	return mgmt.ResetCreditConsume{Outcome: outcome, Probe: mgmt.SubscriptionProbe{
 		Inspection:   inspection,
 		Credential:   credential,
 		Quotas:       limits.quotas(observedAt),
@@ -490,7 +453,7 @@ func (a *Adapter) ConsumeResetCredit(ctx context.Context, raw []byte, proxy *cat
 	}}, nil
 }
 
-// RefreshIfNeeded 在短期 access token 临近过期时交给官方 app-server 刷新。
+// RefreshIfNeeded 在短期 access token 临近过期时直接调用 Codex 使用的 OAuth 令牌端点。
 // 返回的更新凭据仍是完整 auth.json，调用方必须立即加密保存并清除明文。
 func (a *Adapter) RefreshIfNeeded(ctx context.Context, raw []byte, proxy *catalog.OutboundProxy) ([]byte, bool, error) {
 	needed, err := a.NeedsRefresh(raw)
@@ -501,7 +464,7 @@ func (a *Adapter) RefreshIfNeeded(ctx context.Context, raw []byte, proxy *catalo
 	if !needed {
 		return nil, false, nil
 	}
-	updated, _, err := a.refreshCredential(ctx, raw, proxy)
+	updated, err := a.refreshToken(ctx, raw, proxy)
 	if err != nil {
 		return nil, false, err
 	}
@@ -794,9 +757,10 @@ type codexRateLimit struct {
 }
 
 type rateLimitWindow struct {
-	UsedPercent        float64 `json:"usedPercent"`
-	WindowDurationMins *int64  `json:"windowDurationMins"`
-	ResetsAt           *int64  `json:"resetsAt"`
+	UsedPercent           float64 `json:"usedPercent"`
+	WindowDurationMins    *int64  `json:"windowDurationMins"`
+	WindowDurationSeconds *int64  `json:"-"`
+	ResetsAt              *int64  `json:"resetsAt"`
 }
 
 type rateLimitResetCreditsWire struct {
@@ -876,7 +840,10 @@ func officialWindowQuota(code string, name *string, window *rateLimitWindow, rea
 		status = mgmt.QuotaNearLimit
 	}
 	var durationSeconds *int64
-	if window.WindowDurationMins != nil && *window.WindowDurationMins >= 0 && *window.WindowDurationMins <= (1<<63-1)/60 {
+	if window.WindowDurationSeconds != nil && *window.WindowDurationSeconds >= 0 {
+		value := *window.WindowDurationSeconds
+		durationSeconds = &value
+	} else if window.WindowDurationMins != nil && *window.WindowDurationMins >= 0 && *window.WindowDurationMins <= (1<<63-1)/60 {
 		value := *window.WindowDurationMins * 60
 		durationSeconds = &value
 	}

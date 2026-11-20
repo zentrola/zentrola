@@ -72,7 +72,8 @@ func (t *stderrTail) reset() {
 	t.buf, t.truncated = nil, false
 }
 
-// sessionFailure 为 app-server 会话错误附加脱敏后的标准错误摘要，以及会话失败前已被轮换的凭据。
+// sessionFailure 为账号操作错误附加脱敏后的 app-server 标准错误摘要（旧会话路径），
+// 或在 HTTP 查询失败前已轮换的凭据。
 // Error 保持原始错误文本，不影响基于错误链和错误文本的失败分类。
 type sessionFailure struct {
 	cause      error
@@ -90,7 +91,7 @@ func newSessionFailure(cause error, stderr string, credential []byte) error {
 func (e *sessionFailure) Error() string { return e.cause.Error() }
 func (e *sessionFailure) Unwrap() error { return e.cause }
 
-// RotatedCredential 返回会话失败前 app-server 已轮换的完整 auth.json。refresh token 只能使用一次，
+// RotatedCredential 返回账号操作失败前已轮换的完整 auth.json。refresh token 只能使用一次，
 // 轮换后旧凭据已失效，调用方必须立即加密保存并清除明文。
 func (e *sessionFailure) RotatedCredential() []byte { return e.credential }
 

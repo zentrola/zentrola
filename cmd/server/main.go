@@ -318,9 +318,11 @@ func runService(command commandOptions, selection configSelection, cfg config.Co
 	redisProbeCancel()
 	postgresManagementStore := postgres.NewManagementStore(pool, ids, logger)
 	managementStore := gatewaycache.NewManagementStore(postgresManagementStore, gatewayCache, logger)
+	modelDiscoverer := modelcatalog.NewDiscoverer(logger)
+	modelDiscoverer.UseCodexExecutable(startup, cfg.Gateway.CodexExecutable)
 	managementService := management.New(
 		managementStore, ids, credentials, connectionTester,
-		management.WithModelDiscoverer(modelcatalog.NewDiscoverer(logger)),
+		management.WithModelDiscoverer(modelDiscoverer),
 		management.WithSubscriptionAdapter(codexSubscription),
 		management.WithSubscriptionAdapter(claudeSubscription),
 		management.WithPriceStore(postgresManagementStore),

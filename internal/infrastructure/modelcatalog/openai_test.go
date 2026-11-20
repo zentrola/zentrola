@@ -43,7 +43,7 @@ func TestOpenAICatalogRequestByCredentialType(t *testing.T) {
 		{"legacy empty auth type", mgmt.ModelDiscoverySource{ProviderCode: catalog.OpenAIOfficialCode},
 			catalogRequest{URL: openAICatalogURL, Bearer: true}},
 		{"Codex subscription", codexSubscriptionSource, catalogRequest{
-			URL: codexCatalogURL, Bearer: true, AccountIDHeader: "ChatGPT-Account-Id",
+			URL: "https://chatgpt.com/backend-api/codex/models?client_version=0.171.0", Bearer: true, AccountIDHeader: "ChatGPT-Account-Id",
 			Headers: map[string]string{"Originator": "zentrola"},
 		}},
 	} {

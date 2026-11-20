@@ -1,5 +1,5 @@
 ARG APP_VERSION=1.3.4
-ARG BASE_IMAGE=longjianghu/zentrola-codex-base:0.154.0
+ARG BASE_IMAGE=alpine:3.22
 
 FROM ${BASE_IMAGE}
 
@@ -8,6 +8,14 @@ ARG BASE_IMAGE
 ARG TARGETARCH
 ARG VCS_REF=unknown
 ARG BUILD_DATE
+
+RUN apk add --no-cache ca-certificates tzdata \
+    && addgroup -g 10001 -S zentrola \
+    && mkdir -p /app/data /app/run \
+    && adduser -u 10001 -S -G zentrola -h /app/data zentrola \
+    && chown -R zentrola:zentrola /app
+
+ENV HOME=/app/data TZ=Asia/Shanghai
 
 LABEL org.opencontainers.image.title="Zentrola" \
       org.opencontainers.image.description="Enterprise AI coding control plane" \
@@ -22,6 +30,8 @@ LABEL org.opencontainers.image.title="Zentrola" \
       maintainer="longjianghu <longjianghu1982@gmail.com>"
 
 WORKDIR /app
+
+VOLUME ["/app/data"]
 
 COPY --chown=zentrola:zentrola dist/linux/${TARGETARCH}/ /app/
 COPY --chmod=0755 --chown=zentrola:zentrola dist/linux/${TARGETARCH}/zentrola /app/zentrola

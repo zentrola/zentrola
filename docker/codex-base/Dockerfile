@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-ARG CODEX_VERSION=0.154.0
+ARG CODEX_VERSION=0.171.0
 ARG ALPINE_VERSION=3.22
 
 FROM --platform=$BUILDPLATFORM alpine:${ALPINE_VERSION} AS codex-builder
@@ -39,6 +39,13 @@ RUN set -eux; \
         'zentrola:x:10001:' > "${R}/etc/group"; \
     mkdir -p /out/app/data/.codex /out/app/run
 
+# 此独立 CLI 镜像裁剪语音、代码执行和文件搜索组件；主应用镜像不再继承它。
+# 在 COPY 到最终镜像之前裁剪，确保这些文件不会进入最终镜像层。
+RUN set -eux; \
+    rm -rf /out/rootfs/opt/codex/vendor/*/codex-resources/voice \
+           /out/rootfs/opt/codex/vendor/*/codex-path; \
+    rm -f /out/rootfs/opt/codex/vendor/*/bin/codex-code-mode-host
+
 FROM alpine:${ALPINE_VERSION}
 
 ARG CODEX_VERSION
@@ -46,7 +53,7 @@ ARG VCS_REF=unknown
 ARG BUILD_DATE
 
 LABEL org.opencontainers.image.title="codex-runtime" \
-      org.opencontainers.image.description="Codex native runtime on Alpine (no Node.js)" \
+      org.opencontainers.image.description="Standalone Codex CLI runtime on Alpine" \
       org.opencontainers.image.version="${CODEX_VERSION}" \
       org.opencontainers.image.revision="${VCS_REF}" \
       org.opencontainers.image.created="${BUILD_DATE}" \

@@ -237,8 +237,8 @@ func (s *Service) refreshCredential(ctx context.Context, route Route, credential
 	refreshCtx := ctx
 	var cancel context.CancelFunc
 	if s.refreshTimeout > 0 {
-		// 刷新与请求生命周期解耦：客户端断开不能中途终止 app-server，否则已轮换但
-		// 尚未写回的 refresh token 会丢失，后续刷新将永久失败。
+		// 刷新与请求生命周期解耦：客户端断开不能中途取消 OAuth 请求，
+		// 否则上游可能已轮换 refresh token，而新凭据尚未写回。
 		refreshCtx, cancel = context.WithTimeout(context.WithoutCancel(ctx), s.refreshTimeout)
 		defer cancel()
 	}

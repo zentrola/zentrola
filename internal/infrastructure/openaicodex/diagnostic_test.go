@@ -1,19 +1,9 @@
 package openaicodex
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
 	"errors"
-	"log/slog"
-	"os"
-	"strconv"
 	"strings"
 	"testing"
-	"time"
-
-	mgmt "github.com/zentrola/zentrola/internal/application/management"
-	"github.com/zentrola/zentrola/internal/domain/catalog"
 )
 
 func TestSanitizeDiagnostic(t *testing.T) {
@@ -125,58 +115,5 @@ func TestStderrTailKeepsBoundedSuffix(t *testing.T) {
 				t.Fatalf("summary=%q want=%q", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestProbeLogsSanitizedFailure(t *testing.T) {
-	var logs bytes.Buffer
-	adapter := New("", WithLogger(slog.New(slog.NewJSONHandler(&logs, nil))))
-	adapter.runSession = func(context.Context, []byte, *catalog.OutboundProxy, func(accountRPC) error) ([]byte, mgmt.SubscriptionInspection, error) {
-		return nil, mgmt.SubscriptionInspection{}, &sessionFailure{
-			cause:  errors.New("codex app-server request failed (-32603): unexpected status 401 Unauthorized; Bearer leaked-token"),
-			stderr: "ERROR refresh failed",
-		}
-	}
-	_, err := adapter.Probe(context.Background(), []byte("{}"), nil)
-	var connectionError mgmt.SubscriptionConnectionError
-	if !errors.As(err, &connectionError) || connectionError.ConnectionCode() != "SUBSCRIPTION_UNAVAILABLE" {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	var entry map[string]any
-	if err := json.Unmarshal(logs.Bytes(), &entry); err != nil {
-		t.Fatalf("log=%q err=%v", logs.String(), err)
-	}
-	if entry["level"] != "WARN" || entry["error_code"] != "SUBSCRIPTION_UNAVAILABLE" ||
-		entry["app_server_stderr"] != "ERROR refresh failed" ||
-		!strings.Contains(entry["error"].(string), "unexpected status 401 Unauthorized") {
-		t.Fatalf("unexpected log entry %v", entry)
-	}
-	if strings.Contains(logs.String(), "leaked-token") {
-		t.Fatalf("log leaked credential: %s", logs.String())
-	}
-}
-
-func TestProbeCapturesAppServerStderr(t *testing.T) {
-	executable, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var logs bytes.Buffer
-	adapter := New(executable, WithLogger(slog.New(slog.NewJSONHandler(&logs, nil))))
-	expires := time.Now().UTC().Add(time.Hour).Unix()
-	raw := []byte(`{"auth_mode":"chatgpt","tokens":{"id_token":"id","access_token":"` + token(`{"exp":`+strconv.FormatInt(expires, 10)+`}`) + `","refresh_token":"refresh","account_id":"account-1"}}`)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	_, err = adapter.Probe(ctx, raw, nil)
-	var failure *sessionFailure
-	if !errors.As(err, &failure) || !strings.Contains(failure.stderr, "token refresh failed: Bearer ******") {
-		t.Fatalf("stderr summary was not attached: %v", err)
-	}
-	if !strings.Contains(err.Error(), "unexpected status 401 Unauthorized") {
-		t.Fatalf("unexpected error text: %v", err)
-	}
-	if strings.Contains(logs.String(), "eyJhbGci") || !strings.Contains(logs.String(), "codex subscription probe failed") {
-		t.Fatalf("unexpected log output: %s", logs.String())
 	}
 }

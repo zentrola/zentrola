@@ -6,13 +6,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
 
 	mgmt "github.com/zentrola/zentrola/internal/application/management"
-	"github.com/zentrola/zentrola/internal/domain/catalog"
 )
 
 func token(payload string) string {
@@ -139,122 +137,4 @@ func TestRateLimitsBecomeQuotas(t *testing.T) {
 	if len(quotas) != 1 || quotas[0].Status != "NEAR_LIMIT" || quotas[0].WindowDurationSeconds == nil || *quotas[0].WindowDurationSeconds != 900 {
 		t.Fatalf("unexpected quotas: %+v", quotas)
 	}
-}
-
-type accountRPCFunc func(context.Context, int64, string, any, any) error
-
-func (f accountRPCFunc) call(ctx context.Context, id int64, method string, params, target any) error {
-	return f(ctx, id, method, params, target)
-}
-
-func TestProbeReadsOfficialRateLimitsAndResetCredits(t *testing.T) {
-	reset := int64(1730947200)
-	duration := int64(300)
-	expires := int64(1730950800)
-	title := "Rate-limit reset"
-	adapter := New("missing-codex-executable")
-	adapter.runSession = func(ctx context.Context, raw []byte, proxy *catalog.OutboundProxy, action func(accountRPC) error) ([]byte, mgmt.SubscriptionInspection, error) {
-		if proxy != nil {
-			t.Fatal("unexpected proxy")
-		}
-		rpc := accountRPCFunc(func(_ context.Context, id int64, method string, params, target any) error {
-			if id != 2 || method != "account/rateLimits/read" || params != nil {
-				t.Fatalf("unexpected RPC: id=%d method=%s params=%v", id, method, params)
-			}
-			result := target.(*rateLimitsResponse)
-			result.RateLimits = &codexRateLimit{LimitID: "codex", PlanType: "plus", Primary: &rateLimitWindow{
-				UsedPercent: 25, WindowDurationMins: &duration, ResetsAt: &reset,
-			}}
-			result.RateLimitResetCredits = &rateLimitResetCreditsWire{AvailableCount: 1, Credits: []rateLimitResetCreditWire{{
-				ID: "credit-1", ResetType: "codexRateLimits", Status: "available", GrantedAt: reset - 60, ExpiresAt: &expires, Title: &title,
-			}}}
-			return nil
-		})
-		if err := action(rpc); err != nil {
-			return nil, mgmt.SubscriptionInspection{}, err
-		}
-		return bytes.Clone(raw), mgmt.SubscriptionInspection{AccountRef: "account-1"}, nil
-	}
-	raw := []byte(`{"auth_mode":"chatgpt","last_refresh":"2026-01-01T00:00:00Z","tokens":{"id_token":"id","access_token":"access","refresh_token":"refresh","account_id":"account-1"}}`)
-	probe, err := adapter.Probe(context.Background(), raw, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer clear(probe.Credential)
-	if probe.Inspection.PlanCode != "plus" || probe.Inspection.AccountRef != "account-1" || !bytes.Equal(probe.Credential, raw) {
-		t.Fatalf("unexpected probe: %+v", probe.Inspection)
-	}
-	if len(probe.Quotas) != 1 || probe.Quotas[0].Status != "AVAILABLE" || probe.Quotas[0].ResetsAt == nil ||
-		probe.ResetCredits == nil || probe.ResetCredits.AvailableCount != 1 || len(probe.ResetCredits.Credits) != 1 ||
-		probe.ResetCredits.Credits[0].ID != "credit-1" || probe.ResetCredits.Credits[0].ExpiresAt == nil {
-		t.Fatalf("unexpected quotas: %+v", probe.Quotas)
-	}
-}
-
-func TestProbePassesProviderProxyToOfficialAppServer(t *testing.T) {
-	adapter := New("missing-codex-executable")
-	proxySeen := false
-	adapter.runSession = func(_ context.Context, raw []byte, proxy *catalog.OutboundProxy, action func(accountRPC) error) ([]byte, mgmt.SubscriptionInspection, error) {
-		proxySeen = proxy != nil && proxy.URL == "http://proxy.example:8080"
-		rpc := accountRPCFunc(func(_ context.Context, _ int64, _ string, _ any, target any) error {
-			target.(*rateLimitsResponse).RateLimits = &codexRateLimit{LimitID: "codex"}
-			return nil
-		})
-		if err := action(rpc); err != nil {
-			return nil, mgmt.SubscriptionInspection{}, err
-		}
-		return bytes.Clone(raw), mgmt.SubscriptionInspection{}, nil
-	}
-	raw := []byte(`{"auth_mode":"chatgpt","tokens":{"id_token":"id","access_token":"access","refresh_token":"refresh","account_id":"account-1"}}`)
-	probe, err := adapter.Probe(context.Background(), raw, &catalog.OutboundProxy{URL: "http://proxy.example:8080"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer clear(probe.Credential)
-	if !proxySeen {
-		t.Fatal("subscription rate-limit request did not receive provider proxy")
-	}
-}
-
-func TestProbeClassifiesMissingAppServerExecutable(t *testing.T) {
-	raw := []byte(`{"auth_mode":"chatgpt","tokens":{"id_token":"id","access_token":"access","refresh_token":"refresh","account_id":"account-1"}}`)
-	_, err := New(filepath.Join(t.TempDir(), "missing-codex.exe")).Probe(context.Background(), raw, nil)
-	var connectionError mgmt.SubscriptionConnectionError
-	if !errors.As(err, &connectionError) || connectionError.ConnectionCode() != "CODEX_APP_SERVER_UNAVAILABLE" {
-		t.Fatalf("unexpected error classification: %v", err)
-	}
-}
-
-func TestConsumeResetCreditRefreshesOfficialRateLimits(t *testing.T) {
-	adapter := New("missing-codex-executable")
-	var methods []string
-	adapter.runSession = func(_ context.Context, raw []byte, _ *catalog.OutboundProxy, action func(accountRPC) error) ([]byte, mgmt.SubscriptionInspection, error) {
-		rpc := accountRPCFunc(func(_ context.Context, _ int64, method string, params, target any) error {
-			methods = append(methods, method)
-			switch method {
-			case "account/rateLimitResetCredit/consume":
-				values := params.(map[string]string)
-				if values["idempotencyKey"] != "request-1" || values["creditId"] != "credit-1" {
-					t.Fatalf("unexpected consume params: %v", values)
-				}
-				target.(*struct {
-					Outcome string `json:"outcome"`
-				}).Outcome = "reset"
-			case "account/rateLimits/read":
-				target.(*rateLimitsResponse).RateLimitResetCredits = &rateLimitResetCreditsWire{AvailableCount: 0}
-			}
-			return nil
-		})
-		if err := action(rpc); err != nil {
-			return nil, mgmt.SubscriptionInspection{}, err
-		}
-		return bytes.Clone(raw), mgmt.SubscriptionInspection{}, nil
-	}
-	raw := []byte(`{"auth_mode":"chatgpt","tokens":{"id_token":"id","access_token":"access","refresh_token":"refresh","account_id":"account-1"}}`)
-	result, err := adapter.ConsumeResetCredit(context.Background(), raw, nil, "request-1", "credit-1")
-	if err != nil || result.Outcome != "reset" || result.Probe.ResetCredits == nil || result.Probe.ResetCredits.AvailableCount != 0 ||
-		len(methods) != 2 || methods[0] != "account/rateLimitResetCredit/consume" || methods[1] != "account/rateLimits/read" {
-		t.Fatalf("unexpected consume result: %+v methods=%v err=%v", result, methods, err)
-	}
-	clear(result.Probe.Credential)
 }
