@@ -107,7 +107,7 @@ data: {"response":{"id":"resp_2","model":"gpt-test","output":[{"type":"function_
 
 `), nil
 	})
-	request := Request{Protocol: OpenAIProtocol, Path: "/v1/chat/completions", Body: []byte(`{"model":"gpt-test","stream":true,"messages":[{"role":"user","content":"杭州天气"}]}`)}
+	request := Request{Protocol: OpenAIProtocol, Path: "/v1/chat/completions", Body: []byte(`{"model":"gpt-test","stream":true,"stream_options":{"include_usage":true},"messages":[{"role":"user","content":"杭州天气"}]}`)}
 	response, err := NewCompatibleUpstream(nil, upstream).Open(context.Background(), Route{
 		AuthType: "SUBSCRIPTION", AuthAdapter: "OPENAI_CODEX", EndpointProtocol: OpenAIEndpoint,
 	}, request, nil)
@@ -124,6 +124,25 @@ data: {"response":{"id":"resp_2","model":"gpt-test","output":[{"type":"function_
 		if !strings.Contains(stream, expected) {
 			t.Fatalf("missing %s in stream: %s", expected, stream)
 		}
+	}
+}
+
+func TestCodexChatSubscriptionOmitsUnrequestedStreamingUsage(t *testing.T) {
+	upstream := compatibilityUpstreamFunc(func(context.Context, Route, Request, []byte) (*Response, error) {
+		return codexTestResponse(http.StatusOK, `event: response.completed
+data: {"response":{"id":"resp_3","output":[{"type":"message","content":[{"type":"output_text","text":"OK"}]}],"usage":{"input_tokens":8,"output_tokens":1}}}
+
+`), nil
+	})
+	request := Request{Protocol: OpenAIProtocol, Body: []byte(`{"model":"gpt-test","stream":true,"messages":[{"role":"user","content":"Hi"}]}`)}
+	response, err := NewCompatibleUpstream(nil, upstream).Open(context.Background(), Route{AuthType: "SUBSCRIPTION", AuthAdapter: "OPENAI_CODEX"}, request, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	data, err := io.ReadAll(response.Body)
+	if err != nil || strings.Contains(string(data), `"usage"`) || !strings.Contains(string(data), "data: [DONE]") {
+		t.Fatalf("unexpected streaming response: %s, %v", data, err)
 	}
 }
 

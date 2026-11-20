@@ -29,7 +29,8 @@ func (u *CompatibleUpstream) Open(ctx context.Context, route Route, request Requ
 		if err != nil {
 			return nil, err
 		}
-		adapted, clientStream, err := codexChatToResponses(request)
+		includeUsage := false
+		adapted, clientStream, err := codexChatToResponsesWithOptions(request, &includeUsage)
 		if err != nil {
 			if CodexChatConversionStage(err) == "" {
 				err = codexChatStage("options", err)
@@ -40,7 +41,7 @@ func (u *CompatibleUpstream) Open(ctx context.Context, route Route, request Requ
 		if err != nil {
 			return nil, err
 		}
-		return codexResponsesToChat(ctx, response, clientStream, parsed.Model)
+		return codexResponsesToChat(ctx, response, clientStream, includeUsage, parsed.Model)
 	}
 	endpointProtocol := route.EndpointProtocol
 	if endpointProtocol == "" {

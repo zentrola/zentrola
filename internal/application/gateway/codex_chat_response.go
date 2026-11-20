@@ -33,7 +33,7 @@ type codexChatResult struct {
 	outputBytes int
 }
 
-func codexResponsesToChat(ctx context.Context, response *Response, clientStream bool, model string) (*Response, error) {
+func codexResponsesToChat(ctx context.Context, response *Response, clientStream, includeUsage bool, model string) (*Response, error) {
 	if response == nil || response.Body == nil {
 		return nil, ErrUpstream
 	}
@@ -65,14 +65,14 @@ func codexResponsesToChat(ctx context.Context, response *Response, clientStream 
 	if clientStream {
 		headers.Set("Content-Type", "text/event-stream")
 		result.Body = newConvertedBody(response.Body, func(reader io.Reader, writer io.Writer) error {
-			return convertCodexChatSSE(reader, writer, model, true)
+			return convertCodexChatSSE(reader, writer, model, true, includeUsage)
 		})
 		return result, nil
 	}
 	// The subscription upstream is SSE-only. Consume it before opening a JSON
 	// response so an incomplete stream can still be reported as an upstream error.
 	var output bytes.Buffer
-	if err := convertCodexChatSSE(response.Body, &output, model, false); err != nil {
+	if err := convertCodexChatSSE(response.Body, &output, model, false, false); err != nil {
 		response.Body.Close()
 		if ctx.Err() == context.Canceled {
 			return nil, ErrCancelled
@@ -99,7 +99,7 @@ func (b *codexGzipBody) Close() error {
 	return b.source.Close()
 }
 
-func convertCodexChatSSE(reader io.Reader, writer io.Writer, model string, stream bool) error {
+func convertCodexChatSSE(reader io.Reader, writer io.Writer, model string, stream, includeUsage bool) error {
 	state := &codexChatResult{model: model, created: time.Now().Unix(), byOutput: map[int]*codexChatCall{}, textSeen: map[int]bool{}}
 	err := scanSSELimit(reader, 16<<20, func(event sseEvent) error {
 		if event.data == "" || event.data == "[DONE]" {
@@ -116,7 +116,7 @@ func convertCodexChatSSE(reader io.Reader, writer io.Writer, model string, strea
 		if kind == "response.failed" || kind == "error" {
 			return ErrUpstream
 		}
-		if err := state.consume(kind, source, writer, stream); err != nil {
+		if err := state.consume(kind, source, writer, stream, includeUsage); err != nil {
 			return err
 		}
 		return nil
@@ -135,7 +135,7 @@ func convertCodexChatSSE(reader io.Reader, writer io.Writer, model string, strea
 	return writeSSEData(writer, "[DONE]")
 }
 
-func (s *codexChatResult) consume(kind string, source map[string]any, writer io.Writer, stream bool) error {
+func (s *codexChatResult) consume(kind string, source map[string]any, writer io.Writer, stream, includeUsage bool) error {
 	switch kind {
 	case "response.created", "response.in_progress":
 		if response, ok := source["response"].(map[string]any); ok {
@@ -229,7 +229,7 @@ func (s *codexChatResult) consume(kind string, source map[string]any, writer io.
 			if err := s.chunk(writer, map[string]any{}, finish); err != nil {
 				return err
 			}
-			if s.usage != nil {
+			if includeUsage && s.usage != nil {
 				return s.usageChunk(writer)
 			}
 		}

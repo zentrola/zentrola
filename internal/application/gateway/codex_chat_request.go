@@ -137,6 +137,10 @@ func isCodexChatSupportedField(field string) bool {
 // Codex subscription endpoint. Unknown fields fail closed instead of silently
 // changing a client's request semantics.
 func codexChatToResponses(request Request) (Request, bool, error) {
+	return codexChatToResponsesWithOptions(request, nil)
+}
+
+func codexChatToResponsesWithOptions(request Request, includeUsage *bool) (Request, bool, error) {
 	source, err := decodeJSONObject(request.Body)
 	if err != nil {
 		return Request{}, false, codexChatStage("json", err)
@@ -167,6 +171,9 @@ func codexChatToResponses(request Request) (Request, bool, error) {
 			}
 			if _, ok := value.(bool); !ok {
 				return Request{}, false, ErrInvalid
+			}
+			if includeUsage != nil {
+				*includeUsage = value.(bool)
 			}
 		}
 	}

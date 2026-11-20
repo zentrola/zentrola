@@ -4,6 +4,18 @@ All notable changes to Zentrola are documented here. Dates use UTC. The project 
 
 Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循语义化版本。
 
+## [1.3.4] - 2026-11-20
+
+### Added / 新增
+
+- Support WorkBuddy and DeepSeek Harness with Codex subscriptions through `/v1/chat/completions`. Zentrola converts supported Chat Completions requests and responses to and from the subscription's `/v1/responses` protocol, including streaming, conversation history, images, and function tools. Unsupported request fields return `400 INVALID_REQUEST`.
+- 支持 WorkBuddy 和 DeepSeek Harness 通过 `/v1/chat/completions` 使用 Codex 订阅。Zentrola 在网关中转换受支持的 Chat Completions 请求与订阅所需的 `/v1/responses` 响应，包括流式输出、历史消息、图片和函数工具；不支持的请求字段返回 `400 INVALID_REQUEST`。
+
+### Fixed / 修复
+
+- Accept matching `Authorization` and `X-Api-Key` headers from WorkBuddy, handle its message metadata, and accept DeepSeek Harness requests with `store: false`. Streaming usage is emitted only when `stream_options.include_usage` is true.
+- 接受 WorkBuddy 同时发送且值一致的 `Authorization` 与 `X-Api-Key`，处理其消息元数据，并兼容 DeepSeek Harness 的 `store: false` 请求。仅在 `stream_options.include_usage` 为 true 时输出流式用量信息。
+
 ## [1.3.3] - 2026-11-08
 
 ### Changed / 变更
@@ -322,6 +334,7 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 - 支持协议转换、流式响应、工具调用和服务商故障切换的 OpenAI/Anthropic 兼容网关。
 - 中英文管理界面、独立发布包和 Docker Compose 部署方式。
 
+[1.3.4]: https://github.com/zentrola/zentrola/releases/tag/v1.3.4
 [1.3.3]: https://github.com/zentrola/zentrola/releases/tag/v1.3.3
 [1.3.2]: https://github.com/zentrola/zentrola/releases/tag/v1.3.2
 [1.3.1]: https://github.com/zentrola/zentrola/releases/tag/v1.3.1
