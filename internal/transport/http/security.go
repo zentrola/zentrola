@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"io"
@@ -359,9 +360,13 @@ func (s *SecurityHandlers) openaiAuth(next http.Handler) http.Handler {
 			"gateway_protocol", "openai", "method", r.Method, "path", r.URL.Path)
 		key := bearer(r)
 		credentialSource := "bearer"
-		if len(r.Header.Values("X-Api-Key")) > 0 {
-			key = ""
-			credentialSource = "invalid"
+		if keys := r.Header.Values("X-Api-Key"); len(keys) > 0 {
+			if len(keys) == 1 && key != "" && subtle.ConstantTimeCompare([]byte(key), []byte(keys[0])) == 1 {
+				credentialSource = "bearer+x-api-key"
+			} else {
+				key = ""
+				credentialSource = "invalid"
+			}
 		}
 		identity, err := s.Keys.Authenticate(r.Context(), key)
 		if err != nil {
