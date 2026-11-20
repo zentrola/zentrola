@@ -174,6 +174,21 @@ func TestCodexChatConversionStageDoesNotExposeRequestContent(t *testing.T) {
 	}
 }
 
+func TestCodexChatConversionFieldFiltersSensitiveNames(t *testing.T) {
+	for _, test := range []struct{ input, want string }{
+		{"message_id", "message_id"},
+		{"private_prompt", ""},
+		{"access_key", ""},
+		{"x-request-id", ""},
+		{"", ""},
+		{strings.Repeat("a", 49), ""},
+	} {
+		if got := CodexChatConversionField(codexChatField("message_field", test.input, ErrInvalid)); got != test.want {
+			t.Errorf("filtered field=%q, want=%q", got, test.want)
+		}
+	}
+}
+
 func TestCodexChatSubscriptionOmitsDefaultSamplingOptions(t *testing.T) {
 	request := Request{Protocol: OpenAIProtocol, Path: "/v1/chat/completions", Body: []byte(`{"model":"gpt-test","messages":[{"role":"user","content":"Hi"}],"temperature":1,"top_p":1.0}`)}
 	converted, _, err := codexChatToResponses(request)

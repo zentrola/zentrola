@@ -3,10 +3,12 @@ package gateway
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 )
 
 type codexChatConversionError struct {
 	stage string
+	field string
 	cause error
 }
 
@@ -17,6 +19,10 @@ func codexChatStage(stage string, err error) error {
 	return &codexChatConversionError{stage: stage, cause: err}
 }
 
+func codexChatField(stage, field string, err error) error {
+	return &codexChatConversionError{stage: stage, field: safeCodexChatField(field), cause: err}
+}
+
 // CodexChatConversionStage returns a fixed diagnostic label without request content.
 func CodexChatConversionStage(err error) string {
 	var conversion *codexChatConversionError
@@ -24,6 +30,35 @@ func CodexChatConversionStage(err error) string {
 		return conversion.stage
 	}
 	return ""
+}
+
+// CodexChatConversionField returns only short, ordinary field names for dev diagnostics.
+func CodexChatConversionField(err error) string {
+	var conversion *codexChatConversionError
+	if errors.As(err, &conversion) {
+		return conversion.field
+	}
+	return ""
+}
+
+func safeCodexChatField(field string) string {
+	if len(field) == 0 || len(field) > 48 {
+		return ""
+	}
+	for i := 0; i < len(field); i++ {
+		char := field[i]
+		if i == 0 && !('a' <= char && char <= 'z' || 'A' <= char && char <= 'Z') ||
+			i > 0 && !('a' <= char && char <= 'z' || 'A' <= char && char <= 'Z' || '0' <= char && char <= '9' || char == '_') {
+			return ""
+		}
+	}
+	lower := strings.ToLower(field)
+	for _, sensitive := range []string{"secret", "password", "token", "credential", "private", "api_key", "access_key", "authorization"} {
+		if strings.Contains(lower, sensitive) {
+			return ""
+		}
+	}
+	return field
 }
 
 // codexChatToResponses converts the Chat Completions subset supported by the
@@ -182,7 +217,7 @@ func codexChatMessage(message map[string]any) ([]any, error) {
 	}
 	for field := range message {
 		if field != "role" && field != "content" && field != "tool_calls" {
-			return nil, codexChatStage(codexChatMessageFieldStage(field), ErrInvalid)
+			return nil, codexChatField(codexChatMessageFieldStage(field), field, ErrInvalid)
 		}
 	}
 	parts := make([]any, 0)
