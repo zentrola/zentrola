@@ -35,7 +35,7 @@ VOLUME ["/app/data"]
 COPY --chown=zentrola:zentrola dist/linux/${TARGETARCH}/ /app/
 COPY --chmod=0755 --chown=zentrola:zentrola dist/linux/${TARGETARCH}/zentrola /app/zentrola
 COPY --chmod=0755 --chown=zentrola:zentrola dist/linux/${TARGETARCH}/zentrola-web /app/zentrola-web
-RUN test -n "${APP_VERSION}" && test "${APP_VERSION}" = "$(cat /app/VERSION)"
+RUN test -n "${APP_VERSION}" && test "${APP_VERSION}" = "$(tr -d '\r' < /app/VERSION)"
 COPY --chmod=0755 --chown=root:root scripts/docker-entrypoint.sh /usr/local/bin/zentrola-entrypoint
 COPY --chown=root:root LICENSE NOTICE THIRD_PARTY_NOTICES.md /usr/share/licenses/zentrola/
 COPY --chown=root:root third_party_licenses/ /usr/share/licenses/zentrola/third_party/
