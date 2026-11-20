@@ -16,8 +16,12 @@ type sseEvent struct {
 }
 
 func scanSSE(reader io.Reader, consume func(sseEvent) error) error {
+	return scanSSELimit(reader, 4<<20, consume)
+}
+
+func scanSSELimit(reader io.Reader, maxLineBytes int, consume func(sseEvent) error) error {
 	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 64<<10), 4<<20)
+	scanner.Buffer(make([]byte, 64<<10), maxLineBytes)
 	current := sseEvent{}
 	flush := func() error {
 		if current.event == "" && current.data == "" {

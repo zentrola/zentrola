@@ -21,6 +21,24 @@ func NewCompatibleUpstream(anthropic, openAI Upstream) *CompatibleUpstream {
 }
 
 func (u *CompatibleUpstream) Open(ctx context.Context, route Route, request Request, credential []byte) (*Response, error) {
+	if route.AuthType == "SUBSCRIPTION" && route.AuthAdapter == "OPENAI_CODEX" && request.Protocol == OpenAIProtocol {
+		if u.openAI == nil {
+			return nil, ErrRoute
+		}
+		parsed, err := ParseOpenAI(request.Body)
+		if err != nil {
+			return nil, err
+		}
+		adapted, clientStream, err := codexChatToResponses(request)
+		if err != nil {
+			return nil, err
+		}
+		response, err := u.openAI.Open(ctx, route, adapted, credential)
+		if err != nil {
+			return nil, err
+		}
+		return codexResponsesToChat(ctx, response, clientStream, parsed.Model)
+	}
 	endpointProtocol := route.EndpointProtocol
 	if endpointProtocol == "" {
 		endpointProtocol = OpenAIEndpoint

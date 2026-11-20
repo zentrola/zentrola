@@ -40,6 +40,8 @@ Remove-Variable secureKey, zentrolaKey
 
 从 `GET /v1/models` 返回结果中选择一个逻辑模型编码。客户端配置文件及支持的环境变量可能随客户端版本变化；需要持久化配置时，以客户端当前官方文档为准。
 
+使用 Codex 个人订阅时，`/v1/responses` 是原生路径。网关也可将 `/v1/chat/completions` 的文本、图片及函数工具请求转换为 Responses，并将流式或非流式结果转回 Chat Completions；不支持的 Chat 字段返回 `400 INVALID_REQUEST`，不会被静默丢弃。订阅上游始终使用流式请求，非流式 Chat 响应由网关在上游完成后组装。
+
 ## Claude Code 和 Anthropic 兼容客户端
 
 macOS/Linux：
@@ -67,7 +69,7 @@ Remove-Variable secureKey, zentrolaKey
 
 ## 会话与账号分流
 
-管理员可在模型页面为每条服务商模型映射设置路由优先级，范围为 1–100，默认 100，数值越小越先尝试；同级按服务商 ID 升序尝试。同一服务商可以针对不同逻辑模型设置不同优先级。Zentrola 先按映射优先级和服务商 ID 选路，再比较协议偏好；在同一映射下，个人订阅优先于 API Key。有多个同类账号时，Codex 的 `session-id` 和 Claude Code 的 `x-claude-code-session-id` 用于分配新会话，并将后续请求固定到同一账号。Claude Code 子代理的 `x-claude-code-agent-id` 会得到独立绑定。绑定在连续 30 天没有请求后过期。
+管理员可在模型页面为每条服务商模型映射设置路由优先级，范围为 1–100，默认 100，数值越小越先尝试；同级按服务商 ID 升序尝试。同一服务商可以针对不同逻辑模型设置不同优先级。Zentrola 先按映射优先级和服务商 ID 选路，再比较协议偏好；在同一映射下，个人订阅优先于 API Key。对于 Chat Completions 请求，已有可用路由先于 Codex 订阅转换路由，避免启用转换后改变现有流量。有多个同类账号时，Codex 的 `session-id` 和 Claude Code 的 `x-claude-code-session-id` 用于分配新会话，并将后续请求固定到同一账号。Claude Code 子代理的 `x-claude-code-agent-id` 会得到独立绑定。绑定在连续 30 天没有请求后过期。
 
 当前账号不可用时，网关会在可以安全重试的情况下切换账号并更新绑定。如果带会话头的请求包含 `previous_response_id`，网关必须找到原绑定，不会将该 ID 发给另一个账号；找不到时返回 `SESSION_ROUTE_UNAVAILABLE`。不带上述会话头的普通请求仍按优先级和故障转移规则选路；包含 `previous_response_id` 的请求不会在账号间重试。
 

@@ -40,6 +40,8 @@ Remove-Variable secureKey, zentrolaKey
 
 Select one of the logical-model codes returned by `GET /v1/models`. Client-specific configuration files and supported environment variables can change between client releases; prefer the client's current official documentation when persistent configuration is required.
 
+For Codex personal subscriptions, `/v1/responses` is the native path. The gateway can also convert text, image, and function-tool requests from `/v1/chat/completions` to Responses and convert streaming or non-streaming results back to Chat Completions. Unsupported Chat fields return `400 INVALID_REQUEST` instead of being silently discarded. The subscription upstream always receives a streaming request; the gateway assembles a non-streaming Chat response after upstream completion.
+
 ## Claude Code and Anthropic-compatible clients
 
 macOS/Linux:
@@ -67,7 +69,7 @@ Configure the client to use a logical-model code returned by `GET /anthropic/v1/
 
 ## Session and account distribution
 
-Administrators can set route priority for each provider-model mapping on the Models page, from 1 to 100. The default is 100, and lower values are tried first; ties use ascending provider ID. A provider can have different priorities for different logical models. Zentrola orders routes by mapping priority and provider ID before protocol preference. Within the same mapping, personal subscriptions precede API keys. When multiple accounts of the same type are available, Codex's `session-id` and Claude Code's `x-claude-code-session-id` distribute new sessions and keep later requests on the selected account. Claude Code subagents receive separate bindings through `x-claude-code-agent-id`. A binding expires after 30 days without requests.
+Administrators can set route priority for each provider-model mapping on the Models page, from 1 to 100. The default is 100, and lower values are tried first; ties use ascending provider ID. A provider can have different priorities for different logical models. Zentrola orders routes by mapping priority and provider ID before protocol preference. Within the same mapping, personal subscriptions precede API keys. For Chat Completions, existing eligible routes precede Codex subscription conversion routes so enabling conversion does not redirect established traffic. When multiple accounts of the same type are available, Codex's `session-id` and Claude Code's `x-claude-code-session-id` distribute new sessions and keep later requests on the selected account. Claude Code subagents receive separate bindings through `x-claude-code-agent-id`. A binding expires after 30 days without requests.
 
 When an account becomes unavailable, the gateway switches and updates the binding only when retrying is safe. A request with a session header and `previous_response_id` requires its original binding; Zentrola will not send that ID to another account and returns `SESSION_ROUTE_UNAVAILABLE` if the binding is missing. Ordinary requests without either session header follow the configured priority and failover behavior; requests containing `previous_response_id` do not retry on another account.
 

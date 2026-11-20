@@ -176,7 +176,26 @@ func (s *GatewayStore) ResolveCandidates(ctx context.Context, identity appsec.Pr
 	if len(routes) == 0 {
 		return nil, gw.ErrRoute
 	}
+	if protocol == gw.OpenAIProtocol {
+		routes = preferExistingChatRoutes(routes)
+	}
 	return routes, nil
+}
+
+// Existing Chat routes retain their order. A Codex subscription is a
+// conversion fallback, so enabling it cannot silently move established Chat
+// traffic from an API key or another provider to a personal subscription.
+func preferExistingChatRoutes(routes []gw.Route) []gw.Route {
+	existing := make([]gw.Route, 0, len(routes))
+	converted := make([]gw.Route, 0)
+	for _, route := range routes {
+		if route.AuthType == mgmt.AuthTypeSubscription && route.AuthAdapter == mgmt.AuthAdapterOpenAICodex {
+			converted = append(converted, route)
+		} else {
+			existing = append(existing, route)
+		}
+	}
+	return append(existing, converted...)
 }
 
 func gatewayEndpointProtocols(protocol string) []string {
@@ -192,7 +211,7 @@ func gatewayEndpointProtocols(protocol string) []string {
 func subscriptionSupportsProtocol(adapter, protocol string) bool {
 	switch adapter {
 	case mgmt.AuthAdapterOpenAICodex:
-		return protocol == gw.OpenAIResponsesProtocol
+		return protocol == gw.OpenAIResponsesProtocol || protocol == gw.OpenAIProtocol
 	case mgmt.AuthAdapterClaudeCode:
 		return protocol == gw.AnthropicProtocol
 	default:
