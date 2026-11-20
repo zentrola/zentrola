@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { readFileSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { longID, stamp } from './mock/constants'
 import { fixture } from './mock/fixture'
@@ -21,8 +22,10 @@ test.describe('布局与综合流程', () => {
     await fixture(page)
     await signIn(page)
     const brandName = page.locator('.sidebar .brand-name')
-    const versionBadge = brandName.locator('.backend-version')
-    await expect(versionBadge).toHaveText('1.3.0')
+    const versionBadge = brandName.locator('.app-version')
+    await expect(versionBadge).toHaveText(
+      readFileSync(new URL('../../VERSION', import.meta.url), 'utf8').trim(),
+    )
     const brandBox = await brandName.boundingBox()
     const badgeBox = await versionBadge.boundingBox()
     expect(brandBox && badgeBox && badgeBox.x > brandBox.x + brandBox.width).toBeTruthy()

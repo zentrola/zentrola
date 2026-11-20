@@ -97,7 +97,7 @@ Windows PowerShell：
 go build -o zentrola-web.exe ./cmd/web
 ```
 
-手动构建时，将两个可执行文件、仓库根目录的 `.env.example` 和完整的 `web/dist` 放入同一发布目录。发布包不需要携带 Node.js、npm 或源代码。
+手动构建时，将两个可执行文件、仓库根目录的 `VERSION`、`.env.example` 和完整的 `web/dist` 放入同一发布目录。发布包不需要携带 Node.js、npm 或源代码。
 
 ## 运行发布包
 

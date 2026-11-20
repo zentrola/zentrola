@@ -81,7 +81,7 @@ Codex / Claude Code / OpenAI 兼容客户端 / 应用
 - PostgreSQL 17
 - Redis，用于保存 Gateway 缓存和路由冷却状态；Redis 暂时不可用时，Gateway 会回退到 PostgreSQL
 
-如果 [GitHub Releases](https://github.com/zentrola/zentrola/releases) 已提供目标操作系统和 CPU 架构的发布包，请优先使用。发布包包含 Backend、Admin Web、静态资源、`.env.example`、项目许可证和第三方许可证声明。
+如果 [GitHub Releases](https://github.com/zentrola/zentrola/releases) 已提供目标操作系统和 CPU 架构的发布包，请优先使用。发布包包含 Backend、Admin Web、静态资源、`VERSION`、`.env.example`、项目许可证和第三方许可证声明。
 
 如果目标平台暂时没有发布包，请参考 [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md) 从源代码构建相同结构的发布包。
 

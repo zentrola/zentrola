@@ -29,6 +29,7 @@ type releaseTarget struct {
 }
 
 var releaseMetadataFiles = []string{
+	"VERSION",
 	".env.example",
 	"LICENSE",
 	"NOTICE",
@@ -52,7 +53,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	if zentrola.Version() == "" {
-		return errors.New(".env.example APP_VERSION must be a semantic version")
+		return errors.New("VERSION must contain a semantic version")
 	}
 	target, err := resolveTarget(options)
 	if err != nil {

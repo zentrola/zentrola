@@ -48,15 +48,7 @@ const setupRequired = ref(false),
   notice = ref('')
 const restoring = ref(true),
   restoreError = ref('')
-const backendVersion = ref('-')
-async function loadBackendVersion() {
-  try {
-    const result = await api<{ version: string }>('/version')
-    backendVersion.value = result.version || '-'
-  } catch {
-    backendVersion.value = '-'
-  }
-}
+const appVersion = __APP_VERSION__
 let restoreRevision = 0
 async function initializeSession() {
   const revision = ++restoreRevision
@@ -184,8 +176,6 @@ onUnmounted(() => {
 })
 watch(identity, (value) => {
   changingPassword.value = false
-  if (value) void loadBackendVersion()
-  else backendVersion.value = '-'
   if (!value && !restoring.value) {
     notice.value = ''
     void loadSetup()
@@ -403,9 +393,7 @@ async function signOut() {
         ><span class="brand-mark">Z</span
         ><span class="brand-name"
           >{{ t('brand')
-          }}<span class="backend-version" :title="t('backendVersion')">{{
-            backendVersion
-          }}</span></span
+          }}<span class="app-version" :title="t('appVersion')">{{ appVersion }}</span></span
         ></RouterLink
       >
       <button

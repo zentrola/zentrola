@@ -1,8 +1,15 @@
+import { readFileSync } from 'node:fs'
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
+const appVersion = readFileSync(new URL('../VERSION', import.meta.url), 'utf8').trim()
+if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(appVersion)) {
+  throw new Error('VERSION must contain a semantic version')
+}
+
 export default defineConfig({
   plugins: [vue()],
+  define: { __APP_VERSION__: JSON.stringify(appVersion) },
   server: {
     port: 9528,
     strictPort: true,

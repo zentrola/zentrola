@@ -81,7 +81,7 @@ Model-catalog synchronization currently has dedicated adapters for Anthropic, Op
 - PostgreSQL 17
 - Redis for gateway caches and route cooldown state; gateway routing falls back to PostgreSQL when Redis is temporarily unavailable
 
-Use a published bundle for your operating system and architecture from [GitHub Releases](https://github.com/zentrola/zentrola/releases) when one is available. A bundle contains the Backend, Admin Web, static assets, `.env.example`, project license files, and third-party license notices.
+Use a published bundle for your operating system and architecture from [GitHub Releases](https://github.com/zentrola/zentrola/releases) when one is available. A bundle contains the Backend, Admin Web, static assets, `VERSION`, `.env.example`, project license files, and third-party license notices.
 
 If a release bundle is not available for the target platform, see [CONTRIBUTING.md](CONTRIBUTING.md) to build the same bundle from source.
 

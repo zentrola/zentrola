@@ -4,15 +4,15 @@ param()
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$envExample = Get-Content -LiteralPath (Join-Path $projectRoot '.env.example') -Raw
-$versionMatch = [regex]::Match($envExample, '(?m)^APP_VERSION=([^\r\n]+)\r?$')
-if (!$versionMatch.Success) {
-    throw '.env.example must declare APP_VERSION'
-}
-$version = $versionMatch.Groups[1].Value.Trim()
+$version = (Get-Content -LiteralPath (Join-Path $projectRoot 'VERSION') -Raw).Trim()
 
 if ($version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
-    throw ".env.example APP_VERSION contains an invalid semantic version: $version"
+    throw "VERSION contains an invalid semantic version: $version"
+}
+
+$envExample = Get-Content -LiteralPath (Join-Path $projectRoot '.env.example') -Raw
+if ($envExample -match '(?m)^APP_VERSION=') {
+    throw '.env.example must not duplicate the release version'
 }
 
 $dockerfile = Get-Content -LiteralPath (Join-Path $projectRoot 'Dockerfile') -Raw
@@ -20,44 +20,27 @@ $compose = Get-Content -LiteralPath (Join-Path $projectRoot 'compose.yaml') -Raw
 
 Push-Location $projectRoot
 try {
-    $packageVersion = (& node -p "require('./web/package.json').version").Trim()
+    $webHasVersion = (& node -p "const p=require('./web/package.json'),l=require('./web/package-lock.json'); [p,l,l.packages['']].some(x=>Object.hasOwn(x,'version'))").Trim()
     if ($LASTEXITCODE -ne 0) {
-        throw 'Unable to read web/package.json with Node.js'
-    }
-    $packageLockVersion = (& node -p "require('./web/package-lock.json').version").Trim()
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Unable to read web/package-lock.json with Node.js'
-    }
-    $packageLockRootVersion = (& node -p "require('./web/package-lock.json').packages[''].version").Trim()
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Unable to read the root package version from web/package-lock.json with Node.js'
+        throw 'Unable to read private web package metadata with Node.js'
     }
 }
 finally {
     Pop-Location
 }
-
-$checks = [ordered]@{
-    'web/package.json' = $packageVersion
-    'web/package-lock.json' = $packageLockVersion
-    'web/package-lock.json packages[""]' = $packageLockRootVersion
+if ($webHasVersion -ne 'false') {
+    throw 'Private web package metadata must not duplicate the application version'
 }
 
-foreach ($entry in $checks.GetEnumerator()) {
-    if ($entry.Value -ne $version) {
-        throw "$($entry.Key) version is '$($entry.Value)', expected '$version'"
-    }
-}
-
-if ($dockerfile -notmatch "(?m)^ARG APP_VERSION=$([regex]::Escape($version))\r?$") {
-    throw "Dockerfile APP_VERSION does not match .env.example APP_VERSION '$version'"
+if ($dockerfile -notmatch '(?m)^ARG APP_VERSION\r?$') {
+    throw 'Dockerfile must declare APP_VERSION as a build argument without a default'
 }
 
 $composeVersions = [regex]::Matches($compose, '(?m)^\s*image:\s*longjianghu/zentrola:([^\s#]+)\s*$')
 if ($composeVersions.Count -eq 0) {
     throw 'compose.yaml does not declare a longjianghu/zentrola image'
 }
-# Compose 固定跟随 latest；.env.example、前端包和 Dockerfile 使用发布版本号。
+# Compose 固定跟随 latest；应用版本仅由 VERSION 提供。
 foreach ($match in $composeVersions) {
     if ($match.Groups[1].Value -ne 'latest') {
         throw "compose.yaml image tag is '$($match.Groups[1].Value)', expected 'latest'"

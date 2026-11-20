@@ -5,28 +5,22 @@ import (
 	_ "embed"
 	"regexp"
 	"strings"
-
-	"github.com/joho/godotenv"
 )
 
-//go:embed .env.example
-var envExample string
+//go:embed VERSION
+var versionFile string
 
 var versionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$`)
 
-var version = parseVersion(envExample)
+var version = parseVersion(versionFile)
 
-// Version 返回编译时从 .env.example 嵌入的 APP_VERSION；缺失或不是语义化版本时返回空字符串。
+// Version 返回编译时从 VERSION 嵌入的应用版本；缺失或不是语义化版本时返回空字符串。
 func Version() string {
 	return version
 }
 
 func parseVersion(content string) string {
-	values, err := godotenv.Unmarshal(content)
-	if err != nil {
-		return ""
-	}
-	value := strings.TrimSpace(values["APP_VERSION"])
+	value := strings.TrimSpace(content)
 	if !versionPattern.MatchString(value) {
 		return ""
 	}

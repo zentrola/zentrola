@@ -537,7 +537,7 @@ label textarea {
   color: #fff;
   background: transparent;
 }
-.backend-version {
+.app-version {
   position: absolute;
   top: -6px;
   left: calc(100% + 3px);

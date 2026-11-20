@@ -6,6 +6,11 @@ Zentrola 的重要变化记录在此。日期使用 UTC；从 `1.0.0` 起遵循�
 
 ## [1.3.4] - 2026-11-20
 
+### Changed / 变更
+
+- Use the root `VERSION` file as the sole application version for the backend and frontend builds. Release bundles include it; CI, release tags, and container builds read it. The private npm package no longer duplicates the application version.
+- 前后端构建统一使用根目录 `VERSION` 作为唯一应用版本号。发布包包含该文件；CI、发布标签和容器构建从中读取版本，私有 npm 包不再重复声明应用版本。
+
 ### Added / 新增
 
 - Support WorkBuddy and DeepSeek Harness with Codex subscriptions through `/v1/chat/completions`. Zentrola converts supported Chat Completions requests and responses to and from the subscription's `/v1/responses` protocol, including streaming, conversation history, images, and function tools. Unsupported request fields return `400 INVALID_REQUEST`.
