@@ -137,6 +137,16 @@ func codexChatToResponses(request Request) (Request, bool, error) {
 		if !ok {
 			return Request{}, false, ErrInvalid
 		}
+		if rawSkip, exists := message["skipRun"]; exists {
+			skip, ok := rawSkip.(bool)
+			if !ok {
+				return Request{}, false, codexChatStage("message_skip_run", ErrInvalid)
+			}
+			if skip {
+				continue
+			}
+			delete(message, "skipRun")
+		}
 		items, convertErr := codexChatMessage(message)
 		if convertErr != nil {
 			if CodexChatConversionStage(convertErr) == "" {
@@ -145,6 +155,9 @@ func codexChatToResponses(request Request) (Request, bool, error) {
 			return Request{}, false, convertErr
 		}
 		input = append(input, items...)
+	}
+	if len(input) == 0 {
+		return Request{}, false, codexChatStage("messages_skipped", ErrInvalid)
 	}
 	target := map[string]any{"model": model, "input": input, "stream": true, "store": false}
 	copyFields(target, source, "parallel_tool_calls")

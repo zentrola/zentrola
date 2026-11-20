@@ -189,6 +189,40 @@ func TestCodexChatConversionFieldFiltersSensitiveNames(t *testing.T) {
 	}
 }
 
+func TestCodexChatSubscriptionSkipsWorkBuddyInternalMessages(t *testing.T) {
+	request := Request{Protocol: OpenAIProtocol, Body: []byte(`{
+		"model":"gpt-test",
+		"messages":[
+			{"role":"user","content":"internal instruction","skipRun":true},
+			{"role":"system","content":"system instruction","skipRun":false},
+			{"role":"user","content":"real question"}
+		]
+	}`)}
+	converted, _, err := codexChatToResponses(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	object, err := decodeJSONObject(converted.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := anySlice(object["input"])
+	if len(input) != 2 || input[0].(map[string]any)["role"] != "system" || input[1].(map[string]any)["role"] != "user" ||
+		strings.Contains(string(converted.Body), "internal instruction") || strings.Contains(string(converted.Body), "skipRun") {
+		t.Fatalf("WorkBuddy internal message was not omitted: %s", converted.Body)
+	}
+
+	for _, test := range []struct{ body, stage string }{
+		{`{"model":"gpt-test","messages":[{"role":"user","content":"hi","skipRun":"true"}]}`, "message_skip_run"},
+		{`{"model":"gpt-test","messages":[{"role":"user","content":"hi","skipRun":true}]}`, "messages_skipped"},
+	} {
+		_, _, err := codexChatToResponses(Request{Protocol: OpenAIProtocol, Body: []byte(test.body)})
+		if !errors.Is(err, ErrInvalid) || CodexChatConversionStage(err) != test.stage {
+			t.Fatalf("invalid skipRun stage=%q err=%v", CodexChatConversionStage(err), err)
+		}
+	}
+}
+
 func TestCodexChatSubscriptionOmitsDefaultSamplingOptions(t *testing.T) {
 	request := Request{Protocol: OpenAIProtocol, Path: "/v1/chat/completions", Body: []byte(`{"model":"gpt-test","messages":[{"role":"user","content":"Hi"}],"temperature":1,"top_p":1.0}`)}
 	converted, _, err := codexChatToResponses(request)
