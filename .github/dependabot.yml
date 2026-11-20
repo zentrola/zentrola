@@ -21,11 +21,6 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
   - package-ecosystem: docker
-    directory: /docker/codex-base
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-  - package-ecosystem: docker
     directory: /docker/postgres
     schedule:
       interval: weekly
