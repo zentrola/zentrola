@@ -102,6 +102,37 @@ func CodexChatUnknownMessageFields(body []byte) []string {
 	return fields
 }
 
+// CodexChatUnknownTopLevelFields lists only field names, never request values.
+func CodexChatUnknownTopLevelFields(body []byte) []string {
+	source, err := decodeJSONObject(body)
+	if err != nil {
+		return nil
+	}
+	fields := make([]string, 0)
+	for field := range source {
+		if !isCodexChatSupportedField(field) {
+			if safe := safeCodexChatField(field); safe != "" {
+				fields = append(fields, safe)
+			}
+		}
+	}
+	sort.Strings(fields)
+	if len(fields) > 16 {
+		fields = fields[:16]
+	}
+	return fields
+}
+
+func isCodexChatSupportedField(field string) bool {
+	switch field {
+	case "model", "messages", "stream", "stream_options", "temperature", "top_p", "max_tokens",
+		"max_completion_tokens", "tools", "tool_choice", "parallel_tool_calls", "n":
+		return true
+	default:
+		return false
+	}
+}
+
 // codexChatToResponses converts the Chat Completions subset supported by the
 // Codex subscription endpoint. Unknown fields fail closed instead of silently
 // changing a client's request semantics.
@@ -110,14 +141,8 @@ func codexChatToResponses(request Request) (Request, bool, error) {
 	if err != nil {
 		return Request{}, false, codexChatStage("json", err)
 	}
-	allowed := map[string]bool{
-		"model": true, "messages": true, "stream": true, "stream_options": true,
-		"temperature": true, "top_p": true, "max_tokens": true,
-		"max_completion_tokens": true, "tools": true, "tool_choice": true,
-		"parallel_tool_calls": true, "n": true,
-	}
 	for field := range source {
-		if !allowed[field] {
+		if !isCodexChatSupportedField(field) {
 			return Request{}, false, codexChatStage("unsupported_field", ErrInvalid)
 		}
 	}

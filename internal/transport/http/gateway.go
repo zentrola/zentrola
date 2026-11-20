@@ -493,6 +493,11 @@ func (g *GatewayHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					attributes = append(attributes, "conversion_fields", fields)
 				}
 			}
+			if gw.CodexChatConversionStage(err) == "unsupported_field" {
+				if fields := gw.CodexChatUnknownTopLevelFields(body); len(fields) > 0 {
+					attributes = append(attributes, "conversion_fields", fields)
+				}
+			}
 			parse := gw.Parse
 			if gw.IsOpenAIProtocol(protocol) {
 				parse = gw.ParseOpenAI

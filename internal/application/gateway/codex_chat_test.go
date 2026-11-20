@@ -241,6 +241,14 @@ func TestCodexChatUnknownMessageFieldsFiltersValuesAndSkippedMessages(t *testing
 	}
 }
 
+func TestCodexChatUnknownTopLevelFieldsFiltersValues(t *testing.T) {
+	body := []byte(`{"model":"gpt-test","messages":[{"role":"user","content":"private prompt"}],"response_format":{"type":"json_object"},"service_tier":"secret value","private_token":"secret"}`)
+	fields := CodexChatUnknownTopLevelFields(body)
+	if len(fields) != 2 || fields[0] != "response_format" || fields[1] != "service_tier" {
+		t.Fatalf("unexpected diagnostic fields: %v", fields)
+	}
+}
+
 func TestCodexChatSubscriptionOmitsDefaultSamplingOptions(t *testing.T) {
 	request := Request{Protocol: OpenAIProtocol, Path: "/v1/chat/completions", Body: []byte(`{"model":"gpt-test","messages":[{"role":"user","content":"Hi"}],"temperature":1,"top_p":1.0}`)}
 	converted, _, err := codexChatToResponses(request)
