@@ -20,7 +20,7 @@ func TestCodexChatSubscriptionConvertsHistoryAndNonStreamResponse(t *testing.T) 
 			t.Fatalf("wrong upstream body: %s, %v", request.Body, err)
 		}
 		input := anySlice(body["input"])
-		if len(input) != 6 || input[0].(map[string]any)["role"] != "system" ||
+		if len(input) != 6 || input[0].(map[string]any)["role"] != "developer" ||
 			input[3].(map[string]any)["type"] != "function_call" ||
 			input[4].(map[string]any)["type"] != "function_call_output" ||
 			strings.Contains(string(request.Body), "internal reasoning") ||
@@ -209,7 +209,7 @@ func TestCodexChatSubscriptionSkipsWorkBuddyInternalMessages(t *testing.T) {
 		t.Fatal(err)
 	}
 	input := anySlice(object["input"])
-	if len(input) != 2 || input[0].(map[string]any)["role"] != "system" || input[1].(map[string]any)["role"] != "user" ||
+	if len(input) != 2 || input[0].(map[string]any)["role"] != "developer" || input[1].(map[string]any)["role"] != "user" ||
 		strings.Contains(string(converted.Body), "internal instruction") || strings.Contains(string(converted.Body), "skipRun") ||
 		strings.Contains(string(converted.Body), "conversationRequestId") || strings.Contains(string(converted.Body), "internal-id") ||
 		strings.Contains(string(converted.Body), "startsNewUserRequest") {

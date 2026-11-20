@@ -298,6 +298,9 @@ func codexChatMessage(message map[string]any) ([]any, error) {
 	if role != "system" && role != "developer" && role != "user" && role != "assistant" {
 		return nil, codexChatStage("message_role", ErrInvalid)
 	}
+	if role == "system" {
+		role = "developer"
+	}
 	for field := range message {
 		if field != "role" && field != "content" && field != "tool_calls" {
 			return nil, codexChatField(codexChatMessageFieldStage(field), field, ErrInvalid)
