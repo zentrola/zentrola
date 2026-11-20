@@ -182,7 +182,7 @@ func codexChatMessage(message map[string]any) ([]any, error) {
 	}
 	for field := range message {
 		if field != "role" && field != "content" && field != "tool_calls" {
-			return nil, codexChatStage("message_field", ErrInvalid)
+			return nil, codexChatStage(codexChatMessageFieldStage(field), ErrInvalid)
 		}
 	}
 	parts := make([]any, 0)
@@ -225,6 +225,15 @@ func codexChatMessage(message map[string]any) ([]any, error) {
 		return nil, ErrInvalid
 	}
 	return result, nil
+}
+
+func codexChatMessageFieldStage(field string) string {
+	switch field {
+	case "name", "function_call", "tool_call_id", "reasoning_content", "refusal", "audio", "annotations", "metadata", "cache_control", "id", "status":
+		return "message_field_" + field
+	default:
+		return "message_field"
+	}
 }
 
 func codexChatContent(content any, role string) ([]any, error) {
